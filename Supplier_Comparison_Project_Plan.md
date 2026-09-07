@@ -11,7 +11,9 @@
 | 计划周期 | 三个阶段：第一周、第二周、最终周 |
 | 文档版本 | v0.1 · 2026-09-07 · 团队规划稿 |
 
-**阅读说明：**本文汇总本次讨论中的选题、问题定义、三周计划、交付物及 Delivery, Measurement and Controls。功能范围是团队拟实施的方案；人力投入、评测目标、模型和部署配置属于规划假设。正式比赛日期、框架限制和提交格式，须以主办方最新通知为准。
+**阅读说明**：本文汇总本次讨论中的选题、问题定义、三周计划、交付物及 Delivery, Measurement and Controls。功能范围是团队拟实施的方案；人力投入、评测目标、模型和部署配置属于规划假设。正式比赛日期、框架限制和提交格式，须以主办方最新通知为准。
+
+**背景**: Procurement executives regularly receive quotations from multiple suppliers for the same products. Before every purchase, they manually compare prices, delivery lead times, payment terms, and supplier performance using spreadsheets and emails. As the number of suppliers and products grows, the comparison process becomes increasingly difficult, resulting in slower purchasing decisions and missed opportunities to negotiate better terms.
 
 ---
 
