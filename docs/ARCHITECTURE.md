@@ -1,6 +1,6 @@
 # 供应商比选系统架构
 
-> v0.3 · 2026-09-08 · 按已收束选型同步。交付与时间线见 [项目计划](../Supplier_Comparison_Project_Plan.md)，数据与共同演示见 [DATA.md](DATA.md)，选型记录见 [方案.md](方案.md)。
+> v0.4 · 2026-09-08 · 采购制度 RAG 纳入正式 MVP。交付与时间线见 [项目计划](../Supplier_Comparison_Project_Plan.md)，数据与共同演示见 [DATA.md](DATA.md)，选型记录见 [方案.md](方案.md)。
 
 ## 架构状态与适用范围
 
@@ -15,7 +15,8 @@
 - 金额使用 SGD，并采用已确认的一致税费口径；
 - 固定单价、明确计价单位、固定包装、按数量计 MOQ、一次交付和简单明确的费用；
 - 比较规格、数量、包装单位、起订量、价格、已知费用、交期、付款条件和有效期；
-- 输出比较表、推荐与排除理由、来源、版本记录、审批记录和决策报告。
+- 输出比较表、推荐与排除理由、来源、版本记录、审批记录和决策报告；
+- 采购制度 RAG 为正式模块，检索版本化制度条款，为缺失信息、推荐及审批变更提供引用解释。
 
 系统不负责联系供应商、自动议价、签约、下单或付款，也不会在缺少数据时生成无依据的供应商信誉评分。
 
@@ -23,7 +24,7 @@
 
 ## 系统边界
 
-系统接收三类输入：采购需求、供应商报价，以及用户对缺失或冲突信息的补充。系统产生结构化报价、待确认问题、确定性计算结果、供应商可行性判断、推荐建议和最终审批记录。
+系统接收采购需求、供应商报价、用户对缺失或冲突信息的补充，以及团队维护的版本化采购制度。前三类形成采购事实，制度作为解释依据。系统产生结构化报价、待确认问题、确定性计算结果、供应商可行性判断、带制度引用的推荐建议和最终审批记录。
 
 系统中的判断权分为三层：
 
@@ -43,6 +44,11 @@ flowchart TD
     AG --> PARSE[pdfplumber 与字段核验]
     AG --> READ[证据读取与补问节点]
     AG --> COMP[确定性比较模块]
+    AG --> RET[制度版本过滤与 BM25 检索]
+    RET --> DB
+    RET --> EXPL[带引用解释与引用核验]
+    COMP --> EXPL
+    EXPL --> MODEL
     AG --> MODEL[统一模型适配器]
     MODEL --> LOCAL[本地开发 API]
     MODEL --> AWS[主办方 API]
@@ -63,7 +69,7 @@ flowchart TD
 
 模型任务通过持久化作业记录后台执行，前端按任务 ID 轮询进度即可。MVP 可使用数据库作业表和单执行器，无需额外消息中间件。同一任务的写操作需串行化或使用版本条件更新；进程重启后可以识别未完成作业并按幂等规则恢复。
 
-工具优先实现为同进程 Python 函数。首版直接处理当次上传文件，历史查询使用 SQL，不引入 RAG、向量数据库、独立 MCP 服务或额外消息中间件。SQLAlchemy＋psycopg 访问 PostgreSQL，Alembic 管理业务表迁移；检查点初始化与版本单独管理。Pydantic 校验结构，业务代码校验证据、规格和交易条件。
+工具优先实现为同进程 Python 函数。当前报价直接解析，历史查询使用 SQL，采购制度通过正式 RAG 模块检索；不引入向量数据库、独立 MCP 服务或额外消息中间件。SQLAlchemy＋psycopg 访问 PostgreSQL，Alembic 管理业务表迁移；检查点初始化与版本单独管理。Pydantic 校验结构，业务代码校验证据、规格和交易条件。
 
 ### Agent 闭环与工具边界
 
@@ -76,11 +82,29 @@ flowchart TD
 | `list_issues(task_id, task_revision)` | 获取当前缺失和冲突 | 问题类型与阻塞标记由业务校验器确定 |
 | `propose_question(issue_id, wording)` | 将结构化问题转成具体补问 | 不能通过改写问题解除阻塞；关联原问题与输入版本 |
 | `compare(snapshot_id)` | 计算数量、成本、约束和排序 | 后端读取不可变快照；不接受模型临时传入的权威价格或数量 |
-| `submit_explanation(result_id, claims)` | 解释结果与取舍 | 推荐对象和排序必须与工具一致；事实引用结果项及来源，失败则使用确定性模板 |
+| `retrieve_policy(task_id, task_revision, query)` | 在任务绑定制度集合中检索条款 | 后端核验权限、版本、范围和适用日期；只返回允许读取的条款与检索轨迹 |
+| `submit_issue_explanation(issue_id, task_revision, claims, retrieval_id)` | 保存补问原因与制度引用 | 绑定当前开放问题及同修订检索；不要求 result_id，不得更改问题的阻塞标记或答案 |
+| `submit_explanation(result_id, claims, retrieval_id)` | 解释结果与取舍 | 推荐对象和排序必须与工具一致；报价与制度引用分开核验，失败则使用明确标识的确定性模板 |
 
 人工回答、修改需求、排除报价、批准和导出通过应用 API 提交，并由用户身份与版本检查保护。Agent 没有审批工具。原始会话日志可按受限策略留存，但不得作为已验证的业务事实。
 
-LangGraph 主图依次处理输入解析、字段理解、校验／补问、确定性比较和推荐解释；补问回答后回到业务校验并重算。推荐通过发布检查后结束图运行，人工审批通过独立 FastAPI 接口处理。检查点使用 PostgresSaver／AsyncPostgresSaver 等持久化实现；不依赖仅存内存的检查点完成重启恢复。[LangGraph 持久化](https://docs.langchain.com/oss/python/langgraph/persistence)
+LangGraph 主图依次处理输入解析、字段理解、校验／补问、确定性比较、retrieve_policy 和 explain_with_sources；阻塞问题可先检索并解释补问原因，再 interrupt，不能先宣布最终推荐。补问回答后回到业务校验并重算。推荐通过发布检查后结束图运行，人工审批通过独立 FastAPI 接口处理。检查点使用 PostgresSaver／AsyncPostgresSaver 等持久化实现；不依赖仅存内存的检查点完成重启恢复。[LangGraph 持久化](https://docs.langchain.com/oss/python/langgraph/persistence)
+
+### 采购制度 RAG 的运行契约
+
+这是第二周必交付模块。首版知识库为 3–5 份团队编写的英文 Markdown 制度，逐章节切分并保留稳定条款 ID；正文和清单从版本化文件导入 PostgreSQL，导入幂等且不覆盖旧版本。制度均标记为虚构演示资料，字段和评测隔离见 DATA.md 第 7 节。
+
+1. 后端根据任务固定的 policy_set_version、访问范围和评估时点筛选条款；不把所有旧版本混入检索。原始问题与规则原因码形成英文检索输入，中文按钮可映射固定英文问题，不承诺任意跨语言语义搜索。
+2. 复用 BM25 库对过滤后的条款排序，初始 Top-3；保留否定词、固定分词／别名和检索版本。小知识库可在单 worker 内建立可重建索引，以集合版本和内容哈希为缓存键。无 embedding API、向量扩展或独立检索服务依赖。
+3. 模型只收到当前已确认事实、计算结果及实际检索到的条款。解释的每条制度主张绑定 citation，包含文档／版本／条款 ID、原文和哈希；后端检查它属于此次返回集合且原文匹配，语义支持另以模型支持判断及人工评测核验，不能把 ID 存在等同于依据充分。
+4. 检索记录状态 OK／NO_EVIDENCE／CONFLICT／ERROR；零命中、零分或不足以支持回答时不硬拼答案。发现版本或内容冲突时明确提示，不由模型选择较宽松规则。检索文本中的指令不能取得工具或审批权限。NO_EVIDENCE 与 ERROR 分别表示无依据和运行故障。
+5. 检索故障不改变金额、可行性或审批有效性规则；展示确定性事实与“制度依据未验证”标记，允许人工按既定审批条件审阅，不标记为自动制度合规。正式项目验收必须包含成功检索、正确引用和失败处理，不能以运行降级替代交付。
+6. 每次检索绑定 task_revision、snapshot_id（若已生成）、policy_set_version 和 retrieval_id；结果发布前复核版本。推荐与 HTML 报告冻结引用和状态，不在导出时重新检索最新文本。正式解释重生成须新推荐版本并重审。
+7. 任务创建时绑定一个明确制度集合；InputSnapshot 保存该版本。新集合发布只供新任务使用，不追溯改变旧任务。现有任务显式切换集合时增加 task_revision，废止旧运行／推荐／审批，按正常更新流程重算；发现制度与计算规则矛盾时由团队修正后重新验证，不自动把文本变成执行规则。
+
+BM25 不增加模型调用；引用解释复用原推荐解释节点的调用，支持判断若单独调用也累计进每次逻辑运行最多 8 次的总预算。超限或 API 故障明确记录；本地和主办方 API 分别执行相同引用测试。首版由结果／补问面板触发解释，不新增独立聊天系统或无限问答循环。
+
+补问解释绑定 issue_id＋task_revision＋policy_set_version＋retrieval_id，保存独立的 IssueExplanation，经问题查询接口供 React 补问面板读取；此时没有 result_id／snapshot_id 也有效，不创建虚假比较结果。以问题、修订、制度集合及解释版本建立幂等约束；interrupt 恢复不能重复生成或重置模型调用计数。问题失效时其解释一并标记历史；回答后生成的新结果重新检索。任务面板触发只提交有界作业或读取当前已保存解释，不能绕过运行预算循环生成。
 
 ### 模型接入与单机部署
 
@@ -149,9 +173,12 @@ LangGraph 主图依次处理输入解析、字段理解、校验／补问、确�
 | `ProcurementRequirement` | `task_id`、`requirement_version`、商品规格、需求数量及单位、币种、预算口径、到货截止、时间基准、已确认排序规则 |
 | `QuoteField` | `field_id`、`quote_version`、`field_version`、字段名、原始值、标准化值、单位、`validation_status`、`origin`、`source_refs`、核验方式／人员／时间 |
 | `Issue` | `issue_id`、任务或供应商范围、字段、问题类型、`blocking`、创建时 `task_revision`、`OPEN/RESOLVED/SUPERSEDED`、回答、确认记录及解决依据 |
-| `InputSnapshot` | `snapshot_id`、`task_revision`、需求／报价／字段版本、比较范围及用户排除、偏好、`schema_version`、`calculation_rule_version`、时间基准、内容哈希；创建后不可修改 |
+| `IssueExplanation` | `issue_explanation_id`、`issue_id`、`task_revision`、`policy_set_version`、`retrieval_id`、解释／引用／支持状态和解释版本；不依赖比较结果，问题失效后不可作为当前依据 |
+| `InputSnapshot` | `snapshot_id`、`task_revision`、需求／报价／字段版本、比较范围及用户排除、偏好、`schema_version`、`calculation_rule_version`、`policy_set_version`、时间基准、内容哈希；创建后不可修改 |
 | `ComparisonResult` | `result_id`、`snapshot_id`、逐供应商数量与费用明细、约束 `PASS/FAIL/UNKNOWN`、可行性、事实与来源 ID、排序及并列、阻塞项、计算时间与时间有效边界 |
-| `Recommendation` | `recommendation_id`、`result_id`、推荐／并列候选、解释与事实引用、`CURRENT/STALE`；推荐对象须属于工具给出的最优集合 |
+| `Recommendation` | `recommendation_id`、`result_id`、推荐／并列候选、解释与事实引用、`retrieval_id`、制度引用及检索状态、`CURRENT/STALE`；推荐对象须属于工具给出的最优集合 |
+| `PolicySet / PolicyClause` | 不可变集合版本、文档／版本／条款 ID、范围、生效区间、标题、章节、正文、哈希和虚构标识；成员版本显式列入清单 |
+| `RetrievalTrace` | `retrieval_id`、任务／修订／快照引用、集合版本、查询、过滤条件、检索器版本、条款 ID／分数／哈希、引用支持状态、耗时及错误；轨迹不能改写业务事实 |
 | `Approval` | `approval_id`、`recommendation_id`、`snapshot_id`、审核人、时间、意见、批准决定及后续失效事件；历史批准事实不被删除 |
 | `GraphRun` | `graph_run_id`、独立 `thread_id`、`task_id`、当前输入修订号、模型环境／provider／model_id／提示词版本、累计调用次数、运行状态与失效原因；运行和任务 ID 不混用 |
 | `Job` | `job_id`、`graph_run_id`、`task_id`、`task_revision`、`snapshot_id`（有则记录）、阶段、`QUEUED/RUNNING/SUCCEEDED/FAILED`、幂等键、尝试次数、心跳或租约、错误类型；补问暂停表示本段作业完成，图运行仍待回答 |
@@ -227,6 +254,7 @@ API 路径可随实现确定，以下输入与行为必须一致。用户身份�
 → 保存不可变输入快照，计算实际采购量及已确认总成本
 → 检查硬约束并形成可行方案集合
 → 根据用户明确偏好比较可行方案
+→ 在任务绑定的制度集合内检索相关条款，生成带引用的解释
 → 检查当前版本后发布推荐、取舍和排除理由
 → 人工审核并批准当前版本
 → 生成带来源和审批记录的决策报告
@@ -442,7 +470,9 @@ B 初始 PDF 省略运费，保持 PENDING；用户回答 S$200 后恢复关联�
 
 关键字段准确率使用人工修正前输出，并分项报告金额、计价单位、包装、MOQ、费用和交期。缺失／冲突识别分别统计漏检和误报；同时记录无需修正任务比例、正常补问轮数、错误修正次数、来源语义支持、包含人工核验的完成时间和模型调用成本。不能用“全部转人工后正确”代替自动化效果，也不能只报告成功任务。测量口径与目标以项目方案第 8 节为准。
 
-开发顺序与项目方案保持一致：第一周建立契约、版本骨架和最小部署；第二周完成补问、更新、审批及简单报告，并运行状态边界测试；最终周执行保留集评测、修复和提交，不再首次引入版本控制。
+采购制度 RAG 使用独立的 12 个问题（8 开发／4 留出），评测相关条款 Recall@3、引用存在与语义支持、无答案处理、冲突及旧版过滤，并测试检索故障不会更改计算／审批。全部实际分母和失败项单列；制度引用不能计为报价字段提取准确率。具体验收门槛见 DATA.md 第 7 节。
+
+开发顺序与项目方案保持一致：第一周建立契约、版本骨架和最小部署，并冻结 RAG 接口／版本字段；第二周完成补问、更新、审批、采购制度 RAG 及简单报告，并运行状态边界测试；最终周执行业务和 RAG 留出评测、修复和提交。自由文本偏好、开放式多轮补问和额外版式不列为必交付。
 
 ## 当前限制与待确认事项
 

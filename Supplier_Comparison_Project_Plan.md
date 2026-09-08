@@ -9,14 +9,14 @@
 | 暂定产品名称 | **QuoteWise — Evidence-Grounded Supplier Comparison Agent** |
 | 产品定位 | 辅助采购决策，不自主下单或付款 |
 | 计划周期 | 2026-09-07 至 2026-09-25 开发；2026-09-28 提交 |
-| 文档版本 | v0.3 · 2026-09-08 · 已收束选型同步稿 |
+| 文档版本 | v0.4 · 2026-09-08 · 采购制度 RAG 正式交付稿 |
 | 首版商品 | Electronics／Microcontroller MCU-9，同制造商、同料号、同封装及版本，全新且不允许替代 |
-| 技术选型 | FastAPI＋Pydantic＋React＋LangGraph＋PostgreSQL＋pdfplumber |
+| 技术选型 | FastAPI＋Pydantic＋React＋LangGraph＋PostgreSQL＋pdfplumber；采购制度 RAG 使用 BM25＋引用解释 |
 | 部署与模型 | 官方 Lightsail＋Docker Compose／持久化卷；本地开发 API 跑通后切换主办方 API 测试 |
 
 **阅读说明**：本文汇总选题、三周计划、交付物及 Delivery, Measurement and Controls。商品类别和工程选型已确定，具体模型接口、实例参数、人力投入与评测目标仍需核验；功能是拟实施设计，不表示已经完成。正式比赛日期、框架要求和提交格式以主办方通知为准。
 
-本次修订按 [选型方案](docs/方案.md)同步 MCU-9、LangGraph、PostgreSQL 及两阶段 API 路线。第一周建立版本／检查点骨架与最小部署，第二周完成补问、更新、审批和报告，最终周评测与提交。工程细则见 [架构文档](docs/ARCHITECTURE.md)，来源、字段和共同演示参考见 [数据文档](docs/DATA.md)。
+本次修订将采购制度 RAG 纳入正式 MVP，保留 MCU-9、LangGraph、PostgreSQL 及两阶段 API 路线。第一周建立版本／检查点骨架、最小部署及 RAG 契约，第二周完成补问、更新、审批、制度检索引用和报告，最终周评测与提交。工程细则见 [架构文档](docs/ARCHITECTURE.md)，来源、字段和共同演示参考见 [数据文档](docs/DATA.md)。
 
 **背景**: Procurement executives regularly receive quotations from multiple suppliers for the same products. Before every purchase, they manually compare prices, delivery lead times, payment terms, and supplier performance using spreadsheets and emails. As the number of suppliers and products grows, the comparison process becomes increasingly difficult, resulting in slower purchasing decisions and missed opportunities to negotiate better terms.
 
@@ -137,7 +137,8 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 | 排序 | 用户明确选择成本优先或交期优先；可确认第二排序项，否则并列 | 模型自定权重、未经确认的综合评分 |
 | 信息补充 | 用户在应用内回答问题或更新资料 | 自动接入邮箱或 WhatsApp 并联系供应商 |
 | 输出 | 比较表、有依据的推荐、版本与审批记录、可导出的报告 | 自动签约、下单和付款 |
-| 系统接入 | LangGraph＋本地开发 API／主办方 API，官方 Lightsail＋Docker Compose，PostgreSQL 与文件持久化卷 | ERP、供应商消息系统、RAG／向量库或复杂消息中间件 |
+| 采购制度 RAG | 3–5 份版本化演示制度，BM25 检索＋LLM 引用解释，进入补问原因、推荐和审批变更说明 | 通用知识库、向量检索／重排、规格书兼容性判断、任意跨语言问答 |
+| 系统接入 | LangGraph＋本地开发 API／主办方 API，官方 Lightsail＋Docker Compose，PostgreSQL 与文件持久化卷 | ERP、供应商消息系统或复杂消息中间件 |
 
 运费、税费、交期定义或规格不明确时，须先标记并确认；不能把未知费用默认为零，也不能把无法确认等价的商品直接比较。
 
@@ -152,7 +153,7 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 | 阶段 | 本周目标 | 主要交付物 | 团队总投入预算 |
 | --- | --- | --- | --- |
 | **第一周：9/7–9/13，能比较** | 带版本和来源跑通最小流程 | 样例、数据契约、版本骨架、提取与计算、纠正入口、最小部署 | 40 小时：32 小时计划工作＋8 小时缓冲 |
-| **第二周：9/14–9/20，闭环完成** | 补问、推荐、更新、审批和简单报告贯通 | 持久化补问、重算、并发保护、审批、可导出的报告 | 40 小时：32 小时计划工作＋8 小时缓冲 |
+| **第二周：9/14–9/20，闭环完成** | 补问、更新、审批、采购制度 RAG 和简单报告贯通 | 版本化制度库、检索引用、持久化恢复、审批与报告、AWS 回归 | 40 小时：32 小时计划工作（含 RAG 10 小时）＋8 小时缓冲 |
 | **最终周：9/21–9/25，稳定交付** | 固定功能范围，完成评测和提交包 | 保留集结果、故障修复、部署复核、演示与提交材料 | 40 小时：26 小时计划工作＋14 小时缓冲 |
 
 **工作量口径：**暂按四人团队、1 人日＝8 小时估算，总计 15 人日／120 小时，平均每人每周约 10 小时。其中 90 小时安排计划工作，30 小时（25%）保留给集成、故障和提交问题。最后一周仅五个开发日，成员需提前确认可投入时间；不能把团队 40 小时误解为每人 40 小时。第一周按实际情况复核。
@@ -161,11 +162,11 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 ### 5.2 第一周：数据契约、版本骨架与最小部署
 
-**本周目标：三份报价在部署环境中形成一张可核对、可纠正、带版本的比较表。**
+**本周目标：三份报价在本地后端形成可核对、可纠正、带版本的比较 JSON，并验证持久化中断恢复。** 具体以 [第一周计划](docs/WEEK1_PLAN.md)为准；React 和正式 RAG 运行链路第二周交付，云端验证按资源可用情况记录。
 
 前两个工作日按 DATA.md 冻结 MCU 演示规格、源供应商映射、字段单位／精度、交易条款、工具契约和参考答案。采购需求、报价、人工修正和结果从首次持久化起携带任务 ID 与版本；同时建立 LangGraph 运行标识、PostgreSQL 检查点及数据库迁移骨架。
 
-完成来源定位、提取候选值、字段核验、数量与金额计算、简单前端和人工纠正。CSV 使用明确模板；文本 PDF 聚焦已声明可支持的版式，复杂条款进入待确认。
+完成来源定位、提取候选值、字段核验、数量与金额计算及人工纠正，以 Swagger／脚本作为交互入口。CSV 使用明确模板；文本 PDF 聚焦已声明可支持的版式，复杂条款进入待确认。共同契约评审同时冻结 policy_set_version、条款／引用及检索状态格式；本周不要求检索实现。
 
 先用团队自行配置的真实开发 API 完成本地闭环，具体服务商／协议待确定。Lightsail 与主办方 API 可用后尽早验证连通性、结构化输出和工具调用；正式访问未开放时继续本地工作，但云端验收保持未通过。若使用模拟接口则单独标识，AWS 失败不静默回退个人 API。
 
@@ -179,9 +180,9 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 **通过标准：**已知条件下计算正确，未知值不被猜测，字段来源可核对，刷新页面不会丢失已保存需求和纠正记录。
 
-### 5.3 第二周：补问、更新、审批与报告闭环
+### 5.3 第二周：补问、更新、审批、采购制度 RAG 与报告闭环
 
-**本周目标：端到端完成“补问 → 推荐 → 批准 → 报价更新 → 旧审批失效 → 重新批准”。**
+**本周目标：端到端完成“补问 → 推荐与制度引用 → 批准 → 报价更新 → 旧审批失效 → 引用制度解释 → 重新批准”。采购制度 RAG 是必交付工作，不以剩余时间作为启动条件。**
 
 LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后端校验回答对应的问题、运行和版本，保存回答、推进修订号并创建恢复作业；恢复后读取最新确认数据，冻结新快照并完整重算。新报价／主动修正／范围修改创建新图运行，旧运行失效。实现检查点与业务提交崩溃窗口的幂等恢复；具体规则见架构文档。审批独立于图执行，首版不实现字段级依赖图。
 
@@ -191,9 +192,24 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 | 可行性与推荐 | 区分可行、不可行、待确认；未知不算零，不因已排除报价缺字段而阻塞其他报价 |
 | 版本和并发控制 | 旧计算晚到不覆盖当前结果；旧页面审批被拒绝；重复请求不生成重复记录 |
 | 审批和报告 | 只批准当前有效结果；重新检查有效期；报告绑定输入、范围、来源和审批 |
+| 采购制度 RAG | 3–5 份审阅后的虚构制度、版本过滤、BM25 检索、引用解释、React／HTML 来源展示；通过 8 个开发问题与边界测试，留出问题最终周执行 |
 | 完整演示闭环 | B 以 S$7,000 获批，交期更新后改荐 S$7,100 的 C，旧审批失效并解释 S$100 差额 |
 
 **通过标准：**有阻塞问题时只显示草稿；无可行方案时不强行推荐；输入变化和报价自然过期都不能复用旧审批。
+
+**正式工时分配：32 小时计划工作中，RAG 10 小时，其他闭环工作 22 小时，另保留 8 小时缓冲。** 下表按第一周 A／B／C／D 延续责任并调整第二周任务；交叉评审与模块验证已计入对应行，不再重复加时。
+
+| 成员 | RAG 工作／小时 | 其他闭环工作／小时 | 计划合计 | 缓冲 |
+| --- | --- | --- | ---: | ---: |
+| A | 制度编写、元数据与独立开发／留出问题参考：2 | 复用组件搭 React 表单、比较／补问／审批页面：5；业务验收与记录：1 | 8 | 2 |
+| B | BM25 检索、过滤、引用生成／核验及模块测试：4 | 解析问题修复及模型适配：2；与 D 完成恢复边界测试：2 | 8 | 2 |
+| C | 制度与计算规则一致性复核、RAG 云端与故障验证：1 | 作业轮询／租约恢复：2；部署／认证入口与 AWS 回归：2；规则与版本边界回归：3 | 8 | 2 |
+| D | 制度版本／轨迹持久化及迁移、LangGraph 节点／API、配合 A 展示引用：3 | 身份与审批事务：3；简单 HTML 报告：1；图恢复集成：1 | 8 | 2 |
+| **合计** | **10** | **22** | **32** | **8** |
+
+以上是复用第一周稳定接口、成熟认证组件、现成 React 组件和 BM25 库前提下的紧凑估算，不是交付已完成的声明。第二周开始即由 A 出制度／问题、B 与 D 用契约并行接入；中段完成“检索→解释→来源展示”纵向链路，后段与审批变更及 AWS 回归联合验收，不能最后一天才接入 RAG。
+
+为容纳正式 RAG，首版采用结构化补问回答与偏好表单、固定问句；自由文本偏好、开放式多轮补问／润色、独立聊天界面、报告美化和额外开发 PDF 版式不列为必交付。最终评测保留独立版式。规则、审批、持久化恢复及 AWS 验证不删减；RAG 的版本过滤、可追溯引用和无依据处理同样必须保留。若首周基线不稳定或认证／恢复明显超出估算，记录实际差额并重排工作，不能把 RAG 改称可选项或暗中追加人时。
 
 ### 5.4 最终周：评测、稳定与提交
 
@@ -203,7 +219,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 
 | 最终周交付 | 验收方式 |
 | --- | --- |
-| 实际评测摘要 | 注明样本量、保留集、人工修正前结果、完成时间和局限 |
+| 实际评测摘要 | 采购业务与 RAG 分开统计；完成 4 个 RAG 留出问题，注明样本量、检索召回、引用支持、人工修正前字段结果、时间和局限 |
 | 回归与故障恢复 | 核心算术、补问、范围、版本、并发和时间边界用例通过 |
 | 部署与运行说明 | 其他队员按说明启动；人工后备路径和模拟数据标识清楚 |
 | 提交包与演示 | 已批准示例报告、可复现数据、录屏和材料与真实能力一致 |
@@ -214,7 +230,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 
 进度不足时，依次缩减报告美化、自由文本偏好输入、字段级差异展示和额外 PDF 版式；需求可先使用结构化表单，报告可先导出 HTML。保留至少一类文本 PDF、CSV 模板、来源查看和人工纠正。
 
-必须保留：确定性计算、缺失与冲突处理、补问持久化恢复、输入快照、旧结果和审批失效、简单报告及可运行演示。不得以默认费用为零、忽略版本或把人工结果包装成自动结果来换取进度。
+必须保留：确定性计算、缺失与冲突处理、补问持久化恢复、输入快照、旧结果和审批失效、采购制度 RAG、简单报告及可运行演示。RAG 故障允许明确降级，但正式交付必须通过检索与引用验收；不得以默认费用为零、忽略版本、固定答案冒充检索或把人工结果包装成自动结果来换取进度。
 
 ## 6. 数据、工具与运行约束
 
@@ -228,7 +244,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 | 产品和供应商参考资料 | 产品目录及可获得的历史记录 | 数据提供方 | 可选，取决于可用性和授权 | 资料过期、记录不完整、无法支持表现判断 |
 | 测试样例与参考答案 | 团队构建并人工核验 | 项目团队 | 第一周开始准备并持续补充 | 与调试样例过度重复，或标准答案本身出错 |
 
-原始 CSV 共 47,128 条，Electronics 为 6,123 条，MCU-9 为 1,185 条／15 家合成供应商（2026-09-08 核对）。选 3–5 家素材建立约 20 个场景，缺失字段按种子与业务规则合成，参考答案独立核验并与运行输入隔离；3 种开发版式＋1 种留出版式为初值。数据哈希、完整字段、生成目录和日期约定见 DATA.md。没有真实业务验证时，不称为已获 SME 客户验证。
+原始 CSV 共 47,128 条，Electronics 为 6,123 条，MCU-9 为 1,185 条／15 家合成供应商（2026-09-08 核对）。选 3–5 家素材建立约 20 个场景，缺失字段按种子与业务规则合成，参考答案独立核验并与运行输入隔离；必交付 1 种开发版式＋1 种独立留出版式，额外开发版式不列为必做。另制作 3–5 份虚构制度及独立 RAG 问题集。数据哈希、完整字段、生成目录和日期约定见 DATA.md。没有真实业务验证时，不称为已获 SME 客户验证。
 
 ### 6.2 AI Models & Tools
 
@@ -245,7 +261,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 
 采用模块化单体，API 与 worker 共用版本一致的后端镜像；前端按任务 ID 查询进度，模型工作通过持久化作业执行。业务表保存权威数据，检查点保存图执行位置，文件卷保存原件、解析文本和报告，均不向 Agent 暴露评测答案。
 
-工具采用同进程函数，历史数据查询使用 SQL，首版不引入 RAG、向量数据库、独立 MCP 或 Redis／Celery。每任务一个活跃执行，每阶段最多 3 次尝试（含首次）、每次逻辑图运行最多 8 次模型调用作为可配置初值；恢复／重试不重置预算，未知业务字段直接补问。受控中断、版本迁移及两阶段模型适配见 ARCHITECTURE.md。
+工具采用同进程函数，历史数据查询使用 SQL；正式采购制度 RAG 使用版本过滤＋BM25＋现有模型引用解释，不引入向量数据库、独立 MCP 或 Redis／Celery。制度和检索轨迹进入 PostgreSQL，索引按集合版本重建。每任务一个活跃执行，每阶段最多 3 次尝试（含首次）、每次逻辑图运行最多 8 次模型调用作为可配置初值；引用解释／支持判断也计入，恢复／重试不重置预算，未知业务字段直接补问。受控中断、制度版本和两阶段模型适配见 ARCHITECTURE.md，制度数据及独立 12 个 RAG 问题见 DATA.md 第 7 节。
 
 ## 7. Integrations and Manual Fallback
 
@@ -275,6 +291,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 | 来源正确性 | 人工标注原文依据 | 最终推荐的关键事实均有可定位且支持该事实的来源 | 分别检查定位有效性与语义支持，不能只检查是否存在页码 | 每周 |
 | 运行效率 | 第一周记录初版耗时 | 披露系统处理时长和每任务模型调用成本，不预先宣称已达目标 | 记录调用次数、用量、失败重试；可计费数据缺失时明确标注估算 | 第二周及最终评测 |
 | 异常和审批处理 | 首次实现后建立结果 | 预定的补问、更新、并发和审批测试全部通过 | 包括旧计算晚到、旧页面审批、重复请求、重启恢复和自然过期 | 第二周及最终评测 |
+| 采购制度 RAG | 第二周建立 8 题开发基线 | 有答案问题 Recall@3 宏平均至少 80%；引用匹配和主张支持目标 100%；无依据、冲突、版本及故障边界通过 | 独立 12 题，8 开发／4 留出；实际分母、失败与两环境结果单列，详见 DATA.md 第 7 节 | 第二周及最终评测 |
 
 逐步准备约 20 个带人工参考结果的业务场景，建议 12 个用于开发、8 个作为保留集。按报价版式或模板分组划分，不只对同一模板替换数字；保留集不用于调整提示词。若因排错查看并据此调优，应披露并补充新的保留样例。确定性计算和状态测试另行组织，不把每个代码断言计作一个独立业务场景。
 
@@ -321,6 +338,7 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 | **源代码与运行说明** | 前后端代码、依赖、配置示例、运行与部署步骤 | 其他队员能按说明启动；配置示例不包含真实密钥 |
 | **样例数据与测试材料** | 允许分享的报价、采购场景、人工参考答案与测试说明 | 数据来源和虚构／匿名化状态清楚，结果可复查 |
 | **示例决策报告** | 采购需求、比较范围、成本明细、推荐及排除理由、来源、版本、时间边界和审批记录 | 首选可导出 HTML；未批准草稿与已批准报告明确区分 |
+| **采购制度 RAG** | 3–5 份虚构制度与版本清单、BM25 检索、引用解释、来源展示及 12 个独立问题的实测记录 | 主演示实际命中相关条款；引用、旧版过滤、无依据和冲突处理达到 DATA.md 第 7 节标准 |
 | **评测结果摘要** | 人工基线、系统结果、异常测试、耗时及已知限制 | 使用实际测量值，不把目标写成已实现效果 |
 | **展示与提交材料** | 演示脚本、项目介绍、流程和业务价值说明；按要求准备录屏或演示稿 | 与真实原型一致；模拟事件和未实现功能明确标注 |
 
@@ -345,23 +363,24 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 3. 新快照重算 B 为 S$7,000、C 为 S$7,100，推荐 B；用户查看来源和范围后，通过后端审批并导出报告。
 4. 同一受控场景日上传 B v2，报价日期为 9/14、有效期不变；到货改为 6 天、明确运费仍为 S$200。新版独立核验，不继承旧人工回答。
 5. 旧图运行、结果和审批失效；新运行改荐 C，解释增加 S$100 满足五天到货要求，并请求重新批准。B v2 的 9/20 到货超过 9/19 截止。
+6. 展示检索到的审批变更条款及文档版本／章节／原文，解释重新审批原因；S$100 来自比较工具，不从制度文本推断。初始缺运费也通过报价完整性制度说明补问必要性。
 
 另备短场景：A 已确定交期超限但缺运费，不追问无助于决策的信息；A、B、C 都已确定超限时输出“无可行方案”；若 A、C 超限而 B 的交期未知、也没有其他已确定的失败项，则输出“暂时无法确定”。演示中的模拟更新和人工回答清楚标识。
 
 ## 12. 团队分工建议
 
-下面按四人团队规划，具体负责人由团队确认。
+沿用第一周的 A／B／C／D 标识，第二周正式工时见第 5.3 节；实名映射由团队内部确定。
 
 | 角色 | 主要职责 |
 | --- | --- |
-| Agent 与业务流程负责人 | LangGraph、模型适配、运行／问题版本、检查点恢复、快照与审批事务 |
-| 文档与计算工具负责人 | MCU 数据生成、pdfplumber 解析、证据核验、Decimal 计算和约束工具 |
-| 前端交互负责人 | 上传、比选表、来源查看、纠正、审批及版本变化展示 |
-| 测试与部署负责人 | Lightsail／Compose、迁移与备份、本地与主办方 API 分环境评测、保留集及演示材料 |
+| A：数据、制度与交互 | MCU 样例和独立答案；制度编写与 RAG 问题参考；第二周 React 页面、验收记录 |
+| B：解析、模型与检索 | pdfplumber、模型适配、证据核验；BM25、引用解释及模块测试 |
+| C：规则、作业执行与部署 | Decimal 计算、约束；制度规则复核、worker 轮询／租约、Lightsail／Compose 与 AWS 回归 |
+| D：业务版本与图流程 | API、业务迁移、LangGraph／检查点、快照与审批；制度版本、检索轨迹和报告 |
 
 开始并行开发前，按已定 MCU-9 场景共同冻结具体规格、字段结构、工具输入输出和演示参考答案。规则和验收由团队共同确认，避免各模块采用不同口径。
 
-数据库和 API 契约由业务流程负责人维护，其他模块共同评审。第二周的版本、审批工作优先于额外 Agent 能力；每周按成员实际工时调整分工，不把集成责任全部留给测试与部署负责人。
+数据库和 API 契约由 D 维护，其他模块共同评审。第二周 RAG、版本、审批均为正式工作，检索模块 B 与图集成 D 从周初联调，A／C 负责内容及规则交叉核验；每周按实际工时调整分工，不把集成责任全部留给某一人。
 
 ## 13. 开始开发前需要确认的事项
 
@@ -375,11 +394,15 @@ LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后�
 | 团队投入 | 实际成员分工、每周可投入时间及工时估算是否需要调整 |
 | 官方提交要求 | 官网日期已核对；仍需确认 9/28 的具体提交时刻、渠道、演示形式及文件格式 |
 
-FastAPI／Pydantic／React、LangGraph、PostgreSQL、pdfplumber、Lightsail／Docker Compose 与持久化卷已确定，不再作为开放选项。模型路线也已确定为本地开发 API→主办方 API，仅具体接入信息待核验。按合成样例推进，不能把尚未取得的 API 权限或未完成的部署称为已经验证。
+FastAPI／Pydantic／React、LangGraph、PostgreSQL、pdfplumber、采购制度 RAG、Lightsail／Docker Compose 与持久化卷已确定，不再作为开放选项。RAG 首版采用 BM25＋现有模型引用解释。模型路线也已确定为本地开发 API→主办方 API，仅具体接入信息待核验。按合成样例推进，不能把尚未取得的 API 权限或未完成的部署称为已经验证。
 
 ## 附录 A：可用于 Proposal 的英文 Solution Overview
 
 > We propose a supplier comparison assistant for SME electronics procurement, initially comparing quotations for one fixed-specification MCU with no substitute parts. FastAPI, Pydantic and React support the application, while a LangGraph workflow interprets documents, asks targeted questions and resumes through PostgreSQL checkpoints. Independent Python tools calculate quantities, costs and feasibility; backend transactions enforce versions and human approvals. PostgreSQL business records remain authoritative. Synthetic quotation PDFs are generated from open synthetic procurement data and parsed with pdfplumber, with evaluation answers isolated from agent inputs. Development uses a team-configured model API, followed by integration and regression testing against the organizer-provided API on the supplied Lightsail instance. Docker Compose manages services and environments, with persistent database and file volumes. Model access details remain subject to confirmation. Evaluation separates local and AWS results and measures field and evidence accuracy, clarification burden, cost and completion time. The system does not contact suppliers, place orders or make payments.
+
+英文 Proposal 的正式 RAG 交付说明：
+
+> Procurement-policy RAG is a required MVP component. Version-filtered BM25 retrieval supplies relevant clauses from explicitly fictional demonstration policies to the explanation stage. The interface and report show versioned citations, while deterministic tools retain control of costs, feasibility and approval validity. Retrieval failures are visible, and policy retrieval and citation quality are evaluated separately from quotation extraction.
 
 ## 附录 B：资料依据与状态
 
@@ -396,5 +419,6 @@ FastAPI／Pydantic／React、LangGraph、PostgreSQL、pdfplumber、Lightsail／D
 **第一周：把不同报价变成一张带来源和版本的可信比较表，并贯通最小部署。**
 
 **第二周：补问后继续比较，处理报价变化，完成审批与报告闭环。**
+**采购制度 RAG 同期交付：推荐和审批变更解释带可追溯条款引用，独立评测检索与引用质量。**
 
 **最终周：用保留样例验证效果，修复问题，完成稳定演示和提交。**
