@@ -9,11 +9,14 @@
 | 暂定产品名称 | **QuoteWise — Evidence-Grounded Supplier Comparison Agent** |
 | 产品定位 | 辅助采购决策，不自主下单或付款 |
 | 计划周期 | 2026-09-07 至 2026-09-25 开发；2026-09-28 提交 |
-| 文档版本 | v0.2 · 2026-09-07 · 设计审查修订稿 |
+| 文档版本 | v0.3 · 2026-09-08 · 已收束选型同步稿 |
+| 首版商品 | Electronics／Microcontroller MCU-9，同制造商、同料号、同封装及版本，全新且不允许替代 |
+| 技术选型 | FastAPI＋Pydantic＋React＋LangGraph＋PostgreSQL＋pdfplumber |
+| 部署与模型 | 官方 Lightsail＋Docker Compose／持久化卷；本地开发 API 跑通后切换主办方 API 测试 |
 
-**阅读说明**：本文汇总本次讨论中的选题、问题定义、三周计划、交付物及 Delivery, Measurement and Controls。功能范围是团队拟实施的方案；人力投入、评测目标、模型和部署配置属于规划假设。正式比赛日期、框架限制和提交格式，须以主办方最新通知为准。
+**阅读说明**：本文汇总选题、三周计划、交付物及 Delivery, Measurement and Controls。商品类别和工程选型已确定，具体模型接口、实例参数、人力投入与评测目标仍需核验；功能是拟实施设计，不表示已经完成。正式比赛日期、框架要求和提交格式以主办方通知为准。
 
-本次修订将版本骨架提前到第一周，将补问、更新、审批和简单报告集中在第二周完成，最终周用于评测、稳定和提交。工程状态、数据契约和计算细则见 [架构文档](docs/ARCHITECTURE.md)；两份文档共同描述开发目标，不表示功能已经实现。
+本次修订按 [选型方案](docs/方案.md)同步 MCU-9、LangGraph、PostgreSQL 及两阶段 API 路线。第一周建立版本／检查点骨架与最小部署，第二周完成补问、更新、审批和报告，最终周评测与提交。工程细则见 [架构文档](docs/ARCHITECTURE.md)，来源、字段和共同演示参考见 [数据文档](docs/DATA.md)。
 
 **背景**: Procurement executives regularly receive quotations from multiple suppliers for the same products. Before every purchase, they manually compare prices, delivery lead times, payment terms, and supplier performance using spreadsheets and emails. As the number of suppliers and products grows, the comparison process becomes increasingly difficult, resulting in slower purchasing decisions and missed opportunities to negotiate better terms.
 
@@ -37,7 +40,7 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 ### 2.1 目标用户与当前流程
 
-目标用户是中小企业的采购人员、采购主管，或兼任采购工作的业务负责人。
+首版目标用户是中小型电子制造企业的采购人员、采购主管，或兼任采购工作的业务负责人，使用同一明确规格 MCU 的多供应商报价验证通用比选流程。
 
 根据用户提供的选题截图，采购人员会收到同一类商品的多家供应商报价，并通过邮件和电子表格手动比较价格、交期、付款条件及供应商表现。随着供应商和商品数量增加，比较更困难，采购决策也更慢。
 
@@ -105,7 +108,7 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 ### 3.4 Agent / Workflow Roles
 
-以下是工作流职责，不要求实现为多个独立 Agent。
+以下职责通过一个 LangGraph 主图、独立业务模块和人工审批接口实现，不增加多 Agent 系统。图负责解析、理解、校验／补问、比较和解释，最终审批由 FastAPI 后端事务处理。
 
 | 角色 | 职责 | 输入 | 输出 | 转人工的情况 |
 | --- | --- | --- | --- | --- |
@@ -125,16 +128,16 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 | 维度 | 首版范围 | 暂不纳入 |
 | --- | --- | --- |
-| 业务场景 | 一个商品类别，建议从包装耗材入手；具体类别待团队确认 | 跨行业通用采购平台 |
+| 业务场景 | Electronics／MCU-9，固定制造商、料号、封装及必要版本，全新且不允许替代 | 跨行业采购平台及器件兼容性自动判断 |
 | 比较单位 | 每次一种明确规格的商品，典型规模 3–5 家供应商；排除后可仅剩一家可行 | 多商品组合采购和跨供应商拆单优化 |
-| 输入格式 | 英文文本型 PDF 和 CSV，允许人工录入或纠正 | 扫描件、手写报价、任意复杂 Excel |
+| 输入格式 | 团队基于合成 CSV 生成英文文本 PDF／模板 CSV，pdfplumber 解析；每份 PDF 上限初值 5 页／5 MB、每任务 5 份，允许人工录入 | 扫描件、手写报价、任意复杂 Excel |
 | 金额口径 | SGD；在已确认的一致税费口径下比较 | 自动汇率换算和复杂税务处理 |
 | 主要条件 | 规格、数量、包装单位、起订量、成本、交期、付款条件和有效期 | 缺少数据时预测供应商表现 |
 | 计价与履约 | 固定单价、明确计价单位、固定包装、按数量计 MOQ、一次交付、明确费用 | 阶梯价格、最低订单金额、分批交付及复杂折扣；遇到时请求适用条件或明确排除 |
 | 排序 | 用户明确选择成本优先或交期优先；可确认第二排序项，否则并列 | 模型自定权重、未经确认的综合评分 |
 | 信息补充 | 用户在应用内回答问题或更新资料 | 自动接入邮箱或 WhatsApp 并联系供应商 |
 | 输出 | 比较表、有依据的推荐、版本与审批记录、可导出的报告 | 自动签约、下单和付款 |
-| 系统接入 | 比赛批准的模型、Agent 框架和 AWS 环境 | 首版即全面对接 ERP、库存或采购系统 |
+| 系统接入 | LangGraph＋本地开发 API／主办方 API，官方 Lightsail＋Docker Compose，PostgreSQL 与文件持久化卷 | ERP、供应商消息系统、RAG／向量库或复杂消息中间件 |
 
 运费、税费、交期定义或规格不明确时，须先标记并确认；不能把未知费用默认为零，也不能把无法确认等价的商品直接比较。
 
@@ -160,18 +163,19 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 **本周目标：三份报价在部署环境中形成一张可核对、可纠正、带版本的比较表。**
 
-前两个工作日共同冻结首个商品规格、字段单位、支持条款、任务状态、工具输入输出和一组参考答案。采购需求、报价、人工修正、比较结果从首次持久化起就携带任务 ID 和版本；不等到最后一周再补版本。
+前两个工作日按 DATA.md 冻结 MCU 演示规格、源供应商映射、字段单位／精度、交易条款、工具契约和参考答案。采购需求、报价、人工修正和结果从首次持久化起携带任务 ID 与版本；同时建立 LangGraph 运行标识、PostgreSQL 检查点及数据库迁移骨架。
 
 完成来源定位、提取候选值、字段核验、数量与金额计算、简单前端和人工纠正。CSV 使用明确模板；文本 PDF 聚焦已声明可支持的版式，复杂条款进入待确认。
 
-同时验证比赛账号、模型访问和最小部署链路。若正式访问未开放，先完成本地业务闭环，模拟接口必须标识，并把真实模型及云端贯通列为尚未通过的验收项。
+先用团队自行配置的真实开发 API 完成本地闭环，具体服务商／协议待确定。Lightsail 与主办方 API 可用后尽早验证连通性、结构化输出和工具调用；正式访问未开放时继续本地工作，但云端验收保持未通过。若使用模拟接口则单独标识，AWS 失败不静默回退个人 API。
 
 | 第一周交付 | 验收方式 |
 | --- | --- |
-| 样例与人工基线 | 样例有参考答案；记录人工比较时间；按版式划分调试集和保留集 |
+| 样例与人工基线 | 源 CSV 与许可／哈希保存，MCU 合成报价有独立答案；按模板划分开发／留出集；测人工时间 |
 | 统一契约与版本骨架 | 前端、解析、Agent 和计算工具使用同一字段定义；历史值不被覆盖 |
-| 确定性比较与纠正 | 正确处理按箱／按个、MOQ 和费用；纠正产生新版本并更新比较 |
-| 来源与最小部署 | 关键值能打开对应原文；三份报价在部署环境中完成一次比较 |
+| 确定性比较与纠正 | 正确处理按盘／按颗、MOQ 和费用；纠正产生新版本并更新比较 |
+| 来源与最小部署 | 原文定位可核验；本地 API 跑通三份报价；权限具备时在 Lightsail 用主办方 API 重复验证 |
+| 持久化骨架 | PostgreSQL 业务表及检查点可恢复；Compose 重建后数据保留，API／worker 版本一致 |
 
 **通过标准：**已知条件下计算正确，未知值不被猜测，字段来源可核对，刷新页面不会丢失已保存需求和纠正记录。
 
@@ -179,15 +183,15 @@ Quotation Preparation 和 Technician Scheduling 是此前比较过的备选方�
 
 **本周目标：端到端完成“补问 → 推荐 → 批准 → 报价更新 → 旧审批失效 → 重新批准”。**
 
-Agent 根据证据生成具体补问，后端持久化问题和回答；用户确认后生成新快照，工具从快照读取权威数据并重算。实现单供应商阻塞、明确排除、当前版本检查和简单报告。首版对决策输入变化全量重算，不实现字段级依赖图。
+LangGraph 根据证据组织补问并持久化 interrupt，释放 worker。后端校验回答对应的问题、运行和版本，保存回答、推进修订号并创建恢复作业；恢复后读取最新确认数据，冻结新快照并完整重算。新报价／主动修正／范围修改创建新图运行，旧运行失效。实现检查点与业务提交崩溃窗口的幂等恢复；具体规则见架构文档。审批独立于图执行，首版不实现字段级依赖图。
 
 | 第二周交付 | 验收方式 |
 | --- | --- |
-| 补问和恢复 | 刷新及服务重启后仍可回答原问题；过期问题的回答不会修改当前版本 |
+| 补问和恢复 | 刷新／重启后恢复持久化中断；重复回答／恢复幂等，过期回答不改当前版本，重试不重置调用预算 |
 | 可行性与推荐 | 区分可行、不可行、待确认；未知不算零，不因已排除报价缺字段而阻塞其他报价 |
 | 版本和并发控制 | 旧计算晚到不覆盖当前结果；旧页面审批被拒绝；重复请求不生成重复记录 |
 | 审批和报告 | 只批准当前有效结果；重新检查有效期；报告绑定输入、范围、来源和审批 |
-| 完整演示闭环 | B 首先获批，交期更新后旧审批失效并改为推荐 C，解释 S$10 差额 |
+| 完整演示闭环 | B 以 S$7,000 获批，交期更新后改荐 S$7,100 的 C，旧审批失效并解释 S$100 差额 |
 
 **通过标准：**有阻塞问题时只显示草稿；无可行方案时不强行推荐；输入变化和报价自然过期都不能复用旧审批。
 
@@ -195,7 +199,7 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 **本周目标：9/25 前交付一个可重复演示、结果可复核的提交候选版本。**
 
-使用保留集测量实际效果；修复关键异常，复核来源和报告；记录端到端耗时、人工修正负担及调用成本。完善运行说明、演示脚本、录屏和正式提交材料。报告先保证内容完整，不追求复杂排版。
+在 AWS 使用主办方 API 执行完整留出评测和回归，与本地开发 API 结果分开报告；修复关键异常，复核来源与报告，记录含人工的耗时、修正负担及调用成本。完善 Compose 版本／环境说明、备份恢复、演示录屏和提交材料；不在最后阶段首次接入云端模型。
 
 | 最终周交付 | 验收方式 |
 | --- | --- |
@@ -218,28 +222,30 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 | 数据或文档 | 来源 | 所有人／责任方 | 当前访问状态 | 隐私或质量问题 |
 | --- | --- | --- | --- | --- |
-| 供应商报价 | 获授权的供应商文件，或团队制作的演示样例 | 数据提供方／项目团队 | 样例待准备；真实数据需取得许可 | 商业价格敏感、版式不一致、条款缺失 |
+| 原始采购素材 | Procurement Spend Analysis Dashboard 合成 CSV，Electronics／MCU-9 子集 | 开源项目／团队 | 已在线核对；待下载归档，保留 MIT 许可与哈希 | 历史订单缺币种、完整规格和报价条款，不能当当前报价 |
+| 供应商报价 | 团队基于 CSV 素材和固定种子生成文本 PDF／模板 CSV | 项目团队 | 待生成；真实报价可获授权后补充 | 新增字段明确标合成，隐藏参考答案，控制版式泄漏 |
 | 采购需求 | 用户填写或团队设计的测试场景 | 采购用户／项目团队 | 每次比较时提供 | 规格、预算、数量和交付要求可能不完整 |
 | 产品和供应商参考资料 | 产品目录及可获得的历史记录 | 数据提供方 | 可选，取决于可用性和授权 | 资料过期、记录不完整、无法支持表现判断 |
 | 测试样例与参考答案 | 团队构建并人工核验 | 项目团队 | 第一周开始准备并持续补充 | 与调试样例过度重复，或标准答案本身出错 |
 
-初期优先使用匿名化或明确标注的虚构样例。没有真实业务验证时，不能将演示结果表述为已获得 SME 客户验证。
+原始 CSV 共 47,128 条，Electronics 为 6,123 条，MCU-9 为 1,185 条／15 家合成供应商（2026-09-08 核对）。选 3–5 家素材建立约 20 个场景，缺失字段按种子与业务规则合成，参考答案独立核验并与运行输入隔离；3 种开发版式＋1 种留出版式为初值。数据哈希、完整字段、生成目录和日期约定见 DATA.md。没有真实业务验证时，不称为已获 SME 客户验证。
 
 ### 6.2 AI Models & Tools
 
 | 模型／工具 | 项目职责 | 运行约束 |
 | --- | --- | --- |
-| Amazon Bedrock，具体模型待确认 | 理解报价、识别缺失信息、解释比较结果 | 以比赛账号权限和调用额度为准；输出需要核验 |
-| 比赛批准的 Agent 框架 | 编排处理、补问、比较和审阅流程 | 仅调用获准工具；遇到未解决问题或审批节点时暂停 |
-| 文档解析和确定性业务工具 | 提取字段、计算成本、检查条件、生成报告 | 只处理已支持格式；计算基于明确且已校验的输入 |
-| Web 应用与持久化存储 | 提供上传、查看、纠正、审批、版本和任务状态 | 控制访问，避免不必要的数据留存 |
-| AWS 部署环境 | 托管应用并提供演示访问 | Lightsail 等具体配置以主办方提供的环境为准 |
+| 本地开发 API→主办方 API | 理解报价、补问和解释；AWS 目标 Sonnet 4.6 或获准 Sonnet | 协议、模型 ID、认证及额度待核验，不预设 Bedrock；两环境分别测试，不静默回退 |
+| LangGraph | 一个主图编排，interrupt＋PostgreSQL 检查点恢复 | 业务状态以业务表为准；审批经独立后端接口；恢复及重试幂等 |
+| pdfplumber＋Python 业务模块 | 原文定位、字段理解接入、Decimal 成本和硬约束、报告 | Pydantic 校验结构，业务校验证据；不能猜测未知费用或替代型号 |
+| FastAPI＋Pydantic＋React | 上传、纠正、补问、审批和版本界面 | 预建具名账户＋成熟认证组件／服务端会话；后端保存角色并验证审批身份 |
+| PostgreSQL＋SQLAlchemy／psycopg＋Alembic | 业务表、NUMERIC 金额、JSONB 快照和迁移 | 检查点表独立管理；短事务和行锁；单 worker，作业表调度 |
+| 官方 Lightsail＋Docker Compose | Web、API、worker、数据库及演示入口 | 镜像版本和环境配置固定；数据库／文件分别持久化，实例外备份及恢复验证 |
 
-建议先采用一个主 Agent 加业务工具，不为展示“多 Agent”而增加没有必要的角色。首版不训练模型，也不引入 RL 训练路线。
+首版使用一个 LangGraph 主图及受控工具，不为展示多 Agent 增加角色，不训练模型或引入 RL。
 
-实现形态采用模块化单体：一个后端代码库包含工作流、Agent、解析、比较、审批和报告模块；业务数据库保存权威状态，文件存储保存原始报价与解析文本。模型工作通过后台作业执行，前端按任务 ID 查询进度。Agent 会话仅用于上下文恢复，不能代替版本和审批记录。
+采用模块化单体，API 与 worker 共用版本一致的后端镜像；前端按任务 ID 查询进度，模型工作通过持久化作业执行。业务表保存权威数据，检查点保存图执行位置，文件卷保存原件、解析文本和报告，均不向 Agent 暴露评测答案。
 
-工具优先使用同进程函数；不将独立 MCP 服务、向量数据库、多 Agent 服务或复杂消息中间件设为 MVP 依赖。具体语言和数据库按团队熟悉程度与比赛环境选择，在第一周前两个工作日记录决定。若允许且团队熟悉 Python，可评估 Strands 的中断和会话持久化能力；框架不会替代业务事务校验。[Strands 中断文档](https://strandsagents.com/docs/user-guide/concepts/interrupts/)、[会话管理文档](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/)
+工具采用同进程函数，历史数据查询使用 SQL，首版不引入 RAG、向量数据库、独立 MCP 或 Redis／Celery。每任务一个活跃执行，每阶段最多 3 次尝试（含首次）、每次逻辑图运行最多 8 次模型调用作为可配置初值；恢复／重试不重置预算，未知业务字段直接补问。受控中断、版本迁移及两阶段模型适配见 ARCHITECTURE.md。
 
 ## 7. Integrations and Manual Fallback
 
@@ -248,7 +254,7 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 | 异常 | 后备处理 |
 | --- | --- |
 | 文档解析失败或格式不支持 | 提示用户改用支持格式，或人工录入并核对关键字段 |
-| 模型服务不可用或额度耗尽 | 暂停 AI 步骤；对已核验数据使用比较工具或人工模板继续处理 |
+| 模型服务不可用或额度耗尽 | 有限重试后暂停；对已核验数据用确定性工具／模板并标记后备，AWS 测试不静默调用个人 API |
 | 应用整体不可用 | 使用原始报价和标准比较模板，保留人工处理记录 |
 | 关键信息缺失或冲突 | 按供应商判断影响范围；仍可能影响选择时补问并阻止最终批准，已有结果可作草稿查看 |
 | 旧任务晚到、旧页面提交或重复点击 | 校验输入版本和幂等键；拒绝过期操作，不覆盖当前结果或重复创建审批 |
@@ -272,7 +278,7 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 逐步准备约 20 个带人工参考结果的业务场景，建议 12 个用于开发、8 个作为保留集。按报价版式或模板分组划分，不只对同一模板替换数字；保留集不用于调整提示词。若因排错查看并据此调优，应披露并补充新的保留样例。确定性计算和状态测试另行组织，不把每个代码断言计作一个独立业务场景。
 
-场景覆盖正常比较、整包装取整、MOQ 超预算、未知／免费运费、发货与到货歧义、并列方案、全部不可行、仍有待确认报价、用户排除、已不可行报价缺非必要字段、新版报价和时间自然过期。额外验证并发、重复提交、补问后重启及文档中夹带指令的行为。
+场景覆盖 MCU 料号／封装缺失或不匹配、按盘／按颗和整包装取整、MOQ 超预算、未知／免费运费、交期歧义、并列、全不可行、仍待确认、用户排除、已不可行报价缺非必要字段、新版报价和自然过期。额外验证检查点／业务提交崩溃窗口、重复恢复、过期回答、并发审批、文档夹带指令，以及容器重建与备份恢复。
 
 注意以下测量边界：
 
@@ -322,23 +328,23 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 ## 11. 建议演示案例
 
-以下全部为虚构数据，仅用于展示系统行为。商品规格一致、币种统一为 SGD；演示明确采用不计税的简化口径，不代表真实税务处理。运行前将场景基准日期、报价有效期和采购截止日期写入演示数据；下表交期均指从已确认的同一基准日起按自然日计算的到货时间。
+共同演示为 MCU-DEMO-001，完整参考以 [DATA.md 第 5 节](docs/DATA.md#5-共同主演示与参考答案)为准。全部是团队合成条款，不能表述为原始 CSV 中的当前报价。制造商 QQ Demo Components、料号 QW-MCU9-DEMO、QFN-32／R1 为虚构演示规格，全新且不允许替代；SGD，明确含运费、不计税且无其他费用。
 
-采购要求：**采购 1,000 个包装盒，五天内到货，总预算不超过 S$300，满足条件后优先选择总成本最低的方案。**
+采购要求：**1,000 颗 MCU，总预算 S$8,000，以总成本最低优先。** 受控时钟为 2026-09-14 09:00（Asia/Singapore），当日下单为第 0 日，2026-09-19 前到货。初始报价日期为 9/13，有效至 9/20 当日结束，付款条件为演示 Net 30。测试日期固定并明确标识；实际应用使用真实时间，不自动移动旧报价日期。
 
-| 供应商 | 报价 | 起订量 | 运费 | 交期 | 系统应得出的结果 |
+| 供应商 | 报价 | MOQ／订购倍数 | 运费 | 到货周期 | 参考结果 |
 | --- | --- | --- | --- | --- | --- |
-| A | S$20／箱，每箱 100 个 | 20 箱 | 免费 | 7 天 | 至少购买 2,000 个，费用 S$400；预算和交期均不满足 |
-| B | S$0.24／个 | 1,000 个 | S$20 | 3 天 | 总成本 S$260，满足要求 |
-| C | S$0.21／个 | 1,000 个 | S$60 | 3 天 | 总成本 S$270，满足要求，但高于 B |
+| A | S$640／盘，每盘 100 颗 | 20 盘／整盘购买 | 免费 | 7 天 | 2,000 颗，S$12,800；超预算且超期 |
+| B | S$6.80／颗 | 1,000 颗／可按颗购买 | S$200 | 3 天 | 1,000 颗，S$7,000；可行且最低 |
+| C | S$660／盘，每盘 100 颗 | 10 盘／整盘购买 | S$500 | 3 天 | 1,000 颗，S$7,100；可行 |
 
 上表是完整条件和人工参考答案。正式演示以 B 的运费缺失版本开始，按以下连续流程展开：
 
 1. 上传三份报价。A 因 MOQ 成本和交期被排除；B 待确认；C 可行。系统展示草稿，暂不宣称 C 最优。
-2. Agent 指出 B 未说明运费，引用相关报价内容并询问金额或是否包含。用户补充 S$20 并确认，系统记录为人工输入的新版本。
-3. 比较工具计算 B 为 S$260、C 为 S$270，推荐 B。用户查看来源、金额明细和比较范围后批准，并导出简单报告。
-4. 上传 B 的新版报价：交期改为 6 天，并在样例中明确运费仍为 S$20。新版独立核验，不静默继承旧人工补充。
-5. 旧结果和审批失效；重新比较后推荐 C，解释多花 S$10 换取满足五天到货要求，并请求重新批准。
+2. Agent 请求确认 B 运费，引用相关上下文而不伪造缺失条款。用户回答 S$200 并确认，后端保存人工输入、推进版本并排队恢复对应 LangGraph 中断。
+3. 新快照重算 B 为 S$7,000、C 为 S$7,100，推荐 B；用户查看来源和范围后，通过后端审批并导出报告。
+4. 同一受控场景日上传 B v2，报价日期为 9/14、有效期不变；到货改为 6 天、明确运费仍为 S$200。新版独立核验，不继承旧人工回答。
+5. 旧图运行、结果和审批失效；新运行改荐 C，解释增加 S$100 满足五天到货要求，并请求重新批准。B v2 的 9/20 到货超过 9/19 截止。
 
 另备短场景：A 已确定交期超限但缺运费，不追问无助于决策的信息；A、B、C 都已确定超限时输出“无可行方案”；若 A、C 超限而 B 的交期未知、也没有其他已确定的失败项，则输出“暂时无法确定”。演示中的模拟更新和人工回答清楚标识。
 
@@ -348,12 +354,12 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 | 角色 | 主要职责 |
 | --- | --- |
-| Agent 与业务流程负责人 | 任务状态、工具调用、补问恢复、快照与审批事务、更新后的重新评估 |
-| 文档与计算工具负责人 | 报价解析、字段校验、单位换算、成本和约束工具 |
+| Agent 与业务流程负责人 | LangGraph、模型适配、运行／问题版本、检查点恢复、快照与审批事务 |
+| 文档与计算工具负责人 | MCU 数据生成、pdfplumber 解析、证据核验、Decimal 计算和约束工具 |
 | 前端交互负责人 | 上传、比选表、来源查看、纠正、审批及版本变化展示 |
-| 测试与部署负责人 | 第一周贯通部署和人工基线、维护保留集、回归测试、效果统计及演示材料 |
+| 测试与部署负责人 | Lightsail／Compose、迁移与备份、本地与主办方 API 分环境评测、保留集及演示材料 |
 
-开始并行开发前，先共同确认商品类别、字段结构、工具输入输出和一组演示样例。业务规则和验收由团队共同确认，避免各模块采用不同口径。
+开始并行开发前，按已定 MCU-9 场景共同冻结具体规格、字段结构、工具输入输出和演示参考答案。规则和验收由团队共同确认，避免各模块采用不同口径。
 
 数据库和 API 契约由业务流程负责人维护，其他模块共同评审。第二周的版本、审批工作优先于额外 Agent 能力；每周按成员实际工时调整分工，不把集成责任全部留给测试与部署负责人。
 
@@ -361,18 +367,19 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 | 待确认项 | 需要明确什么 |
 | --- | --- |
-| 业务范围 | 前两个工作日冻结首个商品规格、支持条款、排序方式和测试场景 |
-| 比赛环境 | 前两个工作日确认可用模型、Agent 框架要求、AWS 部署权限和调用额度 |
-| 工程选型 | 前两个工作日记录语言、框架、数据库、文件存储和解析器；未开放权限单列阻塞项 |
-| 数据权限 | 是否有真实报价可用、使用和展示权限如何界定 |
+| 数据细节 | 按 DATA.md 冻结演示规格、源供应商映射、字段精度、模板与独立答案；具体值调整需同步三份文档 |
+| 模型接入 | 本地 API 服务商／协议；主办方 API 模型 ID、认证、地址／区域（如适用）和额度 |
+| 比赛适用性 | LangGraph 是否符合参赛要求；Lightsail 访问方式、CPU／内存／磁盘／系统架构及有效期 |
+| 实施参数 | 认证组件、部署域名／HTTPS、迁移版本、连接池、超时及保留／备份期限；选型本身已确定 |
+| 数据权限 | 保留合成数据许可；真实报价仅在获授权后补充，不阻塞首版 |
 | 团队投入 | 实际成员分工、每周可投入时间及工时估算是否需要调整 |
 | 官方提交要求 | 官网日期已核对；仍需确认 9/28 的具体提交时刻、渠道、演示形式及文件格式 |
 
-在未确认模型和环境之前，文档保留“模型待确认”和“比赛批准的 Agent 框架”，不提前锁定实现。没有真实报价时，先用明确标注的虚构样例推进。
+FastAPI／Pydantic／React、LangGraph、PostgreSQL、pdfplumber、Lightsail／Docker Compose 与持久化卷已确定，不再作为开放选项。模型路线也已确定为本地开发 API→主办方 API，仅具体接入信息待核验。按合成样例推进，不能把尚未取得的 API 权限或未完成的部署称为已经验证。
 
 ## 附录 A：可用于 Proposal 的英文 Solution Overview
 
-> We propose an AI-powered supplier comparison assistant for SME procurement teams. Users enter purchasing requirements and typically upload quotations from 3–5 suppliers for one clearly specified product. A single agent identifies ambiguities, retrieves supporting evidence, asks targeted questions, and resumes comparison after confirmed responses. Deterministic tools calculate purchase quantities and costs, check hard constraints, and rank feasible options using explicit user preferences. The system distinguishes infeasible quotations from those awaiting information and records any user exclusions. Immutable input snapshots bind recommendations and approvals; changes or expiry require re-evaluation before final approval and export. The prototype will use Amazon Bedrock and an event-approved agent framework, subject to access confirmation. The initial scope supports fixed prices, clear packaging and quantity-based minimum orders, one delivery, and explicit fees, excluding live purchasing. Evaluation will report extraction and evidence accuracy, constraint compliance, clarification and correction burden, runtime cost, and completion time against manual comparison.
+> We propose a supplier comparison assistant for SME electronics procurement, initially comparing quotations for one fixed-specification MCU with no substitute parts. FastAPI, Pydantic and React support the application, while a LangGraph workflow interprets documents, asks targeted questions and resumes through PostgreSQL checkpoints. Independent Python tools calculate quantities, costs and feasibility; backend transactions enforce versions and human approvals. PostgreSQL business records remain authoritative. Synthetic quotation PDFs are generated from open synthetic procurement data and parsed with pdfplumber, with evaluation answers isolated from agent inputs. Development uses a team-configured model API, followed by integration and regression testing against the organizer-provided API on the supplied Lightsail instance. Docker Compose manages services and environments, with persistent database and file volumes. Model access details remain subject to confirmation. Evaluation separates local and AWS results and measures field and evidence accuracy, clarification burden, cost and completion time. The system does not contact suppliers, place orders or make payments.
 
 ## 附录 B：资料依据与状态
 
@@ -380,7 +387,7 @@ Agent 根据证据生成具体补问，后端持久化问题和回答；用户�
 
 2026-09-07 修订时补充核对 [NUS-ISS 官方比赛页面](https://www.iss.nus.edu.sg/show-me-your-agents) 的开发与提交日期。公开页面未列出具体 Agent 框架限制；本文不据此推断任意框架均获许可。运行架构和状态契约见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-除已选题目外，产品名称、具体商品类别、人力估算、性能目标和技术配置均为暂定规划。本文不认定真实数据、企业审核人或模型权限已经到位，也不将建议交付包视为官方强制清单。
+2026-09-08 按团队已收束方案同步商品和工程选型，并在线核对 Electronics／MCU-9 数据规模。产品名称、人力投入、性能目标及具体配置仍可调整；本文不认定真实企业数据、企业审核人、模型权限或代码实现已到位，也不将建议交付包视为官方强制清单。
 
 ---
 
