@@ -1,0 +1,294 @@
+{
+  "schema_version": "1.0.0",
+  "task_id": "TASK-MCU-DEMO-001",
+  "task_revision": 1,
+  "scenario_id": "MCU-DEMO-001",
+  "quote_id": "QUOTE-MCU-DEMO-001-B",
+  "quote_version": 1,
+  "document_id": "DOC-MCU-DEMO-001-B-CSV",
+  "document_version": 1,
+  "document_sha256": "85742dd2f2d1afd08d4752b94b591eb11199c9e316c731677a00faa13bc4fadc",
+  "supplier_alias": "B",
+  "snapshot_id": "SNAP-MCU-DEMO-001-R1",
+  "calculation_rule_version": null,
+  "policy_set_version": null,
+  "fees_complete": false,
+  "source_po_id": null,
+  "is_synthetic": true,
+  "field_records": [
+    {
+      "field_id": "QF-B-001",
+      "field_version": 1,
+      "field_name": "supplier_name",
+      "raw_value": "Schwarzwald Circuits",
+      "normalized_value": "Schwarzwald Circuits",
+      "unit": null,
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Supplier",
+          "evidence_text": "Schwarzwald Circuits"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_AND_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-002",
+      "field_version": 1,
+      "field_name": "manufacturer",
+      "raw_value": "QQ Demo Components",
+      "normalized_value": "QQ Demo Components",
+      "unit": null,
+      "validation_status": "EXTRACTED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Brand",
+          "evidence_text": "QQ Demo Components"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": null,
+      "verified_by": null,
+      "verified_at": null
+    },
+    {
+      "field_id": "QF-B-003",
+      "field_version": 1,
+      "field_name": "manufacturer_part_number",
+      "raw_value": "QW-MCU9-DEMO",
+      "normalized_value": "QW-MCU9-DEMO",
+      "unit": null,
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Part No.",
+          "evidence_text": "QW-MCU9-DEMO"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_AND_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-004",
+      "field_version": 1,
+      "field_name": "unit_price",
+      "raw_value": "6.80",
+      "normalized_value": "6.80",
+      "unit": "SGD",
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Each Price",
+          "evidence_text": "6.80"
+        },
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Currency",
+          "evidence_text": "S$"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_UNIT_AND_RANGE_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-005",
+      "field_version": 1,
+      "field_name": "price_basis_quantity",
+      "raw_value": "1",
+      "normalized_value": "1",
+      "unit": "piece",
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Each Price",
+          "evidence_text": "6.80"
+        },
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Supply Form",
+          "evidence_text": "Individual pieces"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "CROSS_FIELD_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-006",
+      "field_version": 1,
+      "field_name": "price_basis_unit",
+      "raw_value": "Each Price / Individual pieces",
+      "normalized_value": "piece",
+      "unit": null,
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Each Price",
+          "evidence_text": "6.80"
+        },
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Supply Form",
+          "evidence_text": "Individual pieces"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "CROSS_FIELD_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-007",
+      "field_version": 1,
+      "field_name": "moq_quantity",
+      "raw_value": "1,000 pcs",
+      "normalized_value": "1000",
+      "unit": "piece",
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Minimum Qty",
+          "evidence_text": "1,000 pcs"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_UNIT_AND_RANGE_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-008",
+      "field_version": 1,
+      "field_name": "shipping_fee_status",
+      "raw_value": null,
+      "normalized_value": null,
+      "unit": null,
+      "validation_status": "MISSING",
+      "origin": null,
+      "source_refs": [],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "HEADER_ABSENCE_CHECK",
+      "verified_by": null,
+      "verified_at": null
+    },
+    {
+      "field_id": "QF-B-009",
+      "field_version": 1,
+      "field_name": "other_fees_status",
+      "raw_value": "None",
+      "normalized_value": "KNOWN_ZERO",
+      "unit": null,
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Additional Fees",
+          "evidence_text": "None"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_AND_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-010",
+      "field_version": 1,
+      "field_name": "lead_time_days",
+      "raw_value": "Arrival within 3 calendar days of confirmed purchase order",
+      "normalized_value": "3",
+      "unit": "calendar_day",
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Lead Time",
+          "evidence_text": "Arrival within 3 calendar days of confirmed purchase order"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_AND_SEMANTIC_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    },
+    {
+      "field_id": "QF-B-011",
+      "field_version": 1,
+      "field_name": "valid_until",
+      "raw_value": "Valid through 2026/09/20",
+      "normalized_value": "2026-09-20",
+      "unit": null,
+      "validation_status": "VERIFIED",
+      "origin": "DOCUMENT",
+      "source_refs": [
+        {
+          "document_id": "DOC-MCU-DEMO-001-B-CSV",
+          "document_version": 1,
+          "row_number": 2,
+          "column_name": "Validity",
+          "evidence_text": "Valid through 2026/09/20"
+        }
+      ],
+      "parser_version": "fixed-csv-parser-v0.2.0",
+      "verification_method": "SOURCE_AND_DATE_VALIDATION",
+      "verified_by": "development-fixture-check",
+      "verified_at": "2026-09-09T15:00:00+08:00"
+    }
+  ],
+  "fixture_metadata": {
+    "purpose": "Development-only example of field-level evidence and missing-fee handling",
+    "source_file": "supplier_b_quote_v2.csv",
+    "quote_dictionary_version": "1.2.0",
+    "quote_dictionary_sha256": "7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd",
+    "system_dictionary_sha256": "2ed5892b38cdc0ad8114987e4682e8b0b5479b6d8e961c2050c5d8bf858893bf",
+    "note": "Shipping is intentionally absent. No hidden confirmation value is included."
+  }
+}
