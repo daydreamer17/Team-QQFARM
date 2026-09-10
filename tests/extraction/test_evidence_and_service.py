@@ -111,6 +111,28 @@ def test_all_three_v2_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, al
     assert budget.calls_used == 0
 
 
+@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
+def test_all_five_v3_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path(alias, version=3),
+        context_for(alias, version=3),
+    )
+    budget = ModelCallBudget(graph_run_id=f"GRAPH-V3-{alias.upper()}")
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: _all_missing_payload(quote_dictionary)}),
+        budget,
+        f"EXTRACT-V3-{alias.upper()}",
+    )
+
+    assert len(batch.candidates) == 30
+    assert batch.parsed_input.context.quote_version == 3
+    assert batch.parsed_input.context.document_version == 3
+    assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED
+    assert budget.calls_used == 0
+
+
 def test_unknown_model_source_id_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         quote_path("a"),

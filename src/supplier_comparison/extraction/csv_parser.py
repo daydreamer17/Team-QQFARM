@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -82,6 +83,91 @@ V2_CSV_PROFILES = {
         ),
     ),
 }
+
+V3_CSV_PROFILES = {
+    "v3_supplier_a": CsvSourceProfile(
+        profile_id="v3_supplier_a",
+        version="1.0.0",
+        columns=(
+            "Vendor reference", "Seller legal name", "Registered vendor country",
+            "Commodity family", "Catalogue item", "Maker shown for the device",
+            "Manufacturer ordering code", "IC body / case", "Device revision",
+            "Stock condition", "Money denomination", "Quoted rate",
+            "Quantity covered by that rate", "Rate unit", "Physical supply form",
+            "Contents of one sales pack", "Permitted quantity step",
+            "Minimum commitment - number", "Minimum commitment - unit",
+            "Freight treatment", "Freight amount", "Ancillary charge rule",
+            "Ancillary charge amount", "Tax treatment", "Promised duration",
+            "Days mean", "Promise ends when", "Duration starts on", "Settlement",
+            "Offer issued", "Offer remains good through",
+        ),
+    ),
+    "v3_supplier_b": CsvSourceProfile(
+        profile_id="v3_supplier_b",
+        version="1.0.0",
+        columns=(
+            "Expiry of offer", "Dated", "Quoted by", "Supplier code",
+            "Vendor country of registration", "Sourcing class", "Article",
+            "Mfr. part reference", "Device brand / maker", "Silicon rev.",
+            "Case style", "Material status", "Line rate", "Currency code",
+            "Pricing UOM", "The line rate covers", "Packing method", "Tray contents",
+            "Ordering restriction", "Minimum order UOM", "Minimum order count",
+            "Logistics charge treatment", "Separate freight amount", "Extras policy",
+            "Extras total", "Indirect tax", "Lead-time milestone",
+            "Time to that milestone", "Counting convention", "Count begins", "Terms",
+        ),
+    ),
+    "v3_supplier_c": CsvSourceProfile(
+        profile_id="v3_supplier_c",
+        version="1.0.0",
+        columns=(
+            "Company issuing this offer", "Company country", "Account vendor ID",
+            "Commodity", "Manufactured by", "Product description", "Original maker P/N",
+            "Device package", "Supply condition", "Part revision",
+            "All quoted money is in", "Price applies to", "Price for that basis",
+            "Basis unit", "Sales presentation", "Units in each sales package",
+            "Order step", "Smallest accepted quantity",
+            "Smallest quantity measured in", "One-time delivery charge",
+            "Delivery charge status", "One-time handling amount", "Handling status",
+            "Tax basis", "Service clock starts", "Committed transit duration",
+            "Days are counted as", "Completion event", "Payment arrangement",
+            "Offer expiration date", "Quotation date",
+        ),
+    ),
+    "v3_supplier_d": CsvSourceProfile(
+        profile_id="v3_supplier_d",
+        version="1.0.0",
+        columns=(
+            "Seller number", "Offeror", "Offeror registered in", "Quoted article",
+            "Product family", "Maker's part number", "Maker", "Hardware revision",
+            "Component case", "Goods offered", "Each quoted price covers",
+            "Price basis UOM", "Price for the stated basis", "Price currency",
+            "Physical pack", "Exact fill of each tray", "Accepted ordering step",
+            "MOQ measure", "MOQ count", "Delivery fee", "Delivery fee rule",
+            "Handling and admin", "Separate other-fee amount",
+            "Tax treatment for this offer", "Arrival commitment",
+            "The five-day point means", "Day definition", "Lead-time origin", "Payment",
+            "Prepared on", "Valid up to and including",
+        ),
+    ),
+    "v3_supplier_e": CsvSourceProfile(
+        profile_id="v3_supplier_e",
+        version="1.0.0",
+        columns=(
+            "Buying category", "Quoted goods", "Vendor", "Vendor master code",
+            "Vendor registration country", "Brand owner / manufacturer",
+            "Manufacturer P/N", "Body package", "Device version", "Item state",
+            "Each-price amount", "Each price covers", "Each-price unit",
+            "Quote denominated in", "Supply packaging", "Count per package",
+            "Order granularity", "Minimum unit", "Minimum quantity", "Freight status",
+            "Freight number", "Other charges", "Other-charge amount", "Tax handling",
+            "Delivery duration", "Duration basis", "Delivery means",
+            "Duration begins on", "Price held through", "Credit term", "Issued date",
+        ),
+    ),
+}
+
+REGISTERED_CSV_PROFILES = {**V2_CSV_PROFILES, **V3_CSV_PROFILES}
 
 
 def _normalize(raw_value: str, definition: QuoteFieldDefinition) -> str | int:
@@ -261,7 +347,7 @@ class ProfiledCsvQuoteParser:
         profiles: Mapping[str, CsvSourceProfile] | None = None,
         limits: FileLimits | None = None,
     ) -> None:
-        self.profiles = dict(V2_CSV_PROFILES if profiles is None else profiles)
+        self.profiles = dict(REGISTERED_CSV_PROFILES if profiles is None else profiles)
         self.limits = limits or FileLimits()
 
     def parse_row(
@@ -290,6 +376,7 @@ class ProfiledCsvQuoteParser:
                 reader = csv.DictReader(handle)
                 actual_columns = tuple(reader.fieldnames or ())
                 if actual_columns != profile.columns:
+                    counts = Counter(actual_columns)
                     raise ContractError(
                         "csv_profile_header_mismatch",
                         "CSV header does not match the selected versioned profile",
@@ -297,6 +384,11 @@ class ProfiledCsvQuoteParser:
                         profile_version=profile.version,
                         expected=list(profile.columns),
                         actual=list(actual_columns),
+                        duplicate_headers=sorted(
+                            name for name, count in counts.items() if count > 1
+                        ),
+                        missing_headers=sorted(set(profile.columns) - set(actual_columns)),
+                        unexpected_headers=sorted(set(actual_columns) - set(profile.columns)),
                     )
                 selected: dict[str, str] | None = None
                 for current_row_number, row in enumerate(reader, start=2):

@@ -49,6 +49,21 @@ def test_v2_real_runner_builds_profiled_csv_paths(alias: str) -> None:
     assert context.document_id.endswith("-V2-CSV")
 
 
+@pytest.mark.parametrize("alias", ("A", "B", "C", "D", "E"))
+def test_v3_real_runner_builds_pdf_and_csv_jobs(alias: str) -> None:
+    pdf_path = _pdf_path("V3", alias)
+    csv_path = _profiled_csv_path("V3", alias)
+    pdf_context = _context("V3", alias)
+    csv_context = _context("V3", alias, input_format="csv")
+
+    assert pdf_path.name == f"supplier_{alias.lower()}_quote_v3.pdf"
+    assert csv_path.name == f"supplier_{alias.lower()}_quote_v3.csv"
+    assert pdf_path.is_file() and csv_path.is_file()
+    assert pdf_context.document_id.endswith("-V3-PDF")
+    assert csv_context.document_id.endswith("-V3-CSV")
+    assert pdf_context.supplier_id == csv_context.supplier_id
+
+
 def test_real_runner_failure_is_explicitly_unscored(monkeypatch, quote_dictionary, tmp_path) -> None:
     def fail_extract(*args, **kwargs):
         del args, kwargs

@@ -16,7 +16,11 @@ from supplier_comparison.extraction.adapters import (
 )
 from supplier_comparison.extraction.contracts import DocumentContext, ValidationStatus
 from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser
-from supplier_comparison.extraction.development_data import DATASET_VERSIONS, supplier_quote_path
+from supplier_comparison.extraction.development_data import (
+    DATASET_VERSIONS,
+    dataset_supplier_aliases,
+    supplier_quote_path,
+)
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.errors import ExtractionError
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
@@ -29,6 +33,8 @@ SUPPLIERS = {
     "A": "SUP-022",
     "B": "SUP-023",
     "C": "SUP-024",
+    "D": "SUP-025",
+    "E": "SUP-026",
 }
 
 
@@ -89,7 +95,7 @@ def _run_supplier(
                 input_path,
                 context,
                 2,
-                profile_id=f"v2_supplier_{supplier_alias.lower()}",
+                profile_id=f"{dataset_version.lower()}_supplier_{supplier_alias.lower()}",
             )
         )
         extraction_run_id = f"extract_local_{uuid4().hex}"
@@ -106,7 +112,7 @@ def _run_supplier(
             if candidate.field_name in {"shipping_fee_status", "shipping_fee_amount"}
         }
         shipping_missing = None
-        if supplier_alias == "B":
+        if supplier_alias == "B" and dataset_version in {"V1", "V2"}:
             shipping_missing = len(shipping) == 2 and all(
                 candidate.validation_status == ValidationStatus.MISSING
                 and candidate.normalized_value is None
@@ -208,8 +214,13 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
 
-    if args.input_format == "csv" and args.dataset_version != "V2":
-        parser.error("--input-format csv currently requires --dataset-version V2")
+    allowed_suppliers = dataset_supplier_aliases(args.dataset_version)
+    if args.supplier is not None and args.supplier not in allowed_suppliers:
+        parser.error(
+            f"--supplier {args.supplier} is not available for --dataset-version {args.dataset_version}"
+        )
+    if args.input_format == "csv" and args.dataset_version not in {"V2", "V3"}:
+        parser.error("--input-format csv currently requires --dataset-version V2 or V3")
 
     if args.all_suppliers:
         if args.output_dir is None or args.output is not None:
@@ -223,7 +234,7 @@ def main() -> int:
                     f"{alias.lower()}_pre_correction.json"
                 ),
             )
-            for alias in sorted(SUPPLIERS)
+            for alias in allowed_suppliers
         ]
     else:
         if args.output is None or args.output_dir is not None:

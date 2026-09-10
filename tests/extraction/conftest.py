@@ -37,7 +37,13 @@ def quote_dictionary() -> QuoteDictionary:
 
 def context_for(alias: str, version: int = 1) -> DocumentContext:
     alias = alias.upper()
-    suppliers = {"A": "SUP-022", "B": "SUP-023", "C": "SUP-024"}
+    suppliers = {
+        "A": "SUP-022",
+        "B": "SUP-023",
+        "C": "SUP-024",
+        "D": "SUP-025",
+        "E": "SUP-026",
+    }
     return DocumentContext(
         task_id="TASK-MCU-DEMO-001",
         task_revision=version,

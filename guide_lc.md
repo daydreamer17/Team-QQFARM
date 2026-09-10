@@ -98,7 +98,7 @@ SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
   --output evaluation/results/local/2026-09-10/example.json
 ```
 
-V2 三家供应商批量调用示例（会产生真实模型调用和费用）：
+V2 三家供应商批量调用示例（会产生真实模型调用和费用；V3 会自动使用五家供应商）：
 
 ```bash
 set -a
@@ -114,7 +114,7 @@ SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
 批量模式共享一个 `ModelCallBudget`，三家供应商的调用次数累计计算。V2 的异构 CSV
 使用显式 profile 生成 `CSV_CELL` 来源后进入同一模型适配层；使用时在上述命令增加
 `--input-format csv`。V1 的固定宽表仍由 `FixedCsvQuoteParser` 确定性解析，未知 CSV
-模板继续被拒绝。
+模板继续被拒绝。V3 的五套 CSV 也必须显式匹配各自登记的 profile。
 
 重新生成开发字段对照：
 
@@ -151,6 +151,8 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
 | V2 参考迁移器 | [`migrate_v2_system_evidence.py`](scripts/migrate_v2_system_evidence.py) | 将 A 的旧版 B-CSV 示例迁移为非权威草稿 | 迁移后仍需 A 补齐并批准 |
 | V2 B-CSV 参考草稿 | [`mcu_demo_001_v2_supplier_b_csv_draft.json`](evaluation/reference/mcu_demo_001_v2_supplier_b_csv_draft.json) | 30 字段中 13 个有待复核期望、17 个未复核 | 不得用于正式计分 |
 | V2 开发输入 | [`quote_V2/`](data/generated/inputs/development/quote_V2/) | 三家不同版式报价及采购需求的 PDF/CSV | 报价 PDF 和已登记的异构 CSV 可进入统一模型边界 |
+| V3 开发输入 | [`quote_V3/`](data/generated/inputs/development/quote_V3/) | 五家供应商的 31 字段直接表达 PDF/CSV | 使用 V3 路径和对应的 `v3_supplier_a` 至 `v3_supplier_e` profile |
+| V4 边界夹具 | [`quote_V4/`](data/generated/inputs/development/quote_V4/) | 异常 PDF、错误 CSV 表头和引用来源样本 | 用于模型调用前拒绝、引用和稳定来源测试 |
 | 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
 | 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
 | V2 未计分烟测报告 | [`V2_UNSCORED_SMOKE_REVIEW.md`](evaluation/results/local/2026-09-10/V2_UNSCORED_SMOKE_REVIEW.md) | 汇总六份 V2 输入的最新真实运行、调用量和已知限制 | 用于回归与故障分析；不得作为正式准确率 |
@@ -164,7 +166,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
 
 事实：
 
-- 首版测试为 34 项通过；本轮加入 V2 PDF／CSV 真实烟测、来源语义闸门和冲突占位符归一化后为 68 项通过、0 项失败。
+- 首版测试为 34 项通过；加入 V2 评分及 V3/V4 解析和边界测试后为 109 项通过、0 项失败。
 - 三份开发 PDF 都完成了真实本地模型调用，每份最终记录均为 1 次调用、0 次重试。
 - A 为 30／30，B 按已确认 PDF 口径及 Decimal 比较为 30／30，C 为 29／30；合计 89／90，字段匹配率为 0.9889。
 - B 的运费保持 `MISSING/null/无来源`；包装方式和每包数量按确认口径保持非阻塞缺失。
@@ -172,6 +174,8 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
 - C 的唯一失败是 `shipping_fee_status="PAID"`，契约期望为 `KNOWN_AMOUNT`；原始失败结果没有被改写。
 - 结果文件未发现 API Key 标记。
 - A 新增 V2 聚合开发答案后，六份最新结果按“状态＋标准化值”得到 172／180，开发字段匹配率为 0.9556；这些结果混用提示词 1.3.0、1.4.0 和 1.5.0。
+- V3 的五组 PDF/CSV 均能稳定生成来源并通过固定适配器边界；尚未进行 V3 真实模型调用。
+- V4 的五类异常 PDF、错误 CSV 表头、伪造／跨供应商引用、来源稳定性和 8 次调用预算均已有确定性测试。
 
 结论：PDF／CSV 解析、结构化候选、来源校验和本地模型基线达到了可交接状态。V2 六份输入均已完成真实模型烟测，并已根据 A 的聚合开发答案完成初步评分；由于答案没有 `A_APPROVED` 元数据且结果混用提示词版本，该分数不是最终验收准确率。主办方 API、独立版式盲测和 C/D 端到端集成不在本次已完成结果内。
 
@@ -209,7 +213,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
 - B 的包装缺失是否阻塞、MOQ／成本和可行性如何计算归 C；B 不复制这些公式。
 - 参考 CSV 只在模型调用完成后用于开发验收，没有进入模型提示。
 - 所有 A/B/C 报价和器件标识均为合成数据，不能描述为真实供应商报价。
-- 首版真实模型结果只覆盖一种 PDF 版式和一个冻结 CSV 表头；V2 PDF 已通过解析与固定适配器边界测试，但尚未完成真实模型字段验收，也不代表通用文档解析能力。
+- 真实模型结果目前覆盖 V1 和 V2；V3/V4 当前只有确定性解析与边界测试，不代表真实模型准确率或通用文档解析能力。
 
 ### 是否与上一版本兼容
 

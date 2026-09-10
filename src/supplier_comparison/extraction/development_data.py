@@ -5,8 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DATASET_VERSIONS = {"V1": 1, "V2": 2}
-SUPPLIER_ALIASES = ("A", "B", "C")
+DATASET_VERSIONS = {"V1": 1, "V2": 2, "V3": 3}
+DATASET_SUPPLIER_ALIASES = {
+    "V1": ("A", "B", "C"),
+    "V2": ("A", "B", "C"),
+    "V3": ("A", "B", "C", "D", "E"),
+}
 
 
 def dataset_version_number(dataset_version: str) -> int:
@@ -21,6 +25,12 @@ def development_dataset_dir(development_root: str | Path, dataset_version: str) 
     return Path(development_root) / f"quote_V{version}"
 
 
+def dataset_supplier_aliases(dataset_version: str) -> tuple[str, ...]:
+    normalized = dataset_version.upper()
+    dataset_version_number(normalized)
+    return DATASET_SUPPLIER_ALIASES[normalized]
+
+
 def supplier_quote_path(
     development_root: str | Path,
     dataset_version: str,
@@ -28,8 +38,10 @@ def supplier_quote_path(
     extension: str,
 ) -> Path:
     alias = supplier_alias.upper()
-    if alias not in SUPPLIER_ALIASES:
-        raise ValueError(f"unsupported supplier alias: {supplier_alias}")
+    if alias not in dataset_supplier_aliases(dataset_version):
+        raise ValueError(
+            f"unsupported supplier alias for {dataset_version.upper()}: {supplier_alias}"
+        )
     normalized_extension = extension.lower().lstrip(".")
     if normalized_extension not in {"pdf", "csv"}:
         raise ValueError(f"unsupported quote extension: {extension}")

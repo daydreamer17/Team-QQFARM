@@ -39,6 +39,23 @@ def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> No
     assert all(source.block_id and source.bbox for source in first.sources)
 
 
+@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
+def test_v3_development_pdfs_produce_stable_positioned_sources(alias: str) -> None:
+    path = quote_path(alias, version=3)
+    parser = PdfQuoteParser()
+    first = parser.parse(path, context_for(alias, version=3))
+    second = parser.parse(path, context_for(alias, version=3))
+
+    assert first.document_sha256 == second.document_sha256
+    assert [source.source_id for source in first.sources] == [
+        source.source_id for source in second.sources
+    ]
+    assert first.sources
+    assert all(source.kind == SourceKind.PDF_TEXT_BLOCK for source in first.sources)
+    assert all(source.page_number == 1 for source in first.sources)
+    assert all(source.block_id and source.bbox for source in first.sources)
+
+
 def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
     path = quote_path("b")
     parsed = PdfQuoteParser().parse(path, context_for("b"))
@@ -78,4 +95,4 @@ def test_pdf_without_extractable_text_requires_manual_fallback(monkeypatch) -> N
     monkeypatch.setattr("supplier_comparison.extraction.pdf_parser._extract_lines", lambda page: ())
     with pytest.raises(UnreadableInputError) as raised:
         PdfQuoteParser().parse(path, context_for("a"))
-    assert raised.value.code == "pdf_text_unavailable"
+    assert raised.value.code == "blank_pdf"
