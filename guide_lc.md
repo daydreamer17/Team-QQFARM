@@ -122,6 +122,15 @@ SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
 PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 ```
 
+使用 A 的 V2 聚合开发答案对现有结果评分（不会调用模型）：
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
+  --results-root evaluation/results/local/2026-09-10 \
+  --selection latest-per-input \
+  --output evaluation/results/local/2026-09-10/v2_reference_score.json
+```
+
 | 交付物名称 | 文件路径或链接 | 简单介绍 | 使用方法 |
 | --- | --- | --- | --- |
 | Python 项目配置 | [`pyproject.toml`](pyproject.toml) | Python 版本、运行依赖和测试依赖 | 使用 `pip install -e '.[dev]'` 安装 |
@@ -137,6 +146,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 统一提取入口 | [`service.py`](src/supplier_comparison/extraction/service.py) | 将模型载荷转换成公共 `ExtractionBatch` | 下游调用 `extract_quote_candidates` |
 | 真实提取脚本 | [`run_real_extraction.py`](scripts/run_real_extraction.py) | 分别运行 A／B／C 合成 PDF | 指定 `--supplier` 和 `--output` |
 | 开发验收脚本 | [`evaluate_development_extractions.py`](scripts/evaluate_development_extractions.py) | 按确认口径对照 90 个字段 | 设置 `PYTHONPATH=src` 后运行 |
+| V2 开发答案评分器 | [`evaluate_v2_reference_answers.py`](scripts/evaluate_v2_reference_answers.py) | 对 A 的聚合开发答案进行哈希绑定、逐字段评分和提示词版本分组 | 指定本地结果目录运行；不会调用模型 |
 | 参考答案校验器 | [`validate_extraction_reference.py`](scripts/validate_extraction_reference.py) | 校验字段全集、A 批准状态、输入路径和文件哈希 | 正式计分时增加 `--require-approved` |
 | V2 参考迁移器 | [`migrate_v2_system_evidence.py`](scripts/migrate_v2_system_evidence.py) | 将 A 的旧版 B-CSV 示例迁移为非权威草稿 | 迁移后仍需 A 补齐并批准 |
 | V2 B-CSV 参考草稿 | [`mcu_demo_001_v2_supplier_b_csv_draft.json`](evaluation/reference/mcu_demo_001_v2_supplier_b_csv_draft.json) | 30 字段中 13 个有待复核期望、17 个未复核 | 不得用于正式计分 |
@@ -144,6 +154,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
 | 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
 | V2 未计分烟测报告 | [`V2_UNSCORED_SMOKE_REVIEW.md`](evaluation/results/local/2026-09-10/V2_UNSCORED_SMOKE_REVIEW.md) | 汇总六份 V2 输入的最新真实运行、调用量和已知限制 | 用于回归与故障分析；不得作为正式准确率 |
+| V2 开发答案评分 | [`v2_reference_score.json`](evaluation/results/local/2026-09-10/v2_reference_score.json) | 对六份最新 V2 输出的状态和标准化值进行开发评分 | 仅本地保存；不作为最终 A 验收 |
 | 字段验收报告 | [`DEVELOPMENT_PDF_FIELD_REVIEW.md`](evaluation/results/local/2026-09-10/DEVELOPMENT_PDF_FIELD_REVIEW.md) | A/B/C 逐字段矩阵和调用量 | 供 A 签字及 C/D 查看已知问题 |
 | 完整验收 JSON | [`development_pdf_field_review.json`](evaluation/results/local/2026-09-10/development_pdf_field_review.json) | 90 个字段的期望、实际、来源形状和结果 | 可供脚本或 CI 读取 |
 
@@ -160,8 +171,9 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 - B 的 `other_fees_amount` 模型值为 `"0"`，确定性重放输出为 `"0.00"`，并记录规则 `sgd-fee-amount-2dp/1.0.0`。
 - C 的唯一失败是 `shipping_fee_status="PAID"`，契约期望为 `KNOWN_AMOUNT`；原始失败结果没有被改写。
 - 结果文件未发现 API Key 标记。
+- A 新增 V2 聚合开发答案后，六份最新结果按“状态＋标准化值”得到 172／180，开发字段匹配率为 0.9556；这些结果混用提示词 1.3.0、1.4.0 和 1.5.0。
 
-结论：PDF／CSV 解析、结构化候选、来源校验和本地模型基线达到了可交接状态。V2 六份输入均已完成真实模型烟测，最新结果通过当前结构及确定性证据检查，但由于没有 A 批准的 V2 参考答案，全部保持 `UNSCORED`。主办方 API、独立版式盲测和 C/D 端到端集成不在本次已完成结果内。
+结论：PDF／CSV 解析、结构化候选、来源校验和本地模型基线达到了可交接状态。V2 六份输入均已完成真实模型烟测，并已根据 A 的聚合开发答案完成初步评分；由于答案没有 `A_APPROVED` 元数据且结果混用提示词版本，该分数不是最终验收准确率。主办方 API、独立版式盲测和 C/D 端到端集成不在本次已完成结果内。
 
 ### 达到或未达到的原因
 

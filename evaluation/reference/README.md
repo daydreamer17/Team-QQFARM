@@ -2,8 +2,13 @@
 
 本目录只保存独立评测参考答案，不是运行时输入目录。部署、模型提示和 Agent 工具不得读取这里的内容。
 
-参考答案由 A 创建和复核；B 只提供格式、哈希绑定和评测工具。V2 在 A 完成逐字段复核前必须保持
-`review_status=DRAFT`，不得据此宣称字段准确率。正式计分时必须使用 `--require-approved`。
+参考答案由 A 创建和复核；B 只提供格式、哈希绑定和评测工具。当前存在两种格式：
+
+- `mcu_demo_001_v2_supplier_b_csv_draft.json` 使用逐文档批准格式，由
+  `validate_extraction_reference.py` 校验；正式计分时必须使用 `--require-approved`。
+- `quote_V2/` 至 `quote_V4/` 使用 A 新增的聚合开发答案格式，标记为
+  `DEVELOPMENT_REFERENCE_ANSWER`。它们可用于开发评分，但当前没有
+  `review_status=A_APPROVED` 元数据，不能表述为最终验收。
 
 每份文档记录：
 
@@ -30,7 +35,20 @@ PYTHONPATH=src .venv/bin/python scripts/validate_extraction_reference.py \
   --require-approved
 ```
 
-当前 `mcu_demo_001_v2_supplier_b_csv_draft.json` 是由 A 的旧版 V2 示例迁移得到的
+V2 聚合开发答案评分命令（只读取已保存结果，不调用模型）：
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py \
+  --results-root evaluation/results/local/2026-09-10 \
+  --selection latest-per-input \
+  --output evaluation/results/local/2026-09-10/v2_reference_score.json
+```
+
+该评分只计算 B 负责的 30 个字段，并比较 `validation_status` 和
+`normalized_value`。系统字段 `supplier_id` 不进入分母；缺失字段的 `origin=null`
+与 B 当前 Pydantic 契约的差异单独审计，不混入字段准确率。
+
+`mcu_demo_001_v2_supplier_b_csv_draft.json` 是由 A 的旧版 V2 示例迁移得到的
 B-CSV 草稿：30 个字段均已列出，其中 13 个带待复核期望，17 个明确保持未复核。
 它通过草稿结构和文件哈希校验，但会被 `--require-approved` 拒绝，不能用于正式计分。
 
