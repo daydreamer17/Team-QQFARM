@@ -1,0 +1,376 @@
+{
+  "reference_set_id": "QUOTE-V3-31-FIELD-DIRECT-EXPRESSION",
+  "reference_kind": "DEVELOPMENT_REFERENCE_ANSWER",
+  "runtime_access": "DENY",
+  "dictionary": "data/contracts/quote_data_field.csv",
+  "dictionary_version": "1.2.0",
+  "field_count": 31,
+  "field_order": [
+    "supplier_id",
+    "supplier_name",
+    "supplier_country",
+    "category",
+    "item",
+    "manufacturer",
+    "manufacturer_part_number",
+    "package",
+    "revision",
+    "condition",
+    "currency",
+    "unit_price",
+    "price_basis_quantity",
+    "price_basis_unit",
+    "packaging_type",
+    "units_per_pack",
+    "order_multiple_units",
+    "moq_quantity",
+    "moq_unit",
+    "shipping_fee_status",
+    "shipping_fee_amount",
+    "other_fees_status",
+    "other_fees_amount",
+    "tax_mode",
+    "lead_time_days",
+    "day_basis",
+    "delivery_semantics",
+    "start_event",
+    "payment_terms",
+    "quote_date",
+    "valid_until"
+  ],
+  "usage": {
+    "csv_branch": "Use the five CSV files as one test run.",
+    "pdf_branch": "Use the five PDF files as an alternative test run.",
+    "pairing_rule": "CSV and PDF with the same supplier letter represent the same quote and share one answer.",
+    "isolation_rule": "Never mount this reference directory for the parser or model under test.",
+    "scoring_rule": "Score normalized fields before human correction. Null is not numeric zero."
+  },
+  "provenance": {
+    "supplier_identity": "Copied from historical synthetic rows in data/electronics_purchase_orders.csv.",
+    "commercial_terms": "Synthetic V3 development conditions created for direct-expression parsing tests.",
+    "all_expected_non_null_values_have_direct_textual_support": true,
+    "cross_field_inference_expected": false
+  },
+  "files": [
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_a_quote_v3.csv",
+      "media_type": "text/csv",
+      "answer_id": "V3-A",
+      "sha256": "725e06f2c64c30ffb97beb60ac05c2e4e2df07041733981463affd5cb6a90bc3"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_a_quote_v3.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V3-A",
+      "sha256": "21e8ef9b8c7faa6e08b23549738eac1868584b9b155351b9992260e5cd116eb7"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_b_quote_v3.csv",
+      "media_type": "text/csv",
+      "answer_id": "V3-B",
+      "sha256": "2f6ab97740238bb14628e6b69a46820f3315994e5ef948ab4ca890ff0ce02028"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_b_quote_v3.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V3-B",
+      "sha256": "8ecf6bae26f4061aa26586125e29880e25e93bed1c50315caede1e739512e48a"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_c_quote_v3.csv",
+      "media_type": "text/csv",
+      "answer_id": "V3-C",
+      "sha256": "a7cb4986599b42e5b535a16e3b25972101be84e4c2689c2a9f104da9b4aeb41e"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_c_quote_v3.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V3-C",
+      "sha256": "cde31bed3f00ba4d08cc254e12528b90d1f6098b96129e1edeb933dc1d1a55f5"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_d_quote_v3.csv",
+      "media_type": "text/csv",
+      "answer_id": "V3-D",
+      "sha256": "c59f6baeb1380122987d56b58ad6c796a8d2cd88b42e051479e145da6972ba33"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_d_quote_v3.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V3-D",
+      "sha256": "7dbe3f92e3ba9988f7b23c13a0c2b263f11fb4a256576332b9dd0634d6d7a481"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_e_quote_v3.csv",
+      "media_type": "text/csv",
+      "answer_id": "V3-E",
+      "sha256": "68a40b30ef01dee4f5c8d87160d0d5d71fa39c6047f6654f186fa8dd4a7544b0"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V3/supplier_e_quote_v3.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V3-E",
+      "sha256": "9c8e8d92529a7e47fe23795798c548e3352712068c62edc2a630a4631a70ae34"
+    }
+  ],
+  "answers": {
+    "V3-A": {
+      "normalized_quote": {
+        "supplier_id": "SUP-022",
+        "supplier_name": "Redwood Components",
+        "supplier_country": "USA",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.72",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 1,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 4,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Piece packaging, one unit per pack, and a one-piece order increment are stated separately.",
+        "Free freight and zero freight amount are both explicit.",
+        "No other fees and a zero other-fee amount are both explicit."
+      ]
+    },
+    "V3-B": {
+      "normalized_quote": {
+        "supplier_id": "SUP-023",
+        "supplier_name": "Schwarzwald Circuits",
+        "supplier_country": "Germany",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "665.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 10,
+        "moq_unit": "tray",
+        "shipping_fee_status": "INCLUDED",
+        "shipping_fee_amount": null,
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 2,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "SHIPMENT",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-21"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Tray capacity, order increment, and MOQ unit are stated independently.",
+        "Freight is INCLUDED, so a missing separate amount must remain null and must not become zero.",
+        "The two-day promise ends at SHIPMENT, not ARRIVAL."
+      ]
+    },
+    "V3-C": {
+      "normalized_quote": {
+        "supplier_id": "SUP-024",
+        "supplier_name": "Sterling Components",
+        "supplier_country": "USA",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.75",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 25,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "185.50",
+        "other_fees_status": "KNOWN_AMOUNT",
+        "other_fees_amount": "45.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 3,
+        "day_basis": "BUSINESS_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Due on receipt",
+        "quote_date": "2026-09-12",
+        "valid_until": "2026-09-22"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "A one-piece pack is explicit even though the order increment is 25 pieces.",
+        "Freight and handling are separate known per-order charges and must not be merged.",
+        "The arrival promise uses BUSINESS_DAYS, which must not be normalized to calendar days."
+      ]
+    },
+    "V3-D": {
+      "normalized_quote": {
+        "supplier_id": "SUP-025",
+        "supplier_name": "Cascade Semitech",
+        "supplier_country": "USA",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "335.00",
+        "price_basis_quantity": 50,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 50,
+        "order_multiple_units": 50,
+        "moq_quantity": 20,
+        "moq_unit": "tray",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "INCLUDED",
+        "other_fees_amount": null,
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 5,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "100% before dispatch",
+        "quote_date": "2026-09-14",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "other_fees_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "The 50-piece price basis, tray capacity, order increment, and tray MOQ are independently stated.",
+        "Other fees are INCLUDED; the absent separate amount stays null instead of becoming zero.",
+        "Free freight explicitly carries a zero freight amount."
+      ]
+    },
+    "V3-E": {
+      "normalized_quote": {
+        "supplier_id": "SUP-026",
+        "supplier_name": "Great Wall Circuits",
+        "supplier_country": "China",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.55",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 1,
+        "moq_quantity": 1200,
+        "moq_unit": "piece",
+        "shipping_fee_status": "UNKNOWN",
+        "shipping_fee_amount": null,
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 6,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 45",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Loose-piece packaging, one piece per package, and one-piece ordering are each explicit.",
+        "Freight is explicitly UNKNOWN and its amount must remain null rather than zero.",
+        "Other fees are explicitly absent and normalize to NOT_APPLICABLE with 0.00."
+      ]
+    }
+  }
+}
