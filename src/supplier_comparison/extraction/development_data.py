@@ -5,11 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DATASET_VERSIONS = {"V1": 1, "V2": 2, "V3": 3}
+DATASET_VERSIONS = {"V1": 1, "V2": 2, "V3": 3, "V4": 4}
 DATASET_SUPPLIER_ALIASES = {
     "V1": ("A", "B", "C"),
     "V2": ("A", "B", "C"),
     "V3": ("A", "B", "C", "D", "E"),
+    "V4": ("A", "B"),
 }
 
 
@@ -46,10 +47,10 @@ def supplier_quote_path(
     if normalized_extension not in {"pdf", "csv"}:
         raise ValueError(f"unsupported quote extension: {extension}")
     version = dataset_version_number(dataset_version)
-    return (
-        development_dataset_dir(development_root, dataset_version)
-        / f"supplier_{alias.lower()}_quote_v{version}.{normalized_extension}"
-    )
+    filename = f"supplier_{alias.lower()}_quote_v{version}.{normalized_extension}"
+    if version == 4 and normalized_extension == "pdf":
+        filename = f"source_{filename}"
+    return development_dataset_dir(development_root, dataset_version) / filename
 
 
 def canonical_quotes_csv_path(development_root: str | Path, dataset_version: str = "V1") -> Path:

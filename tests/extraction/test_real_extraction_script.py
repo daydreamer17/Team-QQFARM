@@ -64,6 +64,17 @@ def test_v3_real_runner_builds_pdf_and_csv_jobs(alias: str) -> None:
     assert pdf_context.supplier_id == csv_context.supplier_id
 
 
+@pytest.mark.parametrize("alias", ("A", "B"))
+def test_v4_real_runner_builds_valid_source_pdf_jobs(alias: str) -> None:
+    path = _pdf_path("V4", alias)
+    context = _context("V4", alias)
+
+    assert path.name == f"source_supplier_{alias.lower()}_quote_v4.pdf"
+    assert path.is_file()
+    assert context.task_revision == 4
+    assert context.document_id.endswith("-V4-PDF")
+
+
 def test_real_runner_failure_is_explicitly_unscored(monkeypatch, quote_dictionary, tmp_path) -> None:
     def fail_extract(*args, **kwargs):
         del args, kwargs

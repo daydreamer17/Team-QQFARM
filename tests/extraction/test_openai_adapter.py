@@ -187,9 +187,11 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/1.5.0"
+    assert result.run.prompt_version == "quote-extraction/1.6.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
+    assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
+    assert "not zero" in boundaries["fee_status_vs_separate_amount"]
     assert "Never cite either column" in boundaries["price_basis_vs_order_increment"]
     assert "return CONFLICT" in boundaries["start_event"]
     assert {example["field_name"] for example in prompt["unit_examples"]} == {

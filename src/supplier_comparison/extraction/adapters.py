@@ -27,7 +27,7 @@ from .errors import AdapterError, ModelCallBudgetExceeded
 from .model_payload import ModelExtractionPayload
 
 
-PROMPT_VERSION = "quote-extraction/1.5.0"
+PROMPT_VERSION = "quote-extraction/1.6.0"
 
 
 @dataclass(slots=True)
@@ -465,6 +465,12 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
                 "Additional Fees, Other Charges, or Fees Note applies only to other fees unless its text explicitly "
                 "mentions shipping, freight, delivery charge, or logistics. If no shipping term exists, both shipping "
                 "fields are MISSING with no citation; do not reuse a None value from another-fees evidence."
+            ),
+            "fee_status_vs_separate_amount": (
+                "INCLUDED means the fee is already inside the quoted price. If the document says there is no "
+                "separately stated amount, the corresponding amount field is MISSING with normalized_value null, "
+                "not zero. UNKNOWN also requires a MISSING/null amount. Use 0.00 only when the document explicitly "
+                "states a zero amount for FREE or NOT_APPLICABLE."
             ),
             "price_basis_vs_order_increment": (
                 "Order Increment and Minimum Qty do not establish the price basis. Never cite either column for "
