@@ -147,7 +147,7 @@ class QuoteFieldCandidate(FrozenModel):
     normalized_value: NormalizedScalar | None = None
     unit: str | None = None
     validation_status: ValidationStatus
-    origin: Origin
+    origin: Origin | None = None
     source_refs: tuple[SourceCitation, ...] = ()
     producer: CandidateProducer
     adapter_version: str | None = None
@@ -156,9 +156,16 @@ class QuoteFieldCandidate(FrozenModel):
     @model_validator(mode="after")
     def provenance_shape_is_consistent(self) -> "QuoteFieldCandidate":
         if self.validation_status == ValidationStatus.MISSING:
-            if self.raw_value is not None or self.normalized_value is not None or self.source_refs:
-                raise ValueError("MISSING candidate must have null values and no source refs")
-        if self.origin == Origin.DOCUMENT and self.validation_status != ValidationStatus.MISSING:
+            if (
+                self.raw_value is not None
+                or self.normalized_value is not None
+                or self.origin is not None
+                or self.source_refs
+            ):
+                raise ValueError("MISSING candidate must have null values, null origin, and no source refs")
+        elif self.origin is None:
+            raise ValueError("non-missing candidate requires origin")
+        if self.origin == Origin.DOCUMENT:
             if not self.source_refs:
                 raise ValueError("non-missing DOCUMENT candidate requires source refs")
         if self.producer == CandidateProducer.MODEL_ADAPTER:

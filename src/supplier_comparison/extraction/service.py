@@ -45,7 +45,11 @@ def extract_quote_candidates(
             normalized_value=model_candidate.normalized_value,
             unit=model_candidate.unit,
             validation_status=model_candidate.validation_status,
-            origin=Origin.DOCUMENT,
+            origin=(
+                None
+                if model_candidate.validation_status == "MISSING"
+                else Origin.DOCUMENT
+            ),
             source_refs=model_candidate.source_refs,
             producer=CandidateProducer.MODEL_ADAPTER,
             adapter_version=result.run.adapter_version,

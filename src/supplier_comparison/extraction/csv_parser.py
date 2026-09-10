@@ -253,7 +253,7 @@ class FixedCsvQuoteParser:
                         quote_version=context.quote_version,
                         field_name=definition.field_name,
                         validation_status=ValidationStatus.MISSING,
-                        origin=Origin.DOCUMENT,
+                        origin=None,
                         producer=CandidateProducer.DETERMINISTIC_PARSER,
                     )
                 )

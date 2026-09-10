@@ -40,6 +40,7 @@ def test_supplier_b_unknown_shipping_is_null_and_has_no_source(quote_dictionary)
         assert candidate.validation_status == ValidationStatus.MISSING
         assert candidate.raw_value is None
         assert candidate.normalized_value is None
+        assert candidate.origin is None
         assert candidate.source_refs == ()
 
 

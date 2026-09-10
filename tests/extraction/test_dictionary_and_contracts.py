@@ -48,8 +48,36 @@ def test_missing_candidate_cannot_carry_a_value_or_fake_source() -> None:
             raw_value="FREE",
             normalized_value="FREE",
             validation_status=ValidationStatus.MISSING,
-            origin=Origin.DOCUMENT,
+            origin=None,
             source_refs=(SourceCitation(source_id="SRC-1", quoted_text="FREE"),),
+            producer=CandidateProducer.DETERMINISTIC_PARSER,
+        )
+
+
+def test_missing_candidate_requires_null_origin() -> None:
+    with pytest.raises(ValidationError, match="null origin"):
+        QuoteFieldCandidate(
+            field_id="FIELD-1",
+            quote_id="QUOTE-1",
+            quote_version=1,
+            field_name="shipping_fee_amount",
+            validation_status=ValidationStatus.MISSING,
+            origin=Origin.DOCUMENT,
+            producer=CandidateProducer.DETERMINISTIC_PARSER,
+        )
+
+
+def test_non_missing_candidate_requires_origin() -> None:
+    with pytest.raises(ValidationError, match="requires origin"):
+        QuoteFieldCandidate(
+            field_id="FIELD-1",
+            quote_id="QUOTE-1",
+            quote_version=1,
+            field_name="unit_price",
+            raw_value="6.80",
+            normalized_value="6.80",
+            validation_status=ValidationStatus.EXTRACTED,
+            origin=None,
             producer=CandidateProducer.DETERMINISTIC_PARSER,
         )
 
