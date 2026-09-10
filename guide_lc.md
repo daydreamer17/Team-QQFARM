@@ -98,6 +98,22 @@ SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
   --output evaluation/results/local/2026-09-10/example.json
 ```
 
+V2 三家供应商批量调用示例（会产生真实模型调用和费用；当前尚未执行）：
+
+```bash
+set -a
+source .env.local
+set +a
+SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
+  scripts/run_real_extraction.py \
+  --all-suppliers \
+  --dataset-version V2 \
+  --output-dir evaluation/results/local/v2
+```
+
+批量模式共享一个 `ModelCallBudget`，三家供应商的调用次数累计计算。V2 的异构 CSV
+目前仍会被固定模板解析器明确拒绝，尚未实现 CSV profile 适配。
+
 重新生成开发字段对照：
 
 ```bash
@@ -118,6 +134,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 统一提取入口 | [`service.py`](src/supplier_comparison/extraction/service.py) | 将模型载荷转换成公共 `ExtractionBatch` | 下游调用 `extract_quote_candidates` |
 | 真实提取脚本 | [`run_real_extraction.py`](scripts/run_real_extraction.py) | 分别运行 A／B／C 合成 PDF | 指定 `--supplier` 和 `--output` |
 | 开发验收脚本 | [`evaluate_development_extractions.py`](scripts/evaluate_development_extractions.py) | 按确认口径对照 90 个字段 | 设置 `PYTHONPATH=src` 后运行 |
+| V2 开发输入 | [`quote_V2/`](data/generated/inputs/development/quote_V2/) | 三家不同版式报价及采购需求的 PDF/CSV | PDF 可用于解析与模型开发；异构 CSV 尚未支持 |
 | 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
 | 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
 | 字段验收报告 | [`DEVELOPMENT_PDF_FIELD_REVIEW.md`](evaluation/results/local/2026-09-10/DEVELOPMENT_PDF_FIELD_REVIEW.md) | A/B/C 逐字段矩阵和调用量 | 供 A 签字及 C/D 查看已知问题 |
@@ -129,7 +146,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 
 事实：
 
-- 本地测试为 34 项通过、0 项失败。
+- 首版测试为 34 项通过；选择性纳入 V2 并增加回归覆盖后为 45 项通过、0 项失败。
 - 三份开发 PDF 都完成了真实本地模型调用，每份最终记录均为 1 次调用、0 次重试。
 - A 为 30／30，B 按已确认 PDF 口径及 Decimal 比较为 30／30，C 为 29／30；合计 89／90，字段匹配率为 0.9889。
 - B 的运费保持 `MISSING/null/无来源`；包装方式和每包数量按确认口径保持非阻塞缺失。
@@ -173,7 +190,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 - B 的包装缺失是否阻塞、MOQ／成本和可行性如何计算归 C；B 不复制这些公式。
 - 参考 CSV 只在模型调用完成后用于开发验收，没有进入模型提示。
 - 所有 A/B/C 报价和器件标识均为合成数据，不能描述为真实供应商报价。
-- 当前只支持一种开发 PDF 版式和一个冻结 CSV 表头，不代表通用文档解析能力。
+- 首版真实模型结果只覆盖一种 PDF 版式和一个冻结 CSV 表头；V2 PDF 已通过解析与固定适配器边界测试，但尚未完成真实模型字段验收，也不代表通用文档解析能力。
 
 ### 是否与上一版本兼容
 

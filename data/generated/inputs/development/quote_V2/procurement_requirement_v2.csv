@@ -1,0 +1,2 @@
+manufacturer,manufacturer_part_number,package,revision,condition,allow_substitutes,base_unit,required_quantity,quantity_unit,budget_amount,currency,includes_shipping,tax_mode,other_fees_required,planned_order_date,delivery_deadline,delivery_location,ranking_preference,secondary_preference
+QQ Demo Components,QW-MCU9-DEMO,QFN-32,R1,NEW,false,piece,1000,piece,8000.00,SGD,true,NOT_APPLICABLE,true,2026-09-14,2026-09-19,SG-DEMO-01,LOWEST_CONFIRMED_TOTAL_COST,

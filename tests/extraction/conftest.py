@@ -17,16 +17,16 @@ def quote_dictionary() -> QuoteDictionary:
     return QuoteDictionary.load(DATA_ROOT / "contracts" / "quote_data_field.csv")
 
 
-def context_for(alias: str) -> DocumentContext:
+def context_for(alias: str, version: int = 1) -> DocumentContext:
     alias = alias.upper()
     suppliers = {"A": "SUP-022", "B": "SUP-023", "C": "SUP-024"}
     return DocumentContext(
         task_id="TASK-MCU-DEMO-001",
-        task_revision=1,
+        task_revision=version,
         scenario_id="MCU-DEMO-001",
         quote_id=f"QUOTE-MCU-DEMO-001-{alias}",
-        quote_version=1,
-        document_id=f"DOC-MCU-DEMO-001-{alias}-V1",
-        document_version=1,
+        quote_version=version,
+        document_id=f"DOC-MCU-DEMO-001-{alias}-V{version}",
+        document_version=version,
         supplier_id=suppliers[alias],
     )

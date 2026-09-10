@@ -24,6 +24,28 @@ def test_three_development_pdfs_produce_stable_positioned_sources() -> None:
         assert all(source.block_id and source.bbox for source in first.sources)
 
 
+@pytest.mark.parametrize("alias", ("a", "b", "c"))
+def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> None:
+    path = (
+        DATA_ROOT
+        / "generated"
+        / "inputs"
+        / "development"
+        / "quote_V2"
+        / f"supplier_{alias}_quote_v2.pdf"
+    )
+    parser = PdfQuoteParser()
+    first = parser.parse(path, context_for(alias, version=2))
+    second = parser.parse(path, context_for(alias, version=2))
+
+    assert first.document_sha256 == second.document_sha256
+    assert [source.source_id for source in first.sources] == [source.source_id for source in second.sources]
+    assert len(first.sources) >= 10
+    assert all(source.kind == SourceKind.PDF_TEXT_BLOCK for source in first.sources)
+    assert all(source.page_number == 1 for source in first.sources)
+    assert all(source.block_id and source.bbox for source in first.sources)
+
+
 def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
     path = DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf"
     parsed = PdfQuoteParser().parse(path, context_for("b"))
@@ -31,6 +53,23 @@ def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
     assert "shipping" not in full_text
     assert "freight" not in full_text
     assert "200" not in full_text
+
+
+def test_supplier_b_v2_pdf_preserves_shipping_omission() -> None:
+    path = (
+        DATA_ROOT
+        / "generated"
+        / "inputs"
+        / "development"
+        / "quote_V2"
+        / "supplier_b_quote_v2.pdf"
+    )
+    parsed = PdfQuoteParser().parse(path, context_for("b", version=2))
+    full_text = " ".join(source.raw_text for source in parsed.sources).lower()
+
+    assert "shipping" not in full_text
+    assert "freight" not in full_text
+    assert "logistics charge" not in full_text
 
 
 def test_non_pdf_content_is_explicitly_rejected(tmp_path) -> None:

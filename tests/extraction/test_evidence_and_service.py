@@ -88,6 +88,33 @@ def test_all_three_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias
         assert all(candidate.source_refs == () for candidate in shipping.values())
 
 
+@pytest.mark.parametrize("alias", ("a", "b", "c"))
+def test_all_three_v2_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias) -> None:
+    parsed = PdfQuoteParser().parse(
+        DATA_ROOT
+        / "generated"
+        / "inputs"
+        / "development"
+        / "quote_V2"
+        / f"supplier_{alias}_quote_v2.pdf",
+        context_for(alias, version=2),
+    )
+    budget = ModelCallBudget(graph_run_id=f"GRAPH-V2-{alias.upper()}")
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: _all_missing_payload(quote_dictionary)}),
+        budget,
+        f"EXTRACT-V2-{alias.upper()}",
+    )
+
+    assert len(batch.candidates) == 30
+    assert batch.parsed_input.context.quote_version == 2
+    assert batch.parsed_input.context.document_version == 2
+    assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED
+    assert budget.calls_used == 0
+
+
 def test_unknown_model_source_id_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
