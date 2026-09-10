@@ -5,6 +5,7 @@ import pytest
 from supplier_comparison.extraction.adapters import FixedOutputAdapter, ModelCallBudget
 from supplier_comparison.extraction.contracts import AdapterOutputMode, CandidateProducer, ValidationStatus
 from supplier_comparison.extraction.errors import EvidenceValidationError
+from supplier_comparison.extraction.normalization import CONFLICT_STATUS_PLACEHOLDER_RULE
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.service import extract_quote_candidates
 
@@ -195,3 +196,164 @@ def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
         )
     assert raised.value.code == "candidate_enum_invalid"
     assert raised.value.details["normalized_value"] == "PAID"
+
+
+def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path("b", version=2),
+        context_for("b", version=2),
+    )
+    payload = _all_missing_payload(quote_dictionary)
+    source = next(source for source in parsed.sources if source.raw_text == "ADDITIONAL FEES None")
+    field_index = next(
+        index
+        for index, field in enumerate(quote_dictionary.extractable_fields)
+        if field.field_name == "shipping_fee_status"
+    )
+    payload["candidates"][field_index] = {
+        "field_name": "shipping_fee_status",
+        "raw_value": "None",
+        "normalized_value": "NOT_APPLICABLE",
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": source.source_id, "quoted_text": "None"}],
+    }
+
+    with pytest.raises(EvidenceValidationError) as raised:
+        extract_quote_candidates(
+            parsed,
+            quote_dictionary,
+            FixedOutputAdapter({parsed.context.document_id: payload}),
+            ModelCallBudget(graph_run_id="GRAPH-SHIPPING-SEMANTICS"),
+            "EXTRACT-SHIPPING-SEMANTICS",
+        )
+
+    assert raised.value.code == "source_semantic_mismatch"
+    assert raised.value.details["field_name"] == "shipping_fee_status"
+
+
+def test_order_increment_evidence_cannot_support_price_basis(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path("b", version=2),
+        context_for("b", version=2),
+    )
+    payload = _all_missing_payload(quote_dictionary)
+    source = next(source for source in parsed.sources if source.raw_text == "ORDER INCREMENT 1 piece")
+    field_index = next(
+        index
+        for index, field in enumerate(quote_dictionary.extractable_fields)
+        if field.field_name == "price_basis_quantity"
+    )
+    payload["candidates"][field_index] = {
+        "field_name": "price_basis_quantity",
+        "raw_value": "1 piece",
+        "normalized_value": "1",
+        "unit": "piece",
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": source.source_id, "quoted_text": "1 piece"}],
+    }
+
+    with pytest.raises(EvidenceValidationError) as raised:
+        extract_quote_candidates(
+            parsed,
+            quote_dictionary,
+            FixedOutputAdapter({parsed.context.document_id: payload}),
+            ModelCallBudget(graph_run_id="GRAPH-PRICE-BASIS-SEMANTICS"),
+            "EXTRACT-PRICE-BASIS-SEMANTICS",
+        )
+
+    assert raised.value.code == "source_semantic_mismatch"
+    assert raised.value.details["field_name"] == "price_basis_quantity"
+
+
+def test_field_specific_sources_pass_semantic_guards(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path("a", version=2),
+        context_for("a", version=2),
+    )
+    payload = _all_missing_payload(quote_dictionary)
+    replacements = {
+        "shipping_fee_status": {
+            "raw_value": "Free",
+            "normalized_value": "FREE",
+            "unit": None,
+            "source": next(source for source in parsed.sources if source.raw_text == "FREIGHT Free"),
+            "quoted_text": "Free",
+        },
+        "price_basis_quantity": {
+            "raw_value": "100 pieces per tray",
+            "normalized_value": "100",
+            "unit": "piece",
+            "source": next(source for source in parsed.sources if "100 pieces per tray" in source.raw_text),
+            "quoted_text": "100 pieces per tray",
+        },
+    }
+    for field_name, replacement in replacements.items():
+        field_index = next(
+            index
+            for index, field in enumerate(quote_dictionary.extractable_fields)
+            if field.field_name == field_name
+        )
+        payload["candidates"][field_index] = {
+            "field_name": field_name,
+            "raw_value": replacement["raw_value"],
+            "normalized_value": replacement["normalized_value"],
+            "unit": replacement["unit"],
+            "validation_status": "EXTRACTED",
+            "source_refs": [
+                {
+                    "source_id": replacement["source"].source_id,
+                    "quoted_text": replacement["quoted_text"],
+                }
+            ],
+        }
+
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: payload}),
+        ModelCallBudget(graph_run_id="GRAPH-VALID-SEMANTICS"),
+        "EXTRACT-VALID-SEMANTICS",
+    )
+
+    assert len(batch.candidates) == 30
+
+
+def test_conflict_status_label_is_normalized_before_evidence_validation(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path("a", version=2),
+        context_for("a", version=2),
+    )
+    payload = _all_missing_payload(quote_dictionary)
+    source = next(source for source in parsed.sources if "confirmed purchase order date" in source.raw_text)
+    field_index = next(
+        index
+        for index, field in enumerate(quote_dictionary.extractable_fields)
+        if field.field_name == "start_event"
+    )
+    payload["candidates"][field_index] = {
+        "field_name": "start_event",
+        "raw_value": "confirmed purchase order date",
+        "normalized_value": "CONFLICT",
+        "unit": None,
+        "validation_status": "CONFLICT",
+        "source_refs": [
+            {"source_id": source.source_id, "quoted_text": "confirmed purchase order date"}
+        ],
+    }
+
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: payload}),
+        ModelCallBudget(graph_run_id="GRAPH-CONFLICT-PLACEHOLDER"),
+        "EXTRACT-CONFLICT-PLACEHOLDER",
+    )
+
+    start_event = next(
+        candidate for candidate in batch.candidates if candidate.field_name == "start_event"
+    )
+    assert start_event.validation_status == ValidationStatus.CONFLICT
+    assert start_event.normalized_value is None
+    assert len(batch.normalization_events) == 1
+    assert batch.normalization_events[0].rule_id == CONFLICT_STATUS_PLACEHOLDER_RULE

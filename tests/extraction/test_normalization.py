@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
-from supplier_comparison.extraction.normalization import SGD_FEE_SCALE_RULE, normalize_model_payload
+from supplier_comparison.extraction.normalization import (
+    CONFLICT_STATUS_PLACEHOLDER_RULE,
+    SGD_FEE_SCALE_RULE,
+    normalize_model_payload,
+)
 
 
 def _payload(amount: str, *, currency: str = "SGD", field_name: str = "other_fees_amount"):
@@ -64,3 +68,30 @@ def test_non_sgd_fee_amount_is_not_reformatted() -> None:
     normalized, events = normalize_model_payload(payload)
     assert normalized == payload
     assert events == ()
+
+
+def test_conflict_status_placeholder_is_normalized_to_null() -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "start_event",
+                    "raw_value": "after confirmed PO date",
+                    "normalized_value": "CONFLICT",
+                    "unit": None,
+                    "validation_status": "CONFLICT",
+                    "source_refs": [
+                        {"source_id": "SRC-START", "quoted_text": "after confirmed PO date"}
+                    ],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    assert normalized.candidates[0].normalized_value is None
+    assert len(events) == 1
+    assert events[0].input_value == "CONFLICT"
+    assert events[0].output_value is None
+    assert events[0].rule_id == CONFLICT_STATUS_PLACEHOLDER_RULE

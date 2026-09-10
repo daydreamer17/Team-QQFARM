@@ -170,11 +170,11 @@ class QuoteFieldCandidate(FrozenModel):
 
 
 class NormalizationEvent(FrozenModel):
-    """Auditable deterministic formatting applied after the model response."""
+    """Auditable deterministic cleanup applied after the model response."""
 
     field_name: str = Field(min_length=1)
     input_value: NormalizedScalar
-    output_value: NormalizedScalar
+    output_value: NormalizedScalar | None
     rule_id: str = Field(min_length=1)
 
 

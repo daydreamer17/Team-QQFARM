@@ -11,6 +11,7 @@ from supplier_comparison.extraction.adapters import (
     OpenAICompatibleConfig,
 )
 from supplier_comparison.extraction.contracts import AdapterEnvironment, AdapterOutputMode
+from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser
 from supplier_comparison.extraction.errors import AdapterError, ModelCallBudgetExceeded
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 
@@ -154,6 +155,93 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
         "NOT_APPLICABLE",
         "UNKNOWN",
     ]
+
+
+def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -> None:
+    captured = {}
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_valid_response(quote_dictionary))
+
+    parsed = ProfiledCsvQuoteParser().parse_row(
+        quote_path("b", version=2, extension="csv"),
+        context_for("b", version=2),
+        2,
+        profile_id="v2_supplier_b",
+    )
+    result = OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-V2-CSV-PROMPT"),
+        "EXTRACT-V2-CSV-PROMPT",
+    )
+
+    prompt = json.loads(captured["messages"][1]["content"])
+    sources_by_column = {source["column_name"]: source for source in prompt["sources"]}
+    price_source = sources_by_column["Each Price"]
+
+    assert price_source["kind"] == "CSV_CELL"
+    assert price_source["row_number"] == 2
+    assert price_source["text"] == "6.80"
+    assert "page_number" not in price_source
+    assert "block_id" not in price_source
+    assert result.run.prompt_version == "quote-extraction/1.5.0"
+    boundaries = prompt["field_specific_boundaries"]
+    assert "other fees" in boundaries["shipping_vs_other_fees"]
+    assert "Never cite either column" in boundaries["price_basis_vs_order_increment"]
+    assert "return CONFLICT" in boundaries["start_event"]
+    assert {example["field_name"] for example in prompt["unit_examples"]} == {
+        "unit_price",
+        "price_basis_quantity",
+        "units_per_pack",
+        "moq_quantity",
+        "lead_time_days",
+    }
+    fee_example, price_example, tray_price_example = prompt["cross_field_examples"]
+    assert fee_example["outputs"]["shipping_fee_status"]["validation_status"] == "MISSING"
+    assert fee_example["outputs"]["shipping_fee_amount"]["validation_status"] == "MISSING"
+    assert fee_example["outputs"]["other_fees_amount"]["unit"] == "SGD"
+    assert price_example["outputs"]["price_basis_quantity"]["cite_columns"] == [
+        "Each Price",
+        "Supply Form",
+    ]
+    assert price_example["outputs"]["order_multiple_units"]["cite_columns"] == [
+        "Order Increment"
+    ]
+    assert tray_price_example["outputs"]["price_basis_quantity"] == {
+        "normalized_value": "100",
+        "unit": "piece",
+        "cite_columns": ["Price", "Packaging"],
+    }
+    assert tray_price_example["outputs"]["price_basis_unit"]["normalized_value"] == "piece"
+
+
+def test_pdf_prompt_includes_page_and_block_location_metadata(quote_dictionary) -> None:
+    captured = {}
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_valid_response(quote_dictionary))
+
+    parsed = PdfQuoteParser().parse(quote_path("a", version=2), context_for("a", version=2))
+    OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-V2-PDF-PROMPT"),
+        "EXTRACT-V2-PDF-PROMPT",
+    )
+
+    prompt = json.loads(captured["messages"][1]["content"])
+    first_source = prompt["sources"][0]
+
+    assert first_source["kind"] == "PDF_TEXT_BLOCK"
+    assert first_source["page_number"] >= 1
+    assert first_source["block_id"]
+    assert "row_number" not in first_source
+    assert "column_name" not in first_source
 
 
 def test_restored_call_count_cannot_be_reset_by_retry(quote_dictionary) -> None:

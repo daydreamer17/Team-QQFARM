@@ -9,13 +9,15 @@ from .model_payload import ModelExtractionPayload, ModelFieldCandidate
 
 
 SGD_FEE_SCALE_RULE = "sgd-fee-amount-2dp/1.0.0"
+CONFLICT_STATUS_PLACEHOLDER_RULE = "conflict-status-placeholder-null/1.0.0"
 FEE_AMOUNT_FIELDS = frozenset({"shipping_fee_amount", "other_fees_amount"})
+STATUS_LABELS = frozenset({"EXTRACTED", "VERIFIED", "MISSING", "CONFLICT"})
 
 
 def normalize_model_payload(
     payload: ModelExtractionPayload,
 ) -> tuple[ModelExtractionPayload, tuple[NormalizationEvent, ...]]:
-    """Format exact SGD fee amounts to two decimals without rounding extra precision."""
+    """Apply small auditable cleanups without changing document provenance."""
 
     currency = next(
         (
@@ -25,15 +27,28 @@ def normalize_model_payload(
         ),
         None,
     )
-    if currency != "SGD":
-        return payload, ()
-
     normalized_candidates: list[ModelFieldCandidate] = []
     events: list[NormalizationEvent] = []
     for candidate in payload.candidates:
         value = candidate.normalized_value
         if (
-            candidate.validation_status != "EXTRACTED"
+            candidate.validation_status == "CONFLICT"
+            and isinstance(value, str)
+            and value.upper() in STATUS_LABELS
+        ):
+            normalized_candidates.append(candidate.model_copy(update={"normalized_value": None}))
+            events.append(
+                NormalizationEvent(
+                    field_name=candidate.field_name,
+                    input_value=value,
+                    output_value=None,
+                    rule_id=CONFLICT_STATUS_PLACEHOLDER_RULE,
+                )
+            )
+            continue
+        if (
+            currency != "SGD"
+            or candidate.validation_status != "EXTRACTED"
             or candidate.field_name not in FEE_AMOUNT_FIELDS
             or not isinstance(value, str)
         ):

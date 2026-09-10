@@ -23,6 +23,7 @@ REQUIRED_COLUMNS = {
 }
 
 FIELD_ALLOWED_NORMALIZED_VALUES = {
+    "price_basis_unit": ("piece",),
     "shipping_fee_status": (
         "KNOWN_AMOUNT",
         "FREE",

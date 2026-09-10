@@ -35,6 +35,7 @@ def test_a_dictionary_is_loaded_as_the_only_quote_field_list(quote_dictionary) -
         "NOT_APPLICABLE",
         "UNKNOWN",
     )
+    assert quote_dictionary.fields["price_basis_unit"].allowed_normalized_values == ("piece",)
 
 
 def test_missing_candidate_cannot_carry_a_value_or_fake_source() -> None:

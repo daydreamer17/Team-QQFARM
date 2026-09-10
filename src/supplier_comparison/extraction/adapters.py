@@ -27,6 +27,9 @@ from .errors import AdapterError, ModelCallBudgetExceeded
 from .model_payload import ModelExtractionPayload
 
 
+PROMPT_VERSION = "quote-extraction/1.5.0"
+
+
 @dataclass(slots=True)
 class ModelCallBudget:
     """Caller-owned cumulative counter; restore this value when a graph resumes."""
@@ -90,7 +93,7 @@ class FixedOutputAdapter(ModelAdapter):
         outputs_by_document_id: dict[str, ModelExtractionPayload | dict],
         *,
         adapter_version: str = "fixed-output/1.0.0",
-        prompt_version: str = "quote-extraction/1.0.0",
+        prompt_version: str = PROMPT_VERSION,
     ) -> None:
         self._outputs = outputs_by_document_id
         self.adapter_version = adapter_version
@@ -151,7 +154,7 @@ class OpenAICompatibleConfig(BaseModel):
     enable_thinking: bool = False
     max_tokens: int = Field(default=8192, ge=1)
     adapter_version: str = "openai-compatible/1.0.0"
-    prompt_version: str = "quote-extraction/1.0.0"
+    prompt_version: str = PROMPT_VERSION
 
     @classmethod
     def from_env(cls, prefix: str = "SUPPLIER_MODEL_") -> "OpenAICompatibleConfig":
@@ -427,10 +430,22 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
         }
         for field in dictionary.extractable_fields
     ]
-    sources = [
-        {"source_id": source.source_id, "text": source.raw_text}
-        for source in parsed_input.sources
-    ]
+    sources = []
+    for source in parsed_input.sources:
+        prompt_source: dict[str, str | int] = {
+            "source_id": source.source_id,
+            "kind": source.kind.value,
+            "text": source.raw_text,
+        }
+        if source.row_number is not None:
+            prompt_source["row_number"] = source.row_number
+        if source.column_name is not None:
+            prompt_source["column_name"] = source.column_name
+        if source.page_number is not None:
+            prompt_source["page_number"] = source.page_number
+        if source.block_id is not None:
+            prompt_source["block_id"] = source.block_id
+        sources.append(prompt_source)
     instructions = {
         "rules": [
             "Return every field in field_contract exactly once.",
@@ -440,8 +455,29 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
             "EXTRACTED must have non-null raw_value and normalized_value; normalize enums and units to the field contract.",
             "raw_value is the document wording; normalized_value is the canonical value after applying normalization_rule.",
             "Every other field must cite only source_id values below and quote an exact substring from that source.",
+            "Use source location metadata, including CSV column_name, only to interpret the text; quoted_text must remain an exact substring of text.",
             "Decimal money values must be strings, never JSON floating-point numbers.",
+            "Populate unit for an extracted amount, quantity, or lead-time field when its currency or counting unit is explicit; otherwise use null.",
+            "Never use EXTRACTED, MISSING, VERIFIED, or CONFLICT as normalized_value; those are status labels, not field values.",
         ],
+        "field_specific_boundaries": {
+            "shipping_vs_other_fees": (
+                "Additional Fees, Other Charges, or Fees Note applies only to other fees unless its text explicitly "
+                "mentions shipping, freight, delivery charge, or logistics. If no shipping term exists, both shipping "
+                "fields are MISSING with no citation; do not reuse a None value from another-fees evidence."
+            ),
+            "price_basis_vs_order_increment": (
+                "Order Increment and Minimum Qty do not establish the price basis. Never cite either column for "
+                "price_basis_quantity or price_basis_unit. For Each Price=6.80 plus Supply Form=Individual pieces, "
+                "cite the Each Price and Supply Form cells, normalize quantity to 1 with unit piece, and normalize "
+                "the basis unit to piece."
+            ),
+            "start_event": (
+                "Do not normalize PO receipt, confirmed purchase order, or confirmed PO date to ORDER_DATE. If the "
+                "document does not explicitly say order date and no canonical enum is supported, return CONFLICT with "
+                "normalized_value null and cite the complete start-event phrase."
+            ),
+        },
         "normalization_examples": [
             {"field_name": "currency", "raw_value": "S$", "normalized_value": "SGD"},
             {"field_name": "condition", "raw_value": "New product", "normalized_value": "NEW"},
@@ -451,6 +487,77 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
                 "field_name": "shipping_fee_status",
                 "raw_value": "Shipping fee S$500.00",
                 "normalized_value": "KNOWN_AMOUNT",
+            },
+        ],
+        "unit_examples": [
+            {"field_name": "unit_price", "normalized_value": "6.80", "unit": "SGD"},
+            {"field_name": "price_basis_quantity", "normalized_value": "1", "unit": "piece"},
+            {"field_name": "units_per_pack", "normalized_value": "100", "unit": "piece"},
+            {"field_name": "moq_quantity", "normalized_value": "10", "unit": "tray"},
+            {"field_name": "lead_time_days", "normalized_value": "3", "unit": "calendar_day"},
+        ],
+        "cross_field_examples": [
+            {
+                "inputs": {"Currency": "S$", "Additional Fees": "None"},
+                "outputs": {
+                    "shipping_fee_status": {
+                        "validation_status": "MISSING",
+                        "normalized_value": None,
+                        "unit": None,
+                    },
+                    "shipping_fee_amount": {
+                        "validation_status": "MISSING",
+                        "normalized_value": None,
+                        "unit": None,
+                    },
+                    "other_fees_status": {"normalized_value": "NOT_APPLICABLE", "unit": None},
+                    "other_fees_amount": {"normalized_value": "0.00", "unit": "SGD"},
+                },
+            },
+            {
+                "inputs": {
+                    "Each Price": "6.80",
+                    "Supply Form": "Individual pieces",
+                    "Order Increment": "1 piece",
+                },
+                "outputs": {
+                    "price_basis_quantity": {
+                        "normalized_value": "1",
+                        "unit": "piece",
+                        "cite_columns": ["Each Price", "Supply Form"],
+                    },
+                    "price_basis_unit": {
+                        "normalized_value": "piece",
+                        "unit": None,
+                        "cite_columns": ["Each Price", "Supply Form"],
+                    },
+                    "order_multiple_units": {
+                        "normalized_value": "1",
+                        "unit": "piece",
+                        "cite_columns": ["Order Increment"],
+                    },
+                },
+            },
+            {
+                "inputs": {
+                    "Price": "S$640.00 per tray",
+                    "Packaging": "100 pieces per tray; full trays only",
+                },
+                "outputs": {
+                    "unit_price": {"normalized_value": "640.00", "unit": "SGD"},
+                    "price_basis_quantity": {
+                        "normalized_value": "100",
+                        "unit": "piece",
+                        "cite_columns": ["Price", "Packaging"],
+                    },
+                    "price_basis_unit": {
+                        "normalized_value": "piece",
+                        "unit": None,
+                        "cite_columns": ["Price", "Packaging"],
+                    },
+                    "packaging_type": {"normalized_value": "tray", "unit": None},
+                    "units_per_pack": {"normalized_value": "100", "unit": "piece"},
+                },
             },
         ],
         "status_shapes": {

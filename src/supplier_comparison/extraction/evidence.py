@@ -5,13 +5,33 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from .contracts import ParsedInput, QuoteFieldCandidate, ValidationStatus
+from .contracts import EvidenceSource, ParsedInput, QuoteFieldCandidate, ValidationStatus
 from .dictionary import QuoteDictionary
 from .errors import EvidenceValidationError
 
 
+SHIPPING_FIELDS = frozenset({"shipping_fee_status", "shipping_fee_amount"})
+PRICE_BASIS_FIELDS = frozenset({"price_basis_quantity", "price_basis_unit"})
+SHIPPING_SOURCE_PATTERN = re.compile(
+    r"\b(?:shipping|freight|logistics)\b|\bdelivery\s+charge\b",
+    re.IGNORECASE,
+)
+ORDER_CONSTRAINT_PATTERN = re.compile(
+    r"\b(?:order\s+increment|minimum\s+(?:qty|quantity|order)|moq)\b",
+    re.IGNORECASE,
+)
+
+
 def _normalized_whitespace(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _source_context(source: EvidenceSource) -> str:
+    return " ".join(
+        value
+        for value in (source.column_name, source.raw_text)
+        if value is not None
+    )
 
 
 def validate_candidates(
@@ -45,6 +65,17 @@ def validate_candidates(
             )
         if candidate.validation_status == ValidationStatus.MISSING:
             continue
+        if (
+            candidate.validation_status == ValidationStatus.CONFLICT
+            and isinstance(candidate.normalized_value, str)
+            and candidate.normalized_value.upper() in {status.value for status in ValidationStatus}
+        ):
+            raise EvidenceValidationError(
+                "candidate_status_placeholder_invalid",
+                f"candidate {candidate.field_name} uses a status label as its normalized value",
+                field_name=candidate.field_name,
+                normalized_value=candidate.normalized_value,
+            )
         definition = dictionary.fields[candidate.field_name]
         allowed_values = definition.allowed_normalized_values
         if allowed_values is not None and candidate.normalized_value not in allowed_values:
@@ -55,6 +86,7 @@ def validate_candidates(
                 normalized_value=candidate.normalized_value,
                 allowed_values=list(allowed_values),
             )
+        cited_sources = []
         for citation in candidate.source_refs:
             source = source_map.get(citation.source_id)
             if source is None:
@@ -73,3 +105,22 @@ def validate_candidates(
                     field_name=candidate.field_name,
                     source_id=citation.source_id,
                 )
+            cited_sources.append(source)
+        if candidate.field_name in SHIPPING_FIELDS and not any(
+            SHIPPING_SOURCE_PATTERN.search(_source_context(source)) for source in cited_sources
+        ):
+            raise EvidenceValidationError(
+                "source_semantic_mismatch",
+                f"candidate {candidate.field_name} lacks shipping-specific evidence",
+                field_name=candidate.field_name,
+                required_source_semantics="shipping, freight, logistics, or delivery charge",
+            )
+        if candidate.field_name in PRICE_BASIS_FIELDS and any(
+            ORDER_CONSTRAINT_PATTERN.search(_source_context(source)) for source in cited_sources
+        ):
+            raise EvidenceValidationError(
+                "source_semantic_mismatch",
+                f"candidate {candidate.field_name} cites an order constraint as price-basis evidence",
+                field_name=candidate.field_name,
+                forbidden_source_semantics="order increment, minimum quantity/order, or MOQ",
+            )

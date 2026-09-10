@@ -1,8 +1,19 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from scripts.run_real_extraction import _context, _exit_code, _pdf_path, _profiled_csv_path
+from scripts.run_real_extraction import (
+    _context,
+    _exit_code,
+    _pdf_path,
+    _profiled_csv_path,
+    _run_supplier,
+)
+from supplier_comparison.extraction.adapters import ModelCallBudget, OpenAICompatibleConfig
+from supplier_comparison.extraction.contracts import AdapterEnvironment
+from supplier_comparison.extraction.errors import AdapterError
 
 
 @pytest.mark.parametrize("alias", ("A", "B", "C"))
@@ -36,3 +47,34 @@ def test_v2_real_runner_builds_profiled_csv_paths(alias: str) -> None:
     assert path.parent.name == "quote_V2"
     assert path.is_file()
     assert context.document_id.endswith("-V2-CSV")
+
+
+def test_real_runner_failure_is_explicitly_unscored(monkeypatch, quote_dictionary, tmp_path) -> None:
+    def fail_extract(*args, **kwargs):
+        del args, kwargs
+        raise AdapterError("model_test_failure", "synthetic failure")
+
+    monkeypatch.setattr("scripts.run_real_extraction.extract_quote_candidates", fail_extract)
+    output = tmp_path / "failed.json"
+    config = OpenAICompatibleConfig(
+        provider="local-test",
+        model_id="test-model",
+        base_url="http://127.0.0.1:9999/v1",
+        environment=AdapterEnvironment.LOCAL,
+    )
+
+    code, summary = _run_supplier(
+        "B",
+        "V2",
+        "csv",
+        output,
+        config,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-UNSCORED"),
+    )
+
+    assert code == 1
+    assert summary["status"] == "FAILED"
+    record = json.loads(output.read_text(encoding="utf-8"))
+    assert record["scoring_status"] == "UNSCORED"
+    assert "A-approved reference" in record["scoring_note"]
