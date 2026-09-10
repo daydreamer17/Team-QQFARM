@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 
 from .contracts import NormalizationEvent
@@ -10,8 +11,13 @@ from .model_payload import ModelExtractionPayload, ModelFieldCandidate
 
 SGD_FEE_SCALE_RULE = "sgd-fee-amount-2dp/1.0.0"
 CONFLICT_STATUS_PLACEHOLDER_RULE = "conflict-status-placeholder-null/1.0.0"
+PAYMENT_TERMS_NET_DAYS_RULE = "payment-terms-net-days/1.0.0"
 FEE_AMOUNT_FIELDS = frozenset({"shipping_fee_amount", "other_fees_amount"})
 STATUS_LABELS = frozenset({"EXTRACTED", "VERIFIED", "MISSING", "CONFLICT"})
+NET_DAYS_PATTERN = re.compile(
+    r"^(?:N|NET\s*)(?P<days>\d{1,3})(?:\s*[-:–—]\s*.*)?$",
+    re.IGNORECASE,
+)
 
 
 def normalize_model_payload(
@@ -31,6 +37,27 @@ def normalize_model_payload(
     events: list[NormalizationEvent] = []
     for candidate in payload.candidates:
         value = candidate.normalized_value
+        if (
+            candidate.field_name == "payment_terms"
+            and candidate.validation_status == "EXTRACTED"
+            and isinstance(value, str)
+        ):
+            match = NET_DAYS_PATTERN.fullmatch(value.strip())
+            if match is not None:
+                formatted = f"Net {int(match.group('days'))}"
+                normalized_candidates.append(
+                    candidate.model_copy(update={"normalized_value": formatted})
+                )
+                if formatted != value:
+                    events.append(
+                        NormalizationEvent(
+                            field_name=candidate.field_name,
+                            input_value=value,
+                            output_value=formatted,
+                            rule_id=PAYMENT_TERMS_NET_DAYS_RULE,
+                        )
+                    )
+                continue
         if (
             candidate.validation_status == "CONFLICT"
             and isinstance(value, str)

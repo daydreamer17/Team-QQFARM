@@ -5,6 +5,7 @@ import pytest
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
 from supplier_comparison.extraction.normalization import (
     CONFLICT_STATUS_PLACEHOLDER_RULE,
+    PAYMENT_TERMS_NET_DAYS_RULE,
     SGD_FEE_SCALE_RULE,
     normalize_model_payload,
 )
@@ -95,3 +96,58 @@ def test_conflict_status_placeholder_is_normalized_to_null() -> None:
     assert events[0].input_value == "CONFLICT"
     assert events[0].output_value is None
     assert events[0].rule_id == CONFLICT_STATUS_PLACEHOLDER_RULE
+
+
+@pytest.mark.parametrize(
+    ("input_value", "expected"),
+    (
+        ("N30 - payment due 30 days after invoice", "Net 30"),
+        ("Net30", "Net 30"),
+        ("NET 45", "Net 45"),
+    ),
+)
+def test_net_day_payment_terms_are_normalized(input_value: str, expected: str) -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "payment_terms",
+                    "raw_value": input_value,
+                    "normalized_value": input_value,
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [{"source_id": "SRC-PAYMENT", "quoted_text": input_value}],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    assert normalized.candidates[0].normalized_value == expected
+    assert len(events) == 1
+    assert events[0].rule_id == PAYMENT_TERMS_NET_DAYS_RULE
+
+
+def test_non_net_payment_terms_are_preserved() -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "payment_terms",
+                    "raw_value": "100% before dispatch",
+                    "normalized_value": "100% before dispatch",
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [
+                        {"source_id": "SRC-PAYMENT", "quoted_text": "100% before dispatch"}
+                    ],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    assert normalized == payload
+    assert events == ()

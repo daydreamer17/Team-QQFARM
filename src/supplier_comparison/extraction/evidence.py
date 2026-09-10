@@ -13,7 +13,7 @@ from .errors import EvidenceValidationError
 SHIPPING_FIELDS = frozenset({"shipping_fee_status", "shipping_fee_amount"})
 PRICE_BASIS_FIELDS = frozenset({"price_basis_quantity", "price_basis_unit"})
 SHIPPING_SOURCE_PATTERN = re.compile(
-    r"\b(?:shipping|freight|logistics)\b|\bdelivery\s+charge\b",
+    r"\b(?:shipping|freight|logistics)\b|\bdelivery\s+(?:charge|fee)\b",
     re.IGNORECASE,
 )
 ORDER_CONSTRAINT_PATTERN = re.compile(

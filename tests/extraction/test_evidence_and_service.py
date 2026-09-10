@@ -254,6 +254,39 @@ def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:
     assert raised.value.details["field_name"] == "shipping_fee_status"
 
 
+def test_delivery_fee_evidence_can_support_shipping_amount(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(
+        quote_path("d", version=3),
+        context_for("d", version=3),
+    )
+    payload = _all_missing_payload(quote_dictionary)
+    source = next(source for source in parsed.sources if "Delivery fee SGD 0.00" in source.raw_text)
+    field_index = next(
+        index
+        for index, field in enumerate(quote_dictionary.extractable_fields)
+        if field.field_name == "shipping_fee_amount"
+    )
+    payload["candidates"][field_index] = {
+        "field_name": "shipping_fee_amount",
+        "raw_value": "SGD 0.00",
+        "normalized_value": "0.00",
+        "unit": "SGD",
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": source.source_id, "quoted_text": "SGD 0.00"}],
+    }
+
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: payload}),
+        ModelCallBudget(graph_run_id="GRAPH-DELIVERY-FEE-SEMANTICS"),
+        "EXTRACT-DELIVERY-FEE-SEMANTICS",
+    )
+
+    amount = next(item for item in batch.candidates if item.field_name == "shipping_fee_amount")
+    assert amount.normalized_value == "0.00"
+
+
 def test_order_increment_evidence_cannot_support_price_basis(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         quote_path("b", version=2),
