@@ -16,7 +16,7 @@ def test_v2_real_runner_builds_versioned_jobs(alias: str) -> None:
     assert context.task_revision == 2
     assert context.quote_version == 2
     assert context.document_version == 2
-    assert context.document_id.endswith("-V2")
+    assert context.document_id.endswith("-V2-PDF")
 
 
 def test_real_runner_preserves_v1_paths_and_exit_precedence() -> None:
@@ -30,7 +30,9 @@ def test_real_runner_preserves_v1_paths_and_exit_precedence() -> None:
 @pytest.mark.parametrize("alias", ("A", "B", "C"))
 def test_v2_real_runner_builds_profiled_csv_paths(alias: str) -> None:
     path = _profiled_csv_path("V2", alias)
+    context = _context("V2", alias, input_format="csv")
 
     assert path.name == f"supplier_{alias.lower()}_quote_v2.csv"
     assert path.parent.name == "quote_V2"
     assert path.is_file()
+    assert context.document_id.endswith("-V2-CSV")

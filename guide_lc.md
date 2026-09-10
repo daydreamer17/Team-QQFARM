@@ -138,6 +138,8 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 真实提取脚本 | [`run_real_extraction.py`](scripts/run_real_extraction.py) | 分别运行 A／B／C 合成 PDF | 指定 `--supplier` 和 `--output` |
 | 开发验收脚本 | [`evaluate_development_extractions.py`](scripts/evaluate_development_extractions.py) | 按确认口径对照 90 个字段 | 设置 `PYTHONPATH=src` 后运行 |
 | 参考答案校验器 | [`validate_extraction_reference.py`](scripts/validate_extraction_reference.py) | 校验字段全集、A 批准状态、输入路径和文件哈希 | 正式计分时增加 `--require-approved` |
+| V2 参考迁移器 | [`migrate_v2_system_evidence.py`](scripts/migrate_v2_system_evidence.py) | 将 A 的旧版 B-CSV 示例迁移为非权威草稿 | 迁移后仍需 A 补齐并批准 |
+| V2 B-CSV 参考草稿 | [`mcu_demo_001_v2_supplier_b_csv_draft.json`](evaluation/reference/mcu_demo_001_v2_supplier_b_csv_draft.json) | 30 字段中 13 个有待复核期望、17 个未复核 | 不得用于正式计分 |
 | V2 开发输入 | [`quote_V2/`](data/generated/inputs/development/quote_V2/) | 三家不同版式报价及采购需求的 PDF/CSV | 报价 PDF 和已登记的异构 CSV 可进入统一模型边界 |
 | 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
 | 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
@@ -150,7 +152,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 
 事实：
 
-- 首版测试为 34 项通过；加入 V2 PDF、CSV profile 和参考答案校验后为 58 项通过、0 项失败。
+- 首版测试为 34 项通过；加入 V2 PDF、CSV profile、参考迁移和校验后为 60 项通过、0 项失败。
 - 三份开发 PDF 都完成了真实本地模型调用，每份最终记录均为 1 次调用、0 次重试。
 - A 为 30／30，B 按已确认 PDF 口径及 Decimal 比较为 30／30，C 为 29／30；合计 89／90，字段匹配率为 0.9889。
 - B 的运费保持 `MISSING/null/无来源`；包装方式和每包数量按确认口径保持非阻塞缺失。

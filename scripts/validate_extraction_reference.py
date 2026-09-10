@@ -35,7 +35,7 @@ class FrozenReferenceModel(BaseModel):
 
 class ReferenceField(FrozenReferenceModel):
     field_name: str = Field(min_length=1)
-    expected_status: Literal["EXTRACTED", "MISSING", "CONFLICT"]
+    expected_status: Literal["EXTRACTED", "MISSING", "CONFLICT"] | None = None
     expected_raw_values: tuple[NonEmptyString, ...] = ()
     expected_normalized_value: ExpectedScalar | None = None
     expected_unit: NonEmptyString | None = None
@@ -45,6 +45,15 @@ class ReferenceField(FrozenReferenceModel):
 
     @model_validator(mode="after")
     def expected_shape_matches_status(self) -> "ReferenceField":
+        if self.expected_status is None:
+            if (
+                self.expected_raw_values
+                or self.expected_normalized_value is not None
+                or self.expected_unit is not None
+                or self.semantic_evidence
+            ):
+                raise ValueError("unreviewed reference fields must not contain expected values or evidence")
+            return self
         if self.expected_status == "MISSING":
             if (
                 self.expected_raw_values
@@ -87,6 +96,10 @@ class DocumentReference(FrozenReferenceModel):
             raise ValueError("reference field names must be unique within a document")
         if self.review_status == "A_APPROVED" and not (self.reviewed_by or "").strip():
             raise ValueError("A_APPROVED references require reviewed_by")
+        if self.review_status == "A_APPROVED" and any(
+            field.expected_status is None for field in self.fields
+        ):
+            raise ValueError("A_APPROVED references cannot contain unreviewed fields")
         return self
 
 

@@ -69,6 +69,9 @@ def _write_reference(tmp_path, payload: dict):
 
 
 def test_reference_field_status_controls_value_and_evidence_shape() -> None:
+    unreviewed = ReferenceField(field_name="packaging_type")
+    assert unreviewed.expected_status is None
+
     missing = ReferenceField(field_name="shipping_fee_amount", expected_status="MISSING")
     assert missing.expected_normalized_value is None
 
@@ -83,6 +86,12 @@ def test_reference_field_status_controls_value_and_evidence_shape() -> None:
             field_name="shipping_fee_amount",
             expected_status="EXTRACTED",
             expected_normalized_value="0.00",
+        )
+    with pytest.raises(ValidationError):
+        ReferenceField(
+            field_name="packaging_type",
+            expected_status=None,
+            expected_normalized_value="piece",
         )
 
 
@@ -115,6 +124,20 @@ def test_reference_requires_the_complete_dictionary_field_set(quote_dictionary, 
             DATA_ROOT / "contracts" / "quote_data_field.csv",
         )
     assert raised.value.code == "reference_field_set_mismatch"
+
+
+def test_a_approved_reference_cannot_contain_unreviewed_fields(quote_dictionary, tmp_path) -> None:
+    payload = _reference_payload(quote_dictionary)
+    payload["documents"][0]["review_status"] = "A_APPROVED"
+    payload["documents"][0]["reviewed_by"] = "member-a"
+    payload["documents"][0]["fields"][0]["expected_status"] = None
+
+    with pytest.raises(ContractError) as raised:
+        validate_reference_set(
+            _write_reference(tmp_path, payload),
+            DATA_ROOT / "contracts" / "quote_data_field.csv",
+        )
+    assert raised.value.code == "reference_invalid"
 
 
 def test_reference_is_bound_to_the_exact_input_hash(quote_dictionary, tmp_path) -> None:

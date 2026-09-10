@@ -45,15 +45,20 @@ def _profiled_csv_path(dataset_version: str, supplier_alias: str) -> Path:
     return supplier_quote_path(DEVELOPMENT_ROOT, dataset_version, supplier_alias, "csv")
 
 
-def _context(dataset_version: str, supplier_alias: str) -> DocumentContext:
+def _context(
+    dataset_version: str,
+    supplier_alias: str,
+    input_format: str = "pdf",
+) -> DocumentContext:
     version = DATASET_VERSIONS[dataset_version]
+    document_suffix = "" if version == 1 and input_format == "pdf" else f"-{input_format.upper()}"
     return DocumentContext(
         task_id="TASK-MCU-DEMO-001-LOCAL-MODEL-TEST",
         task_revision=version,
         scenario_id="MCU-DEMO-001",
         quote_id=f"QUOTE-MCU-DEMO-001-{supplier_alias}",
         quote_version=version,
-        document_id=f"DOC-MCU-DEMO-001-{supplier_alias}-V{version}",
+        document_id=f"DOC-MCU-DEMO-001-{supplier_alias}-V{version}{document_suffix}",
         document_version=version,
         supplier_id=SUPPLIERS[supplier_alias],
     )
@@ -76,7 +81,7 @@ def _run_supplier(
         else _profiled_csv_path(dataset_version, supplier_alias)
     )
     try:
-        context = _context(dataset_version, supplier_alias)
+        context = _context(dataset_version, supplier_alias, input_format)
         parsed = (
             PdfQuoteParser().parse(input_path, context)
             if input_format == "pdf"
