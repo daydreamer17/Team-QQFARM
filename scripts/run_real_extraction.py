@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run selected synthetic development PDFs through the configured real model API."""
+"""Run selected synthetic development quote inputs through the configured real model API."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from supplier_comparison.extraction.adapters import (
     OpenAICompatibleConfig,
 )
 from supplier_comparison.extraction.contracts import DocumentContext, ValidationStatus
+from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.errors import ExtractionError
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
@@ -42,6 +43,15 @@ def _pdf_path(dataset_version: str, supplier_alias: str) -> Path:
     return directory / f"supplier_{supplier_alias.lower()}_quote_v{version}.pdf"
 
 
+def _profiled_csv_path(dataset_version: str, supplier_alias: str) -> Path:
+    version = DATASET_VERSIONS[dataset_version]
+    return (
+        DEVELOPMENT_ROOT
+        / f"quote_V{version}"
+        / f"supplier_{supplier_alias.lower()}_quote_v{version}.csv"
+    )
+
+
 def _context(dataset_version: str, supplier_alias: str) -> DocumentContext:
     version = DATASET_VERSIONS[dataset_version]
     return DocumentContext(
@@ -59,6 +69,7 @@ def _context(dataset_version: str, supplier_alias: str) -> DocumentContext:
 def _run_supplier(
     supplier_alias: str,
     dataset_version: str,
+    input_format: str,
     output_path: Path,
     config: OpenAICompatibleConfig,
     dictionary: QuoteDictionary,
@@ -66,10 +77,23 @@ def _run_supplier(
 ) -> tuple[int, dict]:
     started_at = datetime.now(timezone.utc)
     calls_before = budget.calls_used
-    input_path = _pdf_path(dataset_version, supplier_alias)
+    input_path = (
+        _pdf_path(dataset_version, supplier_alias)
+        if input_format == "pdf"
+        else _profiled_csv_path(dataset_version, supplier_alias)
+    )
     try:
         context = _context(dataset_version, supplier_alias)
-        parsed = PdfQuoteParser().parse(input_path, context)
+        parsed = (
+            PdfQuoteParser().parse(input_path, context)
+            if input_format == "pdf"
+            else ProfiledCsvQuoteParser().parse_row(
+                input_path,
+                context,
+                2,
+                profile_id=f"v2_supplier_{supplier_alias.lower()}",
+            )
+        )
         extraction_run_id = f"extract_local_{uuid4().hex}"
         batch = extract_quote_candidates(
             parsed,
@@ -108,6 +132,7 @@ def _run_supplier(
             "environment": "LOCAL",
             "input_is_synthetic": True,
             "dataset_version": dataset_version,
+            "input_format": input_format,
             "correction_state": "PRE_CORRECTION",
             "status": "PASSED" if all_checks_passed else "FAILED_OUTPUT_QUALITY",
             "checks": checks,
@@ -117,6 +142,7 @@ def _run_supplier(
         summary = {
             "supplier": supplier_alias,
             "dataset_version": dataset_version,
+            "input_format": input_format,
             "status": record["status"],
             "output": str(output_path),
             "calls_used_for_supplier": budget.calls_used - calls_before,
@@ -134,6 +160,7 @@ def _run_supplier(
             "environment": "LOCAL",
             "input_is_synthetic": True,
             "dataset_version": dataset_version,
+            "input_format": input_format,
             "correction_state": "PRE_CORRECTION",
             "status": "FAILED",
             "input": str(input_path),
@@ -148,6 +175,7 @@ def _run_supplier(
         summary = {
             "supplier": supplier_alias,
             "dataset_version": dataset_version,
+            "input_format": input_format,
             "status": "FAILED",
             "output": str(output_path),
             "error_code": exc.code,
@@ -172,9 +200,13 @@ def main() -> int:
     target.add_argument("--supplier", choices=sorted(SUPPLIERS))
     target.add_argument("--all-suppliers", action="store_true")
     parser.add_argument("--dataset-version", choices=sorted(DATASET_VERSIONS), default="V1")
+    parser.add_argument("--input-format", choices=("pdf", "csv"), default="pdf")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--output-dir", type=Path)
     args = parser.parse_args()
+
+    if args.input_format == "csv" and args.dataset_version != "V2":
+        parser.error("--input-format csv currently requires --dataset-version V2")
 
     if args.all_suppliers:
         if args.output_dir is None or args.output is not None:
@@ -183,7 +215,10 @@ def main() -> int:
             (
                 alias,
                 args.output_dir
-                / f"{args.dataset_version.lower()}_supplier_{alias.lower()}_pre_correction.json",
+                / (
+                    f"{args.dataset_version.lower()}_{args.input_format}_supplier_"
+                    f"{alias.lower()}_pre_correction.json"
+                ),
             )
             for alias in sorted(SUPPLIERS)
         ]
@@ -196,7 +231,15 @@ def main() -> int:
     dictionary = QuoteDictionary.load(REPO_ROOT / "data/contracts/quote_data_field.csv")
     budget = ModelCallBudget(graph_run_id=f"graph_local_{uuid4().hex}")
     results = [
-        _run_supplier(alias, args.dataset_version, output, config, dictionary, budget)
+        _run_supplier(
+            alias,
+            args.dataset_version,
+            args.input_format,
+            output,
+            config,
+            dictionary,
+            budget,
+        )
         for alias, output in jobs
     ]
     codes = [code for code, _summary in results]
@@ -213,6 +256,7 @@ def main() -> int:
                 {
                     "status": batch_status,
                     "dataset_version": args.dataset_version,
+                    "input_format": args.input_format,
                     "suppliers_run": len(results),
                     "calls_used": budget.calls_used,
                     "results": [summary for _code, summary in results],

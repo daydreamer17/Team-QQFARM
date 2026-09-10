@@ -1,9 +1,11 @@
-"""Strict parser for A's frozen Week 1 canonical CSV template."""
+"""Strict canonical CSV parsing and explicit heterogeneous CSV source profiles."""
 
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from .contracts import (
     CandidateProducer,
@@ -23,6 +25,7 @@ from .files import FileLimits, require_csv_shape, stable_id, validate_regular_fi
 
 
 PARSER_VERSION = "fixed-csv/1.0.0"
+PROFILED_PARSER_VERSION = "profiled-csv/1.0.0"
 
 FROZEN_CSV_COLUMNS = (
     "scenario_id", "quote_id", "quote_version", "document_id", "supplier_alias", "supplier_id",
@@ -34,6 +37,51 @@ FROZEN_CSV_COLUMNS = (
     "start_date", "delivery_location", "payment_terms", "quote_date", "valid_until", "source_po_id",
     "is_synthetic",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CsvSourceProfile:
+    """An explicitly selected CSV header contract that produces evidence only."""
+
+    profile_id: str
+    version: str
+    columns: tuple[str, ...]
+
+    @property
+    def parser_version(self) -> str:
+        return f"{PROFILED_PARSER_VERSION}:{self.profile_id}/{self.version}"
+
+
+V2_CSV_PROFILES = {
+    "v2_supplier_a": CsvSourceProfile(
+        profile_id="v2_supplier_a",
+        version="1.0.0",
+        columns=(
+            "Quotation No.", "Vendor", "Country", "Product Category", "Item Description",
+            "Maker", "Mfr P/N", "Device Package", "Device Rev", "Condition", "Price Offer",
+            "Pack Configuration", "Minimum Order", "Freight", "Other Charges", "Tax Treatment",
+            "Delivery Promise", "Payment", "Quote Date", "Valid To",
+        ),
+    ),
+    "v2_supplier_b": CsvSourceProfile(
+        profile_id="v2_supplier_b",
+        version="1.0.0",
+        columns=(
+            "Response Ref", "Supplier", "Product Description", "Brand", "Part No.", "Case",
+            "Version", "Item Status", "Currency", "Each Price", "Minimum Qty", "Supply Form",
+            "Order Increment", "Additional Fees", "Tax", "Lead Time", "Validity",
+        ),
+    ),
+    "v2_supplier_c": CsvSourceProfile(
+        profile_id="v2_supplier_c",
+        version="1.0.0",
+        columns=(
+            "Offer ID", "Seller", "Product", "MPN", "Package/Revision", "Condition", "Rate",
+            "Packing", "MOQ", "Logistics Charge", "Fees Note", "Tax Basis", "Delivery",
+            "Pay Terms", "Issued", "Offer Expiry",
+        ),
+    ),
+}
 
 
 def _normalize(raw_value: str, definition: QuoteFieldDefinition) -> str | int:
@@ -203,3 +251,120 @@ class FixedCsvQuoteParser:
                 row_number=row_number,
                 mismatches=mismatches,
             )
+
+
+class ProfiledCsvQuoteParser:
+    """Parse a known heterogeneous CSV row into sources for the model adapter."""
+
+    def __init__(
+        self,
+        profiles: Mapping[str, CsvSourceProfile] | None = None,
+        limits: FileLimits | None = None,
+    ) -> None:
+        self.profiles = dict(V2_CSV_PROFILES if profiles is None else profiles)
+        self.limits = limits or FileLimits()
+
+    def parse_row(
+        self,
+        path: str | Path,
+        context: DocumentContext,
+        row_number: int,
+        *,
+        profile_id: str,
+    ) -> ParsedInput:
+        if row_number < 2:
+            raise ContractError("csv_row_invalid", "CSV data row numbers start at 2", row_number=row_number)
+        profile = self.profiles.get(profile_id)
+        if profile is None:
+            raise ContractError(
+                "csv_profile_unknown",
+                "CSV profile must be explicitly selected from the registered profiles",
+                profile_id=profile_id,
+                available_profiles=sorted(self.profiles),
+            )
+
+        csv_path, size, file_hash = validate_regular_file(path, self.limits)
+        require_csv_shape(csv_path)
+        try:
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                reader = csv.DictReader(handle)
+                actual_columns = tuple(reader.fieldnames or ())
+                if actual_columns != profile.columns:
+                    raise ContractError(
+                        "csv_profile_header_mismatch",
+                        "CSV header does not match the selected versioned profile",
+                        profile_id=profile.profile_id,
+                        profile_version=profile.version,
+                        expected=list(profile.columns),
+                        actual=list(actual_columns),
+                    )
+                selected: dict[str, str] | None = None
+                for current_row_number, row in enumerate(reader, start=2):
+                    if current_row_number != row_number:
+                        continue
+                    if row.get(None):
+                        raise ContractError(
+                            "csv_row_shape_invalid",
+                            "CSV row contains more cells than the selected profile",
+                            row_number=row_number,
+                            profile_id=profile.profile_id,
+                        )
+                    selected = {column: row.get(column) or "" for column in profile.columns}
+                    break
+        except UnicodeDecodeError as exc:
+            raise UnreadableInputError("csv_not_utf8", "CSV input must be UTF-8", path=str(csv_path)) from exc
+        except csv.Error as exc:
+            raise UnreadableInputError("csv_parse_failed", "CSV input is malformed", path=str(csv_path)) from exc
+
+        if selected is None:
+            raise ContractError("csv_row_missing", "requested CSV row does not exist", row_number=row_number)
+
+        sources: list[EvidenceSource] = []
+        for column_name in profile.columns:
+            raw_value = selected[column_name].strip()
+            if not raw_value:
+                continue
+            source_id = stable_id(
+                "src",
+                {
+                    "kind": SourceKind.CSV_CELL,
+                    "document_id": context.document_id,
+                    "document_version": context.document_version,
+                    "sha256": file_hash,
+                    "parser_version": profile.parser_version,
+                    "row": row_number,
+                    "column": column_name,
+                    "raw_text": raw_value,
+                },
+            )
+            sources.append(
+                EvidenceSource(
+                    source_id=source_id,
+                    kind=SourceKind.CSV_CELL,
+                    document_id=context.document_id,
+                    document_version=context.document_version,
+                    document_sha256=file_hash,
+                    parser_version=profile.parser_version,
+                    raw_text=raw_value,
+                    row_number=row_number,
+                    column_name=column_name,
+                )
+            )
+
+        if not sources:
+            raise ContractError(
+                "csv_row_empty",
+                "selected CSV row does not contain any non-empty cells",
+                row_number=row_number,
+                profile_id=profile.profile_id,
+            )
+
+        return ParsedInput(
+            context=context,
+            original_filename=csv_path.name,
+            media_type="text/csv",
+            file_size_bytes=size,
+            document_sha256=file_hash,
+            parser_version=profile.parser_version,
+            sources=tuple(sources),
+        )

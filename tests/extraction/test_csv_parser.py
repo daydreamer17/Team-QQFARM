@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from supplier_comparison.extraction.contracts import ValidationStatus
-from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
+from supplier_comparison.extraction.adapters import FixedOutputAdapter, ModelCallBudget
+from supplier_comparison.extraction.contracts import AdapterOutputMode, SourceKind, ValidationStatus
+from supplier_comparison.extraction.csv_parser import (
+    V2_CSV_PROFILES,
+    FixedCsvQuoteParser,
+    ProfiledCsvQuoteParser,
+)
 from supplier_comparison.extraction.errors import ContractError
+from supplier_comparison.extraction.service import extract_quote_candidates
 
 from .conftest import DATA_ROOT, context_for
 
 
 QUOTES_CSV = DATA_ROOT / "generated" / "inputs" / "development" / "quotes.csv"
+V2_DIR = DATA_ROOT / "generated" / "inputs" / "development" / "quote_V2"
 
 
 def _candidate(batch, field_name: str):
@@ -48,3 +55,80 @@ def test_supplier_variant_is_not_silently_accepted_as_fixed_template(quote_dicti
     with pytest.raises(ContractError) as raised:
         FixedCsvQuoteParser(quote_dictionary).parse_row(variant, context_for("a"), 2)
     assert raised.value.code == "csv_header_mismatch"
+
+
+@pytest.mark.parametrize("alias", ("a", "b", "c"))
+def test_v2_profiled_csv_rows_produce_stable_cell_sources(alias: str) -> None:
+    profile_id = f"v2_supplier_{alias}"
+    path = V2_DIR / f"supplier_{alias}_quote_v2.csv"
+    parser = ProfiledCsvQuoteParser()
+
+    first = parser.parse_row(path, context_for(alias, version=2), 2, profile_id=profile_id)
+    second = parser.parse_row(path, context_for(alias, version=2), 2, profile_id=profile_id)
+
+    assert first.document_sha256 == second.document_sha256
+    assert [source.source_id for source in first.sources] == [source.source_id for source in second.sources]
+    assert first.parser_version == V2_CSV_PROFILES[profile_id].parser_version
+    assert first.sources
+    assert all(source.kind == SourceKind.CSV_CELL for source in first.sources)
+    assert all(source.row_number == 2 and source.column_name for source in first.sources)
+
+
+def test_v2_profile_must_match_the_exact_registered_header() -> None:
+    with pytest.raises(ContractError) as raised:
+        ProfiledCsvQuoteParser().parse_row(
+            V2_DIR / "supplier_a_quote_v2.csv",
+            context_for("a", version=2),
+            2,
+            profile_id="v2_supplier_b",
+        )
+
+    assert raised.value.code == "csv_profile_header_mismatch"
+    assert raised.value.details["profile_id"] == "v2_supplier_b"
+
+
+def test_unknown_v2_profile_is_explicitly_rejected() -> None:
+    with pytest.raises(ContractError) as raised:
+        ProfiledCsvQuoteParser().parse_row(
+            V2_DIR / "supplier_a_quote_v2.csv",
+            context_for("a", version=2),
+            2,
+            profile_id="auto_detect",
+        )
+
+    assert raised.value.code == "csv_profile_unknown"
+
+
+def test_v2_profiled_csv_crosses_the_model_adapter_boundary(quote_dictionary) -> None:
+    parsed = ProfiledCsvQuoteParser().parse_row(
+        V2_DIR / "supplier_b_quote_v2.csv",
+        context_for("b", version=2),
+        2,
+        profile_id="v2_supplier_b",
+    )
+    payload = {
+        "candidates": [
+            {
+                "field_name": definition.field_name,
+                "raw_value": None,
+                "normalized_value": None,
+                "unit": None,
+                "validation_status": "MISSING",
+                "source_refs": [],
+            }
+            for definition in quote_dictionary.extractable_fields
+        ]
+    }
+    budget = ModelCallBudget(graph_run_id="GRAPH-V2-CSV-B")
+
+    batch = extract_quote_candidates(
+        parsed,
+        quote_dictionary,
+        FixedOutputAdapter({parsed.context.document_id: payload}),
+        budget,
+        "EXTRACT-V2-CSV-B",
+    )
+
+    assert len(batch.candidates) == 30
+    assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED
+    assert budget.calls_used == 0

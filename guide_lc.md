@@ -112,7 +112,9 @@ SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
 ```
 
 批量模式共享一个 `ModelCallBudget`，三家供应商的调用次数累计计算。V2 的异构 CSV
-目前仍会被固定模板解析器明确拒绝，尚未实现 CSV profile 适配。
+使用显式 profile 生成 `CSV_CELL` 来源后进入同一模型适配层；使用时在上述命令增加
+`--input-format csv`。V1 的固定宽表仍由 `FixedCsvQuoteParser` 确定性解析，未知 CSV
+模板继续被拒绝。
 
 重新生成开发字段对照：
 
@@ -127,6 +129,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 共享契约 | [`contracts.py`](src/supplier_comparison/extraction/contracts.py) | 来源、候选、批次、运行和归一化事件 | C/D 直接导入 Pydantic 类型 |
 | PDF 解析器 | [`pdf_parser.py`](src/supplier_comparison/extraction/pdf_parser.py) | 解析一种英文文本 PDF 开发版式 | 创建 `DocumentContext` 后调用 `PdfQuoteParser.parse` |
 | 固定 CSV 解析器 | [`csv_parser.py`](src/supplier_comparison/extraction/csv_parser.py) | 解析冻结宽表 CSV | 使用 `FixedCsvQuoteParser.parse_row` |
+| Profiled CSV 解析器 | [`csv_parser.py`](src/supplier_comparison/extraction/csv_parser.py) | 将三套已登记 V2 表头转换为带行列位置的来源 | 显式选择 `v2_supplier_a/b/c` 后调用 `ProfiledCsvQuoteParser.parse_row` |
 | 模型适配器 | [`adapters.py`](src/supplier_comparison/extraction/adapters.py) | 固定输出和真实 OpenAI-compatible 调用 | 传入配置、解析结果和 `ModelCallBudget` |
 | 模型载荷 Schema | [`model_payload.py`](src/supplier_comparison/extraction/model_payload.py) | 约束三种候选状态 | 由适配器自动生成 JSON Schema |
 | 来源与枚举校验 | [`evidence.py`](src/supplier_comparison/extraction/evidence.py) | 校验字段集合、来源、引用和费用状态 | 统一服务入口会自动调用 |
@@ -134,7 +137,8 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 | 统一提取入口 | [`service.py`](src/supplier_comparison/extraction/service.py) | 将模型载荷转换成公共 `ExtractionBatch` | 下游调用 `extract_quote_candidates` |
 | 真实提取脚本 | [`run_real_extraction.py`](scripts/run_real_extraction.py) | 分别运行 A／B／C 合成 PDF | 指定 `--supplier` 和 `--output` |
 | 开发验收脚本 | [`evaluate_development_extractions.py`](scripts/evaluate_development_extractions.py) | 按确认口径对照 90 个字段 | 设置 `PYTHONPATH=src` 后运行 |
-| V2 开发输入 | [`quote_V2/`](data/generated/inputs/development/quote_V2/) | 三家不同版式报价及采购需求的 PDF/CSV | PDF 可用于解析与模型开发；异构 CSV 尚未支持 |
+| 参考答案校验器 | [`validate_extraction_reference.py`](scripts/validate_extraction_reference.py) | 校验字段全集、A 批准状态、输入路径和文件哈希 | 正式计分时增加 `--require-approved` |
+| V2 开发输入 | [`quote_V2/`](data/generated/inputs/development/quote_V2/) | 三家不同版式报价及采购需求的 PDF/CSV | 报价 PDF 和已登记的异构 CSV 可进入统一模型边界 |
 | 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
 | 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
 | 字段验收报告 | [`DEVELOPMENT_PDF_FIELD_REVIEW.md`](evaluation/results/local/2026-09-10/DEVELOPMENT_PDF_FIELD_REVIEW.md) | A/B/C 逐字段矩阵和调用量 | 供 A 签字及 C/D 查看已知问题 |
@@ -146,7 +150,7 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 
 事实：
 
-- 首版测试为 34 项通过；选择性纳入 V2 并增加回归覆盖后为 45 项通过、0 项失败。
+- 首版测试为 34 项通过；加入 V2 PDF、CSV profile 和参考答案校验后为 58 项通过、0 项失败。
 - 三份开发 PDF 都完成了真实本地模型调用，每份最终记录均为 1 次调用、0 次重试。
 - A 为 30／30，B 按已确认 PDF 口径及 Decimal 比较为 30／30，C 为 29／30；合计 89／90，字段匹配率为 0.9889。
 - B 的运费保持 `MISSING/null/无来源`；包装方式和每包数量按确认口径保持非阻塞缺失。
