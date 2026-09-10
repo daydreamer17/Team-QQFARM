@@ -15,7 +15,7 @@ from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.model_payload import ModelFieldCandidate
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 MODEL_CANDIDATE_ADAPTER = TypeAdapter(ModelFieldCandidate)
@@ -119,7 +119,7 @@ def test_money_candidate_rejects_binary_float() -> None:
 
 def test_parsed_input_rejects_source_from_wrong_document_version() -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     wrong_version_source = parsed.sources[0].model_copy(update={"document_version": 2})

@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.development_data import canonical_quotes_csv_path
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
 from supplier_comparison.extraction.normalization import normalize_model_payload
 
@@ -24,7 +25,8 @@ DEFAULT_RESULTS = {
     / "evaluation/results/local/2026-09-10/deepseek_v4_flash_supplier_b_pre_correction_attempt3.json",
     "C": REPO_ROOT / "evaluation/results/local/2026-09-10/deepseek_v4_flash_supplier_c_pre_correction.json",
 }
-DEFAULT_REFERENCE = REPO_ROOT / "data/generated/inputs/development/quotes.csv"
+DEVELOPMENT_ROOT = REPO_ROOT / "data/generated/inputs/development"
+DEFAULT_REFERENCE = canonical_quotes_csv_path(DEVELOPMENT_ROOT, "V1")
 DEFAULT_OUTPUT = REPO_ROOT / "evaluation/results/local/2026-09-10/development_pdf_field_review.json"
 
 MODEL_CANDIDATE_KEYS = (

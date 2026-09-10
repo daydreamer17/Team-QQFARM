@@ -7,13 +7,13 @@ from supplier_comparison.extraction.errors import InputLimitError, UnreadableInp
 from supplier_comparison.extraction.files import FileLimits
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 def test_three_development_pdfs_produce_stable_positioned_sources() -> None:
     parser = PdfQuoteParser()
     for alias in ("a", "b", "c"):
-        path = DATA_ROOT / "generated" / "inputs" / "development" / f"supplier_{alias}_quote_v1.pdf"
+        path = quote_path(alias)
         first = parser.parse(path, context_for(alias))
         second = parser.parse(path, context_for(alias))
         assert first.document_sha256 == second.document_sha256
@@ -26,14 +26,7 @@ def test_three_development_pdfs_produce_stable_positioned_sources() -> None:
 
 @pytest.mark.parametrize("alias", ("a", "b", "c"))
 def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> None:
-    path = (
-        DATA_ROOT
-        / "generated"
-        / "inputs"
-        / "development"
-        / "quote_V2"
-        / f"supplier_{alias}_quote_v2.pdf"
-    )
+    path = quote_path(alias, version=2)
     parser = PdfQuoteParser()
     first = parser.parse(path, context_for(alias, version=2))
     second = parser.parse(path, context_for(alias, version=2))
@@ -47,7 +40,7 @@ def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> No
 
 
 def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
-    path = DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf"
+    path = quote_path("b")
     parsed = PdfQuoteParser().parse(path, context_for("b"))
     full_text = " ".join(source.raw_text for source in parsed.sources).lower()
     assert "shipping" not in full_text
@@ -56,14 +49,7 @@ def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
 
 
 def test_supplier_b_v2_pdf_preserves_shipping_omission() -> None:
-    path = (
-        DATA_ROOT
-        / "generated"
-        / "inputs"
-        / "development"
-        / "quote_V2"
-        / "supplier_b_quote_v2.pdf"
-    )
+    path = quote_path("b", version=2)
     parsed = PdfQuoteParser().parse(path, context_for("b", version=2))
     full_text = " ".join(source.raw_text for source in parsed.sources).lower()
 
@@ -81,14 +67,14 @@ def test_non_pdf_content_is_explicitly_rejected(tmp_path) -> None:
 
 
 def test_pdf_page_limit_is_enforced() -> None:
-    path = DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf"
+    path = quote_path("a")
     with pytest.raises(InputLimitError) as raised:
         PdfQuoteParser(FileLimits(max_pdf_pages=0)).parse(path, context_for("a"))
     assert raised.value.code == "pdf_page_limit_exceeded"
 
 
 def test_pdf_without_extractable_text_requires_manual_fallback(monkeypatch) -> None:
-    path = DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf"
+    path = quote_path("a")
     monkeypatch.setattr("supplier_comparison.extraction.pdf_parser._extract_lines", lambda page: ())
     with pytest.raises(UnreadableInputError) as raised:
         PdfQuoteParser().parse(path, context_for("a"))

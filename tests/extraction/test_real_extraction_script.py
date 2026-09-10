@@ -21,7 +21,7 @@ def test_v2_real_runner_builds_versioned_jobs(alias: str) -> None:
 
 def test_real_runner_preserves_v1_paths_and_exit_precedence() -> None:
     assert _pdf_path("V1", "A").name == "supplier_a_quote_v1.pdf"
-    assert _pdf_path("V1", "A").parent.name == "development"
+    assert _pdf_path("V1", "A").parent.name == "quote_V1"
     assert _exit_code([0, 0, 0]) == 0
     assert _exit_code([0, 2, 0]) == 2
     assert _exit_code([2, 1, 0]) == 1

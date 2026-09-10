@@ -8,7 +8,7 @@ from supplier_comparison.extraction.errors import EvidenceValidationError
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.service import extract_quote_candidates
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 def _all_missing_payload(quote_dictionary):
@@ -29,7 +29,7 @@ def _all_missing_payload(quote_dictionary):
 
 def test_fixed_adapter_is_explicit_and_does_not_consume_real_call_budget(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf",
+        quote_path("b"),
         context_for("b"),
     )
     payload = _all_missing_payload(quote_dictionary)
@@ -60,7 +60,7 @@ def test_fixed_adapter_is_explicit_and_does_not_consume_real_call_budget(quote_d
 @pytest.mark.parametrize("alias", ("a", "b", "c"))
 def test_all_three_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / f"supplier_{alias}_quote_v1.pdf",
+        quote_path(alias),
         context_for(alias),
     )
     budget = ModelCallBudget(graph_run_id=f"GRAPH-{alias.upper()}")
@@ -91,12 +91,7 @@ def test_all_three_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias
 @pytest.mark.parametrize("alias", ("a", "b", "c"))
 def test_all_three_v2_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT
-        / "generated"
-        / "inputs"
-        / "development"
-        / "quote_V2"
-        / f"supplier_{alias}_quote_v2.pdf",
+        quote_path(alias, version=2),
         context_for(alias, version=2),
     )
     budget = ModelCallBudget(graph_run_id=f"GRAPH-V2-{alias.upper()}")
@@ -117,7 +112,7 @@ def test_all_three_v2_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, al
 
 def test_unknown_model_source_id_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     payload = _all_missing_payload(quote_dictionary)
@@ -144,7 +139,7 @@ def test_unknown_model_source_id_is_rejected(quote_dictionary) -> None:
 
 def test_altered_display_quote_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     payload = _all_missing_payload(quote_dictionary)
@@ -171,7 +166,7 @@ def test_altered_display_quote_is_rejected(quote_dictionary) -> None:
 
 def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_c_quote_v1.pdf",
+        quote_path("c"),
         context_for("c"),
     )
     payload = _all_missing_payload(quote_dictionary)

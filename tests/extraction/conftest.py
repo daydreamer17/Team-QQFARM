@@ -5,11 +5,29 @@ from pathlib import Path
 import pytest
 
 from supplier_comparison.extraction.contracts import DocumentContext
+from supplier_comparison.extraction.development_data import (
+    canonical_quotes_csv_path,
+    development_dataset_dir,
+    supplier_quote_path,
+)
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO_ROOT / "data"
+DEVELOPMENT_ROOT = DATA_ROOT / "generated" / "inputs" / "development"
+
+
+def development_dir(version: int = 1) -> Path:
+    return development_dataset_dir(DEVELOPMENT_ROOT, f"V{version}")
+
+
+def quote_path(alias: str, version: int = 1, extension: str = "pdf") -> Path:
+    return supplier_quote_path(DEVELOPMENT_ROOT, f"V{version}", alias, extension)
+
+
+def quotes_csv_path(version: int = 1) -> Path:
+    return canonical_quotes_csv_path(DEVELOPMENT_ROOT, f"V{version}")
 
 
 @pytest.fixture(scope="session")

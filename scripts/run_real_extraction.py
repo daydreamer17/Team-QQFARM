@@ -16,6 +16,7 @@ from supplier_comparison.extraction.adapters import (
 )
 from supplier_comparison.extraction.contracts import DocumentContext, ValidationStatus
 from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser
+from supplier_comparison.extraction.development_data import DATASET_VERSIONS, supplier_quote_path
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.errors import ExtractionError
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
@@ -29,7 +30,6 @@ SUPPLIERS = {
     "B": "SUP-023",
     "C": "SUP-024",
 }
-DATASET_VERSIONS = {"V1": 1, "V2": 2}
 
 
 def _write_result(output_path: Path, payload: dict) -> None:
@@ -38,18 +38,11 @@ def _write_result(output_path: Path, payload: dict) -> None:
 
 
 def _pdf_path(dataset_version: str, supplier_alias: str) -> Path:
-    version = DATASET_VERSIONS[dataset_version]
-    directory = DEVELOPMENT_ROOT if version == 1 else DEVELOPMENT_ROOT / f"quote_V{version}"
-    return directory / f"supplier_{supplier_alias.lower()}_quote_v{version}.pdf"
+    return supplier_quote_path(DEVELOPMENT_ROOT, dataset_version, supplier_alias, "pdf")
 
 
 def _profiled_csv_path(dataset_version: str, supplier_alias: str) -> Path:
-    version = DATASET_VERSIONS[dataset_version]
-    return (
-        DEVELOPMENT_ROOT
-        / f"quote_V{version}"
-        / f"supplier_{supplier_alias.lower()}_quote_v{version}.csv"
-    )
+    return supplier_quote_path(DEVELOPMENT_ROOT, dataset_version, supplier_alias, "csv")
 
 
 def _context(dataset_version: str, supplier_alias: str) -> DocumentContext:

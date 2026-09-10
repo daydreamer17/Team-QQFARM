@@ -14,7 +14,7 @@ from supplier_comparison.extraction.contracts import AdapterEnvironment, Adapter
 from supplier_comparison.extraction.errors import AdapterError, ModelCallBudgetExceeded
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 class FakeResponse:
@@ -87,7 +87,7 @@ def test_transient_transport_failure_retries_with_a_bound(quote_dictionary) -> N
         return response
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_c_quote_v1.pdf",
+        quote_path("c"),
         context_for("c"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-RETRY")
@@ -118,7 +118,7 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
         return FakeResponse(_valid_response(quote_dictionary))
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf",
+        quote_path("b"),
         context_for("b"),
     )
     config = _config(max_attempts=1).model_copy(update={"max_tokens": 4096})
@@ -162,7 +162,7 @@ def test_restored_call_count_cannot_be_reset_by_retry(quote_dictionary) -> None:
         raise urllib.error.URLError("temporary")
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_c_quote_v1.pdf",
+        quote_path("c"),
         context_for("c"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-RESTORED", calls_used=7, max_calls=8)
@@ -178,7 +178,7 @@ def test_invalid_provider_envelope_is_not_retried(quote_dictionary) -> None:
         return FakeResponse(b"not-json")
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-FAIL")
@@ -226,7 +226,7 @@ def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(qu
         )
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf",
+        quote_path("b"),
         context_for("b"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-SCHEMA-FAIL")

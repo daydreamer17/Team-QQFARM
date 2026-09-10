@@ -12,11 +12,10 @@ from supplier_comparison.extraction.csv_parser import (
 from supplier_comparison.extraction.errors import ContractError
 from supplier_comparison.extraction.service import extract_quote_candidates
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path, quotes_csv_path
 
 
-QUOTES_CSV = DATA_ROOT / "generated" / "inputs" / "development" / "quotes.csv"
-V2_DIR = DATA_ROOT / "generated" / "inputs" / "development" / "quote_V2"
+QUOTES_CSV = quotes_csv_path()
 
 
 def _candidate(batch, field_name: str):
@@ -51,7 +50,7 @@ def test_csv_identity_is_checked_against_authority_context(quote_dictionary) -> 
 
 
 def test_supplier_variant_is_not_silently_accepted_as_fixed_template(quote_dictionary) -> None:
-    variant = DATA_ROOT / "generated" / "inputs" / "development" / "csv_variants" / "supplier_a_quote_v1.csv"
+    variant = quote_path("a", extension="csv")
     with pytest.raises(ContractError) as raised:
         FixedCsvQuoteParser(quote_dictionary).parse_row(variant, context_for("a"), 2)
     assert raised.value.code == "csv_header_mismatch"
@@ -60,7 +59,7 @@ def test_supplier_variant_is_not_silently_accepted_as_fixed_template(quote_dicti
 @pytest.mark.parametrize("alias", ("a", "b", "c"))
 def test_v2_profiled_csv_rows_produce_stable_cell_sources(alias: str) -> None:
     profile_id = f"v2_supplier_{alias}"
-    path = V2_DIR / f"supplier_{alias}_quote_v2.csv"
+    path = quote_path(alias, version=2, extension="csv")
     parser = ProfiledCsvQuoteParser()
 
     first = parser.parse_row(path, context_for(alias, version=2), 2, profile_id=profile_id)
@@ -77,7 +76,7 @@ def test_v2_profiled_csv_rows_produce_stable_cell_sources(alias: str) -> None:
 def test_v2_profile_must_match_the_exact_registered_header() -> None:
     with pytest.raises(ContractError) as raised:
         ProfiledCsvQuoteParser().parse_row(
-            V2_DIR / "supplier_a_quote_v2.csv",
+            quote_path("a", version=2, extension="csv"),
             context_for("a", version=2),
             2,
             profile_id="v2_supplier_b",
@@ -90,7 +89,7 @@ def test_v2_profile_must_match_the_exact_registered_header() -> None:
 def test_unknown_v2_profile_is_explicitly_rejected() -> None:
     with pytest.raises(ContractError) as raised:
         ProfiledCsvQuoteParser().parse_row(
-            V2_DIR / "supplier_a_quote_v2.csv",
+            quote_path("a", version=2, extension="csv"),
             context_for("a", version=2),
             2,
             profile_id="auto_detect",
@@ -101,7 +100,7 @@ def test_unknown_v2_profile_is_explicitly_rejected() -> None:
 
 def test_v2_profiled_csv_crosses_the_model_adapter_boundary(quote_dictionary) -> None:
     parsed = ProfiledCsvQuoteParser().parse_row(
-        V2_DIR / "supplier_b_quote_v2.csv",
+        quote_path("b", version=2, extension="csv"),
         context_for("b", version=2),
         2,
         profile_id="v2_supplier_b",
