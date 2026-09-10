@@ -5,6 +5,7 @@ import pytest
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
 from supplier_comparison.extraction.normalization import (
     CONFLICT_STATUS_PLACEHOLDER_RULE,
+    INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE,
     PAYMENT_TERMS_NET_DAYS_RULE,
     SGD_FEE_SCALE_RULE,
     normalize_model_payload,
@@ -151,3 +152,45 @@ def test_non_net_payment_terms_are_preserved() -> None:
 
     assert normalized == payload
     assert events == ()
+
+
+def test_included_fee_without_separate_amount_becomes_missing() -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "other_fees_status",
+                    "raw_value": "Included in the quoted line rate",
+                    "normalized_value": "INCLUDED",
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [
+                        {"source_id": "SRC-FEE-STATUS", "quoted_text": "Included"}
+                    ],
+                },
+                {
+                    "field_name": "other_fees_amount",
+                    "raw_value": "No separately stated amount",
+                    "normalized_value": None,
+                    "unit": None,
+                    "validation_status": "CONFLICT",
+                    "source_refs": [
+                        {
+                            "source_id": "SRC-FEE-AMOUNT",
+                            "quoted_text": "No separately stated amount",
+                        }
+                    ],
+                },
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    amount = next(item for item in normalized.candidates if item.field_name == "other_fees_amount")
+    assert amount.validation_status == "MISSING"
+    assert amount.raw_value is None
+    assert amount.normalized_value is None
+    assert amount.source_refs == ()
+    assert len(events) == 1
+    assert events[0].rule_id == INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE

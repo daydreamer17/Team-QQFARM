@@ -56,10 +56,12 @@ def extract_quote_candidates(
     try:
         validate_candidates(parsed_input, candidates, dictionary)
     except EvidenceValidationError as exc:
+        rejected_payload = result.model_payload_before_grounding or result.payload
         raise EvidenceValidationError(
             exc.code,
             str(exc),
             **exc.details,
+            rejected_model_payload=rejected_payload.model_dump(mode="json"),
             adapter_run=result.run.model_dump(mode="json"),
         ) from exc
     return ExtractionBatch(

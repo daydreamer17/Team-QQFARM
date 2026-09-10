@@ -70,6 +70,8 @@ def test_v3_evaluator_separates_document_and_conditional_field_rates(tmp_path: P
         "failed_documents": 1,
         "missing_documents": 8,
         "document_success_rate": "0.1000",
+        "prompt_versions": ["test/1"],
+        "mixed_prompt_versions": False,
         "passed_fields": 30,
         "scorable_fields": 30,
         "conditional_field_match_rate": "1.0000",

@@ -185,6 +185,8 @@ def test_altered_display_quote_is_rejected(quote_dictionary) -> None:
         )
     assert raised.value.code == "source_quote_mismatch"
     assert raised.value.details["adapter_run"]["output_mode"] == "FIXED"
+    rejected = raised.value.details["rejected_model_payload"]
+    assert rejected["candidates"][0]["source_refs"][0]["quoted_text"] == "fabricated snippet"
 
 
 def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:

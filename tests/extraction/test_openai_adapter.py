@@ -187,7 +187,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/1.6.0"
+    assert result.run.prompt_version == "quote-extraction/1.7.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
@@ -239,11 +239,99 @@ def test_pdf_prompt_includes_page_and_block_location_metadata(quote_dictionary) 
     prompt = json.loads(captured["messages"][1]["content"])
     first_source = prompt["sources"][0]
 
+    assert first_source["source_id"] == "S001"
     assert first_source["kind"] == "PDF_TEXT_BLOCK"
     assert first_source["page_number"] >= 1
     assert first_source["block_id"]
     assert "row_number" not in first_source
     assert "column_name" not in first_source
+
+
+def test_real_adapter_grounds_allowed_source_handle_to_authoritative_text(
+    quote_dictionary,
+) -> None:
+    captured = {}
+    parsed = PdfQuoteParser().parse(quote_path("a"), context_for("a"))
+    source = parsed.sources[0]
+    payload = json.loads(
+        _valid_response(quote_dictionary).decode("utf-8")
+    )["choices"][0]["message"]["content"]
+    payload = json.loads(payload)
+    payload["candidates"][0] = {
+        "field_name": quote_dictionary.extractable_fields[0].field_name,
+        "raw_value": source.raw_text,
+        "normalized_value": source.raw_text,
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": "S001", "quoted_text": "model paraphrase"}],
+    }
+    envelope = {
+        "id": "request-grounding-1",
+        "choices": [{"message": {"content": json.dumps(payload)}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(json.dumps(envelope).encode("utf-8"))
+
+    result = OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-SOURCE-HANDLE"),
+        "EXTRACT-SOURCE-HANDLE",
+    )
+
+    source_ref = result.payload.candidates[0].source_refs[0]
+    assert source_ref.source_id == source.source_id
+    assert source_ref.quoted_text == source.raw_text
+    assert result.model_payload_before_grounding is not None
+    assert result.model_payload_before_grounding.candidates[0].source_refs[0].source_id == "S001"
+    allowed = captured["response_format"]["json_schema"]["schema"]["$defs"][
+        "SourceCitation"
+    ]["properties"]["source_id"]["enum"]
+    assert allowed == [f"S{index:03d}" for index in range(1, len(parsed.sources) + 1)]
+
+
+def test_real_adapter_rejects_unknown_source_handle_without_retry(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(quote_path("a"), context_for("a"))
+    payload = json.loads(
+        _valid_response(quote_dictionary).decode("utf-8")
+    )["choices"][0]["message"]["content"]
+    payload = json.loads(payload)
+    payload["candidates"][0] = {
+        "field_name": quote_dictionary.extractable_fields[0].field_name,
+        "raw_value": "QUOTATION",
+        "normalized_value": "QUOTATION",
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": "S999", "quoted_text": "QUOTATION"}],
+    }
+    raw_content = json.dumps(payload)
+    envelope = {
+        "id": "request-unknown-handle-1",
+        "choices": [{"message": {"content": raw_content}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del request, timeout
+        return FakeResponse(json.dumps(envelope).encode("utf-8"))
+
+    budget = ModelCallBudget(graph_run_id="GRAPH-UNKNOWN-HANDLE")
+    with pytest.raises(AdapterError) as raised:
+        OpenAICompatibleAdapter(_config(max_attempts=3), opener=opener).extract(
+            parsed,
+            quote_dictionary,
+            budget,
+            "EXTRACT-UNKNOWN-HANDLE",
+        )
+
+    assert raised.value.code == "model_source_handle_unknown"
+    assert raised.value.details["source_handle"] == "S999"
+    assert raised.value.details["raw_model_content"] == raw_content
+    assert budget.calls_used == 1
 
 
 def test_restored_call_count_cannot_be_reset_by_retry(quote_dictionary) -> None:

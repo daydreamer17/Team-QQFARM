@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .contracts import (
     AdapterEnvironment,
     AdapterOutputMode,
+    EvidenceSource,
     ExtractionRun,
     ParsedInput,
 )
@@ -27,7 +28,7 @@ from .errors import AdapterError, ModelCallBudgetExceeded
 from .model_payload import ModelExtractionPayload
 
 
-PROMPT_VERSION = "quote-extraction/1.6.0"
+PROMPT_VERSION = "quote-extraction/1.7.0"
 
 
 @dataclass(slots=True)
@@ -54,6 +55,7 @@ class ModelCallBudget:
 class AdapterResult:
     payload: ModelExtractionPayload
     run: ExtractionRun
+    model_payload_before_grounding: ModelExtractionPayload | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +139,11 @@ class FixedOutputAdapter(ModelAdapter):
             started_at=started,
             finished_at=finished,
         )
-        return AdapterResult(payload=payload, run=run)
+        return AdapterResult(
+            payload=payload,
+            run=run,
+            model_payload_before_grounding=payload,
+        )
 
 
 class OpenAICompatibleConfig(BaseModel):
@@ -153,7 +159,7 @@ class OpenAICompatibleConfig(BaseModel):
     retry_backoff_seconds: float = Field(default=0.25, ge=0, le=10)
     enable_thinking: bool = False
     max_tokens: int = Field(default=8192, ge=1)
-    adapter_version: str = "openai-compatible/1.0.0"
+    adapter_version: str = "openai-compatible/1.1.0"
     prompt_version: str = PROMPT_VERSION
 
     @classmethod
@@ -203,11 +209,12 @@ class OpenAICompatibleAdapter(ModelAdapter):
         started = datetime.now(timezone.utc)
         calls_before = budget.calls_used
         errors: list[str] = []
-        prompt = _build_prompt(parsed_input, dictionary)
+        source_handles = _source_handle_map(parsed_input)
+        prompt = _build_prompt(parsed_input, dictionary, source_handles)
         for attempt in range(1, self.config.max_attempts + 1):
             budget.consume()
             try:
-                http_response = self._request(prompt)
+                http_response = self._request(prompt, tuple(source_handles))
             except urllib.error.HTTPError as exc:
                 error_text = f"HTTPError: {exc.code} {exc.reason}"
                 errors.append(f"{type(exc).__name__}: {exc}")
@@ -260,7 +267,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 ) from exc
 
             try:
-                payload = ModelExtractionPayload.model_validate_json(decoded.content)
+                model_payload = ModelExtractionPayload.model_validate_json(decoded.content)
             except ValidationError as exc:
                 raise AdapterError(
                     "model_output_schema_invalid",
@@ -281,9 +288,35 @@ class OpenAICompatibleAdapter(ModelAdapter):
                     errors=[f"{type(exc).__name__}: {exc}"],
                 ) from exc
 
+            try:
+                payload = _ground_source_references(model_payload, source_handles)
+            except KeyError as exc:
+                field_name, source_handle = exc.args[0]
+                raise AdapterError(
+                    "model_source_handle_unknown",
+                    "model selected a source handle outside the current input",
+                    provider=self.config.provider,
+                    model_id=self.config.model_id,
+                    attempts=attempt,
+                    calls_before=calls_before,
+                    calls_after=budget.calls_used,
+                    provider_request_id=decoded.provider_request_id,
+                    provider_trace_id=http_response.trace_id,
+                    finish_reason=decoded.finish_reason,
+                    prompt_tokens=decoded.prompt_tokens,
+                    completion_tokens=decoded.completion_tokens,
+                    reasoning_tokens=decoded.reasoning_tokens,
+                    total_tokens=decoded.total_tokens,
+                    field_name=field_name,
+                    source_handle=source_handle,
+                    allowed_source_handles=list(source_handles),
+                    raw_model_content=decoded.content,
+                ) from exc
+
             finished = datetime.now(timezone.utc)
             return AdapterResult(
                 payload=payload,
+                model_payload_before_grounding=model_payload,
                 run=ExtractionRun(
                     extraction_run_id=extraction_run_id,
                     graph_run_id=budget.graph_run_id,
@@ -313,7 +346,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
         raise AssertionError("model attempt loop exited without a result or typed error")
 
-    def _request(self, prompt: str) -> HttpResponse:
+    def _request(self, prompt: str, allowed_source_handles: tuple[str, ...]) -> HttpResponse:
         endpoint = f"{self.config.base_url.rstrip('/')}/chat/completions"
         body = {
             "model": self.config.model_id,
@@ -335,7 +368,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 "json_schema": {
                     "name": "quote_extraction_candidates",
                     "strict": True,
-                    "schema": ModelExtractionPayload.model_json_schema(),
+                    "schema": _model_response_schema(allowed_source_handles),
                 },
             },
         }
@@ -416,7 +449,41 @@ def _env_bool(raw_value: str) -> bool:
     )
 
 
-def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str:
+def _source_handle_map(parsed_input: ParsedInput) -> dict[str, EvidenceSource]:
+    return {
+        f"S{index:03d}": source
+        for index, source in enumerate(parsed_input.sources, start=1)
+    }
+
+
+def _model_response_schema(allowed_source_handles: tuple[str, ...]) -> dict:
+    schema = ModelExtractionPayload.model_json_schema()
+    source_id_schema = schema["$defs"]["SourceCitation"]["properties"]["source_id"]
+    source_id_schema["enum"] = list(allowed_source_handles)
+    return schema
+
+
+def _ground_source_references(
+    payload: ModelExtractionPayload,
+    source_handles: dict[str, EvidenceSource],
+) -> ModelExtractionPayload:
+    grounded = payload.model_dump(mode="python")
+    for candidate in grounded["candidates"]:
+        for source_ref in candidate["source_refs"]:
+            handle = source_ref["source_id"]
+            source = source_handles.get(handle)
+            if source is None:
+                raise KeyError((candidate["field_name"], handle))
+            source_ref["source_id"] = source.source_id
+            source_ref["quoted_text"] = source.raw_text
+    return ModelExtractionPayload.model_validate(grounded)
+
+
+def _build_prompt(
+    parsed_input: ParsedInput,
+    dictionary: QuoteDictionary,
+    source_handles: dict[str, EvidenceSource] | None = None,
+) -> str:
     field_contract = [
         {
             "field_name": field.field_name,
@@ -431,9 +498,10 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
         for field in dictionary.extractable_fields
     ]
     sources = []
-    for source in parsed_input.sources:
+    handles = source_handles or _source_handle_map(parsed_input)
+    for source_handle, source in handles.items():
         prompt_source: dict[str, str | int] = {
-            "source_id": source.source_id,
+            "source_id": source_handle,
             "kind": source.kind.value,
             "text": source.raw_text,
         }
@@ -454,8 +522,8 @@ def _build_prompt(parsed_input: ParsedInput, dictionary: QuoteDictionary) -> str
             "MISSING must have null raw_value, normalized_value, and unit, with an empty source_refs list.",
             "EXTRACTED must have non-null raw_value and normalized_value; normalize enums and units to the field contract.",
             "raw_value is the document wording; normalized_value is the canonical value after applying normalization_rule.",
-            "Every other field must cite only source_id values below and quote an exact substring from that source.",
-            "Use source location metadata, including CSV column_name, only to interpret the text; quoted_text must remain an exact substring of text.",
+            "Every other field must select only a source_id handle listed below; never write or infer a different ID.",
+            "Use source location metadata, including CSV column_name, to interpret the text. quoted_text should be an exact substring; the backend binds the handle to authoritative source text.",
             "Decimal money values must be strings, never JSON floating-point numbers.",
             "Populate unit for an extracted amount, quantity, or lead-time field when its currency or counting unit is explicit; otherwise use null.",
             "Never use EXTRACTED, MISSING, VERIFIED, or CONFLICT as normalized_value; those are status labels, not field values.",

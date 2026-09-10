@@ -246,6 +246,13 @@ def evaluate_v3_results(
     successful_documents = sum(item["status"] == "PASSED" for item in documents)
     failed_documents = sum(item["status"] not in {"PASSED", "MISSING_RESULT"} for item in documents)
     missing_documents = sum(item["status"] == "MISSING_RESULT" for item in documents)
+    prompt_versions = sorted(
+        {
+            item["prompt_version"]
+            for item in documents
+            if isinstance(item.get("prompt_version"), str)
+        }
+    )
     expected_fields = len(documents) * len(field_names)
     return {
         "result_kind": "V3_DEVELOPMENT_REFERENCE_SCORE",
@@ -264,6 +271,8 @@ def evaluate_v3_results(
             "failed_documents": failed_documents,
             "missing_documents": missing_documents,
             "document_success_rate": _rate(successful_documents, len(documents)),
+            "prompt_versions": prompt_versions,
+            "mixed_prompt_versions": len(prompt_versions) > 1,
             "passed_fields": passed_fields,
             "scorable_fields": scorable_fields,
             "conditional_field_match_rate": _rate(passed_fields, scorable_fields),
