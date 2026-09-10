@@ -1,0 +1,198 @@
+{
+  "reference_set_id": "QUOTE-V4-EXTREME-BOUNDARIES",
+  "reference_kind": "DEVELOPMENT_REFERENCE_ANSWER",
+  "runtime_access": "DENY",
+  "limits": {
+    "pdf_max_bytes": 5242880,
+    "pdf_max_pages": 5,
+    "max_documents_per_task": 5,
+    "max_stage_attempts_including_first": 3,
+    "max_model_calls_per_graph_run": 8
+  },
+  "usage": {
+    "file_rejection_suite": "Run the five invalid/over-limit PDF files together or separately; do not add other documents to that task.",
+    "citation_suite": "Use the two source PDFs plus citation_validation_cases_v4.json as a validator fixture.",
+    "execution_suite": "Use a simulated adapter. No paid or external model call is required.",
+    "isolation_rule": "Do not mount evaluation/reference/quote_V4 for the parser or model under test."
+  },
+  "files": [
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/corrupted_quote_v4.pdf",
+      "sha256": "444e935ef3b05df3931d93bc8b8600bab4cba80f0b2a06eece9797ab21110267",
+      "bytes": 72
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/blank_quote_v4.pdf",
+      "sha256": "e90ccae0995b54f7aecb24b0a50fc509801420a7a197bb2d002bb784cde05073",
+      "bytes": 1326
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/encrypted_quote_v4.pdf",
+      "sha256": "5ec0f9e8b25986904900833e371d6db292be594e34b4897a92d280abf8b0c1cb",
+      "bytes": 3404
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/over_page_limit_quote_v4.pdf",
+      "sha256": "cf155a1a83f512f4e9d01e7b638b3d6156c5a288b69216de09b8a50745bdf2ab",
+      "bytes": 8582
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/over_size_limit_quote_v4.pdf",
+      "sha256": "c47bda4803598b1123c4cbab01f4285372509032240e5771c7722d22b648b7f6",
+      "bytes": 8442317
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/invalid_header_quote_v4.csv",
+      "sha256": "04cf65a45cdb0caf5463d29915394a690c43225d2cbb43923a8348185a023579",
+      "bytes": 689
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/source_supplier_a_quote_v4.pdf",
+      "sha256": "cde9311e3491a5354ba9cd69eb99c7138445f5d2586d950cf2737d3f568e7e37",
+      "bytes": 2431
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V4/source_supplier_b_quote_v4.pdf",
+      "sha256": "3c07c3c95aa7d14d6afbd4c2c048e77fca89758874c9b6a2e425cdb25f378e8b",
+      "bytes": 2426
+    },
+    {
+      "relative_path": "data/generated/fixtures/quote_V4/citation_validation_cases_v4.json",
+      "sha256": "2bfb72ec855bc7a28a1a7b94a9b5fe1e31b7b6c23cdc72ad5d76c1eac7067251",
+      "bytes": 3122
+    },
+    {
+      "relative_path": "data/generated/fixtures/quote_V4/execution_limit_cases_v4.json",
+      "sha256": "f5f2a71e63647ab7f3b2a5dd141d598c73cce6cc62f72a21906b12a927fb9a89",
+      "bytes": 1561
+    },
+    {
+      "relative_path": "data/generated/fixtures/quote_V4/source_id_stability_case_v4.json",
+      "sha256": "e37071829dd1620e474869d578a486b8ae715cddd221d94ba807807192ef9f9e",
+      "bytes": 666
+    }
+  ],
+  "expected": {
+    "file_validation": {
+      "corrupted_quote_v4.pdf": {
+        "outcome": "REJECT",
+        "reason_key": "CORRUPTED_PDF",
+        "failure_stage": "PRE_MODEL_FILE_VALIDATION",
+        "model_calls": 0,
+        "retryable": false,
+        "message_must_identify": [
+          "file name",
+          "PDF is damaged or unreadable"
+        ]
+      },
+      "blank_quote_v4.pdf": {
+        "outcome": "REJECT",
+        "reason_key": "BLANK_PDF",
+        "failure_stage": "TEXT_EXTRACTION_VALIDATION",
+        "model_calls": 0,
+        "retryable": false,
+        "message_must_identify": [
+          "file name",
+          "no extractable quote text"
+        ]
+      },
+      "encrypted_quote_v4.pdf": {
+        "outcome": "REJECT",
+        "reason_key": "ENCRYPTED_PDF_UNSUPPORTED",
+        "failure_stage": "PRE_MODEL_FILE_VALIDATION",
+        "model_calls": 0,
+        "retryable": false,
+        "message_must_identify": [
+          "file name",
+          "password-protected or encrypted PDF"
+        ],
+        "test_only_decryption_password": "v4-test-only"
+      },
+      "over_page_limit_quote_v4.pdf": {
+        "outcome": "REJECT",
+        "reason_key": "PDF_PAGE_LIMIT_EXCEEDED",
+        "actual_pages": 6,
+        "maximum_pages": 5,
+        "failure_stage": "PRE_MODEL_FILE_VALIDATION",
+        "model_calls": 0,
+        "retryable": false
+      },
+      "over_size_limit_quote_v4.pdf": {
+        "outcome": "REJECT",
+        "reason_key": "PDF_SIZE_LIMIT_EXCEEDED",
+        "actual_bytes": 8442317,
+        "maximum_bytes": 5242880,
+        "failure_stage": "PRE_MODEL_FILE_VALIDATION",
+        "model_calls": 0,
+        "retryable": false
+      }
+    },
+    "csv_header_validation": {
+      "invalid_header_quote_v4.csv": {
+        "outcome": "REJECT",
+        "reason_key": "INVALID_CSV_HEADER",
+        "duplicate_headers": [
+          "supplier_name"
+        ],
+        "missing_required_headers": [
+          "supplier_country"
+        ],
+        "row_parsing_started": false,
+        "model_calls": 0,
+        "retryable": false
+      }
+    },
+    "citation_validation": {
+      "VALID_CONTROL": {
+        "outcome": "ACCEPT",
+        "accepted_source_id": "SRC-f02d98f0569fb557"
+      },
+      "FORGED_SOURCE_ID": {
+        "outcome": "REJECT",
+        "reason_key": "SOURCE_NOT_FOUND"
+      },
+      "CROSS_SUPPLIER_SOURCE": {
+        "outcome": "REJECT",
+        "reason_key": "SOURCE_SCOPE_MISMATCH",
+        "rejected_source_id": "SRC-a606c98d0343a72c",
+        "required_quote_id": "QUOTE-V4-A",
+        "actual_quote_id": "QUOTE-V4-B"
+      }
+    },
+    "execution_limits": {
+      "STAGE_RETRY_BOUND": {
+        "stage_attempts": 3,
+        "model_calls": 3,
+        "fourth_provider_result_consumed": false,
+        "outcome": "STOP_AND_RECORD_LIMIT"
+      },
+      "GRAPH_CALL_BOUND": {
+        "model_calls": 8,
+        "ninth_provider_call_made": false,
+        "outcome": "STOP_AND_RECORD_LIMIT"
+      },
+      "RESUME_PRESERVES_CALL_COUNT": {
+        "starting_model_calls": 7,
+        "ending_model_calls": 8,
+        "ninth_provider_call_made": false,
+        "outcome": "STOP_AND_RECORD_LIMIT"
+      },
+      "NEW_JOB_DOES_NOT_RESET_GRAPH_BUDGET": {
+        "starting_model_calls": 8,
+        "ending_model_calls": 8,
+        "provider_call_made": false,
+        "outcome": "STOP_AND_RECORD_LIMIT"
+      }
+    },
+    "source_id_stability": {
+      "input_sha256": "cde9311e3491a5354ba9cd69eb99c7138445f5d2586d950cf2737d3f568e7e37",
+      "parser_version": "pdf-text-v1",
+      "assertion": "Run 2 must return exactly the same ordered source_id and text_block_id values as run 1 for the same registered document version.",
+      "allow_random_uuid_or_timestamp_in_source_id": false,
+      "reference_registry_source_ids": [
+        "SRC-f975d8751ceb8f05",
+        "SRC-f02d98f0569fb557"
+      ]
+    }
+  }
+}

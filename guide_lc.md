@@ -1,92 +1,85 @@
-# 成员 B 第一周开发与交接说明
+# 成员 B 解析、模型与证据交接说明
 
 日期：2026-09-10
 
 成员：LC（成员 B）
 
-范围：报价 PDF／CSV 解析、模型适配、来源证据和候选字段
+范围：报价 PDF／CSV 解析、模型适配、来源证据、候选字段与开发评测
 
 ## 1. 本次更新概述
 
-本次为成员 B 增加了可运行的 Python 模块：读取一种英文文本 PDF 开发版式和冻结 CSV 模板，生成稳定来源，调用固定输出或真实模型适配器，输出统一候选字段，并进行结构、来源和确定性格式校验。
+本次完成了可运行的 B 模块，并将 A 提供的 V2、V3、V4 合成数据和参考答案接入开发测试。模块可以解析已登记的文本 PDF／CSV，调用固定或真实模型适配器，输出统一候选字段，并校验文件、版本、来源和引用。
 
-本次使用 SiliconFlow 的 `deepseek-ai/DeepSeek-V4-Flash` 对 A、B、C 三份合成开发 PDF 做了真实本地 API 测试。逐字段开发对照结果为 89／90；A 为 30／30，B 按确认口径为 30／30，C 为 29／30。
-
-本次不包含 C 负责的采购计算，也不包含 D 负责的 FastAPI、数据库、版本和 LangGraph 流程。
+事实：真实模型为 SiliconFlow `deepseek-ai/DeepSeek-V4-Flash`；当前全量自动化测试为 120 项通过。V3 已按统一的提示词 `1.7.0` 和适配器 `1.1.0` 冻结，不再针对 V3 调参。
 
 ## 2. 主要做了什么
 
-- 建立文件、来源、候选字段、模型运行和归一化事件的 Pydantic 契约。
-- 使用 `pdfplumber` 解析机器生成的英文 PDF，保存页码、文本块 ID、坐标、文件哈希和解析器版本。
-- 严格解析 A 冻结的宽表 CSV；错误表头、身份或版本会被拒绝。
-- 实现固定输出适配器和 OpenAI-compatible HTTP 适配器。
-- 限制每阶段最多 3 次尝试、每逻辑运行最多 8 次调用；恢复时调用计数不能重置。
-- 校验字段集合、来源 ID、文件版本和引用原文；缺失字段不允许伪造来源。
-- 使用按状态区分的模型 Schema：`EXTRACTED`、`MISSING`、`CONFLICT` 具有不同约束，模型不能自报 `VERIFIED`。
-- 对当前 SGD 费用做确定性两位小数格式化，并保留归一化前后值和规则版本。
-- 对运费和其他费用状态实施固定枚举校验。
-- 增加单元测试、真实运行脚本和逐字段开发验收脚本。
+- 建立 `ParsedInput`、`EvidenceSource`、`QuoteFieldCandidate` 和 `ExtractionBatch` 等 Pydantic 契约。
+- 使用 `pdfplumber` 提取文本型 PDF，记录 SHA-256、页码、文本块、坐标和稳定来源 ID。
+- 支持 V1 固定 CSV，以及 V2/V3 已登记的异构 CSV profile；未知或错误表头会被拒绝。
+- 实现固定输出与 OpenAI-compatible 真实模型适配器，记录请求、token、错误和调用次数。
+- 实现 3 次阶段尝试、8 次图运行调用上限；缺失业务字段不会通过重试猜测。
+- 校验字段全集、引用原文、来源范围、报价版本以及运费／计价基数的证据语义。
+- 确定性处理 SGD 费用两位小数、`Net N` 付款条款和冲突占位符。
+- 让模型只选择当前文件中的短来源句柄，由后端映射真实来源 ID 并生成权威引用原文。
+- 证据校验失败时保存不含凭据的候选载荷和运行元数据，支持定位失败字段。
+- 接入 V2/V3 参考答案评分；V4 覆盖异常输入、来源稳定性、伪造／跨供应商引用和调用预算。
 
 ## 3. 实现思路
 
-处理顺序如下：
-
 ```text
-文件限制与 SHA-256
-→ PDF／固定 CSV 解析
-→ 稳定来源 ID 和位置
-→ 固定或真实模型适配器
-→ Pydantic 结构化输出校验
-→ 确定性金额格式化
-→ 字段集合、枚举和来源校验
+文件限制与哈希
+→ PDF／CSV 解析
+→ 稳定来源与位置
+→ 模型选择当前文件的来源句柄
+→ 后端映射真实来源并绑定原文
+→ Pydantic 结构校验
+→ 确定性归一化
+→ 引用和证据语义校验
 → ExtractionBatch 交给下游
 ```
 
 关键边界：
 
-- `task_id`、报价／文件版本和业务身份由调用方提供，不信任模型或文件自报。
-- 模型只生成候选，不能生成 `VERIFIED`，也不能执行采购计算。
-- `MISSING` 的值和来源必须为空；`EXTRACTED` 必须有原始值、标准化值和来源。
-- 网络超时、429 和 5xx 才允许有限重试；无效 JSON 或 Schema 输出立即停止，避免重复付费猜测。
-- `raw_value` 保留文档表达；`normalized_value` 保存标准表达；格式调整不会改变 `origin=DOCUMENT`。
-- B 的 “ordering by individual piece is allowed”只支持 `order_multiple_units=1`，不能据此推导实际包装。
+- 业务 ID 和版本由调用方提供，不信任模型自报。
+- 模型只生成候选，不生成 `VERIFIED`，也不执行采购计算。
+- `MISSING` 必须是空值且无来源；`EXTRACTED` 必须有值和合法引用。
+- 引用必须来自当前文件；伪造或跨供应商来源会被拒绝。
+- `raw_value` 保留原文，`normalized_value` 保存标准表达，归一化事件单独记录。
 
 ## 4. 相比上一版本更新了什么
 
-本次开始前仓库已有规划文档、A 的数据字典和合成输入，但没有成员 B 的可运行实现。本次新增：
-
-- `src/supplier_comparison/extraction/` 模块。
-- PDF／CSV 解析器、模型适配器、证据校验和统一服务入口。
-- 严格的模型输出 Schema，以及调用次数和有限重试控制。
-- SGD 费用金额确定性格式化与归一化审计事件。
-- 费用状态允许值和非法枚举拒绝。
-- 真实模型运行脚本、字段验收脚本和 34 项测试。
-- A、B、C 三份人工修正前真实模型结果及开发验收记录。
-
-模型 Schema 也经过两轮修正：最初的可空默认字段没有真正约束模型；随后改为必填仍不能表达“`EXTRACTED` 不得为 `null`”；最终改为按状态判别的联合 Schema，把条件直接写入提供方可见的 JSON Schema。
+- 数据路径集中到 `quote_V1/quote_V2/quote_V3/quote_V4`。
+- 模型提示词更新至 `quote-extraction/1.7.0`，真实适配器更新至 `openai-compatible/1.1.0`。
+- JSON Schema 动态限制模型只能选择 `S001` 等当前文件来源句柄；未知句柄立即拒绝。
+- `quoted_text` 由后端使用解析器原文生成，不再依赖模型逐字复制。
+- 证据失败记录新增校验前候选载荷，但不记录 API Key。
+- 明确 `INCLUDED` 且没有单列金额时，金额保持 `MISSING/null`，不能写成 0。
+- 运费证据支持 `delivery fee`，但仍拒绝其他费用证据冒充运费证据。
+- 将 `N30 - payment due 30 days after invoice` 等直接表达归一化为 `Net 30`。
+- 新增 V2、V3 评分器和 V4 真实来源 PDF 运行能力。
+- 新增 V3 五家 PDF/CSV 与 V4 极端边界测试。
 
 ## 5. 为什么这样修改
 
-- 防止模型把缺失值伪装成正常空报价，或为缺失内容伪造来源。
-- 防止只靠提示词约束结构；关键限制由 Schema 和确定性代码执行。
-- 保留文件哈希、版本、位置和引用，方便 D 持久化并供用户复核。
-- 将模型理解与金额格式化分开，允许合法 Decimal 字符串，同时避免因展示精度重复调用模型。
-- 将固定输出和真实模型结果显式区分，避免把模拟结果当成真实验收。
-- 保留失败结果、请求 ID、trace ID、token 和错误分类，避免只报告成功样本。
+- 防止未知金额被误写成 0，影响下游成本和排序。
+- 防止模型生成不存在或属于其他文件的来源。
+- 避免正确来源因模型改写标点、空格或换行而被误拒绝，同时不使用模糊引用匹配。
+- 将同义付款条款统一，减少只因展示形式造成的评测误差。
+- 将文档成功率与字段准确率分开，避免只统计成功样本而高估整体效果。
+- 保留真实失败记录，便于判断是模型、传输、解析还是证据门禁问题。
 
 ## 6. 使用方法与交付物
 
-### 基本环境
+安装并运行测试：
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src .venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
-真实模型配置从 `.env.local` 读取。可以复制 `.env.example`，再只在本地填写 API Key；`.env.local` 不得提交。
-
-单份真实调用示例（会产生模型费用）：
+真实模型配置只放在 `.env.local`，不得提交。单份 V3 调用示例：
 
 ```bash
 set -a
@@ -94,34 +87,37 @@ source .env.local
 set +a
 SUPPLIER_MODEL_MAX_ATTEMPTS=1 PYTHONPATH=src .venv/bin/python \
   scripts/run_real_extraction.py \
-  --supplier A \
-  --output evaluation/results/local/2026-09-10/example.json
+  --supplier A --dataset-version V3 --input-format pdf \
+  --output evaluation/results/local/v3-a.json
 ```
 
-重新生成开发字段对照：
+离线评分，不会调用模型：
 
 ```bash
-PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
+PYTHONPATH=src .venv/bin/python scripts/evaluate_v2_reference_answers.py
+
+PYTHONPATH=src .venv/bin/python scripts/evaluate_v3_reference_answers.py \
+  --results-root evaluation/results/local/2026-09-10/v3_prompt_1_7_0/frozen \
+  --output evaluation/results/local/2026-09-10/v3_prompt_1_7_0/frozen/v3_reference_score.json
 ```
 
 | 交付物名称 | 文件路径或链接 | 简单介绍 | 使用方法 |
 | --- | --- | --- | --- |
-| Python 项目配置 | [`pyproject.toml`](pyproject.toml) | Python 版本、运行依赖和测试依赖 | 使用 `pip install -e '.[dev]'` 安装 |
-| 环境变量模板 | [`.env.example`](.env.example) | SiliconFlow／模型配置占位符，不含真实密钥 | 复制为 `.env.local` 后填写密钥 |
-| 共享契约 | [`contracts.py`](src/supplier_comparison/extraction/contracts.py) | 来源、候选、批次、运行和归一化事件 | C/D 直接导入 Pydantic 类型 |
-| PDF 解析器 | [`pdf_parser.py`](src/supplier_comparison/extraction/pdf_parser.py) | 解析一种英文文本 PDF 开发版式 | 创建 `DocumentContext` 后调用 `PdfQuoteParser.parse` |
-| 固定 CSV 解析器 | [`csv_parser.py`](src/supplier_comparison/extraction/csv_parser.py) | 解析冻结宽表 CSV | 使用 `FixedCsvQuoteParser.parse_row` |
-| 模型适配器 | [`adapters.py`](src/supplier_comparison/extraction/adapters.py) | 固定输出和真实 OpenAI-compatible 调用 | 传入配置、解析结果和 `ModelCallBudget` |
-| 模型载荷 Schema | [`model_payload.py`](src/supplier_comparison/extraction/model_payload.py) | 约束三种候选状态 | 由适配器自动生成 JSON Schema |
-| 来源与枚举校验 | [`evidence.py`](src/supplier_comparison/extraction/evidence.py) | 校验字段集合、来源、引用和费用状态 | 统一服务入口会自动调用 |
-| 确定性归一化 | [`normalization.py`](src/supplier_comparison/extraction/normalization.py) | 当前 SGD 费用两位小数格式化 | 统一服务入口会自动调用并记录事件 |
-| 统一提取入口 | [`service.py`](src/supplier_comparison/extraction/service.py) | 将模型载荷转换成公共 `ExtractionBatch` | 下游调用 `extract_quote_candidates` |
-| 真实提取脚本 | [`run_real_extraction.py`](scripts/run_real_extraction.py) | 分别运行 A／B／C 合成 PDF | 指定 `--supplier` 和 `--output` |
-| 开发验收脚本 | [`evaluate_development_extractions.py`](scripts/evaluate_development_extractions.py) | 按确认口径对照 90 个字段 | 设置 `PYTHONPATH=src` 后运行 |
-| 单元测试 | [`tests/extraction/`](tests/extraction/) | 覆盖解析、契约、证据、适配器和归一化 | 执行 `pytest -q` |
-| 真实模型结果 | [`evaluation/results/local/2026-09-10/`](evaluation/results/local/2026-09-10/) | 成功、失败和人工修正前运行记录 | 用于开发复核，不作为真实供应商结论 |
-| 字段验收报告 | [`DEVELOPMENT_PDF_FIELD_REVIEW.md`](evaluation/results/local/2026-09-10/DEVELOPMENT_PDF_FIELD_REVIEW.md) | A/B/C 逐字段矩阵和调用量 | 供 A 签字及 C/D 查看已知问题 |
-| 完整验收 JSON | [`development_pdf_field_review.json`](evaluation/results/local/2026-09-10/development_pdf_field_review.json) | 90 个字段的期望、实际、来源形状和结果 | 可供脚本或 CI 读取 |
+| 公共契约 | [`src/supplier_comparison/extraction/contracts.py`](src/supplier_comparison/extraction/contracts.py) | 解析、来源、候选和运行对象 | C/D 直接导入类型 |
+| PDF 解析器 | [`src/supplier_comparison/extraction/pdf_parser.py`](src/supplier_comparison/extraction/pdf_parser.py) | 文本 PDF 解析和来源定位 | 调用 `PdfQuoteParser.parse` |
+| CSV 解析器 | [`src/supplier_comparison/extraction/csv_parser.py`](src/supplier_comparison/extraction/csv_parser.py) | 固定模板和 profile CSV 解析 | 使用登记的 profile 调用 `parse_row` |
+| 模型适配器 | [`src/supplier_comparison/extraction/adapters.py`](src/supplier_comparison/extraction/adapters.py) | 固定输出、真实 API、来源句柄约束和后端引用绑定 | 传入配置和 `ModelCallBudget` |
+| 证据校验 | [`src/supplier_comparison/extraction/evidence.py`](src/supplier_comparison/extraction/evidence.py) | 校验引用、版本、范围和语义 | 统一入口自动调用 |
+| 确定性归一化 | [`src/supplier_comparison/extraction/normalization.py`](src/supplier_comparison/extraction/normalization.py) | 金额、付款条款和冲突占位符处理 | 统一入口自动调用并记录事件 |
+| 统一入口 | [`src/supplier_comparison/extraction/service.py`](src/supplier_comparison/extraction/service.py) | 生成 `ExtractionBatch` | 下游调用 `extract_quote_candidates` |
+| 真实运行脚本 | [`scripts/run_real_extraction.py`](scripts/run_real_extraction.py) | 运行 V1–V4 已支持样本 | 指定版本、供应商和格式 |
+| V2 评分器 | [`scripts/evaluate_v2_reference_answers.py`](scripts/evaluate_v2_reference_answers.py) | 对照 A 的 V2 开发答案 | 指定结果目录离线运行 |
+| V3 评分器 | [`scripts/evaluate_v3_reference_answers.py`](scripts/evaluate_v3_reference_answers.py) | 分开统计文档成功率和字段准确率 | 对 V3 结果目录运行 |
+| V3 冻结评分 | `evaluation/results/local/2026-09-10/v3_prompt_1_7_0/frozen/v3_reference_score.json` | 统一 1.7.0 冻结运行的本地评分 | 仅本地复核，不提交 Git |
+| V2–V4 输入 | [`data/generated/inputs/development/`](data/generated/inputs/development/) | 合成开发报价与异常夹具 | 只用于开发和评测 |
+| V2–V4 参考答案 | [`evaluation/reference/`](evaluation/reference/) | A 提供的开发答案和边界期望 | 必须与运行时隔离 |
+| 自动化测试 | [`tests/extraction/`](tests/extraction/) | 解析、模型、证据、评测与边界测试 | 运行 `pytest -q` |
+| 本地真实结果 | `evaluation/results/local/2026-09-10/` | 人工修正前输出、失败和评分 | 只保留本地，不提交 Git |
 
 ## 7. 结果分析
 
@@ -129,58 +125,57 @@ PYTHONPATH=src .venv/bin/python scripts/evaluate_development_extractions.py
 
 事实：
 
-- 本地测试为 34 项通过、0 项失败。
-- 三份开发 PDF 都完成了真实本地模型调用，每份最终记录均为 1 次调用、0 次重试。
-- A 为 30／30，B 按已确认 PDF 口径及 Decimal 比较为 30／30，C 为 29／30；合计 89／90，字段匹配率为 0.9889。
-- B 的运费保持 `MISSING/null/无来源`；包装方式和每包数量按确认口径保持非阻塞缺失。
-- B 的 `other_fees_amount` 模型值为 `"0"`，确定性重放输出为 `"0.00"`，并记录规则 `sgd-fee-amount-2dp/1.0.0`。
-- C 的唯一失败是 `shipping_fee_status="PAID"`，契约期望为 `KNOWN_AMOUNT`；原始失败结果没有被改写。
-- 结果文件未发现 API Key 标记。
+- 自动化测试：120 项通过，0 项失败。
+- V1 三份开发 PDF：89/90；这是早期开发基线。
+- V2 六份最新结果：172/180，字段匹配率 95.56%；结果混用了多个提示词版本。
+- V3 修复验证中，每个输入取最新结果得到 10/10、300/300；该结果混用提示词 1.6.0 和 1.7.0，只用于证明三个失败点已修复。
+- V3 冻结运行统一使用提示词 1.7.0、适配器 1.1.0：PDF 5/5 通过，CSV 3/5 通过，合计 8/10，文档成功率 80.00%。
+- V3 冻结运行成功的 8 份全部为 240/240，条件字段匹配率 100%；失败文档按零分计入后的保守字段覆盖率为 80.00%。
+- V3 冻结运行没有字段、Schema 或证据失败；C/D CSV 均在首次和第二次尝试中发生 `model_transport_failed`。
+- V3 冻结运行实际调用 13 次：PDF 5 次；CSV 首轮 5 次，加 C/D/E 各 1 次传输重试；按本次 CSV 冻结批次累计达到 8 次调用上限后停止。
+- V4 两份有效来源 PDF 均一次真实调用通过，各输出 30 个候选字段，全部引用属于各自输入文件。
+- V4 的损坏、空白、加密、超页数、超大小 PDF 和错误 CSV 表头均在模型调用前拒绝。
 
-结论：PDF／CSV 解析、结构化候选、来源校验和本地模型基线达到了可交接状态；三份 PDF 的逐字段开发验收尚未全部通过，C 仍有 1 个已登记错误。主办方 API、独立版式盲测和 C/D 端到端集成不在本次已完成结果内。
+结论：B 模块已达到开发交接状态。V3 冻结版在获得模型响应时为 240/240，但端到端成功率受提供方传输超时影响为 80%；这些开发指标不能表述为生产准确率。
 
 ### 达到或未达到的原因
 
-事实：判别联合 Schema 解决了 `EXTRACTED.normalized_value` 缺失或为 `null` 的问题；确定性归一化解决了合法金额字符串的展示精度问题。
+事实：来源句柄和后端原文绑定后，A PDF 的精确引用问题消失，D CSV 的未知来源问题在限定复测中消失；D PDF 的费用状态与金额达到参考答案。
 
-推测：C 输出 `PAID` 很可能是因为调用时提示中没有列出费用状态的完整允许值。该判断不是新的实测结论；代码已增加允许值和非法枚举拒绝，但尚未再次调用 C 验证。
+事实：冻结运行剩余失败均为提供方传输超时，系统保留失败和第二次尝试记录，并在 CSV 累计 8 次调用后停止。
+
+推测：C/D CSV 连续超时可能与当时的提供方服务状态或网络有关；现有证据不能归因于某个具体外部组件。
 
 ### 本次发现的问题与经验
 
-- Pydantic 的运行时跨字段校验不会自动成为模型可见的条件 Schema。
-- “字段为必填”不等于“字段在特定状态下不得为 `null`”。
-- JSON 和来源定位通过，不代表字段业务语义一定正确，仍需逐字段参考对照。
-- 业务缺失不应通过重复调用模型猜测；重试应主要用于瞬时网络或服务错误。
-- 原始模型值、确定性格式化和人工纠正必须分开记录。
-- 失败样本和 token 用量应保留，不能只提交最终成功结果。
+- 结构正确不代表引用或业务语义正确。
+- 条件字段准确率必须和端到端成功率一起报告。
+- CSV 列名也是证据语义的一部分，例如 `Delivery fee` 可以说明金额用途。
+- 来源句柄和后端绑定比放宽引用匹配更安全，也更稳定。
+- 失败、重试、token 和人工修正前输出都应保留。
 
-建议：如需要三份开发 PDF 达到 90／90，只重跑 C 一次即可；运行前保持单次尝试。该建议尚未执行。
+建议：V3 已冻结，不再通过重跑提高分数。下一轮使用新的留出数据验证泛化，并单独统计模型准确率和提供方传输可用性。
 
 ## 8. 下游说明
 
 ### 下游可以直接使用什么
 
-- D 可以直接使用 `DocumentContext`、`ParsedInput`、`ExtractionBatch`、`ExtractionRun`、`NormalizationEvent` 和稳定错误代码。
-- D 可以先用 `FixedOutputAdapter` 解耦联调，再接 `OpenAICompatibleAdapter`；恢复时必须延续同一个 `ModelCallBudget`。
-- C 可以读取已经通过 B 校验的 `QuoteFieldCandidate`，使用 `validation_status`、`normalized_value`、`unit`、`origin` 和 `source_refs`。
-- 下游首次集成建议使用 A 的 30／30 结果；随后使用 B 验证未知运费流程。
+- D 可使用 `DocumentContext`、`ParsedInput`、`ExtractionBatch`、`ExtractionRun` 和稳定错误代码。
+- C 可读取通过 B 门禁的 `QuoteFieldCandidate`，使用状态、标准化值、单位、来源和原文。
+- 联调时可先用 `FixedOutputAdapter`，再切换真实适配器；两种结果必须显式区分。
 
 ### 使用注意事项
 
-- 不要把 `.env.local`、API Key 或凭据写入代码、日志、检查点或 Git。
-- 不要把 B 的 `MISSING` 当成 0，也不要让模型结果直接变成 `VERIFIED`。
-- C 的当前原始结果包含非法的 `shipping_fee_status="PAID"`，只能作为失败样本，不能作为已验收输入。
-- B 的包装缺失是否阻塞、MOQ／成本和可行性如何计算归 C；B 不复制这些公式。
-- 参考 CSV 只在模型调用完成后用于开发验收，没有进入模型提示。
-- 所有 A/B/C 报价和器件标识均为合成数据，不能描述为真实供应商报价。
-- 当前只支持一种开发 PDF 版式和一个冻结 CSV 表头，不代表通用文档解析能力。
+- `MISSING` 不是 0，模型结果也不能直接升级为 `VERIFIED`。
+- 参考答案目录不能提供给运行时解析器或模型。
+- `.env.local`、API Key 和本地真实模型结果不得提交。
+- V3 冻结版的 100% 是成功返回的 8 份结果的条件准确率；完整端到端成功率是 80.00%。
+- 冻结运行的 C/D CSV 没有得到模型结果，不能将旧版成功结果补入统一版本冻结分数。
+- V4 是边界和证据安全测试，不是完整 31 字段报价准确率测试。
+- 所有报价、供应商和器件标识均为合成数据。
 
 ### 是否与上一版本兼容
 
-事实：本实现读取 A 的 `quote_data_field.csv` v1.2.0，没有修改 A 的字段名称；固定输出和真实模型最终都进入同一 `ExtractionBatch`。
+事实：字段名称和 `ExtractionBatch` 主结构保持兼容；来源句柄只存在于真实适配器内部，输出给 C/D 的仍是真实稳定来源 ID。新增归一化事件有默认空值。
 
-事实：`normalization_events` 是带默认空值的新字段；只读取既有候选字段的下游可以继续工作，但若保存完整批次，应同步接收该字段。
-
-事实：当前仓库尚未出现 C/D 的公共实现，因此模块级契约可交接，但真实数据库、计算和 LangGraph 集成兼容性尚未验证。
-
-建议：C/D 接入时先跑一份 A 报价完成“解析→候选→来源校验→计算→保存”，再用 B 验证未知运费和恢复调用计数。
+建议：C/D 接入时先用一份通过门禁的 V3 结果验证完整链路，再使用缺失或失败样本验证 `PENDING`、错误处理和恢复逻辑。

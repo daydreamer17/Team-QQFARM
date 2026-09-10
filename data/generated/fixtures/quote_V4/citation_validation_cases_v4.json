@@ -1,0 +1,94 @@
+{
+  "fixture_id": "QUOTE-V4-CITATION-VALIDATION",
+  "fixture_mode": "TRUSTED_SOURCE_REGISTRY_WITH_UNTRUSTED_CANDIDATES",
+  "setup_note": "Load trusted_source_registry as backend-owned records. Pass only untrusted_candidates to the citation validator.",
+  "trusted_source_registry": [
+    {
+      "source_id": "SRC-f975d8751ceb8f05",
+      "text_block_id": "BLK-f975d8751ceb8f05",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-A",
+      "document_id": "DOC-QUOTE-V4-A-V1",
+      "document_version": 1,
+      "document_sha256": "cde9311e3491a5354ba9cd69eb99c7138445f5d2586d950cf2737d3f568e7e37",
+      "parser_version": "pdf-text-v1",
+      "page_number": 1,
+      "block_number": 1,
+      "locator_text": "Supplier: Redwood Components"
+    },
+    {
+      "source_id": "SRC-f02d98f0569fb557",
+      "text_block_id": "BLK-f02d98f0569fb557",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-A",
+      "document_id": "DOC-QUOTE-V4-A-V1",
+      "document_version": 1,
+      "document_sha256": "cde9311e3491a5354ba9cd69eb99c7138445f5d2586d950cf2737d3f568e7e37",
+      "parser_version": "pdf-text-v1",
+      "page_number": 1,
+      "block_number": 6,
+      "locator_text": "Unit price: SGD 6.72 per piece"
+    },
+    {
+      "source_id": "SRC-1d8c7ef105ad0757",
+      "text_block_id": "BLK-1d8c7ef105ad0757",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-B",
+      "document_id": "DOC-QUOTE-V4-B-V1",
+      "document_version": 1,
+      "document_sha256": "3c07c3c95aa7d14d6afbd4c2c048e77fca89758874c9b6a2e425cdb25f378e8b",
+      "parser_version": "pdf-text-v1",
+      "page_number": 1,
+      "block_number": 1,
+      "locator_text": "Supplier: Schwarzwald Circuits"
+    },
+    {
+      "source_id": "SRC-a606c98d0343a72c",
+      "text_block_id": "BLK-a606c98d0343a72c",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-B",
+      "document_id": "DOC-QUOTE-V4-B-V1",
+      "document_version": 1,
+      "document_sha256": "3c07c3c95aa7d14d6afbd4c2c048e77fca89758874c9b6a2e425cdb25f378e8b",
+      "parser_version": "pdf-text-v1",
+      "page_number": 1,
+      "block_number": 6,
+      "locator_text": "Unit price: SGD 6.60 per piece"
+    }
+  ],
+  "untrusted_candidates": [
+    {
+      "case_id": "VALID_CONTROL",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-A",
+      "supplier_id": "SUP-022",
+      "field_name": "unit_price",
+      "normalized_value": "6.72",
+      "source_refs": [
+        "SRC-f02d98f0569fb557"
+      ]
+    },
+    {
+      "case_id": "FORGED_SOURCE_ID",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-A",
+      "supplier_id": "SUP-022",
+      "field_name": "unit_price",
+      "normalized_value": "1.00",
+      "source_refs": [
+        "SRC-ffffffffffffffff"
+      ]
+    },
+    {
+      "case_id": "CROSS_SUPPLIER_SOURCE",
+      "task_id": "TASK-QUOTE-V4-CITATION",
+      "quote_id": "QUOTE-V4-A",
+      "supplier_id": "SUP-022",
+      "field_name": "unit_price",
+      "normalized_value": "6.60",
+      "source_refs": [
+        "SRC-a606c98d0343a72c"
+      ]
+    }
+  ]
+}

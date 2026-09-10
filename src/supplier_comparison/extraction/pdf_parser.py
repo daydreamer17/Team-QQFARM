@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .contracts import BoundingBox, DocumentContext, EvidenceSource, ParsedInput, SourceKind
-from .errors import InputLimitError, UnreadableInputError
+from .errors import InputLimitError, UnreadableInputError, UnsupportedInputError
 from .files import FileLimits, require_pdf_magic, stable_id, validate_regular_file
 
 
@@ -46,7 +46,17 @@ class PdfQuoteParser:
         self.limits = limits or FileLimits()
 
     def parse(self, path: str | Path, context: DocumentContext) -> ParsedInput:
-        pdf_path, size, file_hash = validate_regular_file(path, self.limits)
+        try:
+            pdf_path, size, file_hash = validate_regular_file(path, self.limits)
+        except InputLimitError as exc:
+            if exc.code != "file_too_large":
+                raise
+            raise InputLimitError(
+                "pdf_size_limit_exceeded",
+                "PDF exceeds configured size limit",
+                path=str(path),
+                **exc.details,
+            ) from exc
         require_pdf_magic(pdf_path)
         try:
             import pdfplumber
@@ -62,6 +72,7 @@ class PdfQuoteParser:
                     raise InputLimitError(
                         "pdf_page_limit_exceeded",
                         "PDF exceeds configured page limit",
+                        path=str(pdf_path),
                         actual_pages=len(pdf.pages),
                         max_pages=self.limits.max_pdf_pages,
                     )
@@ -112,12 +123,26 @@ class PdfQuoteParser:
         except InputLimitError:
             raise
         except Exception as exc:
-            raise UnreadableInputError("pdf_parse_failed", "PDF could not be parsed", path=str(pdf_path)) from exc
+            error_text = (
+                f"{type(exc).__name__}: {exc!r}: "
+                f"{type(exc.__context__).__name__ if exc.__context__ else ''}"
+            ).lower()
+            if "password" in error_text or "encrypt" in error_text:
+                raise UnsupportedInputError(
+                    "encrypted_pdf_unsupported",
+                    f"{pdf_path.name} is password-protected or encrypted",
+                    path=str(pdf_path),
+                ) from exc
+            raise UnreadableInputError(
+                "corrupted_pdf",
+                f"{pdf_path.name} is damaged or unreadable",
+                path=str(pdf_path),
+            ) from exc
 
         if not sources:
             raise UnreadableInputError(
-                "pdf_text_unavailable",
-                "PDF has no extractable text; scanned PDFs and OCR are not supported",
+                "blank_pdf",
+                f"{pdf_path.name} has no extractable quote text; scanned PDFs and OCR are not supported",
                 path=str(pdf_path),
             )
         return ParsedInput(

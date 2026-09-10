@@ -15,7 +15,7 @@ from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.model_payload import ModelFieldCandidate
 from supplier_comparison.extraction.model_payload import ModelExtractionPayload
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 MODEL_CANDIDATE_ADAPTER = TypeAdapter(ModelFieldCandidate)
@@ -35,6 +35,7 @@ def test_a_dictionary_is_loaded_as_the_only_quote_field_list(quote_dictionary) -
         "NOT_APPLICABLE",
         "UNKNOWN",
     )
+    assert quote_dictionary.fields["price_basis_unit"].allowed_normalized_values == ("piece",)
 
 
 def test_missing_candidate_cannot_carry_a_value_or_fake_source() -> None:
@@ -119,7 +120,7 @@ def test_money_candidate_rejects_binary_float() -> None:
 
 def test_parsed_input_rejects_source_from_wrong_document_version() -> None:
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     wrong_version_source = parsed.sources[0].model_copy(update={"document_version": 2})

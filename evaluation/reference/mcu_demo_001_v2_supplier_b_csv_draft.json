@@ -1,0 +1,373 @@
+{
+  "schema_version": "1.0",
+  "reference_set_id": "MCU-DEMO-001-V2-B-CSV-DRAFT",
+  "documents": [
+    {
+      "schema_version": "1.0",
+      "dataset_id": "quote_V2_csv",
+      "split": "development",
+      "template_id": "v2_supplier_b",
+      "dictionary_version": "1.2.0",
+      "input_path": "data/generated/inputs/development/quote_V2/supplier_b_quote_v2.csv",
+      "input_sha256": "85742dd2f2d1afd08d4752b94b591eb11199c9e316c731677a00faa13bc4fadc",
+      "scenario_id": "MCU-DEMO-001",
+      "quote_id": "QUOTE-MCU-DEMO-001-B",
+      "quote_version": 2,
+      "document_id": "DOC-MCU-DEMO-001-B-V2-CSV",
+      "document_version": 2,
+      "supplier_alias": "B",
+      "is_synthetic": true,
+      "review_status": "DRAFT",
+      "reviewed_by": null,
+      "fields": [
+        {
+          "field_name": "supplier_name",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "Schwarzwald Circuits"
+          ],
+          "expected_normalized_value": "Schwarzwald Circuits",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "Schwarzwald Circuits"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "supplier_country",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": false,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "category",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": false,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "item",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": false,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "manufacturer",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "QQ Demo Components"
+          ],
+          "expected_normalized_value": "QQ Demo Components",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "QQ Demo Components"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "manufacturer_part_number",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "QW-MCU9-DEMO"
+          ],
+          "expected_normalized_value": "QW-MCU9-DEMO",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "QW-MCU9-DEMO"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "package",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "revision",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "condition",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "currency",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "unit_price",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "6.80"
+          ],
+          "expected_normalized_value": "6.80",
+          "expected_unit": "SGD",
+          "semantic_evidence": [
+            "6.80",
+            "S$"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "price_basis_quantity",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "1"
+          ],
+          "expected_normalized_value": "1",
+          "expected_unit": "piece",
+          "semantic_evidence": [
+            "6.80",
+            "Individual pieces"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "price_basis_unit",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "Each Price / Individual pieces"
+          ],
+          "expected_normalized_value": "piece",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "6.80",
+            "Individual pieces"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "packaging_type",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "units_per_pack",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "order_multiple_units",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "moq_quantity",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "1,000 pcs"
+          ],
+          "expected_normalized_value": "1000",
+          "expected_unit": "piece",
+          "semantic_evidence": [
+            "1,000 pcs"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "moq_unit",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "shipping_fee_status",
+          "expected_status": "MISSING",
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "shipping_fee_amount",
+          "expected_status": "MISSING",
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Added from the confirmed B shipping omission rule; A review is still required."
+        },
+        {
+          "field_name": "other_fees_status",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "None"
+          ],
+          "expected_normalized_value": "NOT_APPLICABLE",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "None"
+          ],
+          "critical": true,
+          "notes": "Migrated from the legacy KNOWN_ZERO value and changed to the team-confirmed NOT_APPLICABLE contract; A review is still required."
+        },
+        {
+          "field_name": "other_fees_amount",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "None"
+          ],
+          "expected_normalized_value": "0.00",
+          "expected_unit": "SGD",
+          "semantic_evidence": [
+            "None"
+          ],
+          "critical": true,
+          "notes": "Added from the team-confirmed None-to-0.00 normalization; A review is still required."
+        },
+        {
+          "field_name": "tax_mode",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "lead_time_days",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "Arrival within 3 calendar days of confirmed purchase order"
+          ],
+          "expected_normalized_value": "3",
+          "expected_unit": "calendar_day",
+          "semantic_evidence": [
+            "Arrival within 3 calendar days of confirmed purchase order"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        },
+        {
+          "field_name": "day_basis",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "delivery_semantics",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "start_event",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "payment_terms",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": false,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "quote_date",
+          "expected_status": null,
+          "expected_raw_values": [],
+          "expected_normalized_value": null,
+          "expected_unit": null,
+          "semantic_evidence": [],
+          "critical": true,
+          "notes": "Not present in the legacy subset; A must review this field."
+        },
+        {
+          "field_name": "valid_until",
+          "expected_status": "EXTRACTED",
+          "expected_raw_values": [
+            "Valid through 2026/09/20"
+          ],
+          "expected_normalized_value": "2026-09-20",
+          "expected_unit": null,
+          "semantic_evidence": [
+            "Valid through 2026/09/20"
+          ],
+          "critical": true,
+          "notes": "Migrated from A's legacy V2 evidence subset; A review is still required."
+        }
+      ]
+    }
+  ]
+}

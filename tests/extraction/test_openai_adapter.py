@@ -11,10 +11,11 @@ from supplier_comparison.extraction.adapters import (
     OpenAICompatibleConfig,
 )
 from supplier_comparison.extraction.contracts import AdapterEnvironment, AdapterOutputMode
+from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser
 from supplier_comparison.extraction.errors import AdapterError, ModelCallBudgetExceeded
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 
-from .conftest import DATA_ROOT, context_for
+from .conftest import context_for, quote_path
 
 
 class FakeResponse:
@@ -87,7 +88,7 @@ def test_transient_transport_failure_retries_with_a_bound(quote_dictionary) -> N
         return response
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_c_quote_v1.pdf",
+        quote_path("c"),
         context_for("c"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-RETRY")
@@ -118,7 +119,7 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
         return FakeResponse(_valid_response(quote_dictionary))
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf",
+        quote_path("b"),
         context_for("b"),
     )
     config = _config(max_attempts=1).model_copy(update={"max_tokens": 4096})
@@ -156,13 +157,190 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     ]
 
 
+def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -> None:
+    captured = {}
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_valid_response(quote_dictionary))
+
+    parsed = ProfiledCsvQuoteParser().parse_row(
+        quote_path("b", version=2, extension="csv"),
+        context_for("b", version=2),
+        2,
+        profile_id="v2_supplier_b",
+    )
+    result = OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-V2-CSV-PROMPT"),
+        "EXTRACT-V2-CSV-PROMPT",
+    )
+
+    prompt = json.loads(captured["messages"][1]["content"])
+    sources_by_column = {source["column_name"]: source for source in prompt["sources"]}
+    price_source = sources_by_column["Each Price"]
+
+    assert price_source["kind"] == "CSV_CELL"
+    assert price_source["row_number"] == 2
+    assert price_source["text"] == "6.80"
+    assert "page_number" not in price_source
+    assert "block_id" not in price_source
+    assert result.run.prompt_version == "quote-extraction/1.7.0"
+    boundaries = prompt["field_specific_boundaries"]
+    assert "other fees" in boundaries["shipping_vs_other_fees"]
+    assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
+    assert "not zero" in boundaries["fee_status_vs_separate_amount"]
+    assert "Never cite either column" in boundaries["price_basis_vs_order_increment"]
+    assert "return CONFLICT" in boundaries["start_event"]
+    assert {example["field_name"] for example in prompt["unit_examples"]} == {
+        "unit_price",
+        "price_basis_quantity",
+        "units_per_pack",
+        "moq_quantity",
+        "lead_time_days",
+    }
+    fee_example, price_example, tray_price_example = prompt["cross_field_examples"]
+    assert fee_example["outputs"]["shipping_fee_status"]["validation_status"] == "MISSING"
+    assert fee_example["outputs"]["shipping_fee_amount"]["validation_status"] == "MISSING"
+    assert fee_example["outputs"]["other_fees_amount"]["unit"] == "SGD"
+    assert price_example["outputs"]["price_basis_quantity"]["cite_columns"] == [
+        "Each Price",
+        "Supply Form",
+    ]
+    assert price_example["outputs"]["order_multiple_units"]["cite_columns"] == [
+        "Order Increment"
+    ]
+    assert tray_price_example["outputs"]["price_basis_quantity"] == {
+        "normalized_value": "100",
+        "unit": "piece",
+        "cite_columns": ["Price", "Packaging"],
+    }
+    assert tray_price_example["outputs"]["price_basis_unit"]["normalized_value"] == "piece"
+
+
+def test_pdf_prompt_includes_page_and_block_location_metadata(quote_dictionary) -> None:
+    captured = {}
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_valid_response(quote_dictionary))
+
+    parsed = PdfQuoteParser().parse(quote_path("a", version=2), context_for("a", version=2))
+    OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-V2-PDF-PROMPT"),
+        "EXTRACT-V2-PDF-PROMPT",
+    )
+
+    prompt = json.loads(captured["messages"][1]["content"])
+    first_source = prompt["sources"][0]
+
+    assert first_source["source_id"] == "S001"
+    assert first_source["kind"] == "PDF_TEXT_BLOCK"
+    assert first_source["page_number"] >= 1
+    assert first_source["block_id"]
+    assert "row_number" not in first_source
+    assert "column_name" not in first_source
+
+
+def test_real_adapter_grounds_allowed_source_handle_to_authoritative_text(
+    quote_dictionary,
+) -> None:
+    captured = {}
+    parsed = PdfQuoteParser().parse(quote_path("a"), context_for("a"))
+    source = parsed.sources[0]
+    payload = json.loads(
+        _valid_response(quote_dictionary).decode("utf-8")
+    )["choices"][0]["message"]["content"]
+    payload = json.loads(payload)
+    payload["candidates"][0] = {
+        "field_name": quote_dictionary.extractable_fields[0].field_name,
+        "raw_value": source.raw_text,
+        "normalized_value": source.raw_text,
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": "S001", "quoted_text": "model paraphrase"}],
+    }
+    envelope = {
+        "id": "request-grounding-1",
+        "choices": [{"message": {"content": json.dumps(payload)}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(json.dumps(envelope).encode("utf-8"))
+
+    result = OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-SOURCE-HANDLE"),
+        "EXTRACT-SOURCE-HANDLE",
+    )
+
+    source_ref = result.payload.candidates[0].source_refs[0]
+    assert source_ref.source_id == source.source_id
+    assert source_ref.quoted_text == source.raw_text
+    assert result.model_payload_before_grounding is not None
+    assert result.model_payload_before_grounding.candidates[0].source_refs[0].source_id == "S001"
+    allowed = captured["response_format"]["json_schema"]["schema"]["$defs"][
+        "SourceCitation"
+    ]["properties"]["source_id"]["enum"]
+    assert allowed == [f"S{index:03d}" for index in range(1, len(parsed.sources) + 1)]
+
+
+def test_real_adapter_rejects_unknown_source_handle_without_retry(quote_dictionary) -> None:
+    parsed = PdfQuoteParser().parse(quote_path("a"), context_for("a"))
+    payload = json.loads(
+        _valid_response(quote_dictionary).decode("utf-8")
+    )["choices"][0]["message"]["content"]
+    payload = json.loads(payload)
+    payload["candidates"][0] = {
+        "field_name": quote_dictionary.extractable_fields[0].field_name,
+        "raw_value": "QUOTATION",
+        "normalized_value": "QUOTATION",
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_refs": [{"source_id": "S999", "quoted_text": "QUOTATION"}],
+    }
+    raw_content = json.dumps(payload)
+    envelope = {
+        "id": "request-unknown-handle-1",
+        "choices": [{"message": {"content": raw_content}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del request, timeout
+        return FakeResponse(json.dumps(envelope).encode("utf-8"))
+
+    budget = ModelCallBudget(graph_run_id="GRAPH-UNKNOWN-HANDLE")
+    with pytest.raises(AdapterError) as raised:
+        OpenAICompatibleAdapter(_config(max_attempts=3), opener=opener).extract(
+            parsed,
+            quote_dictionary,
+            budget,
+            "EXTRACT-UNKNOWN-HANDLE",
+        )
+
+    assert raised.value.code == "model_source_handle_unknown"
+    assert raised.value.details["source_handle"] == "S999"
+    assert raised.value.details["raw_model_content"] == raw_content
+    assert budget.calls_used == 1
+
+
 def test_restored_call_count_cannot_be_reset_by_retry(quote_dictionary) -> None:
     def opener(request, timeout):
         del request, timeout
         raise urllib.error.URLError("temporary")
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_c_quote_v1.pdf",
+        quote_path("c"),
         context_for("c"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-RESTORED", calls_used=7, max_calls=8)
@@ -178,7 +356,7 @@ def test_invalid_provider_envelope_is_not_retried(quote_dictionary) -> None:
         return FakeResponse(b"not-json")
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_a_quote_v1.pdf",
+        quote_path("a"),
         context_for("a"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-FAIL")
@@ -226,7 +404,7 @@ def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(qu
         )
 
     parsed = PdfQuoteParser().parse(
-        DATA_ROOT / "generated" / "inputs" / "development" / "supplier_b_quote_v1.pdf",
+        quote_path("b"),
         context_for("b"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-SCHEMA-FAIL")
