@@ -1,0 +1,15 @@
+# Local Codex project memory; never commit or push to GitHub.
+/AGENTS.md
+.env
+.env.*
+!.env.example
+
+# Member B's local working plan; the repository handoff is guide_lc.md.
+/docs/B_WEEK1_IMPLEMENTATION_PLAN_2026-09-09.md
+
+# Local Python and test artifacts.
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store

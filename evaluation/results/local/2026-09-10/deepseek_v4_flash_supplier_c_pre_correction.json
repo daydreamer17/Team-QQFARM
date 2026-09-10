@@ -1,0 +1,1144 @@
+{
+  "result_kind": "REAL_MODEL_EXTRACTION",
+  "environment": "LOCAL",
+  "input_is_synthetic": true,
+  "correction_state": "PRE_CORRECTION",
+  "status": "PASSED",
+  "checks": {
+    "candidate_count_is_30": true,
+    "extracted_fields_have_values": true
+  },
+  "batch": {
+    "schema_version": "1.0",
+    "dictionary_version": "1.2.0",
+    "parsed_input": {
+      "context": {
+        "task_id": "TASK-MCU-DEMO-001-LOCAL-MODEL-TEST",
+        "task_revision": 1,
+        "scenario_id": "MCU-DEMO-001",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "document_id": "DOC-MCU-DEMO-001-C-V1",
+        "document_version": 1,
+        "supplier_id": "SUP-024"
+      },
+      "original_filename": "supplier_c_quote_v1.pdf",
+      "media_type": "application/pdf",
+      "file_size_bytes": 3004,
+      "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+      "parser_version": "pdfplumber-text/1.0.0",
+      "sources": [
+        {
+          "source_id": "src_4fd0019c357f5a10f8a86a5f",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "QUOTATION",
+          "page_number": 1,
+          "block_id": "blk_21202df340562f2a1bb446e8",
+          "bbox": {
+            "x0": 42.0,
+            "top": 35.175,
+            "x1": 192.0,
+            "bottom": 60.175
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_45f03b8d6ed5a162006abe48",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "QUOTE-MCU-DEMO-001-C",
+          "page_number": 1,
+          "block_id": "blk_e6f44eb253c972473f731d24",
+          "bbox": {
+            "x0": 427.726,
+            "top": 40.07,
+            "x1": 553.276,
+            "bottom": 50.07
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_56932ffa63dd12f44f2a6bfb",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Quote date: 2026-09-13",
+          "page_number": 1,
+          "block_id": "blk_2b7a07899ac89afb5ce93f8c",
+          "bbox": {
+            "x0": 457.714,
+            "top": 58.863,
+            "x1": 553.276,
+            "bottom": 67.863
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_2f4c0a7f85d483eb16ff57c4",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Synthetic quotation for demonstration only",
+          "page_number": 1,
+          "block_id": "blk_d4abbc17e43501e2d6be4136",
+          "bbox": {
+            "x0": 42.0,
+            "top": 68.863,
+            "x1": 210.084,
+            "bottom": 77.863
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_bd4f5ff8df5d0311fe1e4dab",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Valid through: 2026-09-20",
+          "page_number": 1,
+          "block_id": "blk_057fa123efb324a2893bed4f",
+          "bbox": {
+            "x0": 449.218,
+            "top": 74.863,
+            "x1": 553.276,
+            "bottom": 83.863
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_32199cf1d1b1cc7efe258333",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Sterling Components",
+          "page_number": 1,
+          "block_id": "blk_343c9d805eb759ed60a3780a",
+          "bbox": {
+            "x0": 42.0,
+            "top": 129.691,
+            "x1": 173.456,
+            "bottom": 142.691
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_b5065624dd3182f025ec472d",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Demo Supplier C | USA | SUP-024",
+          "page_number": 1,
+          "block_id": "blk_5a9994cfcd7d7d437cf7d2f3",
+          "bbox": {
+            "x0": 42.0,
+            "top": 148.863,
+            "x1": 180.222,
+            "bottom": 157.863
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_617f7267a1d4a8ad881e72c4",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Product and specification",
+          "page_number": 1,
+          "block_id": "blk_17094008897c8ba47b35a3b5",
+          "bbox": {
+            "x0": 42.0,
+            "top": 179.277,
+            "x1": 176.475,
+            "bottom": 190.277
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_fc28e860c7d28c89758c12a5",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Item Microcontroller MCU-9",
+          "page_number": 1,
+          "block_id": "blk_6b962dce53032be24abf00d7",
+          "bbox": {
+            "x0": 50.0,
+            "top": 207.26,
+            "x1": 290.0,
+            "bottom": 215.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_ccdfdd7eafbcfb1ed76600b3",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Manufacturer QQ Demo Components",
+          "page_number": 1,
+          "block_id": "blk_0b2cf8bd0cc8bf0993d9949e",
+          "bbox": {
+            "x0": 50.0,
+            "top": 231.26,
+            "x1": 293.808,
+            "bottom": 239.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_aab112c09f0ff08ef5c88223",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Manufacturer part number QW-MCU9-DEMO",
+          "page_number": 1,
+          "block_id": "blk_6844b788c30b03cc5fe9a778",
+          "bbox": {
+            "x0": 50.0,
+            "top": 255.26,
+            "x1": 274.878,
+            "bottom": 263.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_5dc76de353ff3e5b1c880407",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Package / revision QFN-32 / R1",
+          "page_number": 1,
+          "block_id": "blk_ffcc337f23aa82dc1e1901fc",
+          "bbox": {
+            "x0": 50.0,
+            "top": 279.26,
+            "x1": 253.178,
+            "bottom": 287.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_f3d064ec42317e77ad8088ca",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Condition New product",
+          "page_number": 1,
+          "block_id": "blk_3d307058346921bad1786d6b",
+          "bbox": {
+            "x0": 50.0,
+            "top": 303.26,
+            "x1": 252.71,
+            "bottom": 311.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_fb41832258d1c052f9c5c0bc",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Commercial terms",
+          "page_number": 1,
+          "block_id": "blk_6f2782284ef0b7e25584567d",
+          "bbox": {
+            "x0": 42.0,
+            "top": 333.277,
+            "x1": 137.975,
+            "bottom": 344.277
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_e1deb7e234c8741c79fa65da",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Price S$660.00 per tray of 100 pieces",
+          "page_number": 1,
+          "block_id": "blk_9720b7978ada251e96529ddf",
+          "bbox": {
+            "x0": 50.0,
+            "top": 361.26,
+            "x1": 325.487,
+            "bottom": 369.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_38f1c797ac74f9b877e5ad56",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Minimum order 10 trays; orders must be in full trays",
+          "page_number": 1,
+          "block_id": "blk_18ea45f4df0182d0fa468d33",
+          "bbox": {
+            "x0": 50.0,
+            "top": 385.26,
+            "x1": 339.631,
+            "bottom": 393.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_b8f53ea0e87f44af7bf60d87",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Shipping fee S$500.00",
+          "page_number": 1,
+          "block_id": "blk_a9ee06c382946f292f91624a",
+          "bbox": {
+            "x0": 50.0,
+            "top": 409.26,
+            "x1": 241.388,
+            "bottom": 417.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_c9bc63c200e02ca2f8703930",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Other fees None",
+          "page_number": 1,
+          "block_id": "blk_8151293ab8a2780c3cd192d8",
+          "bbox": {
+            "x0": 50.0,
+            "top": 433.26,
+            "x1": 225.315,
+            "bottom": 441.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_8ab5209253bcab0f85e7bae5",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Tax Not applicable for this synthetic scenario",
+          "page_number": 1,
+          "block_id": "blk_36dab4c0bad395a80f73da6e",
+          "bbox": {
+            "x0": 50.0,
+            "top": 457.26,
+            "x1": 357.116,
+            "bottom": 465.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_d2a78f2bee349bad448bd8e1",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Delivery Arrival 3 calendar days after order date",
+          "page_number": 1,
+          "block_id": "blk_079562054ed8f323d90d664b",
+          "bbox": {
+            "x0": 50.0,
+            "top": 481.26,
+            "x1": 351.923,
+            "bottom": 489.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_3404b2fd0d382bfdfd72ce09",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Delivery location SG-DEMO-01",
+          "page_number": 1,
+          "block_id": "blk_fcdfcb4190b43454ac134cd0",
+          "bbox": {
+            "x0": 50.0,
+            "top": 505.26,
+            "x1": 257.896,
+            "bottom": 513.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_7c32fa1a36296571589c692a",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "Payment terms Net 30",
+          "page_number": 1,
+          "block_id": "blk_c9b0a2b5eb3cb5e7a2cef960",
+          "bbox": {
+            "x0": 50.0,
+            "top": 529.26,
+            "x1": 230.041,
+            "bottom": 537.76
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_4cd1b405cdb3e2599447474a",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "This document contains fictional quotation terms generated for software development and evaluation. It is not a purchase offer.",
+          "page_number": 1,
+          "block_id": "blk_208667c9e3cf0b7a74dad93b",
+          "bbox": {
+            "x0": 52.0,
+            "top": 767.546,
+            "x1": 500.224,
+            "bottom": 775.546
+          },
+          "row_number": null,
+          "column_name": null
+        },
+        {
+          "source_id": "src_e9293330fcd740b5f2aa1590",
+          "kind": "PDF_TEXT_BLOCK",
+          "document_id": "DOC-MCU-DEMO-001-C-V1",
+          "document_version": 1,
+          "document_sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246",
+          "parser_version": "pdfplumber-text/1.0.0",
+          "raw_text": "DOC-MCU-DEMO-001-C-V1 | Page 1 of 1",
+          "page_number": 1,
+          "block_id": "blk_f8a1f9111329868c4963376b",
+          "bbox": {
+            "x0": 402.966,
+            "top": 788.942,
+            "x1": 543.276,
+            "bottom": 796.442
+          },
+          "row_number": null,
+          "column_name": null
+        }
+      ]
+    },
+    "candidates": [
+      {
+        "field_id": "fld_0d31ad050ef4d9418b03fd2d",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "supplier_name",
+        "raw_value": "Sterling Components",
+        "normalized_value": "Sterling Components",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_32199cf1d1b1cc7efe258333",
+            "quoted_text": "Sterling Components"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_d1bd398d1c1e3aad328e06da",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "supplier_country",
+        "raw_value": "USA",
+        "normalized_value": "USA",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_b5065624dd3182f025ec472d",
+            "quoted_text": "USA"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_0ef0aace7a843e62eeaf23d7",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "category",
+        "raw_value": null,
+        "normalized_value": null,
+        "unit": null,
+        "validation_status": "MISSING",
+        "origin": "DOCUMENT",
+        "source_refs": [],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_977023671ee0e63266a46f21",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "item",
+        "raw_value": "Microcontroller MCU-9",
+        "normalized_value": "Microcontroller MCU-9",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_fc28e860c7d28c89758c12a5",
+            "quoted_text": "Microcontroller MCU-9"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_1190ef8e97e531af25c5e988",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "manufacturer",
+        "raw_value": "QQ Demo Components",
+        "normalized_value": "QQ Demo Components",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_ccdfdd7eafbcfb1ed76600b3",
+            "quoted_text": "QQ Demo Components"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_ab7a818b55fa9e4f2b0431d8",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "manufacturer_part_number",
+        "raw_value": "QW-MCU9-DEMO",
+        "normalized_value": "QW-MCU9-DEMO",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_aab112c09f0ff08ef5c88223",
+            "quoted_text": "QW-MCU9-DEMO"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_91b84d129db76a7fcfbc4dee",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "package",
+        "raw_value": "QFN-32",
+        "normalized_value": "QFN-32",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_5dc76de353ff3e5b1c880407",
+            "quoted_text": "QFN-32"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_11ff12ce9e631d6bf326b234",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "revision",
+        "raw_value": "R1",
+        "normalized_value": "R1",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_5dc76de353ff3e5b1c880407",
+            "quoted_text": "R1"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_03b58a5532debaa80094be70",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "condition",
+        "raw_value": "New product",
+        "normalized_value": "NEW",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_f3d064ec42317e77ad8088ca",
+            "quoted_text": "New product"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_5e281cbad4101a431776a258",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "currency",
+        "raw_value": "S$",
+        "normalized_value": "SGD",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "S$"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_810d4865c556224e8b95235c",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "unit_price",
+        "raw_value": "S$660.00",
+        "normalized_value": "660.00",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "S$660.00"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_f2f73f66f90883b40f26cedb",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "price_basis_quantity",
+        "raw_value": "100 pieces",
+        "normalized_value": "100",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "100 pieces"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_97cd4131178f78663d0569e9",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "price_basis_unit",
+        "raw_value": "pieces",
+        "normalized_value": "piece",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "pieces"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_d6080e82afec022cf90eb440",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "packaging_type",
+        "raw_value": "tray",
+        "normalized_value": "tray",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "tray"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_477b4ab628f9b5a9800582fe",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "units_per_pack",
+        "raw_value": "100 pieces",
+        "normalized_value": "100",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_e1deb7e234c8741c79fa65da",
+            "quoted_text": "100 pieces"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_aeb3e0eb7790be40d2736ce3",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "order_multiple_units",
+        "raw_value": "full trays",
+        "normalized_value": "100",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_38f1c797ac74f9b877e5ad56",
+            "quoted_text": "full trays"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_37a16ea3e89e72bc370a7203",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "moq_quantity",
+        "raw_value": "10 trays",
+        "normalized_value": "10",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_38f1c797ac74f9b877e5ad56",
+            "quoted_text": "10 trays"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_e5a56690733674e7a87ecbe2",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "moq_unit",
+        "raw_value": "trays",
+        "normalized_value": "tray",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_38f1c797ac74f9b877e5ad56",
+            "quoted_text": "trays"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_6fe0e591865139fdb53c70ae",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "shipping_fee_status",
+        "raw_value": "Shipping fee S$500.00",
+        "normalized_value": "PAID",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_b8f53ea0e87f44af7bf60d87",
+            "quoted_text": "Shipping fee S$500.00"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_fbee783221f5f16473f9f8b4",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "shipping_fee_amount",
+        "raw_value": "S$500.00",
+        "normalized_value": "500.00",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_b8f53ea0e87f44af7bf60d87",
+            "quoted_text": "S$500.00"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_f4296c82fa28d203d349328e",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "other_fees_status",
+        "raw_value": "None",
+        "normalized_value": "NOT_APPLICABLE",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_c9bc63c200e02ca2f8703930",
+            "quoted_text": "None"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_6f0d3b8e8376539a0ac05763",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "other_fees_amount",
+        "raw_value": "None",
+        "normalized_value": "0.00",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_c9bc63c200e02ca2f8703930",
+            "quoted_text": "None"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_a6dc1479e23b8af06268c3ac",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "tax_mode",
+        "raw_value": "Not applicable",
+        "normalized_value": "NOT_APPLICABLE",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_8ab5209253bcab0f85e7bae5",
+            "quoted_text": "Not applicable"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_069a0bc648e7485da1dda11b",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "lead_time_days",
+        "raw_value": "3 calendar days",
+        "normalized_value": "3",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_d2a78f2bee349bad448bd8e1",
+            "quoted_text": "3 calendar days"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_4eba58abd9396010916401e2",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "day_basis",
+        "raw_value": "calendar days",
+        "normalized_value": "CALENDAR_DAYS",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_d2a78f2bee349bad448bd8e1",
+            "quoted_text": "calendar days"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_e3957af41b97bd992eed5c84",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "delivery_semantics",
+        "raw_value": "Arrival",
+        "normalized_value": "ARRIVAL",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_d2a78f2bee349bad448bd8e1",
+            "quoted_text": "Arrival"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_41e47d3b94b9f17d71c007e9",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "start_event",
+        "raw_value": "after order date",
+        "normalized_value": "ORDER_DATE",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_d2a78f2bee349bad448bd8e1",
+            "quoted_text": "after order date"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_37c819579128e842187d27aa",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "payment_terms",
+        "raw_value": "Net 30",
+        "normalized_value": "Net 30",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_7c32fa1a36296571589c692a",
+            "quoted_text": "Net 30"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_f4dd6de0c3fc42c4fe76a269",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "quote_date",
+        "raw_value": "2026-09-13",
+        "normalized_value": "2026-09-13",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_56932ffa63dd12f44f2a6bfb",
+            "quoted_text": "2026-09-13"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      },
+      {
+        "field_id": "fld_d4c110568950bfa5d31d00a6",
+        "quote_id": "QUOTE-MCU-DEMO-001-C",
+        "quote_version": 1,
+        "field_version": 1,
+        "field_name": "valid_until",
+        "raw_value": "2026-09-20",
+        "normalized_value": "2026-09-20",
+        "unit": null,
+        "validation_status": "EXTRACTED",
+        "origin": "DOCUMENT",
+        "source_refs": [
+          {
+            "source_id": "src_bd4f5ff8df5d0311fe1e4dab",
+            "quoted_text": "2026-09-20"
+          }
+        ],
+        "producer": "MODEL_ADAPTER",
+        "adapter_version": "openai-compatible/1.0.0",
+        "prompt_version": "quote-extraction/1.0.0"
+      }
+    ],
+    "normalization_events": [],
+    "run": {
+      "extraction_run_id": "extract_local_6647c48a267b492d8df835792b7ab20b",
+      "graph_run_id": "graph_local_8a6046935f2a4554acbd61e5f76ec7af",
+      "provider": "siliconflow",
+      "protocol": "openai_chat_completions",
+      "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+      "environment": "LOCAL",
+      "output_mode": "REAL",
+      "adapter_version": "openai-compatible/1.0.0",
+      "prompt_version": "quote-extraction/1.0.0",
+      "calls_before": 0,
+      "calls_after": 1,
+      "attempts": 1,
+      "enable_thinking": false,
+      "provider_request_id": "01a08957716ae9dc0192016ee367f2a2",
+      "provider_trace_id": "ti_n0y7exbtvv6yb08k0c",
+      "finish_reason": "stop",
+      "prompt_tokens": 3411,
+      "completion_tokens": 2901,
+      "reasoning_tokens": 0,
+      "total_tokens": 6312,
+      "started_at": "2026-09-10T03:23:23.923557Z",
+      "finished_at": "2026-09-10T03:23:36.431609Z",
+      "errors": []
+    },
+    "created_at": "2026-09-10T03:23:36.433763Z"
+  }
+}
