@@ -1,0 +1,66 @@
+{
+  "fixture_id": "QUOTE-V4-EXECUTION-LIMITS",
+  "configuration": {
+    "max_stage_attempts_including_first": 3,
+    "max_model_calls_per_graph_run": 8,
+    "counters_persist_across_retry_and_resume": true
+  },
+  "cases": [
+    {
+      "case_id": "STAGE_RETRY_BOUND",
+      "graph_run_id": "GR-V4-RETRY",
+      "stage": "extract_quote",
+      "persisted_counters": {
+        "stage_attempts": 0,
+        "model_calls": 0
+      },
+      "planned_provider_results": [
+        "TRANSIENT_ERROR",
+        "TRANSIENT_ERROR",
+        "TRANSIENT_ERROR",
+        "SUCCESS_SENTINEL_MUST_NOT_RUN"
+      ]
+    },
+    {
+      "case_id": "GRAPH_CALL_BOUND",
+      "graph_run_id": "GR-V4-CALLS",
+      "persisted_counters": {
+        "model_calls": 0
+      },
+      "planned_call_requests": [
+        "CALL-1",
+        "CALL-2",
+        "CALL-3",
+        "CALL-4",
+        "CALL-5",
+        "CALL-6",
+        "CALL-7",
+        "CALL-8",
+        "CALL-9"
+      ]
+    },
+    {
+      "case_id": "RESUME_PRESERVES_CALL_COUNT",
+      "graph_run_id": "GR-V4-RESUME",
+      "persisted_counters": {
+        "model_calls": 7
+      },
+      "planned_call_requests_after_resume": [
+        "CALL-8",
+        "CALL-9-SENTINEL-MUST_NOT_RUN"
+      ]
+    },
+    {
+      "case_id": "NEW_JOB_DOES_NOT_RESET_GRAPH_BUDGET",
+      "graph_run_id": "GR-V4-JOB-BOUND",
+      "previous_job_id": "JOB-V4-OLD",
+      "new_job_id": "JOB-V4-NEW",
+      "persisted_counters": {
+        "model_calls": 8
+      },
+      "planned_call_requests": [
+        "CALL-9-SENTINEL-MUST_NOT_RUN"
+      ]
+    }
+  ]
+}
