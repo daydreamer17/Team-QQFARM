@@ -1,0 +1,199 @@
+{
+  "dataset_id": "QUOTE-V6-GENERALIZATION",
+  "dataset_version": "6.0.0",
+  "is_synthetic": true,
+  "created_for": "Supplier quote extraction generalization and hybrid CSV route evaluation",
+  "dictionary": {
+    "path": "data/contracts/quote_data_field.csv",
+    "version": "1.2.0",
+    "sha256": "7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd"
+  },
+  "counts": {
+    "logical_cases": 15,
+    "development": 5,
+    "calibration": 5,
+    "holdout": 5,
+    "csv": 6,
+    "pdf": 9
+  },
+  "task_limit": "Each split contains exactly five documents. Do not combine splits in one task.",
+  "split_rules": {
+    "development": "May be used for implementation debugging. Any sample edited after observing model output remains development data.",
+    "calibration": "May be used to choose mappings, prompt version and thresholds. Freeze all settings after calibration and before holdout execution.",
+    "holdout": "Run only after freezing code, mappings, prompt and thresholds. If used to debug or tune, reclassify it as development and create a new holdout set."
+  },
+  "reference_isolation": "Never mount evaluation/reference/quote_V6 to the parser, model, retrieval tools or business runtime.",
+  "registered_csv_profile": {
+    "profile_id": "FIXED-QUOTE-CSV-V1",
+    "encoding": "UTF-8",
+    "delimiter": ",",
+    "header_order": [
+      "scenario_id",
+      "quote_id",
+      "quote_version",
+      "document_id",
+      "supplier_alias",
+      "supplier_id",
+      "supplier_name",
+      "supplier_country",
+      "category",
+      "item",
+      "manufacturer",
+      "manufacturer_part_number",
+      "package",
+      "revision",
+      "condition",
+      "currency",
+      "unit_price",
+      "price_basis_quantity",
+      "price_basis_unit",
+      "packaging_type",
+      "units_per_pack",
+      "order_multiple_units",
+      "moq_quantity",
+      "moq_unit",
+      "shipping_fee_status",
+      "shipping_fee_amount",
+      "other_fees_status",
+      "other_fees_amount",
+      "fees_complete",
+      "tax_mode",
+      "lead_time_days",
+      "day_basis",
+      "delivery_semantics",
+      "start_event",
+      "start_date",
+      "delivery_location",
+      "payment_terms",
+      "quote_date",
+      "valid_until",
+      "source_po_id",
+      "is_synthetic"
+    ],
+    "unexpected_missing_or_duplicate_header": "REJECT",
+    "row_rule": "One quote record per V6 CSV file; header is row 1 and the quote is logical row 2.",
+    "hybrid_rule": "Perform exact-header validation and deterministic field mapping first. Invoke the model only for explicitly flagged cross-field or free-text semantic review."
+  },
+  "coverage": [
+    "Development, calibration and holdout split discipline",
+    "Two- and three-page text PDFs",
+    "Repeated consistent fields with multiple source locations",
+    "Internal price, start-event and revision conflicts",
+    "Missing shipping and other-fee fields distinct from UNKNOWN, FREE and INCLUDED",
+    "Price bases of 1, 50, 100 and 500 pieces plus tray purchasing constraints",
+    "Prompt injection and cross-supplier claims treated as untrusted text",
+    "Registered CSV hybrid routing with zero model calls for clean rows and one bounded call for complex semantics"
+  ],
+  "reference_files": {
+    "development": "evaluation/reference/quote_V6/development/reference_answers.json",
+    "calibration": "evaluation/reference/quote_V6/calibration/reference_answers.json",
+    "holdout": "evaluation/reference/quote_V6/holdout/reference_answers.json"
+  },
+  "inputs": [
+    {
+      "case_id": "V6-CAL-01",
+      "split": "calibration",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/calibration/quote_V6/cal_01_registered_clean.csv",
+      "sha256": "a7b2290bb429f797f0e141ecc16d44bb37508ee8c35ade0b40f393cd6fcbbd11"
+    },
+    {
+      "case_id": "V6-CAL-02",
+      "split": "calibration",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/calibration/quote_V6/cal_02_registered_conflict.csv",
+      "sha256": "2ce22fcbfcb7cbb6a2b5a214a62e22207f7c826e96cf3c600a1dda6d77eeb1fb"
+    },
+    {
+      "case_id": "V6-CAL-03",
+      "split": "calibration",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/calibration/quote_V6/cal_03_multipage_repeated.pdf",
+      "sha256": "27198db843d58db8551b7367fa1ffd5c3b9b0be56d5e67f9a099e7f8315702bc"
+    },
+    {
+      "case_id": "V6-CAL-04",
+      "split": "calibration",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/calibration/quote_V6/cal_04_missing_fees.pdf",
+      "sha256": "bb6e236386762bd9f477dd996557936331642a1f0033b0bf7cc900ea39ac3f5a"
+    },
+    {
+      "case_id": "V6-CAL-05",
+      "split": "calibration",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/calibration/quote_V6/cal_05_prompt_injection.pdf",
+      "sha256": "d4822149843058e4da5937063fe8fdf3f23664832d944671188d1c2e1f259af6"
+    },
+    {
+      "case_id": "V6-DEV-01",
+      "split": "development",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/development/quote_V6/dev_01_registered_clean.csv",
+      "sha256": "4ba52d0cb94028e350a654dd3b46f2958acb598e375c2a4015fc45b5840a5eb8"
+    },
+    {
+      "case_id": "V6-DEV-02",
+      "split": "development",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/development/quote_V6/dev_02_registered_semantic.csv",
+      "sha256": "e78a2904efce280605f3f17497b2406d3d7df15a29411691123cc390fd685b9a"
+    },
+    {
+      "case_id": "V6-DEV-03",
+      "split": "development",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/development/quote_V6/dev_03_multipage_repeated.pdf",
+      "sha256": "5027d8d022779e2324660675ea78dc9b4b318114034c1b2c6f51f2ac59ea7421"
+    },
+    {
+      "case_id": "V6-DEV-04",
+      "split": "development",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/development/quote_V6/dev_04_internal_price_conflict.pdf",
+      "sha256": "84a8ca8abd12f892422a6d34815f8eedefdc41db2d0247554cb2acbae8892199"
+    },
+    {
+      "case_id": "V6-DEV-05",
+      "split": "development",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/development/quote_V6/dev_05_prompt_injection.pdf",
+      "sha256": "5d166c2feff928e53b390ac68ff77e63019155a03a1e00c0aa55e00b1726d45a"
+    },
+    {
+      "case_id": "V6-HOLD-01",
+      "split": "holdout",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/holdout/quote_V6/hold_01_registered_clean.csv",
+      "sha256": "fc6f7efecc800b37a14bc08af53f9e090286487fb278977dc81cc8196f775423"
+    },
+    {
+      "case_id": "V6-HOLD-02",
+      "split": "holdout",
+      "media_type": "text/csv",
+      "relative_path": "data/generated/inputs/holdout/quote_V6/hold_02_registered_semantic.csv",
+      "sha256": "21668319c11ce15076d7183a55f1643b9b510352b3489ac8b43d281d1c43352b"
+    },
+    {
+      "case_id": "V6-HOLD-03",
+      "split": "holdout",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/holdout/quote_V6/hold_03_revision_conflict.pdf",
+      "sha256": "75912d750a054a8edaf89b77ee0f67a14ec17f8700addeaeab49b43cad2be42a"
+    },
+    {
+      "case_id": "V6-HOLD-04",
+      "split": "holdout",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/holdout/quote_V6/hold_04_price_basis_and_fees.pdf",
+      "sha256": "24854a7967607d559a628de24d6032560dc9cc7ec35544c94ced7895634d0056"
+    },
+    {
+      "case_id": "V6-HOLD-05",
+      "split": "holdout",
+      "media_type": "application/pdf",
+      "relative_path": "data/generated/inputs/holdout/quote_V6/hold_05_prompt_injection.pdf",
+      "sha256": "1e517f6bf2584d9bbdbafb52f663b646adfe0994117dbebcab9eec564f6a7eca"
+    }
+  ]
+}
