@@ -1,7 +1,11 @@
 {
   "dataset_version": "V7",
+  "dataset_revision": "V7.1",
   "dictionary_file": "data/contracts/quote_data_field.csv",
   "dictionary_version": "1.2.0",
+  "dictionary_sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
+  "dictionary_sha256_basis": "Git blob bytes with LF line endings",
+  "review_code_version": "V7_STAGE0_APPROVED_2026-09-11",
   "scored_fields": [
     "supplier_name",
     "supplier_country",
@@ -43,7 +47,7 @@
     {
       "case_id": "V7-DEV-01",
       "input_file": "data/generated/inputs/development/quote_V7/dev_01.pdf",
-      "input_sha256": "039dd429eb4780a488c9cc9b8a4943f8455311748d6ae27816e20247745a5061",
+      "input_sha256": "3177bfe7b31d83f6f08690b61115b629c769ceb8ca9e08b53c31ba1ec6e8c12b",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -530,7 +534,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "02/10/2026",
+          "raw_expression": "2026-10-02 (ISO 8601)",
           "normalized_value": "2026-10-02",
           "unit": null,
           "evidence": [
@@ -538,7 +542,7 @@
               "source_id": "V7-DEV-01-P02-R15",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "02/10/2026"
+              "text_contains": "2026-10-02 (ISO 8601)"
             }
           ]
         },
@@ -743,7 +747,7 @@
           "source_id": "V7-DEV-01-P02-R15",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "02/10/2026"
+          "text_contains": "2026-10-02 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-01-P02-R16",
@@ -923,7 +927,7 @@
             {
               "label": "Date quoted",
               "field_name": "quote_date",
-              "value_text": "02/10/2026"
+              "value_text": "2026-10-02 (ISO 8601)"
             },
             {
               "label": "Offer expires",
@@ -950,7 +954,7 @@
     {
       "case_id": "V7-DEV-02",
       "input_file": "data/generated/inputs/development/quote_V7/dev_02.pdf",
-      "input_sha256": "9191a8200c1e8bc7b17e8d17a2edbbab6f847d7f039d821f21b351f16b146682",
+      "input_sha256": "c6d8c01982e49d58c716a6caa5ab86bba4ce70ff145c464805d40de77ac2c08f",
       "page_count": 3,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -1432,7 +1436,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "03/10/2026",
+          "raw_expression": "2026-10-03 (ISO 8601)",
           "normalized_value": "2026-10-03",
           "unit": null,
           "evidence": [
@@ -1440,7 +1444,7 @@
               "source_id": "V7-DEV-02-P03-R08",
               "field_name": "quote_date",
               "page_number": 3,
-              "text_contains": "03/10/2026"
+              "text_contains": "2026-10-03 (ISO 8601)"
             }
           ]
         },
@@ -1639,7 +1643,7 @@
           "source_id": "V7-DEV-02-P03-R08",
           "field_name": "quote_date",
           "page_number": 3,
-          "text_contains": "03/10/2026"
+          "text_contains": "2026-10-03 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-02-P03-R09",
@@ -1823,7 +1827,7 @@
             {
               "label": "Issued on",
               "field_name": "quote_date",
-              "value_text": "03/10/2026"
+              "value_text": "2026-10-03 (ISO 8601)"
             },
             {
               "label": "Valid through",
@@ -1850,7 +1854,7 @@
     {
       "case_id": "V7-DEV-03",
       "input_file": "data/generated/inputs/development/quote_V7/dev_03.pdf",
-      "input_sha256": "9ca25020179d92070fa11ee9f3def027341b39747b163a8f9cb9dff4f904e647",
+      "input_sha256": "a1ef005f893248677f21b35b76a7fff8a504509a03a404e9d24eee8f5dbb7ee3",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -2321,7 +2325,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "04/10/2026",
+          "raw_expression": "2026-10-04 (ISO 8601)",
           "normalized_value": "2026-10-04",
           "unit": null,
           "evidence": [
@@ -2329,7 +2333,7 @@
               "source_id": "V7-DEV-03-P02-R14",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "04/10/2026"
+              "text_contains": "2026-10-04 (ISO 8601)"
             }
           ]
         },
@@ -2522,7 +2526,7 @@
           "source_id": "V7-DEV-03-P02-R14",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "04/10/2026"
+          "text_contains": "2026-10-04 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-03-P02-R15",
@@ -2692,7 +2696,7 @@
             {
               "label": "Quotation date",
               "field_name": "quote_date",
-              "value_text": "04/10/2026"
+              "value_text": "2026-10-04 (ISO 8601)"
             },
             {
               "label": "Quotation valid until",
@@ -2714,14 +2718,14 @@
       "expected_review": {
         "review_status": "REVIEW_REQUIRED",
         "blocking_codes": [
-          "FIELD_CONFLICT"
+          "CRITICAL_FIELD_CONFLICT"
         ]
       }
     },
     {
       "case_id": "V7-DEV-04",
       "input_file": "data/generated/inputs/development/quote_V7/dev_04.pdf",
-      "input_sha256": "9fde3a2d4f770a776566dd5203b51497fe43d606707c501fab8dfab2a2ddb00a",
+      "input_sha256": "e31c501ac8b37d2bc46cc37b80bd0c057851a7cc34f95e3d1ae30497c8c930b1",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -3176,7 +3180,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "05/10/2026",
+          "raw_expression": "2026-10-05 (ISO 8601)",
           "normalized_value": "2026-10-05",
           "unit": null,
           "evidence": [
@@ -3184,7 +3188,7 @@
               "source_id": "V7-DEV-04-P02-R13",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "05/10/2026"
+              "text_contains": "2026-10-05 (ISO 8601)"
             }
           ]
         },
@@ -3365,7 +3369,7 @@
           "source_id": "V7-DEV-04-P02-R13",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "05/10/2026"
+          "text_contains": "2026-10-05 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-04-P02-R14",
@@ -3385,9 +3389,9 @@
         },
         {
           "page_number": 2,
-          "manual_transcription": "Pieces in each pack: Exactly 1 pcs inside each sales pack\nOrder in multiples of: Orders may increase only in steps of 50 piece(s)\nMOQ quantity: Minimum buy is 1000 piece(s)\nMOQ measured in: MOQ unit: piece\nDelivery charge status: Freight amount is presently unknown; confirmation required\nAdditional-charge status: Other fees have not been determined\nTax basis: Tax is not applicable to this synthetic test quote\nLead time count: Lead time is 3 business days\nDays type: Business days only\nDelivery interpretation: Lead time ends when goods arrive\nLead-time starts: Clock starts after written order confirmation\nSettlement terms: Net 15\nDate quoted: 05/10/2026\nOffer expires: Valid through 19 Oct 2026, end of day Singapore",
+          "manual_transcription": "Pieces in each pack: Exactly 1 pcs inside each sales pack\nOrder in multiples of: Orders may increase only in steps of 50 piece(s)\nMOQ quantity: Minimum buy is 1000 piece(s)\nMOQ measured in: MOQ unit: piece\nDelivery charge status: Freight amount is presently unknown; confirmation required\nAdditional-charge status: Other fees have not been determined\nTax basis: Tax is not applicable to this synthetic test quote\nLead time count: Lead time is 3 business days\nDays type: Business days only\nDelivery interpretation: Lead time ends when goods arrive\nLead-time starts: Clock starts after written order confirmation\nSettlement terms: Net 15\nDate quoted: 2026-10-05 (ISO 8601)\nOffer expires: Valid through 19 Oct 2026, end of day Singapore",
           "critical_tokens": [
-            "05/10/2026",
+            "2026-10-05 (ISO 8601)",
             "Valid through 19 Oct 2026, end of day Singapore"
           ]
         }
@@ -3542,7 +3546,7 @@
             {
               "label": "Date quoted",
               "field_name": "quote_date",
-              "value_text": "05/10/2026"
+              "value_text": "2026-10-05 (ISO 8601)"
             },
             {
               "label": "Offer expires",
@@ -3571,7 +3575,7 @@
     {
       "case_id": "V7-DEV-05",
       "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
-      "input_sha256": "ab178b482719e8e2a456644af1e3871c059d3423ed2f1a909be26edf08e23fc5",
+      "input_sha256": "800c4e0993e0700c73f848352a2406274aa97ba7c1d924093c8651adeac8a6c3",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -4033,7 +4037,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "06/10/2026",
+          "raw_expression": "2026-10-06 (ISO 8601)",
           "normalized_value": "2026-10-06",
           "unit": null,
           "evidence": [
@@ -4041,7 +4045,7 @@
               "source_id": "V7-DEV-05-P02-R13",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "06/10/2026"
+              "text_contains": "2026-10-06 (ISO 8601)"
             }
           ]
         },
@@ -4228,7 +4232,7 @@
           "source_id": "V7-DEV-05-P02-R13",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "06/10/2026"
+          "text_contains": "2026-10-06 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-05-P02-R14",
@@ -4248,9 +4252,9 @@
         },
         {
           "page_number": 2,
-          "manual_transcription": "Purchase step: Orders may increase only in steps of 100 piece(s)\nMinimum order quantity: Minimum buy is 12 tray(s)\nMOQ unit: MOQ unit: tray\nShipping terms: Freight is a separately stated fixed amount\nFreight amount: Total freight charge: SGD 88.50\nOther fees treatment: All handling charges are included in the quoted product price\nTax treatment: Tax is not applicable to this synthetic test quote\nDays promised: Lead time is 6 calendar days\nCalendar basis: Calendar days, including weekends\nLead-time event: Lead time ends when goods arrive\nClock starts at: Clock starts on the purchase-order date\nPayment terms: Payment in advance\nIssued on: 06/10/2026\nValid through: Valid through 20 Oct 2026, end of day Singapore\nCross-check arrival date: Promised arrival date: 2026-10-12",
+          "manual_transcription": "Purchase step: Orders may increase only in steps of 100 piece(s)\nMinimum order quantity: Minimum buy is 12 tray(s)\nMOQ unit: MOQ unit: tray\nShipping terms: Freight is a separately stated fixed amount\nFreight amount: Total freight charge: SGD 88.50\nOther fees treatment: All handling charges are included in the quoted product price\nTax treatment: Tax is not applicable to this synthetic test quote\nDays promised: Lead time is 6 calendar days\nCalendar basis: Calendar days, including weekends\nLead-time event: Lead time ends when goods arrive\nClock starts at: Clock starts on the purchase-order date\nPayment terms: Payment in advance\nIssued on: 2026-10-06 (ISO 8601)\nValid through: Valid through 20 Oct 2026, end of day Singapore\nCross-check arrival date: Promised arrival date: 2026-10-12",
           "critical_tokens": [
-            "06/10/2026",
+            "2026-10-06 (ISO 8601)",
             "Valid through 20 Oct 2026, end of day Singapore"
           ]
         }
@@ -4410,7 +4414,7 @@
             {
               "label": "Issued on",
               "field_name": "quote_date",
-              "value_text": "06/10/2026"
+              "value_text": "2026-10-06 (ISO 8601)"
             },
             {
               "label": "Valid through",
@@ -4437,7 +4441,7 @@
     {
       "case_id": "V7-DEV-06",
       "input_file": "data/generated/inputs/development/quote_V7/dev_06.pdf",
-      "input_sha256": "27c2ad76db74100424287d52082a6095fcd53658b3972e00f5af6da2010365b7",
+      "input_sha256": "f58402b9d99181bc88165ef7dbe665f88e075d2dbc6b56afcaedb209d544f68c",
       "page_count": 2,
       "document_profile": "MIXED",
       "expected_page_routes": [
@@ -4906,7 +4910,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "07/10/2026",
+          "raw_expression": "2026-10-07 (ISO 8601)",
           "normalized_value": "2026-10-07",
           "unit": null,
           "evidence": [
@@ -4914,7 +4918,7 @@
               "source_id": "V7-DEV-06-P02-R14",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "07/10/2026"
+              "text_contains": "2026-10-07 (ISO 8601)"
             }
           ]
         },
@@ -5107,7 +5111,7 @@
           "source_id": "V7-DEV-06-P02-R14",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "07/10/2026"
+          "text_contains": "2026-10-07 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-06-P02-R15",
@@ -5119,9 +5123,9 @@
       "ocr_ground_truth": [
         {
           "page_number": 2,
-          "manual_transcription": "Order increment: Orders may increase only in steps of 100 piece(s)\nMinimum buy: Minimum buy is 10 tray(s)\nMinimum-buy unit: MOQ unit: tray\nFreight treatment: Freight is a separately stated fixed amount\nDelivery charge: Total freight charge: SGD 145.00\nSurcharge status: A single fixed handling fee applies\nAdditional charge: Other fee total: SGD 20.00\nGST/VAT basis: Tax is not applicable to this synthetic test quote\nQuoted lead time: Lead time is 4 calendar days\nDay-count basis: Calendar days, including weekends\nPromise means: Lead time ends when goods ship\nStarting event: Clock starts after cleared payment is received\nPayment: Net 30\nQuotation date: 07/10/2026\nQuotation valid until: Valid through 21 Oct 2026, end of day Singapore",
+          "manual_transcription": "Order increment: Orders may increase only in steps of 100 piece(s)\nMinimum buy: Minimum buy is 10 tray(s)\nMinimum-buy unit: MOQ unit: tray\nFreight treatment: Freight is a separately stated fixed amount\nDelivery charge: Total freight charge: SGD 145.00\nSurcharge status: A single fixed handling fee applies\nAdditional charge: Other fee total: SGD 20.00\nGST/VAT basis: Tax is not applicable to this synthetic test quote\nQuoted lead time: Lead time is 4 calendar days\nDay-count basis: Calendar days, including weekends\nPromise means: Lead time ends when goods ship\nStarting event: Clock starts after cleared payment is received\nPayment: Net 30\nQuotation date: 2026-10-07 (ISO 8601)\nQuotation valid until: Valid through 21 Oct 2026, end of day Singapore",
           "critical_tokens": [
-            "07/10/2026",
+            "2026-10-07 (ISO 8601)",
             "Valid through 21 Oct 2026, end of day Singapore"
           ]
         }
@@ -5286,7 +5290,7 @@
             {
               "label": "Quotation date",
               "field_name": "quote_date",
-              "value_text": "07/10/2026"
+              "value_text": "2026-10-07 (ISO 8601)"
             },
             {
               "label": "Quotation valid until",
@@ -5313,7 +5317,7 @@
     {
       "case_id": "V7-DEV-07",
       "input_file": "data/generated/inputs/development/quote_V7/dev_07.pdf",
-      "input_sha256": "8e42f591b341125b2f9a6a2826bd88cc78e6048e6f9a75aa87a8489660d1a6ac",
+      "input_sha256": "021068c08580a210e2c10524fc3f78315fe0d1925fa83428df8f536ea557b03f",
       "page_count": 3,
       "document_profile": "MIXED",
       "expected_page_routes": [
@@ -5795,7 +5799,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "08/10/2026",
+          "raw_expression": "2026-10-08 (ISO 8601)",
           "normalized_value": "2026-10-08",
           "unit": null,
           "evidence": [
@@ -5803,7 +5807,7 @@
               "source_id": "V7-DEV-07-P03-R08",
               "field_name": "quote_date",
               "page_number": 3,
-              "text_contains": "08/10/2026"
+              "text_contains": "2026-10-08 (ISO 8601)"
             }
           ]
         },
@@ -6002,7 +6006,7 @@
           "source_id": "V7-DEV-07-P03-R08",
           "field_name": "quote_date",
           "page_number": 3,
-          "text_contains": "08/10/2026"
+          "text_contains": "2026-10-08 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-07-P03-R09",
@@ -6194,7 +6198,7 @@
             {
               "label": "Date quoted",
               "field_name": "quote_date",
-              "value_text": "08/10/2026"
+              "value_text": "2026-10-08 (ISO 8601)"
             },
             {
               "label": "Offer expires",
@@ -6221,7 +6225,7 @@
     {
       "case_id": "V7-DEV-08",
       "input_file": "data/generated/inputs/development/quote_V7/dev_08.pdf",
-      "input_sha256": "4f0c5047decf08a0cddf2068d8d387afa10398e56cd964018a8aae6abb5f6975",
+      "input_sha256": "ba1fc14b8f26a21ef821fc912a053a6ec5bc324b2e77eab4fbb1e627180bb960",
       "page_count": 2,
       "document_profile": "ADVERSARIAL",
       "expected_page_routes": [
@@ -6690,7 +6694,7 @@
         "quote_date": {
           "validation_status": "EXTRACTED",
           "origin": "DOCUMENT",
-          "raw_expression": "09/10/2026",
+          "raw_expression": "2026-10-09 (ISO 8601)",
           "normalized_value": "2026-10-09",
           "unit": null,
           "evidence": [
@@ -6698,7 +6702,7 @@
               "source_id": "V7-DEV-08-P02-R14",
               "field_name": "quote_date",
               "page_number": 2,
-              "text_contains": "09/10/2026"
+              "text_contains": "2026-10-09 (ISO 8601)"
             }
           ]
         },
@@ -6891,7 +6895,7 @@
           "source_id": "V7-DEV-08-P02-R14",
           "field_name": "quote_date",
           "page_number": 2,
-          "text_contains": "09/10/2026"
+          "text_contains": "2026-10-09 (ISO 8601)"
         },
         {
           "source_id": "V7-DEV-08-P02-R15",
@@ -6911,9 +6915,9 @@
         },
         {
           "page_number": 2,
-          "manual_transcription": "Purchase step: Orders may increase only in steps of 1 piece(s)\nMinimum order quantity: Minimum buy is 800 piece(s)\nMOQ unit: MOQ unit: piece\nShipping terms: Freight is a separately stated fixed amount\nFreight amount: Total freight charge: SGD 99.00\nOther fees treatment: No other fees apply (SGD 0.00)\nSurcharge value: Other fee total: SGD 0.00\nTax treatment: Tax is not applicable to this synthetic test quote\nDays promised: Lead time is 4 calendar days\nCalendar basis: Calendar days, including weekends\nLead-time event: Lead time ends when goods arrive\nClock starts at: Clock starts on the purchase-order date\nPayment terms: Payment in advance\nIssued on: 09/10/2026\nValid through: Valid through 23 Oct 2026, end of day Singapore",
+          "manual_transcription": "Purchase step: Orders may increase only in steps of 1 piece(s)\nMinimum order quantity: Minimum buy is 800 piece(s)\nMOQ unit: MOQ unit: piece\nShipping terms: Freight is a separately stated fixed amount\nFreight amount: Total freight charge: SGD 99.00\nOther fees treatment: No other fees apply (SGD 0.00)\nSurcharge value: Other fee total: SGD 0.00\nTax treatment: Tax is not applicable to this synthetic test quote\nDays promised: Lead time is 4 calendar days\nCalendar basis: Calendar days, including weekends\nLead-time event: Lead time ends when goods arrive\nClock starts at: Clock starts on the purchase-order date\nPayment terms: Payment in advance\nIssued on: 2026-10-09 (ISO 8601)\nValid through: Valid through 23 Oct 2026, end of day Singapore",
           "critical_tokens": [
-            "09/10/2026",
+            "2026-10-09 (ISO 8601)",
             "Valid through 23 Oct 2026, end of day Singapore"
           ]
         }
@@ -7078,7 +7082,7 @@
             {
               "label": "Issued on",
               "field_name": "quote_date",
-              "value_text": "09/10/2026"
+              "value_text": "2026-10-09 (ISO 8601)"
             },
             {
               "label": "Valid through",
@@ -7100,7 +7104,7 @@
       "expected_review": {
         "review_status": "REVIEW_REQUIRED",
         "blocking_codes": [
-          "HIDDEN_TEXT_VISUAL_CONFLICT"
+          "pdf_native_image_conflict"
         ]
       }
     }

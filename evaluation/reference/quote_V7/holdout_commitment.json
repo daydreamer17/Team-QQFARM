@@ -1,7 +1,8 @@
 {
   "dataset_version": "V7",
+  "dataset_revision": "V7.1",
   "split": "holdout",
-  "reference_answer_sha256": "58697c5801657465f21fe8446d313c9f212698849656b947a77047848c912a31",
+  "reference_answer_sha256": "c1c74457929a1f19f4b40380a773814042a93f15670eefab4927f752fa34bde3",
   "reference_answer_filename": "holdout_reference_answers.json",
   "case_ids": [
     "V7-HOLD-01",

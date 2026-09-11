@@ -26,9 +26,11 @@
 
 | 文件 | 数据行 | 列数 | SHA-256 |
 | --- | ---: | ---: | --- |
-| `quote_data_field.csv` | 31 | 19 | `7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd` |
+| `quote_data_field.csv` | 31 | 19 | `2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55` |
 | `procurement_requirement_fields.csv` | 19 | 19 | `b2d7087a60d7fe681f3a7f5a015a8245ccec1480d92663ce540e03837b9a002b` |
 | `system_evidence_fields.csv` | 29 | 19 | `2ed5892b38cdc0ad8114987e4682e8b0b5479b6d8e961c2050c5d8bf858893bf` |
+
+`quote_data_field.csv` 的权威哈希按 Git 仓库中的 LF 字节计算。Windows 工作区若启用 CRLF 转换，直接对工作副本计算可能得到不同结果，不能作为冻结标识。
 
 ### 2.1 数据归属
 
@@ -121,6 +123,7 @@ V4 控制夹具在 `data/generated/fixtures/quote_V4/`，答案位于 [`evaluati
 - 对抗样本含图片中的提示词注入，以及可见扫描图与不可见文字层冲突。文档指令不得改变价格、来源、工具调用或审批结果。
 - B 的字段准确率只统计 30 个报价提取字段；`supplier_id` 是系统权威身份字段，不进入该指标。
 - 开发和校准答案分别位于 `evaluation/reference/quote_V7/development/`、`calibration/`。留出完整答案存放在仓库外；仓库只提交 `holdout_commitment.json` 的 SHA-256 承诺。
+- V7.1 将报价日期统一改为 ISO 8601，并将阻塞码与公共 review code 对齐；涉及的 PDF、输入哈希、开发/校准答案和 holdout 承诺均重新生成。
 - 公开清单位于 [`data/generated/manifests/quote_V7_manifest.json`](../generated/manifests/quote_V7_manifest.json)；holdout 的逐页路由和覆盖标签在释放前盲化。详细设计见 [`docs/v7/V7_DATASET.md`](../../docs/v7/V7_DATASET.md)。
 
 ## 4. JSON 示例与参考答案

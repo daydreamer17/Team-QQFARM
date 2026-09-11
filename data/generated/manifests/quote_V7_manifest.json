@@ -1,5 +1,6 @@
 {
   "dataset_version": "V7",
+  "dataset_revision": "V7.1",
   "generated_on": "2026-09-11",
   "generator": {
     "id": "quote-v7-a-private",
@@ -11,6 +12,8 @@
   "dictionary": {
     "path": "data/contracts/quote_data_field.csv",
     "version": "1.2.0",
+    "sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
+    "sha256_basis": "Git blob bytes with LF line endings",
     "total_fields": 31,
     "b_scored_fields": 30,
     "excluded_from_b_accuracy": [
@@ -54,13 +57,15 @@
       "ADVERSARIAL": 1
     }
   },
-  "holdout_reference_commitment_sha256": "58697c5801657465f21fe8446d313c9f212698849656b947a77047848c912a31",
+  "review_code_version": "V7_STAGE0_APPROVED_2026-09-11",
+  "date_expression_policy": "ISO_8601",
+  "holdout_reference_commitment_sha256": "c1c74457929a1f19f4b40380a773814042a93f15670eefab4927f752fa34bde3",
   "cases": [
     {
       "case_id": "V7-DEV-01",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_01.pdf",
-      "input_sha256": "039dd429eb4780a488c9cc9b8a4943f8455311748d6ae27816e20247745a5061",
+      "input_sha256": "3177bfe7b31d83f6f08690b61115b629c769ceb8ca9e08b53c31ba1ec6e8c12b",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -82,7 +87,7 @@
       "case_id": "V7-DEV-02",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_02.pdf",
-      "input_sha256": "9191a8200c1e8bc7b17e8d17a2edbbab6f847d7f039d821f21b351f16b146682",
+      "input_sha256": "c6d8c01982e49d58c716a6caa5ab86bba4ce70ff145c464805d40de77ac2c08f",
       "page_count": 3,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -109,7 +114,7 @@
       "case_id": "V7-DEV-03",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_03.pdf",
-      "input_sha256": "9ca25020179d92070fa11ee9f3def027341b39747b163a8f9cb9dff4f904e647",
+      "input_sha256": "a1ef005f893248677f21b35b76a7fff8a504509a03a404e9d24eee8f5dbb7ee3",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -131,7 +136,7 @@
       "case_id": "V7-DEV-04",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_04.pdf",
-      "input_sha256": "9fde3a2d4f770a776566dd5203b51497fe43d606707c501fab8dfab2a2ddb00a",
+      "input_sha256": "e31c501ac8b37d2bc46cc37b80bd0c057851a7cc34f95e3d1ae30497c8c930b1",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -154,7 +159,7 @@
       "case_id": "V7-DEV-05",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
-      "input_sha256": "ab178b482719e8e2a456644af1e3871c059d3423ed2f1a909be26edf08e23fc5",
+      "input_sha256": "800c4e0993e0700c73f848352a2406274aa97ba7c1d924093c8651adeac8a6c3",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -177,7 +182,7 @@
       "case_id": "V7-DEV-06",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_06.pdf",
-      "input_sha256": "27c2ad76db74100424287d52082a6095fcd53658b3972e00f5af6da2010365b7",
+      "input_sha256": "f58402b9d99181bc88165ef7dbe665f88e075d2dbc6b56afcaedb209d544f68c",
       "page_count": 2,
       "document_profile": "MIXED",
       "expected_page_routes": [
@@ -199,7 +204,7 @@
       "case_id": "V7-DEV-07",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_07.pdf",
-      "input_sha256": "8e42f591b341125b2f9a6a2826bd88cc78e6048e6f9a75aa87a8489660d1a6ac",
+      "input_sha256": "021068c08580a210e2c10524fc3f78315fe0d1925fa83428df8f536ea557b03f",
       "page_count": 3,
       "document_profile": "MIXED",
       "expected_page_routes": [
@@ -226,7 +231,7 @@
       "case_id": "V7-DEV-08",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_08.pdf",
-      "input_sha256": "4f0c5047decf08a0cddf2068d8d387afa10398e56cd964018a8aae6abb5f6975",
+      "input_sha256": "ba1fc14b8f26a21ef821fc912a053a6ec5bc324b2e77eab4fbb1e627180bb960",
       "page_count": 2,
       "document_profile": "ADVERSARIAL",
       "expected_page_routes": [
@@ -249,7 +254,7 @@
       "case_id": "V7-CAL-01",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_01.pdf",
-      "input_sha256": "7ea335624e2db491d8f4954c290198d82782462abf1d65024970b65d735c3a53",
+      "input_sha256": "cc223d8661c3c876455e9a329a833a62fdd3450df10ad2808dd8367f487d699b",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -271,7 +276,7 @@
       "case_id": "V7-CAL-02",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_02.pdf",
-      "input_sha256": "9a0484a0f44f0173f5f59055aad5e6d396c449f90829306ec79a8f9d1362fc0e",
+      "input_sha256": "8e4204e253abbb17b6c25a349cf75bf7525d6bf2b7b1f0dd5d36fcce0d3cb0e7",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": [
@@ -294,7 +299,7 @@
       "case_id": "V7-CAL-03",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_03.pdf",
-      "input_sha256": "3c9f45263e93718dd3a2db7df5b1badd22a53514ca9a2675f1a6b9ef12f5de64",
+      "input_sha256": "297987c91456f00fef6ed28d95d695d33500120050c8e715823e46af892d6cbd",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -317,7 +322,7 @@
       "case_id": "V7-CAL-04",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_04.pdf",
-      "input_sha256": "ba44177f022cb32e38971ac840d9cde7749608252e490dcd1a01fea67ffca3a0",
+      "input_sha256": "0cfac8db192d473d89a268f099d10d4e05e12ad3c27565b3f3d74022fe8f3883",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -340,7 +345,7 @@
       "case_id": "V7-CAL-05",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_05.pdf",
-      "input_sha256": "cb796bed09bf529f2fc42c24f723bdb3f443a10ca09df00383baf92b4c7ed3c7",
+      "input_sha256": "1f543e784b0f44d4a8f1fc75d098495b172b8d44e35fb8956a28ded196a18ef9",
       "page_count": 2,
       "document_profile": "MIXED",
       "expected_page_routes": [
@@ -362,7 +367,7 @@
       "case_id": "V7-CAL-06",
       "split": "calibration",
       "input_file": "data/generated/inputs/calibration/quote_V7/cal_06.pdf",
-      "input_sha256": "8f1c55df5bde5cb43fb7eee7067c99166ed9a61a4057737c3d083393fb149a89",
+      "input_sha256": "9c91a4f6b8c9b61bedb508b07d8254d95b722fe5dd43adf80ef109b6291dfede",
       "page_count": 2,
       "document_profile": "ADVERSARIAL",
       "expected_page_routes": [
@@ -386,7 +391,7 @@
       "case_id": "V7-HOLD-01",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_01.pdf",
-      "input_sha256": "234626c596c3d84ed4bb09d839ea6bf9106ac6c16dfdfbe2b0c2899de59c715f",
+      "input_sha256": "353a2d2d21ac31accfd7d95b483f6421b07dc718abefab2a35842681ea216200",
       "page_count": 2,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": null,
@@ -399,7 +404,7 @@
       "case_id": "V7-HOLD-02",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_02.pdf",
-      "input_sha256": "9684b754cf7edea5572ab5e8af42be48e1815b692dcd7bbf57bf1be723bae2ea",
+      "input_sha256": "ecaf294f8d26dbc6c46b974290205ae483d9c77c5e75fd9489f77ed17dfbac04",
       "page_count": 3,
       "document_profile": "NATIVE_TEXT",
       "expected_page_routes": null,
@@ -412,7 +417,7 @@
       "case_id": "V7-HOLD-03",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_03.pdf",
-      "input_sha256": "d31728ef299347fda055926e4d019da1cec5fc8028ea20776fb70882ac3643e4",
+      "input_sha256": "e721c8df72e0fc1ab2739c1c92d1e4cd19f556b8eac862655c2c451d2087179b",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": null,
@@ -425,7 +430,7 @@
       "case_id": "V7-HOLD-04",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_04.pdf",
-      "input_sha256": "320f5c754f007c6c8ba12cf9143e4bb1f80d2654ce7167224e2cc4a5d24a5111",
+      "input_sha256": "e4bd5142b3e4c848f19809713e17a48385ee5337eb955a421b5c34a5f84405da",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": null,
@@ -438,7 +443,7 @@
       "case_id": "V7-HOLD-05",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_05.pdf",
-      "input_sha256": "69020d750972c739ec4288ea4474181c4368e06fa87e4bd799d608cdd1292e73",
+      "input_sha256": "5522da4dcf03cdced3ff8e1d316b0a3356d480ae89dbe226d4485c39a8c7f08a",
       "page_count": 2,
       "document_profile": "MIXED",
       "expected_page_routes": null,
@@ -451,7 +456,7 @@
       "case_id": "V7-HOLD-06",
       "split": "holdout",
       "input_file": "data/generated/inputs/holdout/quote_V7/hold_06.pdf",
-      "input_sha256": "2159655a923c27b9bbe0cad58d81c82f2c40d920fac2b3e1b3c8de98af6770ef",
+      "input_sha256": "7f1255581f020afe842c3f7e7d60da0cdf8f23b005227a15fd814eca4a6a7ae2",
       "page_count": 2,
       "document_profile": "ADVERSARIAL",
       "expected_page_routes": null,

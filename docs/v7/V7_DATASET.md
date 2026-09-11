@@ -1,5 +1,9 @@
 # V7 OCR 评测数据说明
 
+- 当前修订：`V7.1`
+- 报价字典：`quote_data_field.csv` 1.2.0
+- 权威字典 SHA-256：`2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55`（Git LF 字节）
+
 ## 1. 目标与边界
 
 V7 为成员 B 后续页级原生文本/OCR 路由、字段提取、证据校验和安全门禁提供成员 A 独立制作的测试输入与参考答案。它不包含 OCR、PDF 解析、模型提示词、成本计算、数据库或 API 实现，也不能证明这些功能已经通过验收。
@@ -41,6 +45,13 @@ data/generated/inputs/holdout/quote_V7/
 - 可见扫描图片和隐藏文字层的冲突。
 
 每个非空标准值都有当前 PDF 中的直接语义证据。参考答案不会只根据另一个字段推导包装、订购倍数、MOQ、费用、日期或料号。
+
+### V7.1 冻结前修订
+
+- 全部报价日期使用 `YYYY-MM-DD (ISO 8601)`，不再使用可能混淆日/月的纯数字斜杠日期。
+- 阻塞码统一为公共 review code：`FIELD_CONFLICT` 改为 `CRITICAL_FIELD_CONFLICT`；`HIDDEN_TEXT_VISUAL_CONFLICT` 改为 `pdf_native_image_conflict`；`OCR_CRITICAL_TOKEN_LOW_CONFIDENCE` 改为 `OCR_CRITICAL_CONFIDENCE_LOW`。
+- `V7-DEV-04` 的真值料号为 `V7-QF-04-R0`。Tesseract 曾以高置信度识别为 `V7-QF-04-RO`，证明只依赖 0.90 置信阈值不能拦截 `0/O` 语义错误；该案例保留为阶段 6 Development 修复样本。
+- 因 PDF 内容变化，所有输入 SHA-256、开发/校准参考答案及仓库外 holdout 答案均重新生成，并产生新的 holdout 承诺。
 
 ## 4. 参考答案结构
 
