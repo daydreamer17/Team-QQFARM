@@ -168,7 +168,7 @@ shipping_fee_amount = 500.00
 在 PowerShell 中进入仓库：
 
 ```powershell
-Set-Location "E:\iss_hackathon\Lumos088"
+Set-Location "...\Lumos088"
 ```
 
 启动 PostgreSQL：
