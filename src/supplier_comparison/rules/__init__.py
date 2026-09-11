@@ -18,7 +18,12 @@ from .contracts import (
 from .cost import calculate_cost
 from .delivery import check_delivery
 from .engine import compare_suppliers, evaluate_supplier
-from .integration import compare_extraction_batches, quote_input_from_extraction
+from .integration import (
+    compare_extraction_batches,
+    compare_reviewed_extractions,
+    quote_input_from_extraction,
+    quote_input_from_reviewed_extraction,
+)
 from .quantity import calculate_quantity
 from .specification import check_specification
 
@@ -42,6 +47,8 @@ __all__ = [
     "check_specification",
     "compare_suppliers",
     "compare_extraction_batches",
+    "compare_reviewed_extractions",
     "evaluate_supplier",
     "quote_input_from_extraction",
+    "quote_input_from_reviewed_extraction",
 ]

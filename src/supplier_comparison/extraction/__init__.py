@@ -17,6 +17,37 @@ from .contracts import (
     SourceKind,
     ValidationStatus,
 )
+from .corrections import apply_candidate_correction
+from .criticality import (
+    ALWAYS_CRITICAL_FIELDS,
+    CONDITIONAL_CRITICAL_FIELDS,
+    NON_CRITICAL_FIELDS,
+    CriticalityContext,
+    resolve_criticalities,
+)
+from .human_review import create_review_event
+from .hybrid_csv import (
+    HybridCsvParseResult,
+    RegisteredHybridCsvParser,
+    detect_semantic_review_fields,
+    merge_semantic_review,
+    selected_dictionary,
+)
+from .readiness import require_downstream_ready
+from .review import model_failed_envelope, review_extraction_batch
+from .review_contracts import (
+    CorrectionAction,
+    CorrectionEvent,
+    EffectiveCriticality,
+    FieldReviewDecision,
+    FieldReviewFinding,
+    HumanReviewAction,
+    ReviewEnvelope,
+    ReviewEvent,
+    ReviewReason,
+    ReviewSeverity,
+    ReviewStatus,
+)
 
 __all__ = [
     "AdapterEnvironment",
@@ -34,4 +65,30 @@ __all__ = [
     "SourceCitation",
     "SourceKind",
     "ValidationStatus",
+    "ALWAYS_CRITICAL_FIELDS",
+    "CONDITIONAL_CRITICAL_FIELDS",
+    "NON_CRITICAL_FIELDS",
+    "CriticalityContext",
+    "CorrectionAction",
+    "CorrectionEvent",
+    "EffectiveCriticality",
+    "FieldReviewDecision",
+    "FieldReviewFinding",
+    "HumanReviewAction",
+    "HybridCsvParseResult",
+    "ReviewEnvelope",
+    "ReviewEvent",
+    "ReviewReason",
+    "ReviewSeverity",
+    "ReviewStatus",
+    "RegisteredHybridCsvParser",
+    "apply_candidate_correction",
+    "create_review_event",
+    "detect_semantic_review_fields",
+    "merge_semantic_review",
+    "model_failed_envelope",
+    "require_downstream_ready",
+    "resolve_criticalities",
+    "review_extraction_batch",
+    "selected_dictionary",
 ]

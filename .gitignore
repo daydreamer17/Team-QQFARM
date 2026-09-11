@@ -4,7 +4,12 @@
 .env.*
 !.env.example
 
-# Member B's local working plan; the repository handoff is guide_lc.md.
+# Local design notes and superseded handoff; current handoff is guide_lc2.md.
+/guide.md
+/plan.md
+/guide_lc.md
+
+# Member B's local working plan.
 /docs/B_WEEK1_IMPLEMENTATION_PLAN_2026-09-09.md
 
 # Local Python and test artifacts.
@@ -14,3 +19,6 @@ __pycache__/
 *.egg-info/
 .venv/
 .DS_Store
+
+# Real-model evaluation outputs are local evidence and may contain provider diagnostics.
+/evaluation/results/local/

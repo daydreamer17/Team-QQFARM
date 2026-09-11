@@ -40,3 +40,9 @@ class AdapterError(ExtractionError):
 
 class ModelCallBudgetExceeded(AdapterError):
     pass
+
+
+class DownstreamNotReadyError(ExtractionError):
+    """Raised when an unreviewed or rejected extraction is sent to C."""
+
+    pass
