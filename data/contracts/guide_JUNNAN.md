@@ -124,6 +124,7 @@ V4 控制夹具在 `data/generated/fixtures/quote_V4/`，答案位于 [`evaluati
 - B 的字段准确率只统计 30 个报价提取字段；`supplier_id` 是系统权威身份字段，不进入该指标。
 - 开发和校准答案分别位于 `evaluation/reference/quote_V7/development/`、`calibration/`。留出完整答案存放在仓库外；仓库只提交 `holdout_commitment.json` 的 SHA-256 承诺。
 - V7.1 将报价日期统一改为 ISO 8601，并将阻塞码与公共 review code 对齐；涉及的 PDF、输入哈希、开发/校准答案和 holdout 承诺均重新生成。
+- V7 review-code runtime version: `extraction-review/1.2.0`.
 - 公开清单位于 [`data/generated/manifests/quote_V7_manifest.json`](../generated/manifests/quote_V7_manifest.json)；holdout 的逐页路由和覆盖标签在释放前盲化。详细设计见 [`docs/v7/V7_DATASET.md`](../../docs/v7/V7_DATASET.md)。
 
 ## 4. JSON 示例与参考答案

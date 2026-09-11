@@ -50,6 +50,7 @@ data/generated/inputs/holdout/quote_V7/
 
 - 全部报价日期使用 `YYYY-MM-DD (ISO 8601)`，不再使用可能混淆日/月的纯数字斜杠日期。
 - 阻塞码统一为公共 review code：`FIELD_CONFLICT` 改为 `CRITICAL_FIELD_CONFLICT`；`HIDDEN_TEXT_VISUAL_CONFLICT` 改为 `pdf_native_image_conflict`；`OCR_CRITICAL_TOKEN_LOW_CONFIDENCE` 改为 `OCR_CRITICAL_CONFIDENCE_LOW`。
+- Review code runtime version: `extraction-review/1.2.0`; unknown fee status uses `FEE_STATUS_UNKNOWN`, and a missing critical field uses `CRITICAL_FIELD_MISSING`.
 - `V7-DEV-04` 的真值料号为 `V7-QF-04-R0`。Tesseract 曾以高置信度识别为 `V7-QF-04-RO`，证明只依赖 0.90 置信阈值不能拦截 `0/O` 语义错误；该案例保留为阶段 6 Development 修复样本。
 - 因 PDF 内容变化，所有输入 SHA-256、开发/校准参考答案及仓库外 holdout 答案均重新生成，并产生新的 holdout 承诺。
 

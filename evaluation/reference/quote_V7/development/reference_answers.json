@@ -5,7 +5,7 @@
   "dictionary_version": "1.2.0",
   "dictionary_sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
   "dictionary_sha256_basis": "Git blob bytes with LF line endings",
-  "review_code_version": "V7_STAGE0_APPROVED_2026-09-11",
+  "review_code_version": "extraction-review/1.2.0",
   "scored_fields": [
     "supplier_name",
     "supplier_country",
@@ -3568,7 +3568,7 @@
       "expected_review": {
         "review_status": "REVIEW_REQUIRED",
         "blocking_codes": [
-          "UNRESOLVED_FEE_AMOUNT"
+          "FEE_STATUS_UNKNOWN"
         ]
       }
     },

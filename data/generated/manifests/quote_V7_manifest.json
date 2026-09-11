@@ -57,9 +57,9 @@
       "ADVERSARIAL": 1
     }
   },
-  "review_code_version": "V7_STAGE0_APPROVED_2026-09-11",
+  "review_code_version": "extraction-review/1.2.0",
   "date_expression_policy": "ISO_8601",
-  "holdout_reference_commitment_sha256": "c1c74457929a1f19f4b40380a773814042a93f15670eefab4927f752fa34bde3",
+  "holdout_reference_commitment_sha256": "484396dad05943e3c662579515527f1893a2e4468008ab929c8fe717a4bdedeb",
   "cases": [
     {
       "case_id": "V7-DEV-01",
