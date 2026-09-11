@@ -1,0 +1,28 @@
+name: supplier-comparison
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-supplier_comparison}
+      POSTGRES_USER: ${POSTGRES_USER:-supplier_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supplier_dev_password}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data
+      # The API will reuse this named volume when D adds the application service.
+      - quote_files:/var/lib/supplier-comparison/quotes
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  database_data:
+  quote_files:
