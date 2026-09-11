@@ -1,0 +1,648 @@
+{
+  "reference_set_id": "QUOTE-V5-GENERALIZATION",
+  "reference_kind": "DEVELOPMENT_REFERENCE_ANSWER",
+  "runtime_access": "DENY",
+  "generator_version": "v5-generalization-fixture-1.0.0",
+  "dictionary": {
+    "path": "data/contracts/quote_data_field.csv",
+    "version": "1.2.0",
+    "field_count": 31,
+    "sha256": "7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd"
+  },
+  "field_order": [
+    "supplier_id",
+    "supplier_name",
+    "supplier_country",
+    "category",
+    "item",
+    "manufacturer",
+    "manufacturer_part_number",
+    "package",
+    "revision",
+    "condition",
+    "currency",
+    "unit_price",
+    "price_basis_quantity",
+    "price_basis_unit",
+    "packaging_type",
+    "units_per_pack",
+    "order_multiple_units",
+    "moq_quantity",
+    "moq_unit",
+    "shipping_fee_status",
+    "shipping_fee_amount",
+    "other_fees_status",
+    "other_fees_amount",
+    "tax_mode",
+    "lead_time_days",
+    "day_basis",
+    "delivery_semantics",
+    "start_event",
+    "payment_terms",
+    "quote_date",
+    "valid_until"
+  ],
+  "usage": {
+    "dataset_size": "Eight logical quote cases, each available as one CSV and one equivalent PDF input branch.",
+    "task_limit": "The dataset has more than five samples, but no test task may contain more than five documents.",
+    "batch_1": [
+      "V5-A",
+      "V5-B",
+      "V5-C",
+      "V5-D"
+    ],
+    "batch_2": [
+      "V5-E",
+      "V5-F",
+      "V5-G",
+      "V5-H"
+    ],
+    "branch_rule": "For a batch, use either the four CSV files or the four PDF files. Do not count both formats as additional suppliers.",
+    "isolation_rule": "Never mount or expose this reference directory to the parser or model under test.",
+    "scoring_rule": "Score document-only normalized values before human correction. Null is not zero, and an unresolved expression is not MISSING."
+  },
+  "coverage": [
+    "Eight independent synthetic supplier identities and heterogeneous header vocabularies",
+    "Piece and tray packaging with price bases of 1, 50, and 100 pieces",
+    "Order increments of 1, 5, 10, 25, 50, 100, and 200 pieces",
+    "MOQ expressed in pieces or trays",
+    "KNOWN_AMOUNT, FREE, INCLUDED, NOT_APPLICABLE, and UNKNOWN fee states",
+    "Calendar-day and business-day promises ending at ARRIVAL or SHIPMENT",
+    "Missing optional/system fields, an unsupported payment-receipt start event, and a lead-time range"
+  ],
+  "provenance": {
+    "is_synthetic": true,
+    "commercial_terms": "Created specifically for V5 development generalization tests.",
+    "historical_order_values_used_as_current_quote_terms": false,
+    "all_non_null_expected_values_have_direct_textual_support": true,
+    "cross_supplier_enrichment_allowed": false
+  },
+  "files": [
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_a_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-A",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "fc3311c108a1c7b10b4bf70198c96c6d923cfd4b2b1461bedfc2110363bd03a5"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_a_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-A",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "59298b8c73d6cbffb653219a7ea83b39b5e2defeae074cef2ef657578d0c6b8a"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_b_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-B",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "c3c04ec7435d2f0c8e07a1fc3f2dad86cfba7d42ebb81cc7f165cdad63f2f101"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_b_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-B",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "61ec4eb869d6fb80f663f8f980aed3b687636a830f4d0e8d679002f23b2b5ce1"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_c_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-C",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "7fb2ad079c16491f07af71515ae653e7bfa3ea6134456ae85004374b323fa27f"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_c_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-C",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "ec4ddfae7a346739223a31dba30493da15bd8a2287125877bdbd91f71c1cd5ce"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_d_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-D",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "1b34566ec89ae0b00d26b1b042a16b2f769f933491010df5c85ab0470a458945"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_d_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-D",
+      "batch_id": "V5-BATCH-1",
+      "sha256": "494dc8da3bf74119d070ac6c97342917835a4c2292f571a28f0e29fe92e9a7ab"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_e_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-E",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "bb3a9aafa42847ee0822f0dc58d316b5a98bfbf64b8b8adc5133d490500e8abb"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_e_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-E",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "86a377e7f45b895ae9a618c4203913e11e89afa8f9265684d72e906c294a196c"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_f_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-F",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "39ec757b42d3d2fcf06817580c40292ee54911ecd4f681e4731870c657e11056"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_f_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-F",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "f74039fb5d5cd2506bf66f6a3fb94766a73622dd2b109bf0b9ecd0d8c1a9a521"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_g_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-G",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "a0f278306bf190d5fa928b643c9159ca747130732b855616082b60d164ec4144"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_g_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-G",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "f7ee06ec89fa4e476b0b1102163ce9c9bb53446c60ef7fa8d5c4f4e28bb556e9"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_h_quote_v5.csv",
+      "media_type": "text/csv",
+      "answer_id": "V5-H",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "0b45c8cb6adae29ac743049b8644421aa0e1cd7f11c4f8dd8c8cda5ffae38a15"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V5/supplier_h_quote_v5.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V5-H",
+      "batch_id": "V5-BATCH-2",
+      "sha256": "c9cf8cec3fa798dc05dcdefe04ba62c5a9790c099f4c1bf9680320ec1a6af775"
+    }
+  ],
+  "answers": {
+    "V5-A": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-A",
+        "supplier_name": "Harbor Circuits Pte. Ltd.",
+        "supplier_country": "Singapore",
+        "category": "Electronic Components",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.42",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 10,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "120.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 4,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-25"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Reordered item wording and the phrase each single piece normalize without changing the MPN.",
+        "Pack size, order increment, and MOQ are independent quantities.",
+        "Freight is a known per-order amount while other fees are explicitly not applicable."
+      ]
+    },
+    "V5-B": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Nordlicht Komponenten GmbH",
+        "supplier_country": "Germany",
+        "category": "Semiconductors",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "625.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 12,
+        "moq_unit": "tray",
+        "shipping_fee_status": "INCLUDED",
+        "shipping_fee_amount": null,
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 5,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 45",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-30"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Supplier ID is not printed and must not be fabricated.",
+        "QFN32 and Rev. R1 normalize to QFN-32 and R1.",
+        "Included freight has no separate amount and must stay null."
+      ]
+    },
+    "V5-C": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-C",
+        "supplier_name": "Maple Ridge Electronics Inc.",
+        "supplier_country": "Canada",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "320.00",
+        "price_basis_quantity": 50,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 50,
+        "order_multiple_units": 50,
+        "moq_quantity": 20,
+        "moq_unit": "tray",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "KNOWN_AMOUNT",
+        "other_fees_amount": "35.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 3,
+        "day_basis": "BUSINESS_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Due on receipt",
+        "quote_date": "2026-09-10",
+        "valid_until": "2026-09-22"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "The price basis and tray capacity are both 50 pieces and are directly stated.",
+        "Free shipping and a separate known handling fee must not be merged.",
+        "Business days must not be converted to calendar days by the parser."
+      ]
+    },
+    "V5-D": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-D",
+        "supplier_name": "Pacific Gate Devices Ltd.",
+        "supplier_country": "Japan",
+        "category": "Electronic Components",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.35",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 25,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "UNKNOWN",
+        "shipping_fee_amount": null,
+        "other_fees_status": "INCLUDED",
+        "other_fees_amount": null,
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 2,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "SHIPMENT",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "100% before dispatch",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-18"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "other_fees_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Freight is explicitly unknown, so its amount remains null.",
+        "Included other fees have no separate amount and are not zero.",
+        "The delivery promise ends at shipment, not arrival."
+      ]
+    },
+    "V5-E": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-E",
+        "supplier_name": "Alpine Micro Supply AG",
+        "supplier_country": "Switzerland",
+        "category": "Semiconductors",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "648.50",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 200,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "250.00",
+        "other_fees_status": "KNOWN_AMOUNT",
+        "other_fees_amount": "40.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 6,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-09",
+        "valid_until": "2026-09-24"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Price basis is 100 pieces, tray capacity is 100, order increment is 200, and MOQ is 1,000 pieces.",
+        "MOQ unit is piece even though packaging is tray.",
+        "Shipping and administration fees are two separate known per-order amounts."
+      ]
+    },
+    "V5-F": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Cedar Tech Distribution LLC",
+        "supplier_country": "USA",
+        "category": null,
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.58",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 1,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 4,
+        "day_basis": "BUSINESS_DAYS",
+        "delivery_semantics": "SHIPMENT",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-26"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "category": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "unresolved_fields": {},
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Supplier ID and category are absent and remain missing.",
+        "S$ is normalized to SGD using the explicit commercial context in the document.",
+        "Four business days ends at shipment, not buyer arrival."
+      ]
+    },
+    "V5-G": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-G",
+        "supplier_name": "Meridian Parts BV",
+        "supplier_country": "Netherlands",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "635.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 10,
+        "moq_unit": "tray",
+        "shipping_fee_status": "INCLUDED",
+        "shipping_fee_amount": null,
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 3,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": null,
+        "payment_terms": "Full prepayment",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-27"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "unresolved_fields": {
+          "start_event": {
+            "validation_status": "EXTRACTED",
+            "origin": "DOCUMENT",
+            "normalized_value": null,
+            "raw_meaning": "CLEARED_PAYMENT_RECEIPT",
+            "question_required": true,
+            "reason": "The current dictionary does not authorize silently mapping payment receipt to ORDER_DATE."
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "Payment receipt is an explicit event but is not normalized to ORDER_DATE.",
+        "Freight is included and has no separate amount.",
+        "A human or approved rule must resolve the lead-time start event before date comparison."
+      ]
+    },
+    "V5-H": {
+      "normalized_quote": {
+        "supplier_id": "V5-SUP-H",
+        "supplier_name": "Southern Cross Semiconductors Pty Ltd",
+        "supplier_country": "Australia",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.47",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 5,
+        "moq_quantity": 750,
+        "moq_unit": "piece",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "85.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": null,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 14",
+        "quote_date": "2026-09-11",
+        "valid_until": "2026-09-28"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {},
+        "unresolved_fields": {
+          "lead_time_days": {
+            "validation_status": "EXTRACTED",
+            "origin": "DOCUMENT",
+            "normalized_value": null,
+            "raw_meaning": {
+              "minimum": 2,
+              "maximum": 4
+            },
+            "question_required": true,
+            "reason": "The 31-field contract accepts one integer and must not silently collapse a stated range."
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "evaluation_focus": [
+        "A two-to-four-day range must not be reduced to one integer by the parser.",
+        "Day basis, arrival semantics, and order-date start remain directly extractable.",
+        "MOQ 750 and order increment 5 are distinct constraints."
+      ]
+    }
+  }
+}
