@@ -1,0 +1,464 @@
+{
+  "dataset_version": "V7",
+  "generated_on": "2026-09-11",
+  "generator": {
+    "id": "quote-v7-a-private",
+    "version": "1.0.0",
+    "availability": "NOT_COMMITTED_TO_PRESERVE_HOLDOUT"
+  },
+  "generator_seed": 7007,
+  "synthetic_only": true,
+  "dictionary": {
+    "path": "data/contracts/quote_data_field.csv",
+    "version": "1.2.0",
+    "total_fields": 31,
+    "b_scored_fields": 30,
+    "excluded_from_b_accuracy": [
+      "supplier_id"
+    ]
+  },
+  "limits": {
+    "max_pages_per_pdf": 5,
+    "max_bytes_per_pdf": 5242880,
+    "language": "English printed text",
+    "handwriting": false
+  },
+  "split_policy": {
+    "development": "Open for implementation and fixes",
+    "calibration": "Open only for selecting and freezing final parameters",
+    "holdout": "Input PDFs are public; answers remain private until frozen one-time run"
+  },
+  "counts": {
+    "development": 8,
+    "calibration": 6,
+    "holdout": 6,
+    "total": 20
+  },
+  "profile_counts": {
+    "development": {
+      "NATIVE_TEXT": 3,
+      "SCAN": 2,
+      "MIXED": 2,
+      "ADVERSARIAL": 1
+    },
+    "calibration": {
+      "NATIVE_TEXT": 2,
+      "SCAN": 2,
+      "MIXED": 1,
+      "ADVERSARIAL": 1
+    },
+    "holdout": {
+      "NATIVE_TEXT": 2,
+      "SCAN": 2,
+      "MIXED": 1,
+      "ADVERSARIAL": 1
+    }
+  },
+  "holdout_reference_commitment_sha256": "58697c5801657465f21fe8446d313c9f212698849656b947a77047848c912a31",
+  "cases": [
+    {
+      "case_id": "V7-DEV-01",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_01.pdf",
+      "input_sha256": "039dd429eb4780a488c9cc9b8a4943f8455311748d6ae27816e20247745a5061",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-02",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_02.pdf",
+      "input_sha256": "9191a8200c1e8bc7b17e8d17a2edbbab6f847d7f039d821f21b351f16b146682",
+      "page_count": 3,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 3,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-03",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_03.pdf",
+      "input_sha256": "9ca25020179d92070fa11ee9f3def027341b39747b163a8f9cb9dff4f904e647",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "field_conflict"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-04",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_04.pdf",
+      "input_sha256": "9fde3a2d4f770a776566dd5203b51497fe43d606707c501fab8dfab2a2ddb00a",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "ocr_confusables",
+        "unknown_fees"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-05",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
+      "input_sha256": "ab178b482719e8e2a456644af1e3871c059d3423ed2f1a909be26edf08e23fc5",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-06",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_06.pdf",
+      "input_sha256": "27c2ad76db74100424287d52082a6095fcd53658b3972e00f5af6da2010365b7",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "split_across_routes"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-07",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_07.pdf",
+      "input_sha256": "8e42f591b341125b2f9a6a2826bd88cc78e6048e6f9a75aa87a8489660d1a6ac",
+      "page_count": 3,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        },
+        {
+          "page_number": 3,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "prompt_injection",
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-08",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_08.pdf",
+      "input_sha256": "4f0c5047decf08a0cddf2068d8d387afa10398e56cd964018a8aae6abb5f6975",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "hidden_text_conflict",
+        "low_quality"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-01",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_01.pdf",
+      "input_sha256": "7ea335624e2db491d8f4954c290198d82782462abf1d65024970b65d735c3a53",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-02",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_02.pdf",
+      "input_sha256": "9a0484a0f44f0173f5f59055aad5e6d396c449f90829306ec79a8f9d1362fc0e",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "field_conflict",
+        "unknown_fees"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-03",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_03.pdf",
+      "input_sha256": "3c9f45263e93718dd3a2db7df5b1badd22a53514ca9a2675f1a6b9ef12f5de64",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "missing_other_fees",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-04",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_04.pdf",
+      "input_sha256": "ba44177f022cb32e38971ac840d9cde7749608252e490dcd1a01fea67ffca3a0",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-05",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_05.pdf",
+      "input_sha256": "cb796bed09bf529f2fc42c24f723bdb3f443a10ca09df00383baf92b4c7ed3c7",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "split_across_routes"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-06",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_06.pdf",
+      "input_sha256": "8f1c55df5bde5cb43fb7eee7067c99166ed9a61a4057737c3d083393fb149a89",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "low_quality",
+        "ocr_critical_low_confidence",
+        "prompt_injection"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-HOLD-01",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_01.pdf",
+      "input_sha256": "234626c596c3d84ed4bb09d839ea6bf9106ac6c16dfdfbe2b0c2899de59c715f",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-02",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_02.pdf",
+      "input_sha256": "9684b754cf7edea5572ab5e8af42be48e1815b692dcd7bbf57bf1be723bae2ea",
+      "page_count": 3,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-03",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_03.pdf",
+      "input_sha256": "d31728ef299347fda055926e4d019da1cec5fc8028ea20776fb70882ac3643e4",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-04",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_04.pdf",
+      "input_sha256": "320f5c754f007c6c8ba12cf9143e4bb1f80d2654ce7167224e2cc4a5d24a5111",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-05",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_05.pdf",
+      "input_sha256": "69020d750972c739ec4288ea4474181c4368e06fa87e4bd799d608cdd1292e73",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-06",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_06.pdf",
+      "input_sha256": "2159655a923c27b9bbe0cad58d81c82f2c40d920fac2b3e1b3c8de98af6770ef",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    }
+  ]
+}

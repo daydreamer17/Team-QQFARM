@@ -1,0 +1,16 @@
+{
+  "dataset_version": "V7",
+  "split": "holdout",
+  "reference_answer_sha256": "58697c5801657465f21fe8446d313c9f212698849656b947a77047848c912a31",
+  "reference_answer_filename": "holdout_reference_answers.json",
+  "case_ids": [
+    "V7-HOLD-01",
+    "V7-HOLD-02",
+    "V7-HOLD-03",
+    "V7-HOLD-04",
+    "V7-HOLD-05",
+    "V7-HOLD-06"
+  ],
+  "answer_content_in_repository": false,
+  "release_condition": "B freezes versions and stores all uncorrected holdout outputs before A releases the answer file."
+}

@@ -11,3 +11,6 @@ evaluation/reference/quote_V4/*.json text eol=lf
 evaluation/reference/quote_V5/*.json text eol=lf
 evaluation/reference/quote_V6/*.json text eol=lf
 evaluation/reference/quote_V6/*/*.json text eol=lf
+data/generated/manifests/quote_V7_manifest.json text eol=lf
+evaluation/reference/quote_V7/*.json text eol=lf
+evaluation/reference/quote_V7/*/*.json text eol=lf
