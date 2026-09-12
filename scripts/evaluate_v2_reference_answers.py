@@ -36,6 +36,18 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _lf_normalized_text_sha256(path: Path) -> str:
+    """Hash a versioned text contract consistently across Git checkouts."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def _reference_input_sha256(path: Path) -> str:
+    """Use canonical LF bytes for text fixtures and exact bytes for binaries."""
+    if path.suffix.lower() in {".csv", ".json"}:
+        return _lf_normalized_text_sha256(path)
+    return _sha256(path)
+
+
 def _relative_to_repo(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(REPO_ROOT.resolve()))
@@ -90,7 +102,7 @@ def _validate_reference(
             expected=dictionary.version,
             actual=supplier_dictionary.get("version"),
         )
-    actual_dictionary_hash = _sha256(dictionary_path)
+    actual_dictionary_hash = _lf_normalized_text_sha256(dictionary_path)
     if supplier_dictionary.get("sha256") != actual_dictionary_hash:
         raise ContractError(
             "v2_reference_dictionary_hash_mismatch",
@@ -121,7 +133,7 @@ def _validate_reference(
                 "V2 reference input does not exist",
                 relative_path=relative_path,
             )
-        actual_hash = _sha256(input_path)
+        actual_hash = _reference_input_sha256(input_path)
         if file_record.get("sha256") != actual_hash:
             raise ContractError(
                 "v2_reference_input_hash_mismatch",

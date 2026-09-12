@@ -17,3 +17,7 @@ evaluation/reference/quote_V7/*/*.json text eol=lf
 data/contracts/quote_data_field.csv text eol=lf
 data/generated/manifests/quote_V7_2_manifest.json text eol=lf
 evaluation/reference/quote_V7_2/*.json text eol=lf
+data/generated/inputs/development/quote_V2/*.csv text eol=lf
+data/generated/inputs/development/quote_V2/*.json text eol=lf
+evaluation/reference/quote_V2/*.json text eol=lf
+data/EXTRACTION_REVIEW_FIELD_CRITICALITY.md text eol=lf
