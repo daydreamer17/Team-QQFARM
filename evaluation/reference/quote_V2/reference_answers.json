@@ -1,0 +1,506 @@
+{
+  "reference_set_id": "QUOTE-V2-CURRENT-DICTIONARY",
+  "reference_kind": "DEVELOPMENT_REFERENCE_ANSWER",
+  "runtime_access": "DENY",
+  "dictionaries": {
+    "supplier_quote": {
+      "path": "data/contracts/quote_data_field.csv",
+      "version": "1.2.0",
+      "field_count": 31,
+      "sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55"
+    },
+    "procurement_requirement": {
+      "path": "data/contracts/procurement_requirement_fields.csv",
+      "version": "1.2.0",
+      "field_count": 19,
+      "sha256": "b2d7087a60d7fe681f3a7f5a015a8245ccec1480d92663ce540e03837b9a002b"
+    },
+    "system_evidence": {
+      "path": "data/contracts/system_evidence_fields.csv",
+      "version": "1.2.0",
+      "field_count": 29,
+      "sha256": "2ed5892b38cdc0ad8114987e4682e8b0b5479b6d8e961c2050c5d8bf858893bf"
+    }
+  },
+  "quote_field_order": [
+    "supplier_id",
+    "supplier_name",
+    "supplier_country",
+    "category",
+    "item",
+    "manufacturer",
+    "manufacturer_part_number",
+    "package",
+    "revision",
+    "condition",
+    "currency",
+    "unit_price",
+    "price_basis_quantity",
+    "price_basis_unit",
+    "packaging_type",
+    "units_per_pack",
+    "order_multiple_units",
+    "moq_quantity",
+    "moq_unit",
+    "shipping_fee_status",
+    "shipping_fee_amount",
+    "other_fees_status",
+    "other_fees_amount",
+    "tax_mode",
+    "lead_time_days",
+    "day_basis",
+    "delivery_semantics",
+    "start_event",
+    "payment_terms",
+    "quote_date",
+    "valid_until"
+  ],
+  "procurement_requirement_field_order": [
+    "manufacturer",
+    "manufacturer_part_number",
+    "package",
+    "revision",
+    "condition",
+    "allow_substitutes",
+    "base_unit",
+    "required_quantity",
+    "quantity_unit",
+    "budget_amount",
+    "currency",
+    "includes_shipping",
+    "tax_mode",
+    "other_fees_required",
+    "planned_order_date",
+    "delivery_deadline",
+    "delivery_location",
+    "ranking_preference",
+    "secondary_preference"
+  ],
+  "usage": {
+    "scope": "V2 procurement requirement recognition, V2 supplier quote recognition, and a compatibility audit of the illustrative system/evidence JSON.",
+    "pairing_rule": "A PDF and CSV are alternative input branches. They share an answer only when their own visible content supports the same normalized fields.",
+    "a_pair_exception": "Supplier A CSV explicitly contains supplier_country and category; Supplier A PDF does not. Use separate answers.",
+    "isolation_rule": "Never mount or expose this reference directory to the parser or model under test.",
+    "scoring_rule": "Score normalized fields before human correction. Null is not numeric zero. A document recognizer must not copy values from the procurement requirement, V1, manifests, or managed supplier context.",
+    "system_evidence_rule": "system_evidence_v2.json is an illustrative output record, not an input document and not a hidden source of quote facts. Audit it separately from recognition scoring."
+  },
+  "normalization_decisions": {
+    "piece_supply": "An explicit per-piece price, Individual pieces supply form, and 1 piece order increment support price_basis_quantity=1, price_basis_unit=piece, packaging_type=piece, units_per_pack=1, and order_multiple_units=1 as DOCUMENT-origin normalizations.",
+    "zero_other_fees": "An explicit None or No other fees statement normalizes to other_fees_status=NOT_APPLICABLE and other_fees_amount=0.00.",
+    "missing_shipping": "If no freight or shipping statement exists, both shipping fields remain null with validation_status=MISSING. A later business question may create an UNKNOWN fee state, but the document recognizer must not invent it or a zero amount.",
+    "money_format": "Reference amounts use decimal strings with two fractional digits for stable comparison.",
+    "supplier_id": "supplier_id is absent from every V2 quote document. It remains null/MISSING in document-recognition answers; managed supplier IDs are shown only as excluded system context.",
+    "po_receipt": "Purchase order receipt is not silently normalized to ORDER_DATE. Supplier C start_event remains unresolved until the business meaning is confirmed."
+  },
+  "files": [
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/procurement_requirement_v2.csv",
+      "media_type": "text/csv",
+      "answer_id": "V2-REQ",
+      "branch": "csv",
+      "sha256": "c0a9d2d334d9ff2e969b3721ceae6b2cdd00adfdc208a00de9ef5902bc0a3be2"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/procurement_requirement_v2.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V2-REQ",
+      "branch": "pdf",
+      "sha256": "116a20538707e6a920560864e66bfc5d83f9c8d216a6d1dc16b64775e7a4c161"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_a_quote_v2.csv",
+      "media_type": "text/csv",
+      "answer_id": "V2-A-CSV",
+      "branch": "csv",
+      "sha256": "4c44938f6b17da7d3e19ffbdaee1b90289033c0985c4f370ce91afe6f64e69cc"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_a_quote_v2.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V2-A-PDF",
+      "branch": "pdf",
+      "sha256": "8d98d47c24ddec1688fec0e8d2562ffa1c4aa1211dab508d1641cc36c749c413"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_b_quote_v2.csv",
+      "media_type": "text/csv",
+      "answer_id": "V2-B",
+      "branch": "csv",
+      "sha256": "85742dd2f2d1afd08d4752b94b591eb11199c9e316c731677a00faa13bc4fadc"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_b_quote_v2.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V2-B",
+      "branch": "pdf",
+      "sha256": "2b0e7207e1c79e8a41ad4f53939491cd3a5f78ae9e00b1b0f0d32255ca2c83be"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_c_quote_v2.csv",
+      "media_type": "text/csv",
+      "answer_id": "V2-C",
+      "branch": "csv",
+      "sha256": "689ef79ab07f29610dee5152c09fdc11f77e19338c5efa1523a9deff29be9a49"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/supplier_c_quote_v2.pdf",
+      "media_type": "application/pdf",
+      "answer_id": "V2-C",
+      "branch": "pdf",
+      "sha256": "3d891651953be1769b6ffd75325921d7de53ea931cc20bdefd6ecdf9f78dceca"
+    },
+    {
+      "relative_path": "data/generated/inputs/development/quote_V2/system_evidence_v2.json",
+      "media_type": "application/json",
+      "answer_id": "V2-SYSTEM-EVIDENCE-AUDIT",
+      "branch": "audit_only",
+      "sha256": "f307b9cbea7069db462312f90c58665882645ac806bca879d4459972941c75c2"
+    }
+  ],
+  "answers": {
+    "V2-REQ": {
+      "normalized_requirement": {
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "allow_substitutes": false,
+        "base_unit": "piece",
+        "required_quantity": 1000,
+        "quantity_unit": "piece",
+        "budget_amount": "8000.00",
+        "currency": "SGD",
+        "includes_shipping": true,
+        "tax_mode": "NOT_APPLICABLE",
+        "other_fees_required": true,
+        "planned_order_date": "2026-09-14",
+        "delivery_deadline": "2026-09-19",
+        "delivery_location": "SG-DEMO-01",
+        "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
+        "secondary_preference": null
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "branch_specific": {
+          "csv": {
+            "missing_fields": {
+              "secondary_preference": {
+                "validation_status": "MISSING",
+                "origin": null,
+                "normalized_value": null
+              }
+            }
+          },
+          "pdf": {
+            "explicit_null_fields": {
+              "secondary_preference": {
+                "validation_status": "EXTRACTED",
+                "origin": "DOCUMENT",
+                "normalized_value": null,
+                "raw_meaning": "None"
+              }
+            }
+          }
+        },
+        "derived_fields_expected": []
+      }
+    },
+    "V2-A-CSV": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Redwood Components",
+        "supplier_country": "USA",
+        "category": "Electronics",
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "640.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 20,
+        "moq_unit": "tray",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 7,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "system_context_excluded_from_recognition_score": {
+        "managed_supplier_id": "SUP-022"
+      }
+    },
+    "V2-A-PDF": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Redwood Components",
+        "supplier_country": null,
+        "category": null,
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "640.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 20,
+        "moq_unit": "tray",
+        "shipping_fee_status": "FREE",
+        "shipping_fee_amount": "0.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 7,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "supplier_country": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "category": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "system_context_excluded_from_recognition_score": {
+        "managed_supplier_id": "SUP-022"
+      }
+    },
+    "V2-B": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Schwarzwald Circuits",
+        "supplier_country": null,
+        "category": null,
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "6.80",
+        "price_basis_quantity": 1,
+        "price_basis_unit": "piece",
+        "packaging_type": "piece",
+        "units_per_pack": 1,
+        "order_multiple_units": 1,
+        "moq_quantity": 1000,
+        "moq_unit": "piece",
+        "shipping_fee_status": null,
+        "shipping_fee_amount": null,
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 3,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": "ORDER_DATE",
+        "payment_terms": null,
+        "quote_date": null,
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "supplier_country": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "category": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "shipping_fee_status": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "shipping_fee_amount": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "payment_terms": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "quote_date": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "system_context_excluded_from_recognition_score": {
+        "managed_supplier_id": "SUP-023"
+      },
+      "evaluation_focus": [
+        "The five piece-related values are independently supported by per piece, Individual pieces, and 1 piece statements; they are DOCUMENT-origin normalizations, not DERIVED values.",
+        "Shipping is absent and must not be treated as free or zero.",
+        "Other fees are explicitly absent and normalize to NOT_APPLICABLE with 0.00."
+      ]
+    },
+    "V2-C": {
+      "normalized_quote": {
+        "supplier_id": null,
+        "supplier_name": "Sterling Components",
+        "supplier_country": null,
+        "category": null,
+        "item": "Microcontroller MCU-9",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "package": "QFN-32",
+        "revision": "R1",
+        "condition": "NEW",
+        "currency": "SGD",
+        "unit_price": "660.00",
+        "price_basis_quantity": 100,
+        "price_basis_unit": "piece",
+        "packaging_type": "tray",
+        "units_per_pack": 100,
+        "order_multiple_units": 100,
+        "moq_quantity": 10,
+        "moq_unit": "tray",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "500.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "tax_mode": "NOT_APPLICABLE",
+        "lead_time_days": 3,
+        "day_basis": "CALENDAR_DAYS",
+        "delivery_semantics": "ARRIVAL",
+        "start_event": null,
+        "payment_terms": "Net 30",
+        "quote_date": "2026-09-13",
+        "valid_until": "2026-09-20"
+      },
+      "field_expectation": {
+        "default": {
+          "validation_status": "EXTRACTED",
+          "origin": "DOCUMENT"
+        },
+        "missing_fields": {
+          "supplier_id": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "supplier_country": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          },
+          "category": {
+            "validation_status": "MISSING",
+            "origin": null,
+            "normalized_value": null
+          }
+        },
+        "unresolved_fields": {
+          "start_event": {
+            "validation_status": "EXTRACTED",
+            "origin": "DOCUMENT",
+            "normalized_value": null,
+            "raw_meaning": "PURCHASE_ORDER_RECEIPT",
+            "question_required": true,
+            "reason": "The current dictionary states that PO receipt/ARO must not be silently treated as ORDER_DATE."
+          }
+        },
+        "derived_fields_expected": []
+      },
+      "system_context_excluded_from_recognition_score": {
+        "managed_supplier_id": "SUP-024"
+      }
+    },
+    "V2-SYSTEM-EVIDENCE-AUDIT": {
+      "role": "ILLUSTRATIVE_OUTPUT_NOT_RECOGNITION_INPUT",
+      "current_contract_conformance": "FAIL",
+      "passing_checks": [
+        "document_sha256 equals the current supplier_b_quote_v2.csv byte hash",
+        "shipping_fee_status is represented as MISSING/null with origin null and no source reference",
+        "validation_status and origin use separate fields",
+        "the file identifies itself as synthetic development data"
+      ],
+      "issues": [
+        {
+          "json_path": "$.field_records[?(@.field_name=='other_fees_status')].normalized_value",
+          "actual": "KNOWN_ZERO",
+          "expected": "NOT_APPLICABLE",
+          "severity": "ERROR",
+          "reason": "KNOWN_ZERO is not one of the five current fee statuses: KNOWN_AMOUNT, FREE, INCLUDED, NOT_APPLICABLE, UNKNOWN."
+        }
+      ],
+      "recognition_score_excluded": true
+    }
+  }
+}

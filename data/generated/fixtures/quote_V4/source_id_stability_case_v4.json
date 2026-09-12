@@ -1,0 +1,19 @@
+{
+  "fixture_id": "QUOTE-V4-SOURCE-ID-STABILITY",
+  "registered_document": {
+    "relative_path": "data/generated/inputs/development/quote_V4/source_supplier_a_quote_v4.pdf",
+    "document_id": "DOC-QUOTE-V4-A-V1",
+    "document_version": 1,
+    "document_sha256": "cde9311e3491a5354ba9cd69eb99c7138445f5d2586d950cf2737d3f568e7e37",
+    "parser_version": "pdf-text-v1"
+  },
+  "parse_runs": 2,
+  "same_registered_document_version": true,
+  "compare_exactly": [
+    "ordered_sources[].source_id",
+    "ordered_sources[].text_block_id",
+    "ordered_sources[].page_number",
+    "ordered_sources[].locator_text",
+    "ordered_sources[].coordinates_when_available"
+  ]
+}
