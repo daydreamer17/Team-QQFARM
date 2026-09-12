@@ -7,13 +7,82 @@ import argparse
 import json
 from pathlib import Path
 
-from supplier_comparison.extraction.contracts import AdapterEnvironment, ExtractionBatch
+from supplier_comparison.extraction.contracts import (
+    AdapterEnvironment,
+    ExtractionBatch,
+    Origin,
+    QuoteFieldCandidate,
+    ValidationStatus,
+)
 from supplier_comparison.extraction.criticality import CriticalityContext
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.model_payload import ModelExtractionPayload
+from supplier_comparison.extraction.normalization import normalize_model_payload
 from supplier_comparison.extraction.review import review_extraction_batch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _renormalize_batch(batch: ExtractionBatch) -> ExtractionBatch:
+    model_payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": candidate.field_name,
+                    "raw_value": candidate.raw_value,
+                    "normalized_value": candidate.normalized_value,
+                    "unit": candidate.unit,
+                    "validation_status": candidate.validation_status.value,
+                    "source_refs": [
+                        citation.model_dump(mode="python")
+                        for citation in candidate.source_refs
+                    ],
+                }
+                for candidate in batch.candidates
+            ]
+        }
+    )
+    normalized, events = normalize_model_payload(model_payload)
+    normalized_by_field = {
+        candidate.field_name: candidate for candidate in normalized.candidates
+    }
+    candidates = []
+    for candidate in batch.candidates:
+        replacement = normalized_by_field[candidate.field_name]
+        candidates.append(
+            QuoteFieldCandidate.model_validate(
+                {
+                    **candidate.model_dump(mode="python"),
+                    "raw_value": replacement.raw_value,
+                    "normalized_value": replacement.normalized_value,
+                    "unit": replacement.unit,
+                    "validation_status": replacement.validation_status,
+                    "origin": (
+                        None
+                        if replacement.validation_status == ValidationStatus.MISSING
+                        else candidate.origin or Origin.DOCUMENT
+                    ),
+                    "source_refs": replacement.source_refs,
+                }
+            )
+        )
+    existing_events = {
+        (event.field_name, event.input_value, event.output_value, event.rule_id)
+        for event in batch.normalization_events
+    }
+    new_events = tuple(
+        event
+        for event in events
+        if (event.field_name, event.input_value, event.output_value, event.rule_id)
+        not in existing_events
+    )
+    return batch.model_copy(
+        update={
+            "candidates": tuple(candidates),
+            "normalization_events": (*batch.normalization_events, *new_events),
+        }
+    )
 
 
 def refresh_saved_reviews(results_root: Path, dictionary_path: Path) -> dict[str, int]:
@@ -25,7 +94,7 @@ def refresh_saved_reviews(results_root: Path, dictionary_path: Path) -> dict[str
         if payload.get("status") != "PASSED" or not isinstance(payload.get("batch"), dict):
             skipped += 1
             continue
-        batch = ExtractionBatch.model_validate(payload["batch"])
+        batch = _renormalize_batch(ExtractionBatch.model_validate(payload["batch"]))
         envelope = review_extraction_batch(
             batch,
             dictionary,
@@ -34,6 +103,11 @@ def refresh_saved_reviews(results_root: Path, dictionary_path: Path) -> dict[str
             environment=AdapterEnvironment(payload.get("environment", "LOCAL")),
         )
         payload["review_envelope"] = envelope.model_dump(mode="json")
+        payload["batch"] = batch.model_dump(mode="json")
+        payload["deterministic_replay"] = {
+            "normalization_reapplied": True,
+            "model_calls_added": 0,
+        }
         path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

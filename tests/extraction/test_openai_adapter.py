@@ -187,7 +187,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/1.7.0"
+    assert result.run.prompt_version == "quote-extraction/2.1.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
@@ -329,8 +329,11 @@ def test_real_adapter_rejects_unknown_source_handle_without_retry(quote_dictiona
         )
 
     assert raised.value.code == "model_source_handle_unknown"
-    assert raised.value.details["source_handle"] == "S999"
-    assert raised.value.details["raw_model_content"] == raw_content
+    assert "raw_model_content" not in raised.value.details
+    assert raised.value.details["model_content_length_bytes"] == len(raw_content.encode())
+    assert len(raised.value.details["model_content_sha256"]) == 64
+    assert raised.value.details["failure_category"] == "EVIDENCE"
+    assert raised.value.details["run_record"]["status"] == "FAILED"
     assert budget.calls_used == 1
 
 
@@ -366,7 +369,8 @@ def test_invalid_provider_envelope_is_not_retried(quote_dictionary) -> None:
     assert raised.value.code == "model_response_invalid"
     assert raised.value.details["attempts"] == 1
     assert raised.value.details["calls_after"] == 1
-    assert raised.value.details["provider_body_preview"] == "not-json"
+    assert "provider_body_preview" not in raised.value.details
+    assert raised.value.details["provider_body_length_bytes"] == len(b"not-json")
     assert len(raised.value.details["provider_body_sha256"]) == 64
     assert budget.calls_used == 1
 
@@ -417,10 +421,12 @@ def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(qu
     assert raised.value.details["calls_after"] == 1
     assert raised.value.details["provider_request_id"] == "request-invalid-1"
     assert raised.value.details["provider_trace_id"] == "trace-invalid-1"
-    assert raised.value.details["finish_reason"] == "stop"
-    assert raised.value.details["prompt_tokens"] == 111
-    assert raised.value.details["completion_tokens"] == 22
-    assert raised.value.details["reasoning_tokens"] == 0
-    assert raised.value.details["total_tokens"] == 133
-    assert raised.value.details["raw_model_content"] == raw_content
+    run = raised.value.details["run_record"]
+    assert run["finish_reason"] == "stop"
+    assert run["prompt_tokens"] == 111
+    assert run["completion_tokens"] == 22
+    assert run["reasoning_tokens"] == 0
+    assert run["total_tokens"] == 133
+    assert "raw_model_content" not in raised.value.details
+    assert raised.value.details["model_content_length_bytes"] == len(raw_content.encode())
     assert budget.calls_used == 1

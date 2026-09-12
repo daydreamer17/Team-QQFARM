@@ -1,0 +1,19 @@
+{
+  "dataset_version": "V7.2",
+  "split": "holdout",
+  "review_code_version": "extraction-review/1.2.0",
+  "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+  "reference_answer_filename": "holdout_reference_answers.json",
+  "holdout_reference_commitment_sha256": "79856196939ff892079aca7024027af75d4de4bacda2593e22e67ca89ab2b97a",
+  "case_ids": [
+    "V72-HOLD-01",
+    "V72-HOLD-02",
+    "V72-HOLD-03",
+    "V72-HOLD-04",
+    "V72-HOLD-05",
+    "V72-HOLD-06"
+  ],
+  "case_count": 6,
+  "answer_content_in_repository": false,
+  "release_condition": "B freezes parser, OCR, thresholds, prompt, review policy, dependencies, and run budget; then stores all uncorrected outputs before A releases the answer."
+}

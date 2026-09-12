@@ -1,0 +1,5 @@
+# Stage 3 benchmark environment. Use Python 3.9-3.13; the main Python 3.14
+# environment intentionally remains independent.
+paddlepaddle==3.3.0
+paddleocr[doc-parser]==3.7.0
+psutil==7.0.0

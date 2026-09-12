@@ -19,7 +19,10 @@ def test_three_development_pdfs_produce_stable_positioned_sources() -> None:
         assert first.document_sha256 == second.document_sha256
         assert [source.source_id for source in first.sources] == [source.source_id for source in second.sources]
         assert first.sources
-        assert all(source.kind == SourceKind.PDF_TEXT_BLOCK for source in first.sources)
+        assert all(
+            source.kind in {SourceKind.PDF_TEXT_BLOCK, SourceKind.PDF_TABLE_CELL}
+            for source in first.sources
+        )
         assert all(source.page_number == 1 for source in first.sources)
         assert all(source.block_id and source.bbox for source in first.sources)
 
@@ -34,7 +37,10 @@ def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> No
     assert first.document_sha256 == second.document_sha256
     assert [source.source_id for source in first.sources] == [source.source_id for source in second.sources]
     assert len(first.sources) >= 10
-    assert all(source.kind == SourceKind.PDF_TEXT_BLOCK for source in first.sources)
+    assert all(
+        source.kind in {SourceKind.PDF_TEXT_BLOCK, SourceKind.PDF_TABLE_CELL}
+        for source in first.sources
+    )
     assert all(source.page_number == 1 for source in first.sources)
     assert all(source.block_id and source.bbox for source in first.sources)
 
@@ -51,7 +57,10 @@ def test_v3_development_pdfs_produce_stable_positioned_sources(alias: str) -> No
         source.source_id for source in second.sources
     ]
     assert first.sources
-    assert all(source.kind == SourceKind.PDF_TEXT_BLOCK for source in first.sources)
+    assert all(
+        source.kind in {SourceKind.PDF_TEXT_BLOCK, SourceKind.PDF_TABLE_CELL}
+        for source in first.sources
+    )
     assert all(source.page_number == 1 for source in first.sources)
     assert all(source.block_id and source.bbox for source in first.sources)
 
@@ -92,7 +101,12 @@ def test_pdf_page_limit_is_enforced() -> None:
 
 def test_pdf_without_extractable_text_requires_manual_fallback(monkeypatch) -> None:
     path = quote_path("a")
-    monkeypatch.setattr("supplier_comparison.extraction.pdf_parser._extract_lines", lambda page: ())
+    from supplier_comparison.extraction.pdf_layout import PageLayout
+
+    monkeypatch.setattr(
+        "supplier_comparison.extraction.pdf_parser.extract_page_layout",
+        lambda page, page_number, config: PageLayout(page_number, (), ()),
+    )
     with pytest.raises(UnreadableInputError) as raised:
         PdfQuoteParser().parse(path, context_for("a"))
     assert raised.value.code == "blank_pdf"
