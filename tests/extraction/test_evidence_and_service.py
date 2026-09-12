@@ -185,8 +185,10 @@ def test_altered_display_quote_is_rejected(quote_dictionary) -> None:
         )
     assert raised.value.code == "source_quote_mismatch"
     assert raised.value.details["adapter_run"]["output_mode"] == "FIXED"
-    rejected = raised.value.details["rejected_model_payload"]
-    assert rejected["candidates"][0]["source_refs"][0]["quoted_text"] == "fabricated snippet"
+    assert raised.value.details["adapter_run"]["status"] == "FAILED"
+    assert raised.value.details["adapter_run"]["failure_category"] == "EVIDENCE"
+    assert "rejected_model_payload" not in raised.value.details
+    assert len(raised.value.details["rejected_model_payload_sha256"]) == 64
 
 
 def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
@@ -195,7 +197,7 @@ def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
         context_for("c"),
     )
     payload = _all_missing_payload(quote_dictionary)
-    source = next(source for source in parsed.sources if source.raw_text == "Shipping fee S$500.00")
+    source = next(source for source in parsed.sources if source.raw_text == "S$500.00")
     field_index = next(
         index
         for index, field in enumerate(quote_dictionary.extractable_fields)
@@ -219,7 +221,8 @@ def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
             "EXTRACT-INVALID-ENUM",
         )
     assert raised.value.code == "candidate_enum_invalid"
-    assert raised.value.details["normalized_value"] == "PAID"
+    assert "normalized_value" in raised.value.details["evidence_detail_keys"]
+    assert "normalized_value" not in raised.value.details
 
 
 def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:
@@ -253,7 +256,8 @@ def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:
         )
 
     assert raised.value.code == "source_semantic_mismatch"
-    assert raised.value.details["field_name"] == "shipping_fee_status"
+    assert "field_name" in raised.value.details["evidence_detail_keys"]
+    assert "field_name" not in raised.value.details
 
 
 def test_delivery_fee_evidence_can_support_shipping_amount(quote_dictionary) -> None:
@@ -262,7 +266,10 @@ def test_delivery_fee_evidence_can_support_shipping_amount(quote_dictionary) -> 
         context_for("d", version=3),
     )
     payload = _all_missing_payload(quote_dictionary)
-    source = next(source for source in parsed.sources if "Delivery fee SGD 0.00" in source.raw_text)
+    semantic_source = next(
+        source for source in parsed.sources if "No delivery fee is charged" in source.raw_text
+    )
+    amount_source = next(source for source in parsed.sources if source.raw_text == "SGD 0.00")
     field_index = next(
         index
         for index, field in enumerate(quote_dictionary.extractable_fields)
@@ -274,7 +281,16 @@ def test_delivery_fee_evidence_can_support_shipping_amount(quote_dictionary) -> 
         "normalized_value": "0.00",
         "unit": "SGD",
         "validation_status": "EXTRACTED",
-        "source_refs": [{"source_id": source.source_id, "quoted_text": "SGD 0.00"}],
+        "source_refs": [
+            {
+                "source_id": semantic_source.source_id,
+                "quoted_text": "delivery fee",
+            },
+            {
+                "source_id": amount_source.source_id,
+                "quoted_text": "SGD 0.00",
+            },
+        ],
     }
 
     batch = extract_quote_candidates(
@@ -320,7 +336,8 @@ def test_order_increment_evidence_cannot_support_price_basis(quote_dictionary) -
         )
 
     assert raised.value.code == "source_semantic_mismatch"
-    assert raised.value.details["field_name"] == "price_basis_quantity"
+    assert "field_name" in raised.value.details["evidence_detail_keys"]
+    assert "field_name" not in raised.value.details
 
 
 def test_field_specific_sources_pass_semantic_guards(quote_dictionary) -> None:

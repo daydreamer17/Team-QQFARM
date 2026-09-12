@@ -18,6 +18,7 @@ from supplier_comparison.extraction.criticality import (
     CriticalityContext,
 )
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
+from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.review import (
     model_failed_envelope,
     review_extraction_batch,
@@ -28,7 +29,7 @@ from supplier_comparison.extraction.review_contracts import (
 )
 from supplier_comparison.extraction.contracts import AdapterEnvironment
 
-from .conftest import context_for, quotes_csv_path
+from .conftest import DEVELOPMENT_ROOT, context_for, quotes_csv_path
 
 
 NOW = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
@@ -454,6 +455,107 @@ def test_document_absence_statement_cannot_prove_fee_value(quote_dictionary) -> 
     assert envelope.review is not None
     assert any(
         "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_tax_evidence_cannot_prove_other_fee_status(quote_dictionary) -> None:
+    batch = _batch(quote_dictionary)
+    candidate = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    source_id = candidate.source_refs[0].source_id
+    tax_text = "Tax is not applicable to this synthetic test quote"
+    sources = tuple(
+        source.model_copy(update={"raw_text": tax_text, "column_name": "tax_mode"})
+        if source.source_id == source_id
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={
+            "parsed_input": batch.parsed_input.model_copy(update={"sources": sources})
+        }
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_status",
+        raw_value=tax_text,
+        normalized_value="NOT_APPLICABLE",
+        source_refs=(SourceCitation(source_id=source_id, quoted_text=tax_text),),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "other_fees_status"
+        and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_distinct_document_unit_prices_block_single_selected_value(
+    quote_dictionary,
+) -> None:
+    parsed = PdfQuoteParser().parse(
+        DEVELOPMENT_ROOT / "quote_V7/dev_03.pdf",
+        context_for("a", version=7),
+    )
+    price_source = next(
+        source for source in parsed.sources if "S$ 5.81" in source.raw_text
+    )
+    candidates = []
+    for definition in quote_dictionary.extractable_fields:
+        if definition.field_name == "unit_price":
+            candidates.append(
+                QuoteFieldCandidate(
+                    field_id="fld-unit-price-conflict-test",
+                    quote_id=parsed.context.quote_id,
+                    quote_version=parsed.context.quote_version,
+                    field_name="unit_price",
+                    raw_value=price_source.raw_text,
+                    normalized_value="5.81",
+                    unit="SGD",
+                    validation_status=ValidationStatus.EXTRACTED,
+                    origin=Origin.DOCUMENT,
+                    source_refs=(
+                        SourceCitation(
+                            source_id=price_source.source_id,
+                            quoted_text=price_source.raw_text,
+                        ),
+                    ),
+                    producer=CandidateProducer.MODEL_ADAPTER,
+                    adapter_version="test-adapter/1.0",
+                    prompt_version="test-prompt/1.0",
+                )
+            )
+        else:
+            candidates.append(
+                QuoteFieldCandidate(
+                    field_id=f"fld-{definition.field_name}",
+                    quote_id=parsed.context.quote_id,
+                    quote_version=parsed.context.quote_version,
+                    field_name=definition.field_name,
+                    validation_status=ValidationStatus.MISSING,
+                    producer=CandidateProducer.MODEL_ADAPTER,
+                    adapter_version="test-adapter/1.0",
+                    prompt_version="test-prompt/1.0",
+                )
+            )
+    batch = ExtractionBatch(
+        schema_version="1.1",
+        dictionary_version=quote_dictionary.version,
+        parsed_input=parsed,
+        candidates=tuple(candidates),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "unit_price"
+        and "CRITICAL_FIELD_CONFLICT" in finding.codes
         for finding in envelope.review.findings
     )
 

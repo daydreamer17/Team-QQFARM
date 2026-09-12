@@ -96,6 +96,44 @@ def test_unreviewed_missing_quote_is_blocked_before_c() -> None:
     assert raised.value.details["review_status"] == "REVIEW_REQUIRED"
 
 
+def test_schema_1_1_reviewed_batch_reaches_c_without_changing_rule_input() -> None:
+    """C accepts B's new envelope/batch version without consuming OCR metadata."""
+
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    legacy_batch = _batches(dictionary)["A"]
+    payload = legacy_batch.model_dump(mode="json")
+    payload["schema_version"] = "1.1"
+    schema_1_1_batch = ExtractionBatch.model_validate(payload)
+
+    envelope = _review(schema_1_1_batch, dictionary)
+    quote = quote_input_from_reviewed_extraction(envelope)
+
+    assert envelope.batch is not None
+    assert envelope.batch.schema_version == "1.1"
+    assert quote.quote_id == legacy_batch.parsed_input.context.quote_id
+    assert quote.candidates
+
+
+def test_b_detected_critical_conflict_is_blocked_before_c() -> None:
+    """C trusts B's gate and must never calculate a quote carrying a conflict."""
+
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    payload = _batches(dictionary)["A"].model_dump(mode="json")
+    revision = next(
+        candidate
+        for candidate in payload["candidates"]
+        if candidate["field_name"] == "revision"
+    )
+    revision["validation_status"] = "CONFLICT"
+    conflict_batch = ExtractionBatch.model_validate(payload)
+    envelope = _review(conflict_batch, dictionary)
+
+    assert envelope.downstream_ready is False
+    with pytest.raises(DownstreamNotReadyError) as raised:
+        quote_input_from_reviewed_extraction(envelope)
+    assert raised.value.code == "extraction_not_ready_for_downstream"
+
+
 def test_reviewed_adapter_excludes_noncritical_display_fields() -> None:
     dictionary = QuoteDictionary.load(CONTRACT_PATH)
     envelope = _review(_batches(dictionary)["A"], dictionary)

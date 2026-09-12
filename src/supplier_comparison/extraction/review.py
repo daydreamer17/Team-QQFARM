@@ -10,9 +10,12 @@ from decimal import Decimal, InvalidOperation
 from .contracts import (
     AdapterEnvironment,
     CandidateProducer,
+    EvidenceContextPurpose,
     ExtractionBatch,
+    EvidenceSource,
     Origin,
     QuoteFieldCandidate,
+    SourceKind,
     ValidationStatus,
 )
 from .criticality import (
@@ -28,6 +31,7 @@ from .evidence import (
     ORDER_CONSTRAINT_PATTERN,
     SHIPPING_FIELDS,
     SHIPPING_SOURCE_PATTERN,
+    source_semantic_contexts,
 )
 from .files import stable_id
 from .review_contracts import (
@@ -58,6 +62,7 @@ CROSS_FIELD_CODES = frozenset(
         "MOQ_PACKAGING_UNIT_MISMATCH",
         "LEAD_TIME_GROUP_INCOMPLETE",
         "QUOTE_DATE_AFTER_VALID_UNTIL",
+        "CRITICAL_FIELD_CONFLICT",
     }
 )
 IDENTITY_CODES = frozenset(
@@ -99,6 +104,25 @@ CLEARED_PAYMENT_PATTERN = re.compile(
     r"\b(?:cleared\s+(?:payment|funds)|payment\s+(?:receipt|received))\b",
     re.IGNORECASE,
 )
+OCR_CRITICAL_CONFIDENCE_THRESHOLD = Decimal("0.90")
+OCR_CONFLICT_REASON_PREFIX = "NATIVE_IMAGE_CRITICAL_TOKEN_CONFLICT:"
+UNIT_PRICE_LABEL_PATTERN = re.compile(
+    r"\b(?:quoted\s+price|unit\s+(?:price|rate)|price\s+for\s+stated\s+basis|rate)\b",
+    re.IGNORECASE,
+)
+NON_PRODUCT_PRICE_LABEL_PATTERN = re.compile(
+    r"\b(?:freight|shipping|delivery|handling|tax|gst|vat)\b",
+    re.IGNORECASE,
+)
+CURRENCY_AMOUNT_PATTERN = re.compile(
+    r"(?:S\$|SGD|USD|EUR|GBP|MYR)\s*([0-9]+(?:\.[0-9]{1,4})?)",
+    re.IGNORECASE,
+)
+OTHER_FEE_SOURCE_PATTERN = re.compile(
+    r"\b(?:other|additional|handling|service|surcharge)\s+"
+    r"(?:fee|fees|charge|charges)\b|\bfee\s+total\b",
+    re.IGNORECASE,
+)
 
 
 def review_extraction_batch(
@@ -136,9 +160,11 @@ def review_extraction_batch(
     assessment_by_name = {item.field_name: item for item in assessments}
     by_name = {candidate.field_name: candidate for candidate in batch.candidates}
     source_by_id = {source.source_id: source for source in batch.parsed_input.sources}
+    semantic_context_by_id = source_semantic_contexts(batch.parsed_input)
     findings: list[FieldReviewFinding] = []
 
     findings.extend(_review_batch_identity(batch, dictionary, expected_fields, assessment_by_name))
+    findings.extend(_review_pdf_page_findings(batch))
     valid_review_events, event_findings = _review_human_events(
         batch, review_events, by_name, source_by_id, assessment_by_name
     )
@@ -158,6 +184,7 @@ def review_extraction_batch(
                     assessment,
                     dictionary,
                     source_by_id,
+                    semantic_context_by_id,
                     valid_review_events.get(candidate.field_name),
                 )
             )
@@ -464,6 +491,42 @@ def _review_batch_identity(
     return findings
 
 
+def _review_pdf_page_findings(batch: ExtractionBatch) -> list[FieldReviewFinding]:
+    findings: list[FieldReviewFinding] = []
+    for analysis in batch.parsed_input.page_analyses:
+        conflict_reasons = tuple(
+            reason
+            for reason in analysis.quality_reasons
+            if reason.startswith(OCR_CONFLICT_REASON_PREFIX)
+        )
+        if not conflict_reasons:
+            continue
+        source_ids = tuple(
+            source.source_id
+            for source in batch.parsed_input.sources
+            if source.page_number == analysis.page_number
+        )
+        findings.append(
+            _finding(
+                batch,
+                field_name="__batch__",
+                assessment=_system_assessment(
+                    "native PDF text and the visible page image must agree on critical tokens"
+                ),
+                decision=FieldReviewDecision.REVIEW_REQUIRED,
+                severity=ReviewSeverity.BLOCKING,
+                reason=ReviewReason.DOCUMENT_CONFLICT,
+                code="pdf_native_image_conflict",
+                message=(
+                    "Native text and visible-image OCR disagree on critical values on "
+                    f"page {analysis.page_number}: {', '.join(conflict_reasons)}."
+                ),
+                source_ids=source_ids,
+            )
+        )
+    return findings
+
+
 def _review_human_events(
     batch: ExtractionBatch,
     events: tuple[ReviewEvent, ...],
@@ -591,6 +654,7 @@ def _review_candidate(
     assessment: CriticalityAssessment,
     dictionary: QuoteDictionary,
     source_by_id: dict[str, object],
+    semantic_context_by_id: dict[str, str],
     review_event: ReviewEvent | None,
 ) -> list[FieldReviewFinding]:
     findings: list[FieldReviewFinding] = []
@@ -713,7 +777,14 @@ def _review_candidate(
                 reason=ReviewReason.MISSING_REQUIRED_INFO,
             )
         )
-    findings.extend(_review_sources(candidate, assessment, source_by_id))
+    findings.extend(
+        _review_sources(
+            candidate,
+            assessment,
+            source_by_id,
+            semantic_context_by_id,
+        )
+    )
 
     if candidate.origin in {Origin.USER_INPUT, Origin.USER_CORRECTION} and (
         candidate.validation_status != ValidationStatus.VERIFIED
@@ -812,7 +883,8 @@ def _review_candidate_shape(
 def _review_sources(
     candidate: QuoteFieldCandidate,
     assessment: CriticalityAssessment,
-    source_by_id: dict[str, object],
+    source_by_id: dict[str, EvidenceSource],
+    semantic_context_by_id: dict[str, str],
 ) -> list[FieldReviewFinding]:
     findings: list[FieldReviewFinding] = []
     cited_sources = []
@@ -850,7 +922,7 @@ def _review_sources(
             continue
         cited_sources.append(source)
     source_contexts = [
-        " ".join(value for value in (source.column_name, source.raw_text) if value).replace("_", " ")
+        semantic_context_by_id[source.source_id].replace("_", " ")
         for source in cited_sources
     ]
     if candidate.field_name in SHIPPING_FIELDS and cited_sources and not any(
@@ -862,6 +934,20 @@ def _review_sources(
                 assessment,
                 code="SOURCE_SEMANTIC_MISMATCH",
                 message="Evidence does not contain shipping-specific semantics.",
+                reason=ReviewReason.EVIDENCE_ERROR,
+            )
+        )
+    if (
+        candidate.field_name in {"other_fees_status", "other_fees_amount"}
+        and cited_sources
+        and not any(OTHER_FEE_SOURCE_PATTERN.search(context) for context in source_contexts)
+    ):
+        findings.append(
+            _candidate_problem(
+                candidate,
+                assessment,
+                code="SOURCE_SEMANTIC_MISMATCH",
+                message="Evidence does not contain other-fee-specific semantics.",
                 reason=ReviewReason.EVIDENCE_ERROR,
             )
         )
@@ -908,6 +994,73 @@ def _review_sources(
                 reason=ReviewReason.EVIDENCE_ERROR,
             )
         )
+    if assessment.is_critical:
+        unavailable_confidence = [
+            source
+            for source in cited_sources
+            if source.kind == SourceKind.PDF_OCR_BLOCK
+            and (
+                source.ocr_metadata is None
+                or source.ocr_metadata.confidence is None
+            )
+        ]
+        low_confidence = [
+            source
+            for source in cited_sources
+            if source.kind == SourceKind.PDF_OCR_BLOCK
+            and source.ocr_metadata is not None
+            and source.ocr_metadata.confidence is not None
+            and Decimal(source.ocr_metadata.confidence)
+            < OCR_CRITICAL_CONFIDENCE_THRESHOLD
+        ]
+        if unavailable_confidence:
+            findings.append(
+                _candidate_problem(
+                    candidate,
+                    assessment,
+                    code="OCR_CRITICAL_CONFIDENCE_UNAVAILABLE",
+                    message=(
+                        "Critical OCR evidence has no confidence value and requires "
+                        "human verification."
+                    ),
+                )
+            )
+        if low_confidence:
+            minimum = min(
+                Decimal(source.ocr_metadata.confidence)
+                for source in low_confidence
+                if source.ocr_metadata is not None
+                and source.ocr_metadata.confidence is not None
+            )
+            findings.append(
+                _candidate_problem(
+                    candidate,
+                    assessment,
+                    code="OCR_CRITICAL_CONFIDENCE_LOW",
+                    message=(
+                        "Critical OCR evidence confidence "
+                        f"{minimum} is below the 0.90 human-review threshold."
+                    ),
+                )
+            )
+        if (
+            candidate.field_name == "manufacturer_part_number"
+            and not unavailable_confidence
+            and not low_confidence
+            and any(source.kind == SourceKind.PDF_OCR_BLOCK for source in cited_sources)
+            and _has_confusable_identifier_token(candidate.raw_value or "")
+        ):
+            findings.append(
+                _candidate_problem(
+                    candidate,
+                    assessment,
+                    code="OCR_CRITICAL_CONFUSABLE_TOKEN",
+                    message=(
+                        "OCR manufacturer part number contains a confusable 0/O or "
+                        "1/I/l token and requires human verification."
+                    ),
+                )
+            )
     return findings
 
 
@@ -920,6 +1073,26 @@ def _review_cross_field(
     findings: list[FieldReviewFinding] = []
     currency = _usable_value(by_name.get("currency"))
     document_text = _document_text_for_review(batch)
+
+    unit_price = by_name.get("unit_price")
+    document_unit_prices = _document_unit_price_values(batch)
+    if (
+        unit_price is not None
+        and _usable_value(unit_price) is not None
+        and len(document_unit_prices) > 1
+    ):
+        findings.append(
+            _candidate_problem(
+                unit_price,
+                assessments["unit_price"],
+                code="CRITICAL_FIELD_CONFLICT",
+                message=(
+                    "Document contains multiple distinct product unit-price amounts; "
+                    "a single extracted value cannot be selected automatically."
+                ),
+                reason=ReviewReason.DOCUMENT_CONFLICT,
+            )
+        )
 
     if (
         ORDER_DATE_PATTERN.search(document_text)
@@ -1056,6 +1229,39 @@ def _document_text_for_review(batch: ExtractionBatch) -> str:
         ).replace("_", " ")
         for source in batch.parsed_input.sources
     )
+
+
+def _document_unit_price_values(batch: ExtractionBatch) -> frozenset[Decimal]:
+    source_by_id = {source.source_id: source for source in batch.parsed_input.sources}
+    values: set[Decimal] = set()
+    for group in batch.parsed_input.context_groups:
+        if group.purpose != EvidenceContextPurpose.FIELD_AND_VALUE:
+            continue
+        members = [source_by_id[source_id] for source_id in group.source_ids]
+        labels = [
+            source.raw_text
+            for source in members
+            if UNIT_PRICE_LABEL_PATTERN.search(source.raw_text)
+            and not NON_PRODUCT_PRICE_LABEL_PATTERN.search(source.raw_text)
+        ]
+        if not labels:
+            continue
+        for source in members:
+            for match in CURRENCY_AMOUNT_PATTERN.finditer(source.raw_text):
+                try:
+                    values.add(Decimal(match.group(1)))
+                except InvalidOperation:
+                    continue
+    return frozenset(values)
+
+
+def _has_confusable_identifier_token(value: str) -> bool:
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9._/-]*", value):
+        if "0" in token and "O" in token:
+            return True
+        if "1" in token and ("I" in token or "l" in token):
+            return True
+    return False
 
 
 def _critical_values_complete(

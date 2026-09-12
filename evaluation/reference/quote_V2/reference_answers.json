@@ -154,7 +154,7 @@
       "media_type": "application/json",
       "answer_id": "V2-SYSTEM-EVIDENCE-AUDIT",
       "branch": "audit_only",
-      "sha256": "f307b9cbea7069db462312f90c58665882645ac806bca879d4459972941c75c2"
+      "sha256": "75af778a4d614bfefab6e025d08e145c0af4a78cf4bb89645c6087b99f06bb07"
     }
   ],
   "answers": {

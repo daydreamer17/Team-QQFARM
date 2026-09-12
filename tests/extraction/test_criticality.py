@@ -16,12 +16,7 @@ from supplier_comparison.extraction.criticality import (
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.review_contracts import EffectiveCriticality
 
-from .conftest import DATA_ROOT, REPO_ROOT, context_for, quotes_csv_path
-
-
-def _normalized_text_sha256(path) -> str:
-    """Hash text consistently on Windows and Unix checkouts."""
-    return sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+from .conftest import DATA_ROOT, context_for, quotes_csv_path
 
 
 def _batch(quote_dictionary, alias: str, row_number: int):
@@ -44,12 +39,12 @@ def test_c_policy_partitions_the_30_extractable_fields(quote_dictionary) -> None
 
 
 def test_criticality_policy_sources_have_not_drifted() -> None:
-    criticality_source = REPO_ROOT / "docs" / "EXTRACTION_REVIEW_FIELD_CRITICALITY.md"
+    criticality_source = DATA_ROOT / "EXTRACTION_REVIEW_FIELD_CRITICALITY.md"
     quote_dictionary_source = DATA_ROOT / "contracts" / "quote_data_field.csv"
 
-    assert _normalized_text_sha256(criticality_source) == CRITICALITY_SOURCE_SHA256
+    assert sha256(criticality_source.read_bytes()).hexdigest() == CRITICALITY_SOURCE_SHA256
     assert (
-        _normalized_text_sha256(quote_dictionary_source)
+        sha256(quote_dictionary_source.read_bytes()).hexdigest()
         == QUOTE_DICTIONARY_SOURCE_SHA256
     )
 

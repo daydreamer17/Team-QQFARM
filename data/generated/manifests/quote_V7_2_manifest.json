@@ -1,0 +1,149 @@
+{
+  "dataset_version": "V7.2",
+  "generated_on": "2026-09-12",
+  "split": "holdout",
+  "synthetic_only": true,
+  "commercial_data": false,
+  "generator": {
+    "id": "quote-v7.2-a-private",
+    "version": "1.0.0",
+    "availability": "PRIVATE_NOT_COMMITTED"
+  },
+  "dictionary": {
+    "path": "data/contracts/quote_data_field.csv",
+    "version": "1.2.0",
+    "sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
+    "sha256_basis": "Git blob bytes with LF line endings",
+    "scored_fields": 30,
+    "excluded_system_fields": [
+      "supplier_id"
+    ]
+  },
+  "review_code_version": "extraction-review/1.2.0",
+  "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+  "holdout_reference_commitment_sha256": "79856196939ff892079aca7024027af75d4de4bacda2593e22e67ca89ab2b97a",
+  "answer_fields_in_manifest": false,
+  "source_mapping_in_manifest": false,
+  "limits": {
+    "max_pages_per_pdf": 5,
+    "max_bytes_per_pdf": 5242880,
+    "language": "English printed text",
+    "handwriting": false,
+    "severe_occlusion": false,
+    "severe_perspective": false
+  },
+  "counts": {
+    "holdout": 6,
+    "total": 6,
+    "native": 2,
+    "OCR": 2,
+    "hybrid": 2
+  },
+  "freshness_policy": {
+    "reuses_v7_1_holdout": false,
+    "simple_rename_or_reencode": false,
+    "hash_duplicate_check_required": true
+  },
+  "cases": [
+    {
+      "case_id": "V72-HOLD-01",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_01_native_table.pdf",
+      "input_sha256": "619171c744c5afb9ed329a26de760da1ca6b9b27b586927fac9e2ddfda6aa1d5",
+      "page_count": 2,
+      "file_size_bytes": 4545,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "native",
+      "coverage_tags": [
+        "native_table",
+        "price_basis_variation",
+        "packaging_moq_variation",
+        "fee_treatment_variation"
+      ]
+    },
+    {
+      "case_id": "V72-HOLD-02",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_02_clear_scan.pdf",
+      "input_sha256": "e735a159d3179226368501caa1986a42b54f9d15e3b49119acbd4b55a98e8407",
+      "page_count": 2,
+      "file_size_bytes": 414093,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "OCR",
+      "coverage_tags": [
+        "clear_english_scan",
+        "price_basis_variation",
+        "fee_treatment_variation",
+        "day_basis_variation"
+      ]
+    },
+    {
+      "case_id": "V72-HOLD-03",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_03_hybrid.pdf",
+      "input_sha256": "edf8ac96a1d0fe0c639046623df79b41a36e464b1c0fac2bbfe6bcc19842614a",
+      "page_count": 3,
+      "file_size_bytes": 172905,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "hybrid",
+      "coverage_tags": [
+        "hybrid_native_scan",
+        "native_image_conflict",
+        "price_basis_variation",
+        "delivery_semantics_variation"
+      ]
+    },
+    {
+      "case_id": "V72-HOLD-04",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_04_rotated_scan.pdf",
+      "input_sha256": "9dbf347667eebd104446081816967b1a645356c88aa8e50ec9e704d9b75fe509",
+      "page_count": 2,
+      "file_size_bytes": 252757,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "OCR",
+      "coverage_tags": [
+        "mild_rotation",
+        "light_blur",
+        "critical_character_confusables",
+        "fee_ambiguity"
+      ]
+    },
+    {
+      "case_id": "V72-HOLD-05",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_05_missing_conflict.pdf",
+      "input_sha256": "fa37fd700a85a9c97bdca4f073fe187153b3f6a2b602b644a5ef924f47583a00",
+      "page_count": 2,
+      "file_size_bytes": 4508,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "native",
+      "coverage_tags": [
+        "critical_field_completeness",
+        "same_field_conflict",
+        "price_basis_variation"
+      ]
+    },
+    {
+      "case_id": "V72-HOLD-06",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7_2/v72_hold_06_prompt_injection.pdf",
+      "input_sha256": "275e7ca136e219c921ab124533738ea67d02588572952197d1da3fac34214e43",
+      "page_count": 2,
+      "file_size_bytes": 230527,
+      "dataset_version": "V7.2",
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN",
+      "sample_type": "hybrid",
+      "coverage_tags": [
+        "hybrid_native_scan",
+        "prompt_injection",
+        "cross_supplier_reference_attempt"
+      ]
+    }
+  ]
+}

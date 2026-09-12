@@ -8,6 +8,7 @@ from supplier_comparison.extraction.normalization import (
     INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE,
     PAYMENT_TERMS_NET_DAYS_RULE,
     SGD_FEE_SCALE_RULE,
+    START_EVENT_PAYMENT_RECEIPT_RULE,
     normalize_model_payload,
 )
 
@@ -194,3 +195,31 @@ def test_included_fee_without_separate_amount_becomes_missing() -> None:
     assert amount.source_refs == ()
     assert len(events) == 1
     assert events[0].rule_id == INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE
+
+
+def test_cleared_payment_received_event_uses_contract_value() -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "start_event",
+                    "raw_value": "Clock starts after cleared payment is received",
+                    "normalized_value": "PAYMENT_RECEIVED",
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [
+                        {
+                            "source_id": "SRC-START",
+                            "quoted_text": "cleared payment is received",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    assert normalized.candidates[0].normalized_value == "PAYMENT_RECEIPT"
+    assert len(events) == 1
+    assert events[0].rule_id == START_EVENT_PAYMENT_RECEIPT_RULE
