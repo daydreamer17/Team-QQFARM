@@ -8,7 +8,7 @@
 - 当前目录为仓库根目录：
 
 ```powershell
-Set-Location "E:\iss_hackathon\Lumos088"
+Set-Location "Your PATH"
 ```
 
 ## 2. 启动数据库
