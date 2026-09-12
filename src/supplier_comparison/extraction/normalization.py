@@ -17,6 +17,7 @@ SGD_FEE_SCALE_RULE = "sgd-fee-amount-2dp/1.0.0"
 CONFLICT_STATUS_PLACEHOLDER_RULE = "conflict-status-placeholder-null/1.0.0"
 PAYMENT_TERMS_NET_DAYS_RULE = "payment-terms-net-days/1.0.0"
 INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE = "included-fee-no-separate-amount/1.0.0"
+START_EVENT_PAYMENT_RECEIPT_RULE = "start-event-payment-receipt/1.0.0"
 FEE_AMOUNT_FIELDS = frozenset({"shipping_fee_amount", "other_fees_amount"})
 FEE_STATUS_BY_AMOUNT_FIELD = {
     "shipping_fee_amount": "shipping_fee_status",
@@ -29,6 +30,10 @@ NET_DAYS_PATTERN = re.compile(
 )
 NO_SEPARATE_AMOUNT_PATTERN = re.compile(
     r"\bno\s+(?:separate\s+charge|separately\s+stated\s+amount)\b",
+    re.IGNORECASE,
+)
+PAYMENT_RECEIPT_EVENT_PATTERN = re.compile(
+    r"\b(?:cleared\s+payment|payment)\b.{0,40}\b(?:receipt|received)\b",
     re.IGNORECASE,
 )
 
@@ -54,6 +59,26 @@ def normalize_model_payload(
     for candidate in payload.candidates:
         value = candidate.normalized_value
         fee_status_field = FEE_STATUS_BY_AMOUNT_FIELD.get(candidate.field_name)
+        if (
+            candidate.field_name == "start_event"
+            and candidate.validation_status == "EXTRACTED"
+            and isinstance(value, str)
+            and isinstance(candidate.raw_value, str)
+            and value in {"PAYMENT_RECEIVED", "CLEARED_PAYMENT_RECEIVED"}
+            and PAYMENT_RECEIPT_EVENT_PATTERN.search(candidate.raw_value)
+        ):
+            normalized_candidates.append(
+                candidate.model_copy(update={"normalized_value": "PAYMENT_RECEIPT"})
+            )
+            events.append(
+                NormalizationEvent(
+                    field_name=candidate.field_name,
+                    input_value=value,
+                    output_value="PAYMENT_RECEIPT",
+                    rule_id=START_EVENT_PAYMENT_RECEIPT_RULE,
+                )
+            )
+            continue
         if (
             fee_status_field is not None
             and normalized_by_field.get(fee_status_field) == "INCLUDED"

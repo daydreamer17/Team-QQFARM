@@ -5,7 +5,13 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from .contracts import EvidenceSource, ParsedInput, QuoteFieldCandidate, ValidationStatus
+from .contracts import (
+    EvidenceContextPurpose,
+    EvidenceSource,
+    ParsedInput,
+    QuoteFieldCandidate,
+    ValidationStatus,
+)
 from .dictionary import QuoteDictionary
 from .errors import EvidenceValidationError
 
@@ -26,12 +32,32 @@ def _normalized_whitespace(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _source_context(source: EvidenceSource) -> str:
-    return " ".join(
-        value
-        for value in (source.column_name, source.raw_text)
-        if value is not None
-    )
+def source_semantic_contexts(parsed_input: ParsedInput) -> dict[str, str]:
+    """Return source text plus only its deterministic field/value context.
+
+    TABLE_ROW groups are intentionally excluded: allowing every header in a row
+    to support every cell would weaken field-specific evidence checks.
+    """
+
+    source_map = {source.source_id: source for source in parsed_input.sources}
+    pieces: dict[str, list[str]] = {
+        source.source_id: [
+            value
+            for value in (source.column_name, source.raw_text)
+            if value is not None
+        ]
+        for source in parsed_input.sources
+    }
+    for group in parsed_input.context_groups:
+        if group.purpose != EvidenceContextPurpose.FIELD_AND_VALUE:
+            continue
+        group_text = [source_map[source_id].raw_text for source_id in group.source_ids]
+        for source_id in group.source_ids:
+            pieces[source_id].extend(group_text)
+    return {
+        source_id: _normalized_whitespace(" ".join(dict.fromkeys(values)))
+        for source_id, values in pieces.items()
+    }
 
 
 def validate_candidates(
@@ -55,6 +81,7 @@ def validate_candidates(
         )
 
     source_map = {source.source_id: source for source in parsed_input.sources}
+    semantic_context_by_id = source_semantic_contexts(parsed_input)
     context = parsed_input.context
     for candidate in candidates:
         if candidate.quote_id != context.quote_id or candidate.quote_version != context.quote_version:
@@ -107,7 +134,8 @@ def validate_candidates(
                 )
             cited_sources.append(source)
         if candidate.field_name in SHIPPING_FIELDS and not any(
-            SHIPPING_SOURCE_PATTERN.search(_source_context(source)) for source in cited_sources
+            SHIPPING_SOURCE_PATTERN.search(semantic_context_by_id[source.source_id])
+            for source in cited_sources
         ):
             raise EvidenceValidationError(
                 "source_semantic_mismatch",
@@ -116,7 +144,8 @@ def validate_candidates(
                 required_source_semantics="shipping, freight, logistics, or delivery charge",
             )
         if candidate.field_name in PRICE_BASIS_FIELDS and any(
-            ORDER_CONSTRAINT_PATTERN.search(_source_context(source)) for source in cited_sources
+            ORDER_CONSTRAINT_PATTERN.search(semantic_context_by_id[source.source_id])
+            for source in cited_sources
         ):
             raise EvidenceValidationError(
                 "source_semantic_mismatch",

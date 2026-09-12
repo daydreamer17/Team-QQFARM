@@ -1,0 +1,470 @@
+{
+  "dataset_version": "V7",
+  "dataset_revision": "V7.1",
+  "development_patch_revision": "V7.1-DEV-B1",
+  "generated_on": "2026-09-11",
+  "generator": {
+    "id": "quote-v7-a-private",
+    "version": "1.0.0",
+    "availability": "NOT_COMMITTED_TO_PRESERVE_HOLDOUT"
+  },
+  "generator_seed": 7007,
+  "synthetic_only": true,
+  "dictionary": {
+    "path": "data/contracts/quote_data_field.csv",
+    "version": "1.2.0",
+    "sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
+    "sha256_basis": "Git blob bytes with LF line endings",
+    "total_fields": 31,
+    "b_scored_fields": 30,
+    "excluded_from_b_accuracy": [
+      "supplier_id"
+    ]
+  },
+  "limits": {
+    "max_pages_per_pdf": 5,
+    "max_bytes_per_pdf": 5242880,
+    "language": "English printed text",
+    "handwriting": false
+  },
+  "split_policy": {
+    "development": "Open for implementation and fixes",
+    "calibration": "Open only for selecting and freezing final parameters",
+    "holdout": "Input PDFs are public; answers remain private until frozen one-time run"
+  },
+  "counts": {
+    "development": 8,
+    "calibration": 6,
+    "holdout": 6,
+    "total": 20
+  },
+  "profile_counts": {
+    "development": {
+      "NATIVE_TEXT": 3,
+      "SCAN": 2,
+      "MIXED": 2,
+      "ADVERSARIAL": 1
+    },
+    "calibration": {
+      "NATIVE_TEXT": 2,
+      "SCAN": 2,
+      "MIXED": 1,
+      "ADVERSARIAL": 1
+    },
+    "holdout": {
+      "NATIVE_TEXT": 2,
+      "SCAN": 2,
+      "MIXED": 1,
+      "ADVERSARIAL": 1
+    }
+  },
+  "review_code_version": "extraction-review/1.2.0",
+  "date_expression_policy": "ISO_8601",
+  "holdout_reference_commitment_sha256": "484396dad05943e3c662579515527f1893a2e4468008ab929c8fe717a4bdedeb",
+  "cases": [
+    {
+      "case_id": "V7-DEV-01",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_01.pdf",
+      "input_sha256": "3177bfe7b31d83f6f08690b61115b629c769ceb8ca9e08b53c31ba1ec6e8c12b",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-02",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_02.pdf",
+      "input_sha256": "c6d8c01982e49d58c716a6caa5ab86bba4ce70ff145c464805d40de77ac2c08f",
+      "page_count": 3,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 3,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-03",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_03.pdf",
+      "input_sha256": "a1ef005f893248677f21b35b76a7fff8a504509a03a404e9d24eee8f5dbb7ee3",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "field_conflict"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-04",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_04.pdf",
+      "input_sha256": "e31c501ac8b37d2bc46cc37b80bd0c057851a7cc34f95e3d1ae30497c8c930b1",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "ocr_confusables",
+        "unknown_fees"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-05",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
+      "input_sha256": "0bcf22ca6bc9848cb8b03797030cd6d979cfe19466816cff8754f874b1fbd257",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-06",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_06.pdf",
+      "input_sha256": "f58402b9d99181bc88165ef7dbe665f88e075d2dbc6b56afcaedb209d544f68c",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "split_across_routes"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-07",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_07.pdf",
+      "input_sha256": "021068c08580a210e2c10524fc3f78315fe0d1925fa83428df8f536ea557b03f",
+      "page_count": 3,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        },
+        {
+          "page_number": 3,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "prompt_injection",
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-DEV-08",
+      "split": "development",
+      "input_file": "data/generated/inputs/development/quote_V7/dev_08.pdf",
+      "input_sha256": "ba1fc14b8f26a21ef821fc912a053a6ec5bc324b2e77eab4fbb1e627180bb960",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "hidden_text_conflict",
+        "low_quality"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-01",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_01.pdf",
+      "input_sha256": "cc223d8661c3c876455e9a329a833a62fdd3450df10ad2808dd8367f487d699b",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "repeat_consistent"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-02",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_02.pdf",
+      "input_sha256": "8e4204e253abbb17b6c25a349cf75bf7525d6bf2b7b1f0dd5d36fcce0d3cb0e7",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "NATIVE_TEXT"
+        }
+      ],
+      "coverage_tags": [
+        "field_conflict",
+        "unknown_fees"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-03",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_03.pdf",
+      "input_sha256": "297987c91456f00fef6ed28d95d695d33500120050c8e715823e46af892d6cbd",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "missing_other_fees",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-04",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_04.pdf",
+      "input_sha256": "0cfac8db192d473d89a268f099d10d4e05e12ad3c27565b3f3d74022fe8f3883",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "explicit_arrival",
+        "ocr_confusables"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-05",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_05.pdf",
+      "input_sha256": "1f543e784b0f44d4a8f1fc75d098495b172b8d44e35fb8956a28ded196a18ef9",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "NATIVE_TEXT"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "split_across_routes"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-CAL-06",
+      "split": "calibration",
+      "input_file": "data/generated/inputs/calibration/quote_V7/cal_06.pdf",
+      "input_sha256": "9c91a4f6b8c9b61bedb508b07d8254d95b722fe5dd43adf80ef109b6291dfede",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": [
+        {
+          "page_number": 1,
+          "route": "OCR"
+        },
+        {
+          "page_number": 2,
+          "route": "OCR"
+        }
+      ],
+      "coverage_tags": [
+        "low_quality",
+        "ocr_critical_low_confidence",
+        "prompt_injection"
+      ],
+      "reference_visibility": "AVAILABLE_TO_B"
+    },
+    {
+      "case_id": "V7-HOLD-01",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_01.pdf",
+      "input_sha256": "353a2d2d21ac31accfd7d95b483f6421b07dc718abefab2a35842681ea216200",
+      "page_count": 2,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-02",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_02.pdf",
+      "input_sha256": "ecaf294f8d26dbc6c46b974290205ae483d9c77c5e75fd9489f77ed17dfbac04",
+      "page_count": 3,
+      "document_profile": "NATIVE_TEXT",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-03",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_03.pdf",
+      "input_sha256": "e721c8df72e0fc1ab2739c1c92d1e4cd19f556b8eac862655c2c451d2087179b",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-04",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_04.pdf",
+      "input_sha256": "e4bd5142b3e4c848f19809713e17a48385ee5337eb955a421b5c34a5f84405da",
+      "page_count": 2,
+      "document_profile": "SCAN",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-05",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_05.pdf",
+      "input_sha256": "5522da4dcf03cdced3ff8e1d316b0a3356d480ae89dbe226d4485c39a8c7f08a",
+      "page_count": 2,
+      "document_profile": "MIXED",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    },
+    {
+      "case_id": "V7-HOLD-06",
+      "split": "holdout",
+      "input_file": "data/generated/inputs/holdout/quote_V7/hold_06.pdf",
+      "input_sha256": "7f1255581f020afe842c3f7e7d60da0cdf8f23b005227a15fd814eca4a6a7ae2",
+      "page_count": 2,
+      "document_profile": "ADVERSARIAL",
+      "expected_page_routes": null,
+      "coverage_tags": [
+        "BLINDED_UNTIL_RELEASE"
+      ],
+      "reference_visibility": "HASH_ONLY_BEFORE_RUN"
+    }
+  ]
+}

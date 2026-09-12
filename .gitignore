@@ -4,12 +4,41 @@
 .env.*
 !.env.example
 
-# Member B's local working plan; the repository handoff is guide_lc.md.
+# Local design notes and superseded handoff; current handoff is guide_lc3.md.
+/guide.md
+/plan.md
+/guide_lc.md
+/guide_lc2 copy.md
+
+# Member B's local working plan.
 /docs/B_WEEK1_IMPLEMENTATION_PLAN_2026-09-09.md
+/docs/B_V7_PDF_OCR_UPGRADE_PLAN_2026-09-11.md
 
 # Local Python and test artifacts.
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
+.venv-ocr/
+.ocr-cache/
+.ocr-tools/
 .DS_Store
+
+# Real-model evaluation outputs are local evidence and may contain provider diagnostics.
+/evaluation/results/local/
+
+# Local IDE and internal working documents.
+/.vscode/
+/docs/assets/
+/docs/v7/
+
+# Private holdout answers must never be committed.
+**/holdout_reference_answers.json

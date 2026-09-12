@@ -1,6 +1,19 @@
 *.pdf binary
 data/generated/inputs/development/quote_V3/*.csv text eol=lf
 data/generated/inputs/development/quote_V4/*.csv text eol=lf
+data/generated/inputs/development/quote_V5/*.csv text eol=lf
+data/generated/inputs/development/quote_V6/*.csv text eol=lf
+data/generated/inputs/calibration/quote_V6/*.csv text eol=lf
+data/generated/inputs/holdout/quote_V6/*.csv text eol=lf
 data/generated/fixtures/quote_V4/*.json text eol=lf
 evaluation/reference/quote_V3/*.json text eol=lf
 evaluation/reference/quote_V4/*.json text eol=lf
+evaluation/reference/quote_V5/*.json text eol=lf
+evaluation/reference/quote_V6/*.json text eol=lf
+evaluation/reference/quote_V6/*/*.json text eol=lf
+data/generated/manifests/quote_V7_manifest.json text eol=lf
+evaluation/reference/quote_V7/*.json text eol=lf
+evaluation/reference/quote_V7/*/*.json text eol=lf
+data/contracts/quote_data_field.csv text eol=lf
+data/generated/manifests/quote_V7_2_manifest.json text eol=lf
+evaluation/reference/quote_V7_2/*.json text eol=lf
