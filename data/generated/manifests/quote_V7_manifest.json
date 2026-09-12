@@ -1,7 +1,6 @@
 {
   "dataset_version": "V7",
   "dataset_revision": "V7.1",
-  "development_patch_revision": "V7.1-DEV-B1",
   "generated_on": "2026-09-11",
   "generator": {
     "id": "quote-v7-a-private",
@@ -160,7 +159,7 @@
       "case_id": "V7-DEV-05",
       "split": "development",
       "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
-      "input_sha256": "0bcf22ca6bc9848cb8b03797030cd6d979cfe19466816cff8754f874b1fbd257",
+      "input_sha256": "800c4e0993e0700c73f848352a2406274aa97ba7c1d924093c8651adeac8a6c3",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [

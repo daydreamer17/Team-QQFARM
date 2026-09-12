@@ -7,7 +7,7 @@
       "path": "data/contracts/quote_data_field.csv",
       "version": "1.2.0",
       "field_count": 31,
-      "sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55"
+      "sha256": "7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd"
     },
     "procurement_requirement": {
       "path": "data/contracts/procurement_requirement_fields.csv",
@@ -154,7 +154,7 @@
       "media_type": "application/json",
       "answer_id": "V2-SYSTEM-EVIDENCE-AUDIT",
       "branch": "audit_only",
-      "sha256": "f307b9cbea7069db462312f90c58665882645ac806bca879d4459972941c75c2"
+      "sha256": "75af778a4d614bfefab6e025d08e145c0af4a78cf4bb89645c6087b99f06bb07"
     }
   ],
   "answers": {

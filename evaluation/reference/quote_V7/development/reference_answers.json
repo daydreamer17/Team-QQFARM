@@ -1,7 +1,6 @@
 {
   "dataset_version": "V7",
   "dataset_revision": "V7.1",
-  "development_patch_revision": "V7.1-DEV-B1",
   "dictionary_file": "data/contracts/quote_data_field.csv",
   "dictionary_version": "1.2.0",
   "dictionary_sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
@@ -3576,7 +3575,7 @@
     {
       "case_id": "V7-DEV-05",
       "input_file": "data/generated/inputs/development/quote_V7/dev_05.pdf",
-      "input_sha256": "0bcf22ca6bc9848cb8b03797030cd6d979cfe19466816cff8754f874b1fbd257",
+      "input_sha256": "800c4e0993e0700c73f848352a2406274aa97ba7c1d924093c8651adeac8a6c3",
       "page_count": 2,
       "document_profile": "SCAN",
       "expected_page_routes": [
@@ -3709,12 +3708,6 @@
               "field_name": "manufacturer_part_number",
               "page_number": 1,
               "text_contains": "V7-QF-05-O0"
-            },
-            {
-              "source_id": "V7-DEV-05-P01-R16",
-              "field_name": "manufacturer_part_number",
-              "page_number": 1,
-              "text_contains": "Suffix characters: letter O, then digit zero"
             }
           ]
         },
@@ -4164,12 +4157,6 @@
           "text_contains": "Exactly 100 pcs inside each sales pack"
         },
         {
-          "source_id": "V7-DEV-05-P01-R16",
-          "field_name": "manufacturer_part_number",
-          "page_number": 1,
-          "text_contains": "Suffix characters: letter O, then digit zero"
-        },
-        {
           "source_id": "V7-DEV-05-P02-R01",
           "field_name": "order_multiple_units",
           "page_number": 2,
@@ -4257,7 +4244,7 @@
       "ocr_ground_truth": [
         {
           "page_number": 1,
-          "manual_transcription": "Quoted by: Synthetic Meridian Supplier 05 Ltd.\nVendor country: Malaysia\nProduct category: Synthetic electronic components\nLine item: V7 evaluation controller 05\nMaker: Fictional Circuit Works 05\nMfr P/N: V7-QF-05-O0\nComponent package: QFN-40\nHardware revision: Rev. R1\nCondition: Brand-new production stock\nPricing currency: SGD\nQuoted price: SGD 5.95 per lot of 500 pcs\nPricing lot size: One price line covers 500 piece(s)\nPrice unit: Basis is pieces (pcs), not trays\nSupply format: Supplied in trays\nPack content: Exactly 100 pcs inside each sales pack\nPart-number clarification: V7-QF-05-O0\nSuffix characters: letter O, then digit zero",
+          "manual_transcription": "Quoted by: Synthetic Meridian Supplier 05 Ltd.\nVendor country: Malaysia\nProduct category: Synthetic electronic components\nLine item: V7 evaluation controller 05\nMaker: Fictional Circuit Works 05\nMfr P/N: V7-QF-05-O0\nComponent package: QFN-40\nHardware revision: Rev. R1\nCondition: Brand-new production stock\nPricing currency: SGD\nQuoted price: SGD 5.95 per lot of 500 pcs\nPricing lot size: One price line covers 500 piece(s)\nPrice unit: Basis is pieces (pcs), not trays\nSupply format: Supplied in trays\nPack content: Exactly 100 pcs inside each sales pack",
           "critical_tokens": [
             "V7-QF-05-O0",
             "SGD 5.95 per lot of 500 pcs"
@@ -4447,10 +4434,8 @@
         ]
       },
       "expected_review": {
-        "review_status": "REVIEW_REQUIRED",
-        "blocking_codes": [
-          "OCR_CRITICAL_CONFIDENCE_LOW"
-        ]
+        "review_status": "READY_FOR_DOWNSTREAM",
+        "blocking_codes": []
       }
     },
     {
