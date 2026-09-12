@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+.venv-ocr
+.pytest_cache
+.local-memory
+evaluation/results/local
+**/holdout_reference_answers.json
+__pycache__
+*.pyc
+build
+dist

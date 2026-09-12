@@ -4,11 +4,13 @@ import json
 
 import pytest
 
+from scripts import run_real_extraction
 from scripts.run_real_extraction import (
     _context,
     _exit_code,
     _pdf_path,
     _profiled_csv_path,
+    _run_jobs_with_independent_budgets,
     _run_supplier,
 )
 from supplier_comparison.extraction.adapters import ModelCallBudget, OpenAICompatibleConfig
@@ -104,3 +106,30 @@ def test_real_runner_failure_is_explicitly_unscored(monkeypatch, quote_dictionar
     record = json.loads(output.read_text(encoding="utf-8"))
     assert record["scoring_status"] == "UNSCORED"
     assert "A-approved reference" in record["scoring_note"]
+
+
+def test_real_runner_gives_each_document_an_independent_budget(
+    monkeypatch, tmp_path
+) -> None:
+    seen = []
+
+    def fake_run_supplier(alias, *_args):
+        budget = _args[-1]
+        seen.append(budget)
+        for _ in range(8 if alias == "A" else 1):
+            budget.consume()
+        return 0, {"supplier": alias}
+
+    monkeypatch.setattr(run_real_extraction, "_run_supplier", fake_run_supplier)
+    results, total_calls = _run_jobs_with_independent_budgets(
+        [("A", tmp_path / "a.json"), ("B", tmp_path / "b.json")],
+        dataset_version="V3",
+        input_format="pdf",
+        config=None,  # type: ignore[arg-type]
+        dictionary=None,  # type: ignore[arg-type]
+    )
+
+    assert [code for code, _ in results] == [0, 0]
+    assert total_calls == 9
+    assert [budget.calls_used for budget in seen] == [8, 1]
+    assert len({budget.graph_run_id for budget in seen}) == 2

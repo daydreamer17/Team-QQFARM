@@ -203,6 +203,39 @@ def _exit_code(codes: list[int]) -> int:
     return 0
 
 
+def _run_jobs_with_independent_budgets(
+    jobs: list[tuple[str, Path]],
+    *,
+    dataset_version: str,
+    input_format: str,
+    config: OpenAICompatibleConfig,
+    dictionary: QuoteDictionary,
+) -> tuple[list[tuple[int, dict]], int]:
+    """Run each document with its own persistent-workflow-equivalent budget."""
+
+    results: list[tuple[int, dict]] = []
+    total_calls = 0
+    for alias, output in jobs:
+        budget = ModelCallBudget(
+            graph_run_id=(
+                f"graph_local_{dataset_version.lower()}_{input_format}_"
+                f"{alias.lower()}_{uuid4().hex}"
+            )
+        )
+        result = _run_supplier(
+            alias,
+            dataset_version,
+            input_format,
+            output,
+            config,
+            dictionary,
+            budget,
+        )
+        results.append(result)
+        total_calls += budget.calls_used
+    return results, total_calls
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     target = parser.add_mutually_exclusive_group(required=True)
@@ -243,19 +276,13 @@ def main() -> int:
 
     config = OpenAICompatibleConfig.from_env()
     dictionary = QuoteDictionary.load(REPO_ROOT / "data/contracts/quote_data_field.csv")
-    budget = ModelCallBudget(graph_run_id=f"graph_local_{uuid4().hex}")
-    results = [
-        _run_supplier(
-            alias,
-            args.dataset_version,
-            args.input_format,
-            output,
-            config,
-            dictionary,
-            budget,
-        )
-        for alias, output in jobs
-    ]
+    results, total_model_calls = _run_jobs_with_independent_budgets(
+        jobs,
+        dataset_version=args.dataset_version,
+        input_format=args.input_format,
+        config=config,
+        dictionary=dictionary,
+    )
     codes = [code for code, _summary in results]
     if args.all_suppliers:
         batch_status = (
@@ -272,7 +299,7 @@ def main() -> int:
                     "dataset_version": args.dataset_version,
                     "input_format": args.input_format,
                     "suppliers_run": len(results),
-                    "calls_used": budget.calls_used,
+                    "calls_used": total_model_calls,
                     "results": [summary for _code, summary in results],
                 },
                 ensure_ascii=False,

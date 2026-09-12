@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import csv
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
-from supplier_comparison.extraction.contracts import DocumentContext, ExtractionBatch
+from supplier_comparison.extraction.contracts import (
+    AdapterEnvironment,
+    DocumentContext,
+    ExtractionBatch,
+)
 from supplier_comparison.extraction.corrections import apply_candidate_correction
 from supplier_comparison.extraction.criticality import CriticalityContext
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
@@ -17,7 +20,10 @@ from supplier_comparison.extraction.human_review import create_review_event
 from supplier_comparison.extraction.review import review_extraction_batch
 from supplier_comparison.extraction.review_contracts import (
     CorrectionAction,
+    CorrectionState,
     HumanReviewAction,
+    ReviewEnvelope,
+    ReviewStatus,
 )
 from supplier_comparison.rules import (
     ComparisonDisposition,
@@ -32,7 +38,6 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "data/contracts/quote_data_field.csv"
 REQUIREMENT_PATH = ROOT / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.csv"
 QUOTES_PATH = ROOT / "data/generated/inputs/development/quote_V1/quotes.csv"
-CORRECTED_RESULTS_PATH = ROOT / "evaluation/results/local/2026-09-10"
 NOW = datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc)
 REVIEWED_AT = datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc)
 
@@ -64,14 +69,6 @@ def _batches(dictionary: QuoteDictionary):
         alias: parser.parse_row(QUOTES_PATH, _context(alias), row_number)
         for alias, row_number in (("A", 2), ("B", 3), ("C", 4))
     }
-
-
-def _corrected_batch(alias: str) -> ExtractionBatch:
-    path = CORRECTED_RESULTS_PATH / (
-        f"deepseek_v4_flash_supplier_{alias.lower()}_post_correction.json"
-    )
-    with path.open("r", encoding="utf-8") as handle:
-        return ExtractionBatch.model_validate(json.load(handle)["batch"])
 
 
 def _review(batch, dictionary, *, review_events=(), corrections=()):
@@ -147,12 +144,25 @@ def test_reviewed_adapter_excludes_noncritical_display_fields() -> None:
     assert len(field_names) == 26
 
 
-def test_c_post_correction_samples_load_and_expose_legacy_audit_gap() -> None:
+def test_user_correction_without_its_event_is_rejected() -> None:
     dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    batches = _batches(dictionary)
+    corrected_c, _omitted_event = apply_candidate_correction(
+        batches["C"],
+        field_name="shipping_fee_status",
+        action=CorrectionAction.USER_CORRECTION,
+        raw_value="KNOWN_AMOUNT",
+        normalized_value="KNOWN_AMOUNT",
+        unit=None,
+        reason_code="TEST_CORRECTION",
+        reason="Exercise the correction audit gate without local model artifacts.",
+        reviewer_id="reviewer-1",
+        reviewed_at=REVIEWED_AT,
+    )
 
-    supplier_a = _review(_corrected_batch("A"), dictionary)
-    supplier_b = _review(_corrected_batch("B"), dictionary)
-    supplier_c = _review(_corrected_batch("C"), dictionary)
+    supplier_a = _review(batches["A"], dictionary)
+    supplier_b = _review(batches["B"], dictionary)
+    supplier_c = _review(corrected_c, dictionary)
 
     assert supplier_a.review_status.value == "READY_FOR_DOWNSTREAM"
     assert supplier_b.review_status.value == "REVIEW_REQUIRED"
@@ -164,6 +174,24 @@ def test_c_post_correction_samples_load_and_expose_legacy_audit_gap() -> None:
         "CORRECTION_AUDIT_MISSING" in finding.codes
         for finding in supplier_c.review.findings
     )
+    with pytest.raises(DownstreamNotReadyError):
+        quote_input_from_reviewed_extraction(supplier_c)
+
+
+def test_model_failed_envelope_is_blocked_before_c() -> None:
+    failed = ReviewEnvelope(
+        environment=AdapterEnvironment.LOCAL,
+        input_is_synthetic=False,
+        correction_state=CorrectionState.PRE_CORRECTION,
+        review_status=ReviewStatus.MODEL_FAILED,
+        downstream_ready=False,
+        calculation_inputs_complete=False,
+        errors=("provider request failed",),
+    )
+
+    with pytest.raises(DownstreamNotReadyError) as raised:
+        quote_input_from_reviewed_extraction(failed)
+    assert raised.value.details["review_status"] == "MODEL_FAILED"
 
 
 def test_confirmed_missing_reaches_c_as_pending_without_final_recommendation() -> None:

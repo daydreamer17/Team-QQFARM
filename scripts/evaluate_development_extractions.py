@@ -49,6 +49,16 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _display_path(path: Path) -> str:
+    """Return a stable repository-relative path when the input is inside the repo."""
+
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
 def _load_reference(path: Path) -> dict[str, dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -143,7 +153,11 @@ def main() -> int:
                 if expected_missing
                 else _values_equal(field_name, actual["normalized_value"], expected_raw, definition.value_type)
             )
-            origin_match = original["origin"] == "DOCUMENT"
+            origin_match = (
+                original["origin"] is None
+                if expected_missing
+                else original["origin"] == "DOCUMENT"
+            )
             citation_pass = _citation_shape_pass(actual, source_map)
             passed = status_match and value_match and origin_match and citation_pass
             total_fields += 1
@@ -166,7 +180,7 @@ def main() -> int:
 
         passed_count = sum(item["passed"] for item in field_reviews)
         reviews[alias] = {
-            "source_result": str(result_path.relative_to(REPO_ROOT)),
+            "source_result": _display_path(result_path),
             "source_result_sha256": _sha256(result_path),
             "field_count": len(field_reviews),
             "passed_count": passed_count,
@@ -183,7 +197,7 @@ def main() -> int:
         "correction_state": "PRE_HUMAN_CORRECTION_WITH_DETERMINISTIC_NORMALIZATION",
         "status": "PASSED" if total_passed == total_fields else "FAILED_FIELD_REVIEW",
         "review_basis": {
-            "reference_csv": str(args.reference.relative_to(REPO_ROOT)),
+            "reference_csv": _display_path(args.reference),
             "reference_csv_sha256": _sha256(args.reference),
             "dictionary_version": dictionary.version,
             "pdf_specific_rules": {

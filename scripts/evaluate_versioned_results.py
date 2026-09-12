@@ -61,6 +61,10 @@ def _load_json(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _canonical_input_path(value: str) -> str:
+    return value.replace("\\", "/")
+
+
 def _values_equal(field_name: str, actual: object, expected: object) -> bool:
     if actual is None or expected is None:
         return actual is expected
@@ -185,7 +189,7 @@ def _discover_results(results_root: Path) -> dict[str, dict[str, Any]]:
         if not isinstance(input_path, str):
             continue
         payload["_result_path"] = str(path)
-        selected[input_path] = payload
+        selected[_canonical_input_path(input_path)] = payload
     return selected
 
 
@@ -330,7 +334,12 @@ def evaluate_results(
         definition.field_name for definition in dictionary.extractable_fields
     )
     documents = [
-        _score_case(case, results.get(case.input_path), field_names) for case in cases
+        _score_case(
+            case,
+            results.get(_canonical_input_path(case.input_path)),
+            field_names,
+        )
+        for case in cases
     ]
     passed_fields = sum(item["passed_fields"] for item in documents)
     expected_fields = len(documents) * len(field_names)

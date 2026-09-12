@@ -4,6 +4,8 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
+      TZ: UTC
+      PGTZ: UTC
       POSTGRES_DB: ${POSTGRES_DB:-supplier_comparison}
       POSTGRES_USER: ${POSTGRES_USER:-supplier_app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supplier_dev_password}
@@ -11,8 +13,6 @@ services:
       - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - database_data:/var/lib/postgresql/data
-      # The API will reuse this named volume when D adds the application service.
-      - quote_files:/var/lib/supplier-comparison/quotes
     healthcheck:
       test:
         - CMD-SHELL
@@ -22,6 +22,63 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+
+  api:
+    build:
+      context: .
+    environment:
+      TZ: UTC
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+      QUOTE_STORAGE_PATH: /var/lib/supplier-comparison/quotes
+      TEST_USER_ID: ${TEST_USER_ID:-local-test-user}
+      SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-}
+      SUPPLIER_MODEL_MODEL_ID: ${SUPPLIER_MODEL_MODEL_ID:-}
+      SUPPLIER_MODEL_ENVIRONMENT: ${SUPPLIER_MODEL_ENVIRONMENT:-LOCAL}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - quote_files:/var/lib/supplier-comparison/quotes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+    profiles: ["worker"]
+    environment:
+      TZ: UTC
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+      QUOTE_STORAGE_PATH: /var/lib/supplier-comparison/quotes
+      TEST_USER_ID: ${TEST_USER_ID:-local-test-user}
+      SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-}
+      SUPPLIER_MODEL_MODEL_ID: ${SUPPLIER_MODEL_MODEL_ID:-}
+      SUPPLIER_MODEL_BASE_URL: ${SUPPLIER_MODEL_BASE_URL:-}
+      SUPPLIER_MODEL_ENVIRONMENT: ${SUPPLIER_MODEL_ENVIRONMENT:-LOCAL}
+      SUPPLIER_MODEL_API_KEY_ENV: ${SUPPLIER_MODEL_API_KEY_ENV:-QQFARM_SILICONFLOW_API_KEY}
+      QQFARM_SILICONFLOW_API_KEY: ${QQFARM_SILICONFLOW_API_KEY:-}
+      SUPPLIER_MODEL_TIMEOUT_SECONDS: ${SUPPLIER_MODEL_TIMEOUT_SECONDS:-60}
+      SUPPLIER_MODEL_MAX_ATTEMPTS: ${SUPPLIER_MODEL_MAX_ATTEMPTS:-3}
+      SUPPLIER_MODEL_ENABLE_THINKING: ${SUPPLIER_MODEL_ENABLE_THINKING:-false}
+      SUPPLIER_MODEL_MAX_TOKENS: ${SUPPLIER_MODEL_MAX_TOKENS:-8192}
+      SUPPLIER_PDF_OCR_ENABLED: ${SUPPLIER_PDF_OCR_ENABLED:-false}
+    volumes:
+      - quote_files:/var/lib/supplier-comparison/quotes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "supplier_comparison.worker", "--help"]
 
 volumes:
   database_data:

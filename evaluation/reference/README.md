@@ -62,3 +62,9 @@ PYTHONPATH=src .venv/bin/python scripts/migrate_v2_system_evidence.py \
 ```
 
 留出答案一旦用于调试，该样本必须转为开发集；随后重新制作未见过的留出集。
+
+## V7.2 状态说明
+
+`quote_V7_2/holdout_reference_answers.json` 曾被提交到仓库，因此 V7.2 已视为
+公开的开发／回归样本，不能再作为未见留出集报告泛化结果。文件仅在本地保留并由
+Git 忽略；正式留出验收必须由 A/B 另行制作从未用于提示词、解析器或规则调试的样本。

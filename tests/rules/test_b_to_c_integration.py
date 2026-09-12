@@ -1,5 +1,4 @@
 import csv
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,7 +26,6 @@ REQUIREMENT_PATH = (
     / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.csv"
 )
 QUOTES_PATH = ROOT / "data/generated/inputs/development/quote_V1/quotes.csv"
-CORRECTED_RESULTS_PATH = ROOT / "evaluation/results/local/2026-09-10"
 
 
 def _load_requirement() -> ProcurementRequirement:
@@ -51,13 +49,12 @@ def _context(alias: str) -> DocumentContext:
     )
 
 
-def _load_corrected_batch(alias: str) -> ExtractionBatch:
-    path = CORRECTED_RESULTS_PATH / (
-        f"deepseek_v4_flash_supplier_{alias.lower()}_post_correction.json"
+def _load_canonical_batch(alias: str) -> ExtractionBatch:
+    row_numbers = {"A": 2, "B": 3, "C": 4}
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    return FixedCsvQuoteParser(dictionary).parse_row(
+        QUOTES_PATH, _context(alias), row_numbers[alias]
     )
-    with path.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-    return ExtractionBatch.model_validate(payload["batch"])
 
 
 def _answer_supplier_b_shipping(batch: ExtractionBatch) -> ExtractionBatch:
@@ -131,10 +128,10 @@ def test_actual_canonical_csv_flows_from_b_parser_into_c_rules() -> None:
     assert result.blocking_pending_quote_ids == ("QUOTE-MCU-DEMO-001-B",)
 
 
-def test_corrected_model_extractions_recommend_b_after_shipping_answer() -> None:
-    supplier_a = _load_corrected_batch("A")
-    supplier_b = _answer_supplier_b_shipping(_load_corrected_batch("B"))
-    supplier_c = _load_corrected_batch("C")
+def test_canonical_extractions_recommend_b_after_shipping_answer() -> None:
+    supplier_a = _load_canonical_batch("A")
+    supplier_b = _answer_supplier_b_shipping(_load_canonical_batch("B"))
+    supplier_c = _load_canonical_batch("C")
 
     result = compare_extraction_batches(
         _load_requirement(),

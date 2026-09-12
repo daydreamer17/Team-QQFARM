@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from scripts import run_versioned_evaluation
 from scripts.evaluate_versioned_results import validate_reference
 from scripts.run_versioned_evaluation import (
     DICTIONARY_PATH,
     _deterministic_only_config,
     _job_requires_model,
+    _run_jobs_with_independent_budgets,
     _v6_jobs,
 )
 from supplier_comparison.extraction.dictionary import QuoteDictionary
@@ -46,3 +49,31 @@ def test_registered_clean_csv_does_not_require_model_configuration() -> None:
     config = _deterministic_only_config()
     assert config.provider == "deterministic"
     assert config.model_id == "no-model-call"
+
+
+def test_versioned_runner_gives_each_document_an_independent_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    jobs = tuple(SimpleNamespace(case_id=f"V6-DEV-0{index}") for index in (1, 2))
+    seen = []
+
+    def fake_run_job(job, _output, _dictionary, _adapter, _config, budget):
+        seen.append(budget)
+        for _ in range(8 if job.case_id.endswith("1") else 1):
+            budget.consume()
+        return 0, {"case_id": job.case_id}
+
+    monkeypatch.setattr(run_versioned_evaluation, "_run_job", fake_run_job)
+    results, total_calls = _run_jobs_with_independent_budgets(
+        jobs,  # type: ignore[arg-type]
+        output_dir=tmp_path,
+        dictionary=None,  # type: ignore[arg-type]
+        adapter=None,  # type: ignore[arg-type]
+        config=None,  # type: ignore[arg-type]
+    )
+
+    assert [code for code, _ in results] == [0, 0]
+    assert total_calls == 9
+    assert [budget.calls_used for budget in seen] == [8, 1]
+    assert len({budget.graph_run_id for budget in seen}) == 2

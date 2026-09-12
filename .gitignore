@@ -24,11 +24,8 @@ htmlcov/
 __pycache__/
 *.py[cod]
 *.egg-info/
-<<<<<<< HEAD
-=======
 build/
 dist/
->>>>>>> 3e0987e556f963938e4b385c7d075ae21e4ee011
 .venv/
 .venv-ocr/
 .ocr-cache/

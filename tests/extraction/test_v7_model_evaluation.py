@@ -54,6 +54,33 @@ def test_v7_model_scorer_keeps_missing_documents_in_denominator(
     assert score["summary"]["passed_fields"] == 0
 
 
+def test_v7_model_scorer_can_select_open_reference_cases(
+    tmp_path: Path,
+) -> None:
+    score = evaluate(
+        DEVELOPMENT_REFERENCE,
+        tmp_path,
+        case_ids=("V7-DEV-01", "V7-DEV-03"),
+    )
+
+    assert score["selected_case_ids"] == ["V7-DEV-01", "V7-DEV-03"]
+    assert score["summary"]["expected_documents"] == 2
+    assert score["summary"]["expected_fields"] == 60
+
+
+def test_v7_model_scorer_rejects_unknown_selected_case(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ContractError) as caught:
+        evaluate(
+            DEVELOPMENT_REFERENCE,
+            tmp_path,
+            case_ids=("V7-DEV-UNKNOWN",),
+        )
+
+    assert caught.value.code == "v7_reference_case_unknown"
+
+
 def test_v7_model_scorer_rejects_runtime_that_loaded_answers(
     tmp_path: Path,
 ) -> None:

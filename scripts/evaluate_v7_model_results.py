@@ -38,6 +38,10 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _canonical_input_path(value: str) -> str:
+    return value.replace("\\", "/")
+
+
 def _rate(numerator: int, denominator: int) -> str:
     if denominator == 0:
         return "0.0000"
@@ -69,7 +73,7 @@ def _discover_results(root: Path) -> dict[str, dict[str, Any]]:
         input_file = value.get("input")
         if isinstance(input_file, str):
             value["_result_path"] = str(path)
-            results[input_file] = value
+            results[_canonical_input_path(input_file)] = value
     return results
 
 
@@ -187,6 +191,7 @@ def evaluate(
     dictionary_path: Path = DICTIONARY_PATH,
     *,
     repo_root: Path = REPO_ROOT,
+    case_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     reference = _load_json(reference_path)
     if reference.get("dataset_version") != "V7" or reference.get("split") not in {"development", "calibration"}:
@@ -197,7 +202,27 @@ def evaluate(
     fields = tuple(reference.get("scored_fields", []))
     if fields != tuple(definition.field_name for definition in dictionary.extractable_fields):
         raise ContractError("v7_reference_fields_invalid", "V7 scored fields must match the 30 extractable fields")
-    for case in reference.get("cases", []):
+    reference_cases = reference.get("cases", [])
+    if not isinstance(reference_cases, list):
+        raise ContractError("v7_reference_cases_invalid", "V7 reference cases must be a list")
+    if case_ids:
+        requested_case_ids = set(case_ids)
+        available_case_ids = {
+            case.get("case_id") for case in reference_cases if isinstance(case, dict)
+        }
+        unknown_case_ids = sorted(requested_case_ids - available_case_ids)
+        if unknown_case_ids:
+            raise ContractError(
+                "v7_reference_case_unknown",
+                "requested V7 case IDs are not present in the open reference",
+                case_ids=unknown_case_ids,
+            )
+        selected_cases = [
+            case for case in reference_cases if case.get("case_id") in requested_case_ids
+        ]
+    else:
+        selected_cases = reference_cases
+    for case in selected_cases:
         input_path = (repo_root / case["input_file"]).resolve()
         try:
             input_path.relative_to(repo_root.resolve())
@@ -228,7 +253,14 @@ def evaluate(
             "V7.2 scoring accepts only V7.2 candidate outputs",
             candidate_versions=sorted(str(item) for item in candidate_versions),
         )
-    documents = [_score_case(case, results.get(case["input_file"]), fields) for case in reference.get("cases", [])]
+    documents = [
+        _score_case(
+            case,
+            results.get(_canonical_input_path(case["input_file"])),
+            fields,
+        )
+        for case in selected_cases
+    ]
     passed_fields = sum(item["passed_fields"] for item in documents)
     expected_fields = len(documents) * len(fields)
     scored = sum(item["status"] == "SCORED" for item in documents)
@@ -250,6 +282,7 @@ def evaluate(
         "dataset_revision": reference.get("dataset_revision"),
         "development_patch_revision": reference.get("development_patch_revision"),
         "split": reference["split"],
+        "selected_case_ids": [case["case_id"] for case in selected_cases],
         "reference_path": str(reference_path),
         "results_root": str(results_root),
         "summary": {
@@ -282,9 +315,15 @@ def main() -> int:
     cli.add_argument("--results-root", type=Path, required=True)
     cli.add_argument("--output", type=Path, required=True)
     cli.add_argument("--dictionary", type=Path, default=DICTIONARY_PATH)
+    cli.add_argument("--case-id", action="append")
     args = cli.parse_args()
     try:
-        score = evaluate(args.reference, args.results_root, args.dictionary)
+        score = evaluate(
+            args.reference,
+            args.results_root,
+            args.dictionary,
+            case_ids=tuple(args.case_id) if args.case_id else None,
+        )
     except ContractError as exc:
         print(json.dumps({"status": "FAILED", "error_code": exc.code, "details": exc.details}))
         return 1

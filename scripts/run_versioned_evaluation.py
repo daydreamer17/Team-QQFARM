@@ -57,7 +57,7 @@ class EvaluationJob:
 def _relative(path: Path) -> str:
     resolved = path.resolve()
     try:
-        return str(resolved.relative_to(REPO_ROOT.resolve()))
+        return resolved.relative_to(REPO_ROOT.resolve()).as_posix()
     except ValueError:
         return str(resolved)
 
@@ -279,6 +279,35 @@ def _run_job(
     return code, summary
 
 
+def _run_jobs_with_independent_budgets(
+    jobs: tuple[EvaluationJob, ...],
+    *,
+    output_dir: Path,
+    dictionary: QuoteDictionary,
+    adapter: OpenAICompatibleAdapter,
+    config: OpenAICompatibleConfig,
+) -> tuple[list[tuple[int, dict[str, object]]], int]:
+    """Keep the eight-call limit independent for every input document."""
+
+    results: list[tuple[int, dict[str, object]]] = []
+    total_calls = 0
+    for job in jobs:
+        budget = ModelCallBudget(
+            graph_run_id=f"graph_eval_{job.case_id.lower()}_{uuid4().hex}"
+        )
+        result = _run_job(
+            job,
+            output_dir,
+            dictionary,
+            adapter,
+            config,
+            budget,
+        )
+        results.append(result)
+        total_calls += budget.calls_used
+    return results, total_calls
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-version", choices=("V5", "V6"), required=True)
@@ -319,11 +348,13 @@ def main() -> int:
         else _deterministic_only_config()
     )
     adapter = OpenAICompatibleAdapter(config)
-    budget = ModelCallBudget(graph_run_id=f"graph_eval_{uuid4().hex}")
-    results = [
-        _run_job(job, args.output_dir, dictionary, adapter, config, budget)
-        for job in jobs
-    ]
+    results, total_model_calls = _run_jobs_with_independent_budgets(
+        jobs,
+        output_dir=args.output_dir,
+        dictionary=dictionary,
+        adapter=adapter,
+        config=config,
+    )
     print(
         json.dumps(
             {
@@ -332,7 +363,7 @@ def main() -> int:
                 "split": args.split if args.dataset_version == "V6" else None,
                 "batch_id": args.batch_id,
                 "inputs_run": len(results),
-                "model_calls_used": budget.calls_used,
+                "model_calls_used": total_model_calls,
                 "results": [summary for _, summary in results],
             },
             ensure_ascii=False,
