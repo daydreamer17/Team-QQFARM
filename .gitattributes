@@ -5,3 +5,6 @@ data/generated/fixtures/quote_V4/*.json text eol=lf
 evaluation/reference/quote_V3/*.json text eol=lf
 evaluation/reference/quote_V4/*.json text eol=lf
 data/contracts/quote_data_field.csv text eol=lf
+data/generated/inputs/development/quote_V2/*.csv text eol=lf
+data/generated/inputs/development/quote_V2/*.json text eol=lf
+evaluation/reference/quote_V2/*.json text eol=lf
