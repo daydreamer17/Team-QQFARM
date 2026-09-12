@@ -4,18 +4,14 @@ version = "0.1.0"
 description = "Supplier quote parsing, extraction adapter, and evidence boundary"
 requires-python = ">=3.11"
 dependencies = [
-<<<<<<< HEAD
     "alembic>=1.14,<2",
     "fastapi>=0.115,<1",
     "langgraph>=1,<2",
     "langgraph-checkpoint-postgres>=3,<4",
-    "pdfplumber>=0.11,<1",
-    "psycopg[binary,pool]>=3.2,<4",
-=======
     "Pillow>=12,<13",
     "pdfplumber>=0.11,<1",
+    "psycopg[binary,pool]>=3.2,<4",
     "pypdfium2>=5,<6",
->>>>>>> 3e0987e556f963938e4b385c7d075ae21e4ee011
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
     "python-multipart>=0.0.20,<1",
