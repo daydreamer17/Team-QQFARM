@@ -38,7 +38,11 @@ dist/
 # Local IDE and internal working documents.
 /.vscode/
 /docs/assets/
-/docs/v7/
+/docs/v7/*
+!/docs/v7/stage0/
+/docs/v7/stage0/*
+!/docs/v7/stage0/extraction_batch_v1_0_example.json
+!/docs/v7/stage0/extraction_batch_v1_1_proposed.json
 
 # Private holdout answers must never be committed.
 **/holdout_reference_answers.json

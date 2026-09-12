@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "dictionary_version": "1.2.0",
+  "parsed_input": {
+    "context": {
+      "task_id": "TASK-SCHEMA-EXAMPLE",
+      "task_revision": 1,
+      "scenario_id": "SCHEMA-MIGRATION",
+      "quote_id": "QUOTE-SCHEMA-V1-0",
+      "quote_version": 1,
+      "document_id": "DOC-SCHEMA-V1-0",
+      "document_version": 1,
+      "supplier_id": null
+    },
+    "original_filename": "quote_v1_0.csv",
+    "media_type": "text/csv",
+    "file_size_bytes": 1,
+    "document_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "parser_version": "schema-example/1.0",
+    "sources": []
+  },
+  "candidates": [],
+  "normalization_events": []
+}

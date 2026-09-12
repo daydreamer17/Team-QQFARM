@@ -241,8 +241,9 @@ def test_restricted_diagnostic_artifact_contains_full_body_but_api_error_does_no
     artifact = json.loads(artifact_path.read_text())
     assert artifact["raw_model_content"] == invalid_content
     assert base64.b64decode(artifact["provider_body_base64"]) == provider_body
-    assert os.stat(tmp_path / "model_failures").st_mode & 0o777 == 0o700
-    assert os.stat(artifact_path).st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert os.stat(tmp_path / "model_failures").st_mode & 0o777 == 0o700
+        assert os.stat(artifact_path).st_mode & 0o777 == 0o600
 
 
 def test_request_fingerprint_is_stable_and_contains_no_plaintext(quote_dictionary) -> None:
