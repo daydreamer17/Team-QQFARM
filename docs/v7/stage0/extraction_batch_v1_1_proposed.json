@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.1",
+  "dictionary_version": "1.2.0",
+  "parsed_input": {
+    "context": {
+      "task_id": "TASK-SCHEMA-EXAMPLE",
+      "task_revision": 1,
+      "scenario_id": "SCHEMA-MIGRATION",
+      "quote_id": "QUOTE-SCHEMA-V1-1",
+      "quote_version": 1,
+      "document_id": "DOC-SCHEMA-V1-1",
+      "document_version": 1,
+      "supplier_id": null
+    },
+    "original_filename": "quote_v1_1.pdf",
+    "media_type": "application/pdf",
+    "file_size_bytes": 1,
+    "document_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "parser_version": "schema-example/1.1",
+    "sources": [
+      {
+        "source_id": "SRC-OCR-1",
+        "kind": "PDF_OCR_BLOCK",
+        "document_id": "DOC-SCHEMA-V1-1",
+        "document_version": 1,
+        "document_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "parser_version": "schema-example/1.1",
+        "raw_text": "Supplier quotation",
+        "page_number": 1,
+        "block_id": "ocr-block-1",
+        "coordinate_space": "IMAGE_PIXELS",
+        "ocr_metadata": {
+          "engine": "example-ocr",
+          "engine_version": "1.0",
+          "confidence": "0.99",
+          "rendered_page_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "render_dpi": 300,
+          "preprocessing_steps": []
+        }
+      }
+    ],
+    "parser_fingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+    "page_analyses": [
+      {
+        "page_number": 1,
+        "route": "OCR",
+        "native_char_count": 0,
+        "printable_ratio": "0",
+        "alnum_ratio": "0",
+        "image_area_ratio": "1",
+        "page_width": 2480,
+        "page_height": 3508,
+        "coordinate_space": "IMAGE_PIXELS",
+        "quality_reasons": ["IMAGE_ONLY_PAGE"],
+        "rendered_page_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      }
+    ],
+    "context_groups": []
+  },
+  "candidates": [],
+  "normalization_events": []
+}

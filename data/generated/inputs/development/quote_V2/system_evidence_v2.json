@@ -287,7 +287,7 @@
     "purpose": "Development-only example of field-level evidence and missing-fee handling",
     "source_file": "supplier_b_quote_v2.csv",
     "quote_dictionary_version": "1.2.0",
-    "quote_dictionary_sha256": "2d011d64c821ae4d124d4dcf046732b7f3f85449b82312d78f5dadc1b878fb55",
+    "quote_dictionary_sha256": "7cfd4759cbbd77420d3c0924482dbb7d231072f1535402c2344e85536b63d4cd",
     "system_dictionary_sha256": "2ed5892b38cdc0ad8114987e4682e8b0b5479b6d8e961c2050c5d8bf858893bf",
     "note": "Shipping is intentionally absent. No hidden confirmation value is included."
   }

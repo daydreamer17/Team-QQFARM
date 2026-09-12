@@ -1,0 +1,115 @@
+{
+  "dataset_id": "V7-STAGE3-V5-RASTERIZED-DEVELOPMENT",
+  "dataset_kind": "DEVELOPMENT",
+  "synthetic": true,
+  "holdout_eligible": false,
+  "description": "Eight one-page synthetic V5 quotations rasterized at 300 DPI. This is an OCR engine development benchmark, not a V7 holdout.",
+  "render_dpi": 300,
+  "max_pixels_per_page": 12000000,
+  "cases": [
+    {
+      "case_id": "V7-OCR-DEV-A",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_a_quote_v5.pdf",
+      "pdf_sha256": "59298b8c73d6cbffb653219a7ea83b39b5e2defeae074cef2ef657578d0c6b8a",
+      "page_number": 1,
+      "critical_tokens": ["V5-A", "HC-0911", "6.42", "10", "1,000", "120.00", "QW-MCU9-DEMO", "25 September 2026"],
+      "table_associations": [
+        {"label": "FIXTURE REFERENCE", "value": "HC-0911", "relation": "NEXT_BLOCK"},
+        {"label": "QUOTED PRICE", "value": "6.42", "relation": "NEXT_BLOCK"},
+        {"label": "FREIGHT CHARGE", "value": "120.00", "relation": "NEXT_BLOCK"},
+        {"label": "MANUFACTURER CODE", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-B",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_b_quote_v5.pdf",
+      "pdf_sha256": "61ec4eb869d6fb80f663f8f980aed3b687636a830f4d0e8d679002f23b2b5ce1",
+      "page_number": 1,
+      "critical_tokens": ["NLK-2026-443", "QW-MCU9-DEMO", "625.00", "100", "12", "5", "September 11, 2026", "September 30, 2026"],
+      "table_associations": [
+        {"label": "MFR. PART", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "PRICE AND BASIS", "value": "625.00", "relation": "NEXT_BLOCK"},
+        {"label": "MINIMUM BUY", "value": "12 trays", "relation": "NEXT_BLOCK"},
+        {"label": "TRANSPORT COST", "value": "Included", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-C",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_c_quote_v5.pdf",
+      "pdf_sha256": "ec4ddfae7a346739223a31dba30493da15bd8a2287125877bdbd91f71c1cd5ce",
+      "page_number": 1,
+      "critical_tokens": ["V5-SUP-C", "QW-MCU9-DEMO", "320.00", "50", "20", "35.00", "2026-09-10", "2026-09-22"],
+      "table_associations": [
+        {"label": "MANUFACTURER P/N", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "COMMERCIAL RATE", "value": "320.00", "relation": "NEXT_BLOCK"},
+        {"label": "SHIPPING", "value": "Free delivery", "relation": "NEXT_BLOCK"},
+        {"label": "HANDLING", "value": "35.00", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-D",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_d_quote_v5.pdf",
+      "pdf_sha256": "494dc8da3bf74119d070ac6c97342917835a4c2292f571a28f0e29fe92e9a7ab",
+      "page_number": 1,
+      "critical_tokens": ["V5-SUP-D", "QW-MCU9-DEMO", "6.35", "25", "1,000", "2", "11 Sep 2026", "18 Sep 2026"],
+      "table_associations": [
+        {"label": "ORDERING CODE", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "EACH PRICE", "value": "6.35", "relation": "NEXT_BLOCK"},
+        {"label": "MINIMUM ORDER QUANTITY", "value": "1,000 pieces", "relation": "NEXT_BLOCK"},
+        {"label": "FREIGHT TERMS", "value": "Freight collect", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-E",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_e_quote_v5.pdf",
+      "pdf_sha256": "86a377e7f45b895ae9a618c4203913e11e89afa8f9265684d72e906c294a196c",
+      "page_number": 1,
+      "critical_tokens": ["V5-SUP-E", "QW-MCU9-DEMO", "648.50", "100", "200", "250.00", "40.00", "2026-09-24"],
+      "table_associations": [
+        {"label": "OEM PART NUMBER", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "PRICING", "value": "648.50", "relation": "NEXT_BLOCK"},
+        {"label": "DELIVERY CHARGE", "value": "250.00", "relation": "NEXT_BLOCK"},
+        {"label": "ADMINISTRATION FEE", "value": "40.00", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-F",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_f_quote_v5.pdf",
+      "pdf_sha256": "f74039fb5d5cd2506bf66f6a3fb94766a73622dd2b109bf0b9ecd0d8c1a9a521",
+      "page_number": 1,
+      "critical_tokens": ["CED-0911-F", "QW-MCU9-DEMO", "6.58", "1,000", "0.00", "0.00", "11 September 2026", "26 September 2026"],
+      "table_associations": [
+        {"label": "PART IDENTIFIER", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "PRICE", "value": "6.58", "relation": "NEXT_BLOCK"},
+        {"label": "FREIGHT", "value": "No charge", "relation": "NEXT_BLOCK"},
+        {"label": "OTHER COSTS", "value": "No other costs", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-G",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_g_quote_v5.pdf",
+      "pdf_sha256": "f7ee06ec89fa4e476b0b1102163ce9c9bb53446c60ef7fa8d5c4f4e28bb556e9",
+      "page_number": 1,
+      "critical_tokens": ["V5-SUP-G", "QW-MCU9-DEMO", "635.00", "100", "10", "0.00", "2026-09-11", "2026-09-27"],
+      "table_associations": [
+        {"label": "MANUFACTURER ORDER CODE", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "TRAY RATE", "value": "635.00", "relation": "NEXT_BLOCK"},
+        {"label": "FREIGHT TREATMENT", "value": "Freight is included", "relation": "NEXT_BLOCK"},
+        {"label": "OTHER FEES", "value": "0.00", "relation": "NEXT_BLOCK"}
+      ]
+    },
+    {
+      "case_id": "V7-OCR-DEV-H",
+      "pdf_path": "data/generated/inputs/development/quote_V5/supplier_h_quote_v5.pdf",
+      "pdf_sha256": "c9cf8cec3fa798dc05dcdefe04ba62c5a9790c099f4c1bf9680320ec1a6af775",
+      "page_number": 1,
+      "critical_tokens": ["V5-SUP-H", "QW-MCU9-DEMO", "6.47", "5", "750", "85.00", "2 to 4", "28-Sep-2026"],
+      "table_associations": [
+        {"label": "MPN", "value": "QW-MCU9-DEMO", "relation": "NEXT_BLOCK"},
+        {"label": "UNIT RATE", "value": "6.47", "relation": "NEXT_BLOCK"},
+        {"label": "SHIPPING AMOUNT", "value": "85.00", "relation": "NEXT_BLOCK"},
+        {"label": "ADDITIONAL FEES", "value": "0.00", "relation": "NEXT_BLOCK"}
+      ]
+    }
+  ]
+}

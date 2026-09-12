@@ -1,0 +1,5 @@
+name: supplier-comparison-ocr-tools
+channels:
+  - conda-forge
+dependencies:
+  - tesseract=5.5.1
