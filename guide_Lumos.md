@@ -70,6 +70,19 @@
 
 存在可能改变最终排名的 `PENDING` 报价时，系统不会提前宣布最终最优供应商。
 
+### 2.6 提取审查与安全交接
+
+B 的提取结果不能直接进入 C，必须先生成 `ReviewEnvelope`。其中包含：
+
+- 提取后的 `ExtractionBatch`
+- 自动审查结果和问题字段
+- 人工确认记录 `ReviewEvent`
+- 人工修改记录 `CorrectionEvent`
+- `downstream_ready`：是否允许交给 C
+- `calculation_inputs_complete`：计算字段是否完整
+
+只有 `downstream_ready=true` 才能进入 C。人工确认“报价确实缺少某字段”后可以交给 C，但只要计算字段仍不完整，C 必须输出 `PENDING`，不能发布最终推荐。
+
 ## 3. MCU-DEMO-001 验收结果
 
 | 供应商 | 结果 | 采购数量 | 成本 | 说明 |
@@ -79,19 +92,28 @@
 | C | `FEASIBLE` | 1,000颗 | S$7,100 | B 未确认时不能宣布 C 最优 |
 | B 补充运费后 | `FEASIBLE` | 1,000颗 | S$7,000 | 补充S$200运费后推荐 B |
 
-规则模块测试结果为：
+当前已经使用三份真实结构的 `ReviewEnvelope` 完成端到端验证：
 
 ```text
-55 passed
+ReviewEnvelope → C 确定性计算 → 状态、成本和推荐
+```
+
+- 补充 B 运费前：`PENDING_INPUT`，禁止最终推荐。
+- 授权补充 B 运费 S$200 后：生成两条 `CorrectionEvent`，B 总成本为 S$7,000，最终推荐 B。
+
+当前规则模块（含 B→C 审查后交接）测试结果为：
+
+```text
+60 passed
 ```
 
 全仓库最近一次回归结果为：
 
 ```text
-175 passed, 2 failed
+234 passed, 2 failed
 ```
 
-两个失败来自既有的 V2 参考答案与字段字典哈希不一致，不属于 C 规则或本地环境故障。
+两个失败来自 Windows CRLF 与仓库 LF 字节导致的 V2 字段字典哈希不一致，不属于 C 计算规则故障。A 最新分支已经加入 LF 约束，待相关更新合入后重新执行全仓库回归。
 
 ## 4. 主要文件入口
 
@@ -105,9 +127,20 @@
 | `src/supplier_comparison/rules/cost.py` | 商品、运费和其他费用计算 |
 | `src/supplier_comparison/rules/delivery.py` | 交期与报价有效期检查 |
 | `src/supplier_comparison/rules/engine.py` | 汇总状态、排名和推荐 |
-| `src/supplier_comparison/rules/integration.py` | B 提取结果到 C 规则输入的适配 |
+| `src/supplier_comparison/rules/integration.py` | 将审核通过的 `ReviewEnvelope` 安全转换为 C 输入 |
 
-### 4.2 测试
+### 4.2 提取审查接口
+
+| 文件 | 用途 |
+| --- | --- |
+| `src/supplier_comparison/extraction/review_contracts.py` | 定义 `ReviewEnvelope`、审核状态和人工事件 |
+| `src/supplier_comparison/extraction/criticality.py` | 解析 16+10+4 字段关键性策略 |
+| `src/supplier_comparison/extraction/review.py` | 执行确定性审查门禁 |
+| `src/supplier_comparison/extraction/human_review.py` | 生成人工确认记录 `ReviewEvent` |
+| `src/supplier_comparison/extraction/corrections.py` | 生成新字段版本和 `CorrectionEvent` |
+| `src/supplier_comparison/extraction/readiness.py` | 阻止未就绪结果进入 C |
+
+### 4.3 测试与运行脚本
 
 | 文件 | 用途 |
 | --- | --- |
@@ -117,8 +150,13 @@
 | `tests/rules/test_delivery.py` | 日期与交期测试 |
 | `tests/rules/test_engine.py` | 状态、排序和推荐测试 |
 | `tests/rules/test_b_to_c_integration.py` | 真实字段契约和 B→C 集成测试 |
+| `tests/rules/test_reviewed_extraction_integration.py` | 验证未审核阻断、确认缺失和补值后的完整链路 |
+| `tests/extraction/test_review_gate.py` | 审查门禁测试 |
+| `tests/extraction/test_corrections.py` | 人工修改与审计记录测试 |
+| `tests/extraction/test_human_review.py` | 人工确认缺失或冲突测试 |
+| `scripts/run_mcu_reviewed_comparison.py` | 运行补运费前后的 MCU 端到端演示 |
 
-### 4.3 环境与说明
+### 4.4 环境与说明
 
 | 文件 | 用途 |
 | --- | --- |
@@ -129,13 +167,14 @@
 
 ## 5. 提取结果使用规则
 
-模型原始结果使用 `pre_correction` 文件保存，不允许覆盖。人工补充或纠正必须生成新版本，并保留：
+模型原始结果使用 `pre_correction` 文件保存，不允许覆盖。人工补充或纠正必须生成新版本和 `CorrectionEvent`，至少保留：
 
-- 原值
-- 新值
-- 修改依据
-- `origin`
-- 修改时间和版本
+- 修改前值和修改后值
+- 修改人、修改时间和修改原因
+- 依据的来源 ID
+- 报价、文档和字段版本
+- 文档 SHA-256
+- `origin` 与 `validation_status`
 
 关键字段只有在以下内容均正确时才能进入下游计算：
 
@@ -162,6 +201,8 @@ shipping_fee_amount = 500.00
 ```
 
 原始提取文件仍保留，用于模型准确率评估和审计。
+
+当前合成演示使用 `synthetic-demo-reviewer` 作为审核人，只用于测试，不代表真实采购人员审批。生成的本地 `ReviewEnvelope` 和比较结果位于 `evaluation/results/local/`，不应提交 Git。
 
 ## 6. 本地环境使用
 
@@ -217,6 +258,20 @@ docker compose down -v
 python -m pytest tests/rules -q
 ```
 
+运行审查接口与 C 规则测试：
+
+```powershell
+python -m pytest tests/extraction/test_review_contracts.py tests/extraction/test_criticality.py tests/extraction/test_review_gate.py tests/extraction/test_corrections.py tests/extraction/test_human_review.py tests/extraction/test_readiness.py tests/rules -q
+```
+
+使用 B 生成的 `ReviewEnvelope` 运行完整比较：
+
+```powershell
+python scripts/run_mcu_reviewed_comparison.py --envelope-dir "E:\iss_hackathon\B\evaluation\results\local\2026-09-12\review_envelopes"
+```
+
+该流程只运行本地确定性代码，不需要 API Key。
+
 运行全仓库测试：
 
 ```powershell
@@ -243,9 +298,12 @@ python -m pytest -q
 
 ### B
 
-- 输出符合共享契约的结构化报价字段。
-- 对非法枚举、缺失证据和模型提取错误进行上游拦截。
+- 正式交付物应为 `ReviewEnvelope`，不能只交付修改后的 `ExtractionBatch`。
+- 只有 `downstream_ready=true` 才能进入 C；已确认确实缺失的字段进入 C 后仍输出 `PENDING`。
+- 对非法枚举、缺失证据和模型提取错误进行上游拦截，并保留 `ReviewEvent` 或 `CorrectionEvent` 审计记录。
 - C 不重新解析 PDF，也不猜测 B 未提供的值。
+
+当前 MCU 合成演示的三份 `ReviewEnvelope` 已经生成并通过 C 接口校验。真实业务中仍必须使用真实审核人身份，不能沿用 `synthetic-demo-reviewer`。
 
 ### D
 
@@ -256,9 +314,10 @@ python -m pytest -q
 
 ## 10. 当前剩余事项
 
+- 等待 A 的 LF 字段字典修复合入共享分支，再重新执行全仓库测试并确认 `0 failed`。
 - 等待 D 提供 Alembic 正式迁移并完成数据库表验收。
 - 等待 D 提供 API 和 worker 启动入口并加入 Compose。
 - 与 A、B、D 完成一次端到端交叉验收。
 - 前端和云端部署按当前决定暂不执行。
 
-在以上依赖到位前，C 独立负责的规则计算和本地 PostgreSQL 基础环境已经完成。
+在以上依赖到位前，C 独立负责的规则计算、B→C 安全交接、端到端演示和本地 PostgreSQL 基础环境已经完成。
