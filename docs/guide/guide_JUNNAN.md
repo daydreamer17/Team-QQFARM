@@ -12,15 +12,15 @@
 2. 整理 `quote_V1` 至 `quote_V7.2` 测试数据，覆盖基准输入、现实字段差异、31 字段直接表达、极端边界、分集泛化和 OCR 路由测试。
 3. 建立版本化参考答案；V2 至 V6 已提交完整答案。`lc` 分支对 V7 只提交开发、校准答案和 V7/V7.2 留出答案哈希，运行时不得读取任何参考答案。
 
-这些条目描述数据、测试输入和验收口径，不应单独用来推断代码或生产验收状态。B 的解析、OCR、模型、证据和审查实现现状见 [`guide_lc3.md`](../../guide_lc3.md)；API、数据库和 AWS/主办方环境仍需由对应负责人另行集成和验证。
+这些条目描述数据、测试输入和验收口径，不应单独用来推断代码或生产验收状态。B 的解析、OCR、模型、证据和审查实现现状见 [`guide_lc3.md`](guide_lc3.md)；API、数据库和 AWS/主办方环境仍需由对应负责人另行集成和验证。
 
 ## 2. 三份数据字典
 
 | 文件 | 字段数 | 用途 | 状态 |
 | --- | ---: | --- | --- |
-| [`quote_data_field.csv`](quote_data_field.csv) | 31 | 供应商身份、规格、价格基数、包装、MOQ、费用、交期和商务条件 | 1.2.0 |
-| [`procurement_requirement_fields.csv`](procurement_requirement_fields.csv) | 19 | 买方规格、数量、预算、交付要求和比较偏好 | 1.2.0 |
-| [`system_evidence_fields.csv`](system_evidence_fields.csv) | 29 | 任务、版本、文件、字段候选、来源、核验、快照和测试溯源 | 1.2.0 |
+| [`quote_data_field.csv`](../../data/contracts/quote_data_field.csv) | 31 | 供应商身份、规格、价格基数、包装、MOQ、费用、交期和商务条件 | 1.2.0 |
+| [`procurement_requirement_fields.csv`](../../data/contracts/procurement_requirement_fields.csv) | 19 | 买方规格、数量、预算、交付要求和比较偏好 | 1.2.0 |
+| [`system_evidence_fields.csv`](../../data/contracts/system_evidence_fields.csv) | 29 | 任务、版本、文件、字段候选、来源、核验、快照和测试溯源 | 1.2.0 |
 
 三份 CSV 均使用相同的 19 列说明结构，包括字段名称、类型、业务含义、示例、必填级别、缺失处理、别名、标准化规则、歧义边界、证据要求、来源分类、责任方和字典版本。
 
@@ -72,7 +72,7 @@ V1–V5 开发输入放在 `data/generated/inputs/development/quote_Vx/`。V6、
 - B 的 `per piece`、`Individual pieces`、`1 piece` 分别支持计价基数、单颗包装和订购步长；属于 `DOCUMENT` 标准化，不是无证据推导。
 - 明确没有其他费用时，统一为 `other_fees_status=NOT_APPLICABLE`、`other_fees_amount="0.00"`。
 - C 的 `purchase order receipt` 不静默等同于 `ORDER_DATE`，起算事件保留待确认。
-- [`system_evidence_v2.json`](../generated/inputs/development/quote_V2/system_evidence_v2.json) 是系统记录示例，不是报价输入或隐藏答案。其中 `KNOWN_ZERO` 不符合当前五类费用状态，不能作为通过样例。
+- [`system_evidence_v2.json`](../../data/generated/inputs/development/quote_V2/system_evidence_v2.json) 是系统记录示例，不是报价输入或隐藏答案。其中 `KNOWN_ZERO` 不符合当前五类费用状态，不能作为通过样例。
 
 V2 答案位于 [`evaluation/reference/quote_V2/reference_answers.json`](../../evaluation/reference/quote_V2/reference_answers.json)，包含字典版本和哈希、9 个输入哈希、采购需求答案、4 组报价答案以及系统证据兼容性检查。
 
@@ -128,7 +128,7 @@ V4 控制夹具在 `data/generated/fixtures/quote_V4/`，答案位于 [`evaluati
 - V7.1-DEV-B1 仅修补 Development 的 `V7-DEV-05`：增加可见 `O/0` 字符说明，并将期望结果改为 `OCR_CRITICAL_CONFIDENCE_LOW` 阻塞人工复核；Calibration 与 Holdout 不变。
 - V7.2 保留 V7.1 的 Development/Calibration 作为开放回归集，并以 6 份全新 PDF 替换已使用的 V7.1 Holdout；新数据包含 2 份原生文本、2 份纯扫描和 2 份混合 PDF。冻结和一次性运行前完整答案由 A 私有保管；运行后 A 发布的原始答案通过预先承诺哈希核验，B 仅在隔离环境离线评分，`lc` 分支不提交该私有答案文件。
 - V7 review-code runtime version: `extraction-review/1.2.0`.
-- V7/V7.1 公开清单位于 [`quote_V7_manifest.json`](../generated/manifests/quote_V7_manifest.json)；V7.2 新 Holdout 清单位于 [`quote_V7_2_manifest.json`](../generated/manifests/quote_V7_2_manifest.json)，`lc` 分支仅保存对应答案 commitment。解析、OCR 和评测实现及实际结果见 [`guide_lc3.md`](../../guide_lc3.md)。
+- V7/V7.1 公开清单位于 [`quote_V7_manifest.json`](../../data/generated/manifests/quote_V7_manifest.json)；V7.2 新 Holdout 清单位于 [`quote_V7_2_manifest.json`](../../data/generated/manifests/quote_V7_2_manifest.json)，`lc` 分支仅保存对应答案 commitment。解析、OCR 和评测实现及实际结果见 [`guide_lc3.md`](guide_lc3.md)。
 
 V7.2 一次性 Holdout 的实际结果为 6/6 文档运行成功、171/180 字段正确（95.00%）、来源身份和坐标可定位率 100%，但 `V72-HOLD-05.revision` 出现 1 个关键静默冲突，因此未通过阶段 6 的“关键静默错误为 0”硬门槛。该结果不能表述为 OCR 正式发布验收通过。
 
