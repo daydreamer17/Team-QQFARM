@@ -26,10 +26,26 @@ ORDER_CONSTRAINT_PATTERN = re.compile(
     r"\b(?:order\s+increment|minimum\s+(?:qty|quantity|order)|moq)\b",
     re.IGNORECASE,
 )
+PRICE_BASIS_SOURCE_PATTERN = re.compile(
+    r"\b(?:price|rate|basis|packing|pack|supply\s+form)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalized_whitespace(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def atomic_source_context(source: EvidenceSource) -> str:
+    """Return only the source's own label and text, without grouped neighbours."""
+
+    return _normalized_whitespace(
+        " ".join(
+            value
+            for value in (source.column_name, source.raw_text)
+            if value is not None
+        )
+    )
 
 
 def source_semantic_contexts(parsed_input: ParsedInput) -> dict[str, str]:
@@ -81,7 +97,6 @@ def validate_candidates(
         )
 
     source_map = {source.source_id: source for source in parsed_input.sources}
-    semantic_context_by_id = source_semantic_contexts(parsed_input)
     context = parsed_input.context
     for candidate in candidates:
         if candidate.quote_id != context.quote_id or candidate.quote_version != context.quote_version:
@@ -133,23 +148,6 @@ def validate_candidates(
                     source_id=citation.source_id,
                 )
             cited_sources.append(source)
-        if candidate.field_name in SHIPPING_FIELDS and not any(
-            SHIPPING_SOURCE_PATTERN.search(semantic_context_by_id[source.source_id])
-            for source in cited_sources
-        ):
-            raise EvidenceValidationError(
-                "source_semantic_mismatch",
-                f"candidate {candidate.field_name} lacks shipping-specific evidence",
-                field_name=candidate.field_name,
-                required_source_semantics="shipping, freight, logistics, or delivery charge",
-            )
-        if candidate.field_name in PRICE_BASIS_FIELDS and any(
-            ORDER_CONSTRAINT_PATTERN.search(semantic_context_by_id[source.source_id])
-            for source in cited_sources
-        ):
-            raise EvidenceValidationError(
-                "source_semantic_mismatch",
-                f"candidate {candidate.field_name} cites an order constraint as price-basis evidence",
-                field_name=candidate.field_name,
-                forbidden_source_semantics="order increment, minimum quantity/order, or MOQ",
-            )
+        # Semantic suitability is deliberately reviewed after extraction. A real,
+        # byte-bound citation with the wrong meaning must remain inspectable in the
+        # ReviewEnvelope instead of being discarded as a model-call failure.

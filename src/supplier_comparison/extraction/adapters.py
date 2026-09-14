@@ -37,7 +37,7 @@ from .errors import AdapterError, ModelCallBudgetExceeded, classify_failure_code
 from .model_payload import ModelExtractionPayload
 
 
-PROMPT_VERSION = "quote-extraction/2.1.0"
+PROMPT_VERSION = "quote-extraction/2.2.0"
 
 
 @dataclass(slots=True)
@@ -976,7 +976,10 @@ def _build_prompt(
             "shipping_vs_other_fees": (
                 "Additional Fees, Other Charges, or Fees Note applies only to other fees unless its text explicitly "
                 "mentions shipping, freight, delivery charge, or logistics. If no shipping term exists, both shipping "
-                "fields are MISSING with no citation; do not reuse a None value from another-fees evidence."
+                "fields are MISSING with no citation; do not reuse a None value from another-fees evidence. For every "
+                "EXTRACTED shipping field, at least one cited atomic source must explicitly contain shipping, freight, "
+                "logistics, delivery charge, or delivery fee semantics. A numeric amount source alone is insufficient; "
+                "also cite its shipping-specific label source when the PDF parser separates label and value."
             ),
             "fee_status_vs_separate_amount": (
                 "INCLUDED means the fee is already inside the quoted price. If the document says there is no "
@@ -985,10 +988,12 @@ def _build_prompt(
                 "states a zero amount for FREE or NOT_APPLICABLE."
             ),
             "price_basis_vs_order_increment": (
-                "Order Increment and Minimum Qty do not establish the price basis. Never cite either column for "
-                "price_basis_quantity or price_basis_unit. For Each Price=6.80 plus Supply Form=Individual pieces, "
-                "cite the Each Price and Supply Form cells, normalize quantity to 1 with unit piece, and normalize "
-                "the basis unit to piece."
+                "Order Increment and Minimum Qty do not establish the price basis. Never cite an atomic source that "
+                "only states Order Increment, Accepted Ordering Step, Minimum Qty, Minimum Order, or MOQ for "
+                "price_basis_quantity or price_basis_unit. Cite the explicit price/rate basis and any directly related "
+                "packing or supply-form source instead. For Each Price=6.80 plus Supply Form=Individual pieces, cite "
+                "the Each Price and Supply Form cells, normalize quantity to 1 with unit piece, and normalize the basis "
+                "unit to piece."
             ),
             "start_event": (
                 "Do not normalize PO receipt, confirmed purchase order, or confirmed PO date to ORDER_DATE. If the "

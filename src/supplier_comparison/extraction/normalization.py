@@ -64,7 +64,12 @@ def normalize_model_payload(
             and candidate.validation_status == "EXTRACTED"
             and isinstance(value, str)
             and isinstance(candidate.raw_value, str)
-            and value in {"PAYMENT_RECEIVED", "CLEARED_PAYMENT_RECEIVED"}
+            and value
+            in {
+                "PAYMENT_RECEIVED",
+                "CLEARED_PAYMENT_RECEIVED",
+                "PAYMENT_CLEARED",
+            }
             and PAYMENT_RECEIPT_EVENT_PATTERN.search(candidate.raw_value)
         ):
             normalized_candidates.append(

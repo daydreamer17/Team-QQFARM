@@ -29,8 +29,10 @@ from .criticality import (
 from .dictionary import QuoteDictionary
 from .evidence import (
     ORDER_CONSTRAINT_PATTERN,
+    PRICE_BASIS_SOURCE_PATTERN,
     SHIPPING_FIELDS,
     SHIPPING_SOURCE_PATTERN,
+    atomic_source_context,
     source_semantic_contexts,
 )
 from .files import stable_id
@@ -120,7 +122,8 @@ CURRENCY_AMOUNT_PATTERN = re.compile(
 )
 OTHER_FEE_SOURCE_PATTERN = re.compile(
     r"\b(?:other|additional|handling|service|surcharge)\s+"
-    r"(?:fee|fees|charge|charges)\b|\bfee\s+total\b",
+    r"(?:fee|fees|charge|charges)\b|\bfee\s+total\b|"
+    r"\bhandling\s+and\s+admin(?:istration)?\b",
     re.IGNORECASE,
 )
 
@@ -983,7 +986,10 @@ def _review_sources(
             )
         )
     if candidate.field_name in {"price_basis_quantity", "price_basis_unit"} and any(
-        ORDER_CONSTRAINT_PATTERN.search(context) for context in source_contexts
+        ORDER_CONSTRAINT_PATTERN.search(context)
+        and not PRICE_BASIS_SOURCE_PATTERN.search(context)
+        for source in cited_sources
+        if (context := atomic_source_context(source))
     ):
         findings.append(
             _candidate_problem(
@@ -1074,6 +1080,26 @@ def _review_cross_field(
     currency = _usable_value(by_name.get("currency"))
     document_text = _document_text_for_review(batch)
 
+    supplier_name_candidate = by_name.get("supplier_name")
+    supplier_name = _usable_value(supplier_name_candidate)
+    context_supplier_id = batch.parsed_input.context.supplier_id
+    if (
+        supplier_name_candidate is not None
+        and isinstance(supplier_name, str)
+        and context_supplier_id.casefold() in supplier_name.casefold()
+    ):
+        findings.append(
+            _candidate_problem(
+                supplier_name_candidate,
+                assessments["supplier_name"],
+                code="SUPPLIER_NAME_CONTAINS_SUPPLIER_ID",
+                message=(
+                    "Supplier name contains the system supplier identifier and must be "
+                    "separated before downstream use."
+                ),
+            )
+        )
+
     unit_price = by_name.get("unit_price")
     document_unit_prices = _document_unit_price_values(batch)
     if (
@@ -1107,6 +1133,26 @@ def _review_cross_field(
                 code="START_EVENT_DOCUMENT_CONFLICT",
                 message="Document contains both order-date and cleared-payment start events.",
                 reason=ReviewReason.DOCUMENT_CONFLICT,
+            )
+        )
+
+    start_event_candidate = by_name.get("start_event")
+    start_event_value = _usable_value(start_event_candidate)
+    if (
+        start_event_candidate is not None
+        and isinstance(start_event_value, str)
+        and start_event_value != "ORDER_DATE"
+        and "start_event" not in review_events
+    ):
+        findings.append(
+            _candidate_problem(
+                start_event_candidate,
+                assessments["start_event"],
+                code="START_EVENT_UNSUPPORTED",
+                message=(
+                    "Relative lead time can only enter automatic calculation when it "
+                    "explicitly starts from the order date."
+                ),
             )
         )
 
