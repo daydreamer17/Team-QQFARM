@@ -1,4 +1,10 @@
-import type { ApiErrorEnvelope, HealthResponse } from './types'
+import type {
+  ApiErrorEnvelope,
+  CreateTaskRequest,
+  HealthResponse,
+  TaskDetail,
+  TaskSummary,
+} from './types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
@@ -85,4 +91,15 @@ export function createIdempotencyKey() {
 
 export const api = {
   healthReady: () => request<HealthResponse>('/health/ready'),
+  createTask: (body: CreateTaskRequest, idempotencyKey: string) =>
+    request<TaskSummary>('/api/v1/tasks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    }),
+  getTask: (taskId: string) =>
+    request<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
 }
