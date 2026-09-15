@@ -2,6 +2,7 @@ import type {
   ApiErrorEnvelope,
   CreateTaskRequest,
   HealthResponse,
+  QuoteUploadResponse,
   TaskDetail,
   TaskSummary,
 } from './types'
@@ -102,4 +103,28 @@ export const api = {
     }),
   getTask: (taskId: string) =>
     request<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
+  uploadQuote: (
+    taskId: string,
+    input: {
+      expectedTaskRevision: number
+      supplierId: string
+      isSynthetic: boolean
+      file: File
+    },
+    idempotencyKey: string,
+  ) => {
+    const body = new FormData()
+    body.append('expected_task_revision', String(input.expectedTaskRevision))
+    body.append('supplier_id', input.supplierId)
+    body.append('is_synthetic', String(input.isSynthetic))
+    body.append('file', input.file)
+    return request<QuoteUploadResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body,
+      },
+    )
+  },
 }

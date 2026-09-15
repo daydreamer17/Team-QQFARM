@@ -446,6 +446,167 @@
   }
 }
 
+.upload-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.upload-form {
+  display: grid;
+  gap: 20px;
+}
+
+.upload-form h2,
+.upload-guidance h2 {
+  margin-bottom: 7px;
+}
+
+.helper-text,
+.session-note {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.selected-file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid #bed8c8;
+  border-radius: 10px;
+  color: var(--green-dark);
+  background: var(--green-soft);
+}
+
+.selected-file strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-file span {
+  flex: none;
+  color: #50705f;
+  font-size: 0.76rem;
+}
+
+.compact-error {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.upload-submit {
+  justify-self: end;
+}
+
+.upload-guidance {
+  position: sticky;
+  top: 96px;
+  background: var(--surface-subtle);
+}
+
+.upload-guidance ol {
+  display: grid;
+  gap: 13px;
+  margin: 18px 0 0;
+  padding-left: 22px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.empty-upload-list {
+  color: var(--muted);
+  text-align: center;
+}
+
+.uploaded-list {
+  display: grid;
+  gap: 12px;
+}
+
+.uploaded-quote {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.6fr);
+  gap: 24px;
+}
+
+.uploaded-quote h3 {
+  margin: 12px 0 6px;
+}
+
+.uploaded-quote p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.uploaded-quote dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.uploaded-quote dl > div {
+  min-width: 0;
+}
+
+.uploaded-quote dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.uploaded-quote dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.session-note {
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .upload-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-guidance {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  .selected-file,
+  .uploaded-quote {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+  }
+
+  .selected-file {
+    flex-direction: column;
+  }
+
+  .uploaded-quote dl {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-submit {
+    justify-self: stretch;
+  }
+}
+
 .requirement-form {
   display: grid;
   gap: 18px;

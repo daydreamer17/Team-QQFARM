@@ -45,6 +45,16 @@ export interface TaskDetail extends TaskSummary {
   requirement: ProcurementRequirement
 }
 
+export interface QuoteUploadResponse {
+  task_id: string
+  task_revision: number
+  quote_id: string
+  quote_version: number
+  document_id: string
+  document_version: number
+  document_sha256: string
+}
+
 export interface ApiErrorEnvelope {
   error: {
     code: string

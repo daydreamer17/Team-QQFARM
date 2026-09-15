@@ -55,9 +55,9 @@ export function TaskPage() {
           <h2>任务已经创建</h2>
           <p>当前需求已保存。下一阶段将接入供应商报价上传和运行触发。</p>
         </div>
-        <button className="button button-secondary" type="button" disabled>
-          上传报价（下一阶段）
-        </button>
+        <Link className="button button-submit" to={`/tasks/${task.data.task_id}/quotes/new`}>
+          上传供应商报价
+        </Link>
       </section>
 
       <section>
