@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
@@ -16,6 +17,7 @@ from supplier_comparison.extraction import (
     HumanReviewAction,
     ReviewEnvelope,
     CorrectionEvent,
+    ValidationStatus,
     apply_candidate_correction,
     create_review_event,
     merge_semantic_review,
@@ -29,13 +31,18 @@ from supplier_comparison.extraction.adapters import (
     OpenAICompatibleConfig,
 )
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.errors import ExtractionError
 from supplier_comparison.extraction.hybrid_csv import RegisteredHybridCsvParser
+from supplier_comparison.extraction.csv_parser import ProfiledCsvQuoteParser, identify_csv_contract
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.service import extract_quote_candidates
 from supplier_comparison.rules import ProcurementRequirement, compare_reviewed_extractions
 from supplier_comparison.rules.contracts import RULE_VERSION
 
 from .service import BackendError, BackendService, ConflictError, new_id
+
+
+logger = logging.getLogger(__name__)
 
 
 class QuoteProcessor(Protocol):
@@ -85,7 +92,17 @@ class DefaultQuoteProcessor:
                 extraction_run_id,
             )
         if media_type == "text/csv":
-            hybrid = RegisteredHybridCsvParser(self.dictionary).parse_row(path, context)
+            profile_id = identify_csv_contract(path)
+            if profile_id is not None:
+                parsed = ProfiledCsvQuoteParser().parse_row(
+                    path, context, 2, profile_id=profile_id
+                )
+                return extract_quote_candidates(
+                    parsed, self.dictionary, self._adapter(), budget, extraction_run_id
+                )
+            hybrid = RegisteredHybridCsvParser(self.dictionary).parse_row(
+                path, context, validate_authority=False
+            )
             if not hybrid.semantic_review_fields:
                 return hybrid.batch
             semantic_dictionary = selected_dictionary(
@@ -200,12 +217,20 @@ class WorkflowRunner:
                 response["result_id"] = result["final_result_id"]
             return response
         except Exception as exc:
-            code = exc.code if isinstance(exc, BackendError) else "workflow_failed"
-            message = (
-                exc.message
-                if isinstance(exc, BackendError)
-                else "Workflow execution failed."
+            logger.exception(
+                "Workflow job %s failed in graph %s",
+                job_id,
+                job["graph_run_id"],
             )
+            if isinstance(exc, BackendError):
+                code = exc.code
+                message = exc.message
+            elif isinstance(exc, ExtractionError):
+                code = exc.code
+                message = str(exc)
+            else:
+                code = "workflow_failed"
+                message = "Workflow execution failed."
             self.service.fail_job(job_id, code=code, message=message)
             raise
 
@@ -335,6 +360,7 @@ class WorkflowRunner:
     def _route_after_review(self, state: WorkflowState) -> str:
         missing = []
         not_ready = []
+        blocking_by_quote: dict[str, list[str]] = {}
         for quote_id, artifact_id in state["review_artifact_ids"].items():
             envelope = ReviewEnvelope.model_validate(
                 self.service.artifact_payload(artifact_id)
@@ -342,6 +368,9 @@ class WorkflowRunner:
             if envelope.downstream_ready:
                 continue
             not_ready.append(quote_id)
+            blocking_by_quote[quote_id] = sorted(
+                set(envelope.review.blocking_fields if envelope.review else ())
+            )
             if (
                 envelope.review is not None
                 and "shipping_fee_status" in envelope.review.blocking_fields
@@ -349,12 +378,17 @@ class WorkflowRunner:
                 missing.append(quote_id)
         if not not_ready:
             return "ready"
-        if len(not_ready) == 1 and missing == not_ready:
+        if (
+            len(not_ready) == 1
+            and missing == not_ready
+            and set(blocking_by_quote[not_ready[0]]) == {"shipping_fee_status"}
+        ):
             return "needs_shipping_confirmation"
         raise BackendError(
             "review_required",
             "One or more quotes require a correction before comparison.",
             quote_ids=sorted(not_ready),
+            blocking_fields=blocking_by_quote,
         )
 
     def _await_missing_confirmation(self, state: WorkflowState) -> WorkflowState:
@@ -366,7 +400,7 @@ class WorkflowRunner:
             issue_type="CONFIRM_MISSING",
             quote_id=target_quote_id,
             field_name="shipping_fee_status",
-            question="请确认该报价 PDF/CSV 确实没有提供运费信息。",
+            question="请确认该报价 PDF/CSV 没有提供可用于计算的运费金额。",
             answer_schema={"answer_type": "CONFIRM_MISSING"},
         )
         resumed = interrupt(self._safe_interrupt(issue))
@@ -388,9 +422,60 @@ class WorkflowRunner:
         batch = ExtractionBatch.model_validate(self.service.artifact_payload(batch_id))
         issue = self.service.get_issue(state["missing_issue_id"])
         reviewed_at = datetime.fromisoformat(issue["answered_at"])
+        shipping_status = next(
+            candidate
+            for candidate in batch.candidates
+            if candidate.field_name == "shipping_fee_status"
+        )
+        confirmation_field = "shipping_fee_status"
+        if (
+            shipping_status.validation_status
+            in {ValidationStatus.EXTRACTED, ValidationStatus.VERIFIED}
+            and shipping_status.normalized_value == "UNKNOWN"
+        ):
+            confirmation_field = "shipping_fee_amount"
+        working_batch = batch
+        status_corrections = tuple(
+            CorrectionEvent.model_validate(payload)
+            for payload in self.service.correction_event_payloads_for_batch(batch_id)
+        )
+        if shipping_status.validation_status == ValidationStatus.MISSING:
+            working_batch, status_event = apply_candidate_correction(
+                batch,
+                field_name='shipping_fee_status',
+                action=CorrectionAction.USER_INPUT,
+                raw_value='UNKNOWN',
+                normalized_value='UNKNOWN',
+                unit=None,
+                reason_code='DOCUMENT_DOES_NOT_STATE_VALUE',
+                reason='Buyer confirmed that the document does not state shipping.',
+                reviewer_id=issue['answered_by'],
+                reviewed_at=reviewed_at,
+            )
+            batch_artifact = self.service.append_artifact(
+                task_id=state['task_id'],
+                task_revision=state['task_revision'],
+                artifact_type='EXTRACTION_BATCH',
+                schema_version=working_batch.schema_version,
+                payload=working_batch.model_dump(mode='json'),
+                parent_artifact_id=batch_id,
+                quote_id=quote_id,
+                graph_run_id=state['graph_run_id'],
+            )
+            self.service.append_artifact(
+                task_id=state['task_id'],
+                task_revision=state['task_revision'],
+                artifact_type='CORRECTION_EVENT',
+                payload=status_event.model_dump(mode='json'),
+                parent_artifact_id=batch_artifact['artifact_id'],
+                quote_id=quote_id,
+                graph_run_id=state['graph_run_id'],
+            )
+            status_corrections = (*status_corrections, status_event)
+            confirmation_field = 'shipping_fee_amount'
         event = create_review_event(
-            batch,
-            field_name="shipping_fee_status",
+            working_batch,
+            field_name=confirmation_field,
             action=HumanReviewAction.CONFIRM_MISSING,
             reviewer_id=issue["answered_by"],
             reviewed_at=reviewed_at,
@@ -409,11 +494,12 @@ class WorkflowRunner:
             item for item in context["documents"] if item["quote_id"] == quote_id
         )
         envelope = self._review(
-            batch,
+            working_batch,
             requirement,
             document["is_synthetic"],
             reviewed_at=self._state_evaluated_at(state),
             review_events=(event,),
+            corrections=status_corrections,
         )
         review_artifact = self.service.append_artifact(
             task_id=state["task_id"],
@@ -445,6 +531,9 @@ class WorkflowRunner:
         return {"draft_result_id": result_id}
 
     def _await_shipping_amount(self, state: WorkflowState) -> WorkflowState:
+        context = self.service.workflow_context(state["graph_run_id"])
+        requirement = ProcurementRequirement.model_validate(context["requirement"])
+        currency = requirement.currency
         issue = self.service.open_issue(
             task_id=state["task_id"],
             graph_run_id=state["graph_run_id"],
@@ -452,11 +541,11 @@ class WorkflowRunner:
             issue_type="SHIPPING_AMOUNT",
             quote_id=state["target_quote_id"],
             field_name="shipping_fee_amount",
-            question="请提供该供应商的 SGD 运费金额。",
+            question=f"请提供该供应商的 {currency} 运费金额。",
             answer_schema={
                 "answer_type": "SHIPPING_AMOUNT",
                 "amount": "decimal-string",
-                "currency": "SGD",
+                "currency": currency,
             },
         )
         resumed = interrupt(self._safe_interrupt(issue))
@@ -481,10 +570,20 @@ class WorkflowRunner:
         issue = self.service.get_issue(state["shipping_issue_id"])
         answer = issue["answer"]
         reviewed_at = datetime.fromisoformat(issue["answered_at"])
+        current_shipping_status = next(
+            candidate
+            for candidate in prior_envelope.batch.candidates
+            if candidate.field_name == 'shipping_fee_status'
+        )
+        status_action = (
+            CorrectionAction.USER_INPUT
+            if current_shipping_status.validation_status == ValidationStatus.MISSING
+            else CorrectionAction.USER_CORRECTION
+        )
         with_status, status_event = apply_candidate_correction(
             prior_envelope.batch,
             field_name="shipping_fee_status",
-            action=CorrectionAction.USER_INPUT,
+            action=status_action,
             raw_value="KNOWN_AMOUNT",
             normalized_value="KNOWN_AMOUNT",
             unit=None,
@@ -536,7 +635,11 @@ class WorkflowRunner:
             requirement,
             document["is_synthetic"],
             reviewed_at=self._state_evaluated_at(state),
-            corrections=(status_event, amount_event),
+            corrections=(
+                *prior_envelope.corrections,
+                status_event,
+                amount_event,
+            ),
         )
         review_artifact = self.service.append_artifact(
             task_id=state["task_id"],
@@ -574,10 +677,33 @@ class WorkflowRunner:
 
     def _freeze_compare_publish(self, state: WorkflowState) -> tuple[str, str]:
         context = self.service.workflow_context(state["graph_run_id"])
-        envelopes = tuple(
-            ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
-            for _quote_id, artifact_id in sorted(state["review_artifact_ids"].items())
+        envelopes_by_quote = tuple(
+            (
+                quote_id,
+                ReviewEnvelope.model_validate(
+                    self.service.artifact_payload(artifact_id)
+                ),
+            )
+            for quote_id, artifact_id in sorted(state["review_artifact_ids"].items())
         )
+        envelopes = tuple(envelope for _quote_id, envelope in envelopes_by_quote)
+        not_ready = [
+            (quote_id, envelope)
+            for quote_id, envelope in envelopes_by_quote
+            if not envelope.downstream_ready
+        ]
+        if not_ready:
+            raise BackendError(
+                "review_required",
+                "One or more quotes require a correction before comparison.",
+                quote_ids=sorted(quote_id for quote_id, _envelope in not_ready),
+                blocking_fields={
+                    quote_id: sorted(
+                        set(envelope.review.blocking_fields if envelope.review else ())
+                    )
+                    for quote_id, envelope in not_ready
+                },
+            )
         requirement = ProcurementRequirement.model_validate(context["requirement"])
         evaluated_at = self._state_evaluated_at(state)
         result = compare_reviewed_extractions(

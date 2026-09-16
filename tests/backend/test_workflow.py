@@ -21,9 +21,14 @@ from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import ConflictError
 from supplier_comparison.backend.workflow import WorkflowRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
-from supplier_comparison.extraction.contracts import DocumentContext, ExtractionBatch
+from supplier_comparison.extraction.contracts import (
+    DocumentContext,
+    ExtractionBatch,
+    ValidationStatus,
+)
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.errors import UnsupportedInputError
 from supplier_comparison.rules import ProcurementRequirement
 
 
@@ -77,7 +82,28 @@ class CanonicalCsvProcessor:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerow(source)
-        return FixedCsvQuoteParser(self.dictionary).parse_row(generated, context, 2)
+        batch = FixedCsvQuoteParser(self.dictionary).parse_row(generated, context, 2)
+        if context.supplier_id == 'SUP-023':
+            batch = batch.model_copy(
+                update={
+                    'candidates': tuple(
+                        candidate.model_copy(
+                            update={
+                                'raw_value': None,
+                                'normalized_value': None,
+                                'unit': None,
+                                'validation_status': ValidationStatus.MISSING,
+                                'origin': None,
+                                'source_refs': (),
+                            }
+                        )
+                        if candidate.field_name == 'shipping_fee_status'
+                        else candidate
+                        for candidate in batch.candidates
+                    )
+                }
+            )
+        return batch
 
 
 def test_two_interrupt_workflow_resumes_without_reextracting_documents(
@@ -148,6 +174,15 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     ).run_job(confirmation["job_id"])
     assert second["status"] == "WAITING_INPUT"
     assert second["issue"]["issue_type"] == "SHIPPING_AMOUNT"
+    pending_fields = service.list_quote_fields(
+        task["task_id"], second["issue"]["quote_id"]
+    )
+    assert not any(
+        finding["field_name"] == "shipping_fee_status"
+        and finding["severity"] == "BLOCKING"
+        and not finding["resolved"]
+        for finding in pending_fields["review_findings"]
+    )
     draft = service.list_results(task["task_id"])[0]["result"]
     assert draft["disposition"] == "PENDING_INPUT"
     assert draft["evaluated_at"] == "2026-09-14T01:00:00Z"
@@ -202,6 +237,8 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         item for item in result["supplier_results"] if item["quote_id"] == supplier_b["quote_id"]
     )["total_cost"] == "7000.00"
     fields = service.list_quote_fields(task["task_id"], supplier_b["quote_id"])
+    assert fields["review_findings"]
+    assert all("codes" in finding for finding in fields["review_findings"])
     shipping_field = next(
         field for field in fields["fields"] if field["field_name"] == "shipping_fee_amount"
     )
@@ -242,7 +279,7 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     assert len(review_events) == 1
     assert review_events[0].task_revision == revision + 1
     assert review_events[0].payload["reviewer_id"] == "test-user"
-    assert len(correction_events) == 2
+    assert len(correction_events) == 3
     assert {event.payload["field_name"] for event in correction_events} == {
         "shipping_fee_status",
         "shipping_fee_amount",
@@ -267,30 +304,61 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         for item in result["supplier_results"]
         if item["supplier_name"] == "Sterling Components"
     )
-    correction = service.correct_field(
+    with pytest.raises(ConflictError) as still_blocking:
+        service.correct_fields(
+            task_id=task["task_id"],
+            expected_task_revision=revision + 2,
+            corrections=[
+                {
+                    "quote_id": supplier_c["quote_id"],
+                    "field_name": "other_fees_status",
+                    "raw_value": "Unknown",
+                    "normalized_value": "UNKNOWN",
+                    "unit": None,
+                    "reason": "Human review could not determine the fee.",
+                }
+            ],
+            idempotency_key="reject-still-blocking-correction",
+        )
+    assert still_blocking.value.code == "corrections_still_require_review"
+    assert service.get_task(task["task_id"])["task_revision"] == revision + 2
+
+    batch_corrections = [
+        {
+            "quote_id": supplier_c["quote_id"],
+            "field_name": "shipping_fee_amount",
+            "raw_value": "S$0.00",
+            "normalized_value": "0.00",
+            "unit": "SGD",
+            "reason": "Correct a confirmed extraction error.",
+        },
+        {
+            "quote_id": supplier_c["quote_id"],
+            "field_name": "payment_terms",
+            "raw_value": "Net 30 days",
+            "normalized_value": "Net 30 days",
+            "unit": None,
+            "reason": "Confirm the extracted payment terms.",
+        },
+    ]
+    correction = service.correct_fields(
         task_id=task["task_id"],
-        quote_id=supplier_c["quote_id"],
-        field_name="shipping_fee_amount",
         expected_task_revision=revision + 2,
-        raw_value="S$0.00",
-        normalized_value="0.00",
-        unit="SGD",
-        reason="Correct a confirmed extraction error.",
+        corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
-    repeated_correction = service.correct_field(
+    repeated_correction = service.correct_fields(
         task_id=task["task_id"],
-        quote_id=supplier_c["quote_id"],
-        field_name="shipping_fee_amount",
         expected_task_revision=revision + 2,
-        raw_value="S$0.00",
-        normalized_value="0.00",
-        unit="SGD",
-        reason="Correct a confirmed extraction error.",
+        corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
     assert repeated_correction == correction
-    assert service.get_task(task["task_id"])["task_revision"] == revision + 3
+    assert correction["correction_count"] == 2
+    corrected_task = service.get_task(task["task_id"])
+    assert corrected_task["task_revision"] == revision + 3
+    assert corrected_task["current_job"]["has_corrections"] is True
+    assert corrected_task["current_job"]["correction_batch_incomplete"] is False
     assert correction["graph_run_id"] != started["graph_run_id"]
     with sessions() as session:
         correction_graph = session.get(GraphRun, correction["graph_run_id"])
@@ -386,3 +454,59 @@ def test_worker_failure_does_not_persist_raw_exception_text(tmp_path: Path) -> N
     assert job is not None
     assert job.error_code == "workflow_failed"
     assert job.error_message == "Workflow execution failed."
+
+
+def test_extraction_failure_persists_safe_actionable_error(tmp_path: Path) -> None:
+    class OcrRequiredProcessor:
+        def process(self, **_kwargs):
+            raise UnsupportedInputError(
+                "pdf_page_requires_ocr",
+                "PDF contains image-backed pages that require OCR; OCR is disabled",
+                page_numbers=[1, 2],
+            )
+
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = BackendService(sessions, tmp_path / "quotes", actor_id="test-user")
+    task = service.create_task(
+        _requirement(), idempotency_key="ocr-failure-create", scenario_id="MCU-DEMO-001"
+    )
+    uploaded = service.upload_quote(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-023",
+        original_filename="scan.pdf",
+        media_type="application/pdf",
+        content=b"placeholder",
+        idempotency_key="ocr-failure-upload",
+        is_synthetic=True,
+    )
+    started = service.start_run(
+        task["task_id"],
+        expected_task_revision=uploaded["task_revision"],
+        idempotency_key="ocr-failure-run",
+    )
+
+    runner = WorkflowRunner(
+        service,
+        processor=OcrRequiredProcessor(),
+        checkpointer=InMemorySaver(),
+        dictionary_path=DICTIONARY_PATH,
+        evaluated_at=datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc),
+    )
+    with pytest.raises(UnsupportedInputError, match="require OCR"):
+        runner.run_job(started["job_id"])
+
+    with sessions() as session:
+        job = session.get(Job, started["job_id"])
+    assert job is not None
+    assert job.error_code == "pdf_page_requires_ocr"
+    assert job.error_message == (
+        "PDF contains image-backed pages that require OCR; OCR is disabled"
+    )
+    detail = service.get_task(task["task_id"])
+    assert detail["current_job"]["error_code"] == "pdf_page_requires_ocr"
+    assert detail["current_job"]["error_message"] == (
+        "PDF contains image-backed pages that require OCR; OCR is disabled"
+    )

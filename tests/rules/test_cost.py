@@ -15,7 +15,7 @@ from supplier_comparison.rules.contracts import (
 from supplier_comparison.rules.cost import calculate_cost
 
 
-def _requirement() -> ProcurementRequirement:
+def _requirement(*, tax_mode: str = "NOT_APPLICABLE") -> ProcurementRequirement:
     return ProcurementRequirement(
         manufacturer="QQ Demo Components",
         manufacturer_part_number="QW-MCU9-DEMO",
@@ -29,7 +29,7 @@ def _requirement() -> ProcurementRequirement:
         budget_amount="8000.00",
         currency="SGD",
         includes_shipping=True,
-        tax_mode="NOT_APPLICABLE",
+        tax_mode=tax_mode,
         other_fees_required=True,
         planned_order_date=date(2026, 9, 14),
         delivery_deadline=date(2026, 9, 19),
@@ -71,6 +71,7 @@ def _quote(
     other_status: str | None = "NOT_APPLICABLE",
     other_amount: str | None = "0.00",
     other_validation: ValidationStatus = ValidationStatus.VERIFIED,
+    tax_mode: str = "NOT_APPLICABLE",
 ) -> QuoteInput:
     return QuoteInput(
         quote_id="QUOTE-A",
@@ -110,7 +111,7 @@ def _quote(
                     else ValidationStatus.VERIFIED
                 ),
             ),
-            _candidate("tax_mode", "NOT_APPLICABLE"),
+            _candidate("tax_mode", tax_mode),
         ),
     )
 
@@ -307,3 +308,61 @@ def test_goods_line_uses_half_up_rounding_to_sgd_cent() -> None:
 
     assert result.goods_cost == Decimal("3.02")
     assert result.total_cost == Decimal("3.02")
+
+
+def test_included_tax_is_already_part_of_confirmed_total() -> None:
+    result = calculate_cost(
+        _requirement(tax_mode="INCLUDED"),
+        _quote(
+            price="6.20",
+            basis=1,
+            shipping_status="KNOWN_AMOUNT",
+            shipping_amount="120.00",
+            other_status="KNOWN_AMOUNT",
+            other_amount="20.00",
+            tax_mode="INCLUDED",
+        ),
+        _quantity(1300),
+    )
+
+    assert result.goods_cost == Decimal("8060.00")
+    assert result.total_cost == Decimal("8200.00")
+    assert result.pending_reasons == ()
+
+
+def test_human_confirmed_free_status_supersedes_old_amount_conflict() -> None:
+    quote = _quote(
+        price="6.50",
+        basis=1,
+        shipping_status="FREE",
+        shipping_amount="0.00",
+    )
+    candidates = tuple(
+        candidate.model_copy(
+            update={
+                "origin": Origin.USER_CORRECTION,
+                "validation_status": ValidationStatus.VERIFIED,
+            }
+        )
+        if candidate.field_name == "shipping_fee_status"
+        else candidate.model_copy(
+            update={
+                "raw_value": "Conflicting historical freight references",
+                "normalized_value": None,
+                "validation_status": ValidationStatus.CONFLICT,
+            }
+        )
+        if candidate.field_name == "shipping_fee_amount"
+        else candidate
+        for candidate in quote.candidates
+    )
+
+    result = calculate_cost(
+        _requirement(),
+        quote.model_copy(update={"candidates": candidates}),
+        _quantity(1250),
+    )
+
+    assert result.shipping_cost == Decimal("0.00")
+    assert result.total_cost == Decimal("8125.00")
+    assert result.pending_reasons == ()

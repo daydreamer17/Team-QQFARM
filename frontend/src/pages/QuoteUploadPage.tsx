@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { QuoteUploadResponse, TaskDetail } from '../api/types'
+import type { TaskDetail } from '../api/types'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
@@ -12,12 +12,6 @@ interface UploadSubmission {
   isSynthetic: boolean
   file: File
   idempotencyKey: string
-}
-
-interface UploadedQuote extends QuoteUploadResponse {
-  supplierId: string
-  originalFilename: string
-  sizeBytes: number
 }
 
 function prepareFile(file: File) {
@@ -70,11 +64,15 @@ export function QuoteUploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [localError, setLocalError] = useState('')
   const [lastSubmission, setLastSubmission] = useState<UploadSubmission | null>(null)
-  const [uploadedQuotes, setUploadedQuotes] = useState<UploadedQuote[]>([])
 
   const task = useQuery({
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
+    enabled: Boolean(taskId),
+  })
+  const quoteHistory = useQuery({
+    queryKey: ['tasks', taskId, 'quotes'],
+    queryFn: () => api.listQuotes(taskId),
     enabled: Boolean(taskId),
   })
 
@@ -89,17 +87,8 @@ export function QuoteUploadPage() {
           file: submission.file,
         },
         submission.idempotencyKey,
-      ),
-    onSuccess: async (result, submission) => {
-      setUploadedQuotes((current) => [
-        ...current,
-        {
-          ...result,
-          supplierId: submission.supplierId,
-          originalFilename: submission.file.name,
-          sizeBytes: submission.file.size,
-        },
-      ])
+    ),
+    onSuccess: async (result) => {
       setSupplierId('')
       setSelectedFile(null)
       setLastSubmission(null)
@@ -108,6 +97,7 @@ export function QuoteUploadPage() {
         current ? { ...current, task_revision: result.task_revision } : current,
       )
       await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
+      await queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quotes'] })
     },
   })
 
@@ -269,35 +259,53 @@ export function QuoteUploadPage() {
       <section>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">CURRENT SESSION</p>
-            <h2>本次上传</h2>
+            <p className="eyebrow">QUOTE HISTORY</p>
+            <h2>报价与版本历史</h2>
           </div>
-          <span>{uploadedQuotes.length} 份</span>
+          <span>{quoteHistory.data?.items.length ?? 0} 个报价</span>
         </div>
-        {uploadedQuotes.length === 0 ? (
-          <div className="card empty-upload-list">尚未在本页面上传报价。</div>
+        {quoteHistory.isPending ? (
+          <div className="card empty-upload-list">正在加载报价历史…</div>
+        ) : quoteHistory.isError ? (
+          <div className="card empty-upload-list">报价历史加载失败，请刷新后重试。</div>
+        ) : quoteHistory.data.items.length === 0 ? (
+          <div className="card empty-upload-list">这个任务还没有上传报价。</div>
         ) : (
           <div className="uploaded-list">
-            {uploadedQuotes.map((quote) => (
-              <article className="card uploaded-quote" key={quote.document_id}>
+            {quoteHistory.data.items.map((quote) => (
+              <article className="card uploaded-quote" key={quote.quote_id}>
                 <div>
-                  <span className="status-pill status-ready">已登记</span>
-                  <h3>{quote.supplierId}</h3>
-                  <p>{quote.originalFilename} · {formatBytes(quote.sizeBytes)}</p>
+                  <span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>
+                    {quote.active ? '当前有效' : '已停用'}
+                  </span>
+                  <h3>{quote.supplier_id}</h3>
+                  <p>{quote.versions.length} 个文件版本 · 当前 V{quote.current_version}</p>
                 </div>
                 <dl>
-                  <div><dt>Revision</dt><dd>{quote.task_revision}</dd></div>
+                  <div><dt>当前版本</dt><dd>V{quote.current_version}</dd></div>
                   <div><dt>Quote ID</dt><dd>{quote.quote_id}</dd></div>
-                  <div><dt>Document ID</dt><dd>{quote.document_id}</dd></div>
-                  <div><dt>SHA-256</dt><dd>{quote.document_sha256.slice(0, 16)}…</dd></div>
                 </dl>
+                <div className="quote-version-list">
+                  {quote.versions.map((version) => (
+                    <div className="quote-version-row" key={version.document_id}>
+                      <div>
+                        <strong>V{version.quote_version} · {version.original_filename}</strong>
+                        <span>
+                          {formatBytes(version.size_bytes)} · {version.media_type}
+                        </span>
+                      </div>
+                      <div>
+                        <span>{version.is_current ? '当前使用' : '历史版本'}</span>
+                        <code>{version.document_sha256.slice(0, 12)}…</code>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </article>
             ))}
           </div>
         )}
-        <p className="session-note">
-          当前后端尚未提供报价列表接口，因此这里仅展示本次页面会话上传成功的文件。
-        </p>
+        <p className="session-note">刷新或关闭浏览器后，历史报价和文件哈希仍可查询。</p>
       </section>
     </div>
   )

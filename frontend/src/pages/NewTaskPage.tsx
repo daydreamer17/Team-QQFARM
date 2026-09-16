@@ -80,6 +80,19 @@ export function NewTaskPage() {
     createTask.reset()
   }
 
+  function updateRankingPreference(value: string) {
+    setForm((current) => ({
+      ...current,
+      ranking_preference: value,
+      secondary_preference:
+        current.secondary_preference === value
+          ? ''
+          : current.secondary_preference,
+    }))
+    setLocalError('')
+    createTask.reset()
+  }
+
   function buildSubmission(): Submission | null {
     const requiredQuantity = Number(form.required_quantity)
     if (!Number.isInteger(requiredQuantity) || requiredQuantity <= 0) {
@@ -95,6 +108,10 @@ export function NewTaskPage() {
       form.delivery_deadline < form.planned_order_date
     ) {
       setLocalError('交付截止日期不能早于计划下单日期。')
+      return null
+    }
+    if (form.secondary_preference === form.ranking_preference) {
+      setLocalError('主要排序偏好和次要偏好不能相同。')
       return null
     }
 
@@ -244,14 +261,28 @@ export function NewTaskPage() {
             </label>
             <label className="field">
               <span>主要排序偏好</span>
-              <select value={form.ranking_preference} onChange={(event) => update('ranking_preference', event.target.value)}>
+              <select value={form.ranking_preference} onChange={(event) => updateRankingPreference(event.target.value)}>
                 <option value="LOWEST_CONFIRMED_TOTAL_COST">最低已确认总成本</option>
                 <option value="FASTEST_CONFIRMED_DELIVERY">最快已确认交付</option>
               </select>
             </label>
             <label className="field">
               <span>次要偏好 <small>可选</small></span>
-              <input value={form.secondary_preference} onChange={(event) => update('secondary_preference', event.target.value)} />
+              <select value={form.secondary_preference} onChange={(event) => update('secondary_preference', event.target.value)}>
+                <option value="">无</option>
+                <option
+                  value="LOWEST_CONFIRMED_TOTAL_COST"
+                  disabled={form.ranking_preference === 'LOWEST_CONFIRMED_TOTAL_COST'}
+                >
+                  最低已确认总成本
+                </option>
+                <option
+                  value="FASTEST_CONFIRMED_DELIVERY"
+                  disabled={form.ranking_preference === 'FASTEST_CONFIRMED_DELIVERY'}
+                >
+                  最快已确认交付
+                </option>
+              </select>
             </label>
           </div>
         </fieldset>

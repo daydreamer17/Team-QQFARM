@@ -1,9 +1,15 @@
 import type {
   ApiErrorEnvelope,
+  ComparisonResultResponse,
   CreateTaskRequest,
+  FieldCorrectionInput,
   HealthResponse,
+  QuoteFieldsResponse,
+  QuoteHistoryResponse,
   QuoteUploadResponse,
+  StartRunResponse,
   TaskDetail,
+  TaskListResponse,
   TaskSummary,
 } from './types'
 
@@ -103,6 +109,12 @@ export const api = {
     }),
   getTask: (taskId: string) =>
     request<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
+  listQuotes: (taskId: string) =>
+    request<QuoteHistoryResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes`,
+    ),
+  listTasks: (limit = 8) =>
+    request<TaskListResponse>('/api/v1/tasks?limit=' + limit),
   uploadQuote: (
     taskId: string,
     input: {
@@ -127,4 +139,150 @@ export const api = {
       },
     )
   },
+  startRun: (
+    taskId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<StartRunResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/runs`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+        }),
+      },
+    ),
+  retryJob: (
+    taskId: string,
+    jobId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<StartRunResponse>(
+      '/api/v1/tasks/' +
+        encodeURIComponent(taskId) +
+        '/jobs/' +
+        encodeURIComponent(jobId) +
+        '/retries',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+        }),
+      },
+    ),
+  answerIssue: (
+    taskId: string,
+    issueId: string,
+    expectedTaskRevision: number,
+    answer:
+      | { answer_type: 'CONFIRM_MISSING' }
+      | { answer_type: 'SHIPPING_AMOUNT'; amount: string; currency: string },
+    idempotencyKey: string,
+  ) =>
+    request<StartRunResponse>(
+      '/api/v1/tasks/' +
+        encodeURIComponent(taskId) +
+        '/issues/' +
+        encodeURIComponent(issueId) +
+        '/answers',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+          answer,
+        }),
+      },
+    ),
+  getResult: (taskId: string, resultId: string) =>
+    request<ComparisonResultResponse>(
+      '/api/v1/tasks/' +
+        encodeURIComponent(taskId) +
+        '/results/' +
+        encodeURIComponent(resultId),
+    ),
+  getQuoteFields: (taskId: string, quoteId: string) =>
+    request<QuoteFieldsResponse>(
+      '/api/v1/tasks/' +
+        encodeURIComponent(taskId) +
+        '/quotes/' +
+      encodeURIComponent(quoteId) +
+      '/fields',
+    ),
+  correctQuoteFields: (
+    taskId: string,
+    expectedTaskRevision: number,
+    corrections: FieldCorrectionInput[],
+    idempotencyKey: string,
+  ) =>
+    request<StartRunResponse>(
+      '/api/v1/tasks/' + encodeURIComponent(taskId) + '/corrections',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+          corrections: corrections.map((item) => ({
+            quote_id: item.quoteId,
+            field_name: item.fieldName,
+            raw_value: item.rawValue,
+            normalized_value: item.normalizedValue,
+            unit: item.unit,
+            reason: item.reason,
+          })),
+        }),
+      },
+    ),
+  correctQuoteField: (
+    taskId: string,
+    quoteId: string,
+    fieldName: string,
+    input: {
+      expectedTaskRevision: number
+      rawValue: string
+      normalizedValue: string | number | boolean
+      unit: string | null
+      reason: string
+    },
+    idempotencyKey: string,
+  ) =>
+    request<StartRunResponse>(
+      '/api/v1/tasks/' +
+        encodeURIComponent(taskId) +
+        '/quotes/' +
+        encodeURIComponent(quoteId) +
+        '/fields/' +
+        encodeURIComponent(fieldName) +
+        '/corrections',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: input.expectedTaskRevision,
+          raw_value: input.rawValue,
+          normalized_value: input.normalizedValue,
+          unit: input.unit,
+          reason: input.reason,
+        }),
+      },
+    ),
 }

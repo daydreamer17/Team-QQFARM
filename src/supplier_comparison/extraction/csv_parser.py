@@ -53,6 +53,36 @@ class CsvSourceProfile:
         return f"{PROFILED_PARSER_VERSION}:{self.profile_id}/{self.version}"
 
 
+V1_CSV_PROFILES = {
+    'v1_supplier_a': CsvSourceProfile(
+        profile_id='v1_supplier_a',
+        version='1.0.0',
+        columns=(
+            'quote_ref', 'vendor_name', 'maker', 'mfr_part_no', 'package_revision',
+            'item_condition', 'price_offer', 'pack_configuration', 'minimum_order',
+            'freight_terms', 'delivery_estimate', 'issued_on', 'offer_expiry', 'payment',
+        ),
+    ),
+    'v1_supplier_b': CsvSourceProfile(
+        profile_id='v1_supplier_b',
+        version='1.0.0',
+        columns=(
+            'response_no', 'supplier', 'part', 'case_style', 'revision', 'condition',
+            'each_price', 'currency', 'minimum_qty', 'delivery', 'valid_until',
+            'payment_terms',
+        ),
+    ),
+    'v1_supplier_c': CsvSourceProfile(
+        profile_id='v1_supplier_c',
+        version='1.0.0',
+        columns=(
+            'quotation', 'seller', 'product_description', 'unit_rate', 'packing',
+            'order_minimum', 'logistics_charge', 'arrival_time', 'offer_window', 'pay_terms',
+        ),
+    ),
+}
+
+
 V2_CSV_PROFILES = {
     "v2_supplier_a": CsvSourceProfile(
         profile_id="v2_supplier_a",
@@ -167,7 +197,103 @@ V3_CSV_PROFILES = {
     ),
 }
 
-REGISTERED_CSV_PROFILES = {**V2_CSV_PROFILES, **V3_CSV_PROFILES}
+V5_CSV_PROFILES = {
+    'v5_supplier_a': CsvSourceProfile(
+        profile_id='v5_supplier_a', version='1.0.0',
+        columns=('Fixture reference', 'Vendor account ID', 'Legal supplier', 'Registered country', 'Commodity', 'Offered item', 'OEM', 'Manufacturer code', 'IC body', 'Device revision', 'Stock condition', 'Quoted price', 'Sales pack', 'Order increment', 'Minimum commitment', 'Freight charge', 'Other charges', 'Tax basis', 'Delivery promise', 'Payment term', 'Issued', 'Valid until'),
+    ),
+    'v5_supplier_b': CsvSourceProfile(
+        profile_id='v5_supplier_b', version='1.0.0',
+        columns=('Response number', 'Supplier', 'Supplier domicile', 'Product family', 'Article', 'Brand owner', 'Mfr. part', 'Case style', 'Revision offered', 'Material status', 'Price and basis', 'Packing and order step', 'Minimum buy', 'Transport cost', 'Incidental fees', 'Tax treatment', 'Arrival commitment', 'Credit terms', 'Offer date', 'Price validity'),
+    ),
+    'v5_supplier_c': CsvSourceProfile(
+        profile_id='v5_supplier_c', version='1.0.0',
+        columns=('Seller code', 'Seller name', 'Country of registration', 'Buying class', 'Goods', 'Manufacturer', 'Manufacturer P/N', 'Package / revision', 'Condition', 'Commercial rate', 'Pack rule', 'MOQ', 'Shipping', 'Handling', 'Tax', 'ETA at buyer', 'Payment', 'Quotation date', 'Expiry date'),
+    ),
+    'v5_supplier_d': CsvSourceProfile(
+        profile_id='v5_supplier_d', version='1.0.0',
+        columns=('Supplier master ref', 'Trading company', 'Registered in', 'Commodity group', 'Description', 'Maker', 'Ordering code', 'Body', 'Silicon revision', 'Inventory description', 'Each price', 'Supply format', 'Quantity step', 'Minimum order quantity', 'Freight terms', 'Other fee rule', 'Tax note', 'Dispatch lead time', 'Settlement requirement', 'Dated', 'Valid through'),
+    ),
+    'v5_supplier_e': CsvSourceProfile(
+        profile_id='v5_supplier_e', version='1.0.0',
+        columns=('Approved vendor number', 'Quoted by', 'Vendor country', 'Category label', 'Line item', 'Device manufacturer', 'OEM part number', 'Package code', 'Revision code', 'Product condition', 'Pricing', 'Physical pack', 'Order multiple', 'Minimum quantity', 'Delivery charge', 'Administration fee', 'Indirect tax', 'Delivery to destination', 'Terms of payment', 'Quote created', 'Quote ends'),
+    ),
+    'v5_supplier_f': CsvSourceProfile(
+        profile_id='v5_supplier_f', version='1.0.0',
+        columns=('Offer', 'Company', 'Company country', 'Product name', 'Brand', 'Part identifier', 'Case', 'Rev', 'State', 'Price', 'Pack description', 'Ordering rule', 'Minimum', 'Freight', 'Other costs', 'Tax basis', 'Lead time', 'Pay terms', 'Date of offer', 'Offer good until'),
+    ),
+    'v5_supplier_g': CsvSourceProfile(
+        profile_id='v5_supplier_g', version='1.0.0',
+        columns=('Vendor ID', 'Vendor legal name', 'Registered country', 'Commodity class', 'Quoted product', 'Manufacturer shown', 'Manufacturer order code', 'Device package', 'Revision', 'Condition statement', 'Tray rate', 'Packing restriction', 'MOQ statement', 'Freight treatment', 'Other fees', 'Tax treatment', 'Arrival time', 'Lead-time starts', 'Payment condition', 'Issue date', 'Last valid day'),
+    ),
+    'v5_supplier_h': CsvSourceProfile(
+        profile_id='v5_supplier_h', version='1.0.0',
+        columns=('Supplier record', 'Seller', 'Seller country', 'Purchase category', 'Item offered', 'Manufacturer', 'MPN', 'Package', 'Device version', 'Condition', 'Unit rate', 'Sales package', 'Order granularity', 'MOQ', 'Shipping amount', 'Additional fees', 'Tax mode', 'Arrival window', 'Payment terms', 'Quotation issued', 'Valid to'),
+    ),
+}
+
+REGISTERED_CSV_PROFILES = {
+    **V1_CSV_PROFILES,
+    **V2_CSV_PROFILES,
+    **V3_CSV_PROFILES,
+    **V5_CSV_PROFILES,
+}
+
+
+def identify_csv_contract(
+    path: str | Path,
+    *,
+    profiles: Mapping[str, CsvSourceProfile] | None = None,
+    limits: FileLimits | None = None,
+) -> str | None:
+    '''Return None for canonical CSV or the exact registered profile id.
+
+    Selection uses the complete header only. Filenames cannot select a parser.
+    '''
+
+    csv_path, _, _ = validate_regular_file(path, limits or FileLimits())
+    require_csv_shape(csv_path)
+    try:
+        with csv_path.open('r', encoding='utf-8-sig', newline='') as handle:
+            actual_columns = tuple(next(csv.reader(handle), ()))
+    except UnicodeDecodeError as exc:
+        raise UnreadableInputError(
+            'csv_not_utf8', 'CSV input must be UTF-8', path=str(csv_path)
+        ) from exc
+    except csv.Error as exc:
+        raise UnreadableInputError(
+            'csv_parse_failed', 'CSV input is malformed', path=str(csv_path)
+        ) from exc
+
+    if not actual_columns:
+        raise ContractError('csv_header_missing', 'CSV header is missing')
+    duplicates = sorted(
+        name for name, count in Counter(actual_columns).items() if count > 1
+    )
+    if duplicates:
+        raise ContractError(
+            'csv_duplicate_headers',
+            'CSV header contains duplicate column names',
+            duplicate_headers=duplicates,
+            actual=list(actual_columns),
+        )
+    if actual_columns == FROZEN_CSV_COLUMNS:
+        return None
+
+    available = REGISTERED_CSV_PROFILES if profiles is None else profiles
+    matches = [
+        profile_id
+        for profile_id, profile in available.items()
+        if profile.columns == actual_columns
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    raise ContractError(
+        'csv_header_unregistered',
+        'CSV header does not match the canonical template or a registered supplier template',
+        actual=list(actual_columns),
+        registered_profiles=sorted(available),
+    )
 
 
 def _normalize(raw_value: str, definition: QuoteFieldDefinition) -> str | int:

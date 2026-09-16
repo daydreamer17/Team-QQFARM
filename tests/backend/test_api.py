@@ -78,6 +78,73 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert loaded.status_code == 200
     assert loaded.json()["scenario_id"] == "MCU-DEMO-001"
     assert loaded.json()["requirement"]["budget_amount"] == "8000.00"
+    assert loaded.json()["quotes"] == [
+        {
+            "quote_id": uploaded.json()["quote_id"],
+            "quote_version": 1,
+            "supplier_id": "SUP-022",
+            "document_id": uploaded.json()["document_id"],
+            "document_version": 1,
+            "original_filename": "supplier-a.csv",
+        }
+    ]
+
+    history = http.get(f"/api/v1/tasks/{task['task_id']}/quotes")
+    assert history.status_code == 200
+    assert history.json()["task_revision"] == 2
+    assert history.json()["items"][0]["supplier_id"] == "SUP-022"
+    assert history.json()["items"][0]["versions"] == [
+        {
+            "quote_version": 1,
+            "document_id": uploaded.json()["document_id"],
+            "document_version": 1,
+            "original_filename": "supplier-a.csv",
+            "media_type": "text/csv",
+            "size_bytes": len(b"quote data"),
+            "document_sha256": uploaded.json()["document_sha256"],
+            "is_synthetic": True,
+            "is_current": True,
+            "created_at": history.json()["items"][0]["versions"][0]["created_at"],
+        }
+    ]
+    assert "storage_path" not in str(history.json())
+
+
+def test_list_tasks_returns_safe_recent_summaries(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    created = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-list-1"},
+        json={"requirement": REQUIREMENT, "scenario_id": "LIST-DEMO-001"},
+    ).json()
+
+    response = http.get("/api/v1/tasks", params={"limit": 10})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "task_id": created["task_id"],
+                "scenario_id": "LIST-DEMO-001",
+                "task_revision": 1,
+                "status": "DRAFT",
+                "current_result_id": None,
+                "manufacturer": "QQ Demo Components",
+                "manufacturer_part_number": "QW-MCU9-DEMO",
+                "created_at": response.json()["items"][0]["created_at"],
+                "updated_at": response.json()["items"][0]["updated_at"],
+            }
+        ]
+    }
+
+
+def test_list_tasks_rejects_oversized_limit(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    assert http.get("/api/v1/tasks", params={"limit": 51}).status_code == 422
 
 
 def test_stale_mutation_returns_stable_error_envelope(
@@ -152,6 +219,55 @@ def test_issue_answer_endpoint_uses_server_side_actor(
     assert answered.status_code == 202
     issues = http.get(f"/api/v1/tasks/{task['task_id']}/issues").json()
     assert issues[0]["answered_by"] == "local-test-user"
+
+
+def test_failed_resume_job_can_be_requeued_from_same_checkpoint(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-retry"},
+        json={"requirement": REQUIREMENT},
+    ).json()
+    run = service.start_run(
+        task["task_id"], expected_task_revision=1, idempotency_key="run-retry"
+    )
+    issue = service.open_issue(
+        task_id=task["task_id"],
+        graph_run_id=run["graph_run_id"],
+        task_revision=1,
+        issue_type="CONFIRM_MISSING",
+        quote_id="quote-b",
+        field_name="shipping_fee_status",
+        question="Confirm missing shipping.",
+        answer_schema={"answer_type": "CONFIRM_MISSING"},
+    )
+    resume = service.answer_issue(
+        task["task_id"],
+        issue["issue_id"],
+        expected_task_revision=1,
+        answer={"answer_type": "CONFIRM_MISSING"},
+        idempotency_key="answer-retry",
+    )
+    service.claim_job(resume["job_id"])
+    service.fail_job(
+        resume["job_id"], code="workflow_failed", message="Workflow execution failed."
+    )
+
+    retried = http.post(
+        f"/api/v1/tasks/{task['task_id']}/jobs/{resume['job_id']}/retries",
+        headers={"Idempotency-Key": "retry-resume"},
+        json={"expected_task_revision": 2},
+    )
+
+    assert retried.status_code == 202
+    assert retried.json()["job_id"] == resume["job_id"]
+    assert retried.json()["job_type"] == "RESUME"
+    assert retried.json()["job_status"] == "PENDING"
+    loaded = http.get(f"/api/v1/tasks/{task['task_id']}").json()
+    assert loaded["status"] == "QUEUED"
+    assert loaded["current_job"]["error_code"] is None
 
 
 def test_health_endpoints_separate_liveness_and_readiness(

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
+import { RunPanel } from '../components/RunPanel'
 
 export function TaskPage() {
   const { taskId = '' } = useParams()
@@ -8,6 +9,10 @@ export function TaskPage() {
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
     enabled: Boolean(taskId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'QUEUED' || status === 'RUNNING' ? 2_000 : false
+    },
   })
 
   if (task.isPending) {
@@ -34,6 +39,11 @@ export function TaskPage() {
   }
 
   const requirement = task.data.requirement
+  const reviewRequired =
+    task.data.status === 'NEEDS_INPUT' ||
+    (task.data.status === 'FAILED' &&
+      task.data.current_job?.error_code === 'review_required') ||
+    Boolean(task.data.current_job?.correction_batch_incomplete)
 
   return (
     <div className="page-stack">
@@ -52,13 +62,27 @@ export function TaskPage() {
       <section className="card next-action-card">
         <div>
           <p className="eyebrow">NEXT STEP</p>
-          <h2>任务已经创建</h2>
-          <p>当前需求已保存。下一阶段将接入供应商报价上传和运行触发。</p>
+          <h2>继续登记报价</h2>
+          <p>可以继续添加供应商报价；上传新文件会推进 task revision。</p>
         </div>
         <Link className="button button-submit" to={`/tasks/${task.data.task_id}/quotes/new`}>
           上传供应商报价
         </Link>
       </section>
+
+      <RunPanel task={task.data} onRefresh={() => task.refetch()} />
+      {reviewRequired && (
+        <section className='card task-review-callout'>
+          <div>
+            <p className='eyebrow'>HUMAN REVIEW REQUIRED</p>
+            <h2>该任务需要人工审核</h2>
+            <p>请前往独立审核页面，一次处理当前任务的全部阻塞字段或待确认问题。</p>
+          </div>
+          <Link className='button button-submit' to={'/reviews/' + task.data.task_id}>
+            进入人工审核
+          </Link>
+        </section>
+      )}
 
       <section>
         <div className="section-heading">

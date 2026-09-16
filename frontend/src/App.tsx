@@ -4,6 +4,9 @@ import { NewTaskPage } from './pages/NewTaskPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { QuoteUploadPage } from './pages/QuoteUploadPage'
+import { ResultPage } from './pages/ResultPage'
+import { ReviewQueuePage } from './pages/ReviewQueuePage'
+import { ReviewTaskPage } from './pages/ReviewTaskPage'
 import { TaskPage } from './pages/TaskPage'
 import './App.css'
 
@@ -11,10 +14,13 @@ function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
+        <Route path='reviews' element={<ReviewQueuePage />} />
+        <Route path='reviews/:taskId' element={<ReviewTaskPage />} />
         <Route index element={<OverviewPage />} />
         <Route path="tasks/new" element={<NewTaskPage />} />
         <Route path="tasks/:taskId" element={<TaskPage />} />
         <Route path="tasks/:taskId/quotes/new" element={<QuoteUploadPage />} />
+        <Route path="tasks/:taskId/results/:resultId" element={<ResultPage />} />
         <Route path="404" element={<NotFoundPage />} />
         <Route path="*" element={<Navigate to="/404" replace />} />
       </Route>

@@ -196,7 +196,11 @@ def test_image_only_pdf_is_never_silently_treated_as_missing(
     assert [item["route"] for item in raised.value.details["page_analyses"]] == ["OCR"]
 
 
-def test_mixed_pdf_reports_every_page_and_only_flags_the_scan_page(tmp_path: Path) -> None:
+def test_mixed_pdf_reports_every_page_and_only_flags_the_scan_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('SUPPLIER_PDF_OCR_ENABLED', 'false')
     path = tmp_path / "mixed.pdf"
     _write_structural_pdf(path, ("native", "image"))
 
@@ -210,7 +214,11 @@ def test_mixed_pdf_reports_every_page_and_only_flags_the_scan_page(tmp_path: Pat
     assert [item["route"] for item in analyses] == ["NATIVE_TEXT", "OCR"]
 
 
-def test_reliable_text_over_a_primary_image_routes_to_hybrid(tmp_path: Path) -> None:
+def test_reliable_text_over_a_primary_image_routes_to_hybrid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('SUPPLIER_PDF_OCR_ENABLED', 'false')
     path = tmp_path / "hybrid.pdf"
     _write_structural_pdf(path, ("hybrid",))
 
@@ -223,7 +231,11 @@ def test_reliable_text_over_a_primary_image_routes_to_hybrid(tmp_path: Path) -> 
     assert float(analysis["image_area_ratio"]) == 1.0
 
 
-def test_page_number_watermark_does_not_disguise_scan_page(tmp_path: Path) -> None:
+def test_page_number_watermark_does_not_disguise_scan_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv('SUPPLIER_PDF_OCR_ENABLED', 'false')
     path = tmp_path / "watermark.pdf"
     _write_structural_pdf(path, ("watermark",))
 

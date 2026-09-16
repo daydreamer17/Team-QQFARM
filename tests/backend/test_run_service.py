@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.models import Base, GraphRun, Issue, Job, Task
-from supplier_comparison.backend.service import BackendService, ConflictError
+from supplier_comparison.backend.service import BackendError, BackendService, ConflictError
 from supplier_comparison.rules import ProcurementRequirement
 
 
@@ -91,6 +91,10 @@ def test_answer_issue_advances_revision_and_creates_idempotent_resume_job(
         "job_type": "START",
         "job_status": "PENDING",
         "task_revision": 1,
+        "error_code": None,
+        "error_message": None,
+        "has_corrections": False,
+        "correction_batch_incomplete": False,
     }
     answer = {"answer_type": "CONFIRM_MISSING"}
 
@@ -168,6 +172,40 @@ def test_answer_issue_rejects_stale_revision_and_second_answer(
             idempotency_key="answer-2",
         )
     assert resolved.value.code == "issue_not_open"
+
+
+def test_shipping_answer_rejects_currency_outside_issue_schema(
+    service: BackendService,
+) -> None:
+    task = service.create_task(_requirement(), idempotency_key="currency-task")
+    started = service.start_run(
+        task["task_id"], expected_task_revision=1, idempotency_key="currency-run"
+    )
+    issue = service.open_issue(
+        task_id=task["task_id"],
+        graph_run_id=started["graph_run_id"],
+        task_revision=1,
+        issue_type="SHIPPING_AMOUNT",
+        quote_id="quote-c",
+        field_name="shipping_fee_amount",
+        question="Provide shipping in USD.",
+        answer_schema={"answer_type": "SHIPPING_AMOUNT", "currency": "USD"},
+    )
+
+    with pytest.raises(BackendError) as rejected:
+        service.answer_issue(
+            task["task_id"],
+            issue["issue_id"],
+            expected_task_revision=1,
+            answer={
+                "answer_type": "SHIPPING_AMOUNT",
+                "amount": "25.00",
+                "currency": "SGD",
+            },
+            idempotency_key="wrong-currency",
+        )
+
+    assert rejected.value.code == "answer_currency_invalid"
 
 
 def test_new_quote_supersedes_old_run_issue_job_and_current_result(
