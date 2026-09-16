@@ -5,10 +5,13 @@ import pytest
 from supplier_comparison.extraction.adapters import FixedOutputAdapter, ModelCallBudget
 from supplier_comparison.extraction.contracts import AdapterOutputMode, SourceKind, ValidationStatus
 from supplier_comparison.extraction.csv_parser import (
+    V1_CSV_PROFILES,
     V2_CSV_PROFILES,
     V3_CSV_PROFILES,
+    V5_CSV_PROFILES,
     FixedCsvQuoteParser,
     ProfiledCsvQuoteParser,
+    identify_csv_contract,
 )
 from supplier_comparison.extraction.errors import ContractError
 from supplier_comparison.extraction.service import extract_quote_candidates
@@ -59,6 +62,41 @@ def test_supplier_variant_is_not_silently_accepted_as_fixed_template(quote_dicti
 
 
 @pytest.mark.parametrize("alias", ("a", "b", "c"))
+@pytest.mark.parametrize(
+    'version,aliases,profiles',
+    [
+        (1, ('a', 'b', 'c'), V1_CSV_PROFILES),
+        (2, ('a', 'b', 'c'), V2_CSV_PROFILES),
+        (3, ('a', 'b', 'c', 'd', 'e'), V3_CSV_PROFILES),
+        (5, ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'), V5_CSV_PROFILES),
+    ],
+)
+def test_registered_supplier_csv_is_selected_by_exact_header(
+    alias: str,
+    version: int,
+    aliases: tuple[str, ...],
+    profiles,
+) -> None:
+    root = QUOTES_CSV.parents[1]
+    for alias in aliases:
+        profile_id = f'v{version}_supplier_{alias}'
+        path = root / f'quote_V{version}' / f'supplier_{alias}_quote_v{version}.csv'
+        assert identify_csv_contract(path) == profile_id
+        assert profile_id in profiles
+
+
+def test_canonical_csv_contract_is_detected_without_profile() -> None:
+    assert identify_csv_contract(QUOTES_CSV) is None
+
+
+def test_duplicate_header_is_rejected_before_profile_selection() -> None:
+    path = QUOTES_CSV.parents[1] / 'quote_V4' / 'invalid_header_quote_v4.csv'
+    with pytest.raises(ContractError) as raised:
+        identify_csv_contract(path)
+    assert raised.value.code == 'csv_duplicate_headers'
+
+
+@pytest.mark.parametrize('alias', ('a', 'b', 'c'))
 def test_v2_profiled_csv_rows_produce_stable_cell_sources(alias: str) -> None:
     profile_id = f"v2_supplier_{alias}"
     path = quote_path(alias, version=2, extension="csv")

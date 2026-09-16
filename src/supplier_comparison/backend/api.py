@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, Header, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
@@ -34,6 +34,10 @@ class StartRunRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
 
 
+class RetryJobRequest(ApiModel):
+    expected_task_revision: int = Field(ge=1)
+
+
 class ConfirmMissingAnswer(ApiModel):
     answer_type: Literal["CONFIRM_MISSING"]
 
@@ -41,7 +45,7 @@ class ConfirmMissingAnswer(ApiModel):
 class ShippingAmountAnswer(ApiModel):
     answer_type: Literal["SHIPPING_AMOUNT"]
     amount: Decimal = Field(ge=0)
-    currency: Literal["SGD"]
+    currency: StrictStr = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -62,6 +66,20 @@ class FieldCorrectionRequest(ApiModel):
     normalized_value: StrictStr | StrictInt | StrictBool
     unit: str | None = None
     reason: str = Field(min_length=3, max_length=1000)
+
+
+class BatchFieldCorrectionItem(ApiModel):
+    quote_id: str = Field(min_length=1)
+    field_name: str = Field(min_length=1)
+    raw_value: str = Field(min_length=1)
+    normalized_value: StrictStr | StrictInt | StrictBool
+    unit: str | None = None
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class BatchFieldCorrectionRequest(ApiModel):
+    expected_task_revision: int = Field(ge=1)
+    corrections: list[BatchFieldCorrectionItem] = Field(min_length=1, max_length=100)
 
 
 def _request_id(request: Request) -> str:
@@ -160,6 +178,10 @@ def create_app(
             scenario_id=body.scenario_id,
         )
 
+    @app.get("/api/v1/tasks")
+    def list_tasks(limit: Annotated[int, Query(ge=1, le=50)] = 20):
+        return service.list_tasks(limit=limit)
+
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str):
         return service.get_task(task_id)
@@ -185,6 +207,10 @@ def create_app(
         )
         return {key: value for key, value in result.items() if key != "storage_path"}
 
+    @app.get("/api/v1/tasks/{task_id}/quotes")
+    def list_quotes(task_id: str):
+        return service.list_quotes(task_id)
+
     @app.post("/api/v1/tasks/{task_id}/runs", status_code=202)
     def start_run(
         task_id: str,
@@ -199,6 +225,20 @@ def create_app(
             model_id=settings.supplier_model_model_id,
             environment=settings.supplier_model_environment,
             prompt_version=settings.supplier_prompt_version,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/jobs/{job_id}/retries", status_code=202)
+    def retry_failed_job(
+        task_id: str,
+        job_id: str,
+        body: RetryJobRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.retry_failed_resume_job(
+            task_id,
+            job_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
         )
 
     @app.get("/api/v1/tasks/{task_id}/issues")
@@ -249,6 +289,22 @@ def create_app(
             idempotency_key=idempotency_key,
         )
 
+    @app.post(
+        '/api/v1/tasks/{task_id}/corrections',
+        status_code=202,
+    )
+    def correct_fields(
+        task_id: str,
+        body: BatchFieldCorrectionRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.correct_fields(
+            task_id=task_id,
+            expected_task_revision=body.expected_task_revision,
+            corrections=[item.model_dump(mode='json') for item in body.corrections],
+            idempotency_key=idempotency_key,
+        )
+
     @app.get("/api/v1/tasks/{task_id}/results")
     def list_results(task_id: str):
         return service.list_results(task_id)
@@ -262,6 +318,11 @@ def create_app(
 
 _engine, _sessions = create_session_factory(settings.database_url)
 app = create_app(
-    BackendService(_sessions, settings.quote_storage_path, actor_id=settings.test_user_id),
+    BackendService(
+        _sessions,
+        settings.quote_storage_path,
+        actor_id=settings.test_user_id,
+        quote_dictionary_path=settings.quote_dictionary_path,
+    ),
     readiness_check=readiness_probe(_engine),
 )

@@ -80,6 +80,8 @@ class RegisteredHybridCsvParser:
         path: str | Path,
         context: DocumentContext,
         row_number: int = 2,
+        *,
+        validate_authority: bool = True,
     ) -> HybridCsvParseResult:
         if row_number < 2:
             raise ContractError(
@@ -90,7 +92,8 @@ class RegisteredHybridCsvParser:
         csv_path, size, file_hash = validate_regular_file(path, self.limits)
         require_csv_shape(csv_path)
         selected = self._read_row(csv_path, row_number)
-        self._validate_authority(selected, context, row_number)
+        if validate_authority:
+            self._validate_authority(selected, context, row_number)
         semantic_fields = detect_semantic_review_fields(selected)
 
         sources: list[EvidenceSource] = []

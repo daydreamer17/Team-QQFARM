@@ -8,16 +8,20 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from .backend.checkpoints import checkpoint_connection_string
 from .backend.database import create_session_factory
-from .backend.service import BackendService
+from .backend.service import BackendError, BackendService
 from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, WorkflowRunner
 from .extraction.dictionary import QuoteDictionary
+from .extraction.errors import ExtractionError
 
 
 def run_job(job_id: str) -> dict:
     _engine, sessions = create_session_factory(settings.database_url)
     service = BackendService(
-        sessions, settings.quote_storage_path, actor_id=settings.test_user_id
+        sessions,
+        settings.quote_storage_path,
+        actor_id=settings.test_user_id,
+        quote_dictionary_path=settings.quote_dictionary_path,
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
@@ -40,13 +44,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = run_job(args.job_id)
-    except Exception:
+    except Exception as exc:
+        known_error = isinstance(exc, (BackendError, ExtractionError))
         print(
             json.dumps(
                 {
                     "error": {
-                        "code": "worker_failed",
-                        "message": "Workflow execution failed.",
+                        "code": exc.code if known_error else "worker_failed",
+                        "message": str(exc) if known_error else "Workflow execution failed.",
                     },
                     "job_id": args.job_id,
                 },

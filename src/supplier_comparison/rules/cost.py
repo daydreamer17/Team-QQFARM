@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-from supplier_comparison.extraction.contracts import ValidationStatus
+from supplier_comparison.extraction.contracts import Origin, ValidationStatus
 
 from .contracts import (
     CostCalculation,
@@ -21,6 +21,7 @@ ZERO = Decimal("0.00")
 KNOWN_FEE_STATUSES = frozenset(
     {"KNOWN_AMOUNT", "FREE", "INCLUDED", "NOT_APPLICABLE", "UNKNOWN"}
 )
+SUPPORTED_CONFIRMED_TAX_MODES = frozenset({"NOT_APPLICABLE", "INCLUDED"})
 
 
 def calculate_cost(
@@ -177,19 +178,26 @@ def _fee_contribution(
         return ZERO, True
     if status in {"INCLUDED", "FREE", "NOT_APPLICABLE"}:
         if status in {"FREE", "NOT_APPLICABLE"}:
+            status_candidate = fields.candidate(status_field)
             amount_candidate = fields.candidate(amount_field)
             if (
                 amount_candidate is not None
                 and amount_candidate.validation_status == ValidationStatus.CONFLICT
             ):
-                issues.append(
-                    RuleIssue(
-                        code="FIELD_CONFLICT",
-                        fields=(amount_field,),
-                        message=f"Required field {amount_field} is ambiguous or contradictory.",
-                    )
+                zero_status_was_human_confirmed = (
+                    status_candidate is not None
+                    and status_candidate.validation_status == ValidationStatus.VERIFIED
+                    and status_candidate.origin == Origin.USER_CORRECTION
                 )
-                return None, False
+                if not zero_status_was_human_confirmed:
+                    issues.append(
+                        RuleIssue(
+                            code="FIELD_CONFLICT",
+                            fields=(amount_field,),
+                            message=f"Required field {amount_field} is ambiguous or contradictory.",
+                        )
+                    )
+                    return None, False
             if (
                 amount_candidate is not None
                 and amount_candidate.validation_status
@@ -254,12 +262,15 @@ def _validate_tax_mode(
                 message="Quote tax treatment does not match the requirement.",
             )
         )
-    elif tax_mode != "NOT_APPLICABLE":
+    elif tax_mode not in SUPPORTED_CONFIRMED_TAX_MODES:
         issues.append(
             RuleIssue(
                 code="TAX_CALCULATION_UNSUPPORTED",
                 fields=("tax_mode",),
-                message="MVP cost calculation only supports explicitly non-applicable tax.",
+                message=(
+                    "MVP cost calculation supports tax that is explicitly included "
+                    "or not applicable; separately calculated tax is unsupported."
+                ),
             )
         )
 

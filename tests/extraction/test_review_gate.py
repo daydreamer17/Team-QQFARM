@@ -23,7 +23,9 @@ from supplier_comparison.extraction.review import (
     model_failed_envelope,
     review_extraction_batch,
 )
+from supplier_comparison.extraction.human_review import create_review_event
 from supplier_comparison.extraction.review_contracts import (
+    HumanReviewAction,
     ReviewReason,
     ReviewStatus,
 )
@@ -380,6 +382,54 @@ def test_unknown_critical_fee_status_requires_human_review(quote_dictionary) -> 
     )
 
 
+def test_confirmed_missing_amount_resolves_explicit_unknown_fee_status(
+    quote_dictionary,
+) -> None:
+    batch = _replace_candidate(
+        _batch(quote_dictionary),
+        "shipping_fee_status",
+        raw_value="Unknown - confirm after order review",
+        normalized_value="UNKNOWN",
+    )
+    batch = _replace_candidate(
+        batch,
+        "shipping_fee_amount",
+        raw_value=None,
+        normalized_value=None,
+        unit=None,
+        validation_status=ValidationStatus.MISSING,
+        origin=None,
+        source_refs=(),
+    )
+    event = create_review_event(
+        batch,
+        field_name="shipping_fee_amount",
+        action=HumanReviewAction.CONFIRM_MISSING,
+        reviewer_id="reviewer-1",
+        reviewed_at=NOW,
+    )
+
+    envelope = review_extraction_batch(
+        batch,
+        quote_dictionary,
+        CRITICALITY_CONTEXT,
+        input_is_synthetic=True,
+        reviewed_at=NOW,
+        review_events=(event,),
+    )
+
+    assert envelope.review_status == ReviewStatus.READY_FOR_DOWNSTREAM
+    assert envelope.downstream_ready is True
+    assert envelope.calculation_inputs_complete is False
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "shipping_fee_status"
+        and "HUMAN_CONFIRMED_FEE_UNKNOWN" in finding.codes
+        and finding.resolved
+        for finding in envelope.review.findings
+    )
+
+
 def test_derived_each_price_is_blocked_when_quote_states_a_basis_price(
     quote_dictionary,
 ) -> None:
@@ -395,6 +445,32 @@ def test_derived_each_price_is_blocked_when_quote_states_a_basis_price(
     assert envelope.review is not None
     assert any(
         "NORMALIZED_PRICE_NOT_IN_EVIDENCE" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_equivalent_price_format_is_accepted(quote_dictionary) -> None:
+    batch = _batch(quote_dictionary)
+    unit_price = next(
+        candidate for candidate in batch.candidates if candidate.field_name == 'unit_price'
+    )
+    cited_ids = set(unit_price.source_refs)
+    parsed = batch.parsed_input.model_copy(
+        update={
+            'sources': tuple(
+                source.model_copy(update={'raw_text': 'S$640 per tray'})
+                if source.source_id in cited_ids
+                else source
+                for source in batch.parsed_input.sources
+            )
+        }
+    )
+    envelope = _review(batch.model_copy(update={'parsed_input': parsed}), quote_dictionary)
+
+    assert envelope.review is not None
+    assert not any(
+        finding.field_name == 'unit_price'
+        and 'NORMALIZED_PRICE_NOT_IN_EVIDENCE' in finding.codes
         for finding in envelope.review.findings
     )
 
@@ -463,6 +539,30 @@ def test_supplier_name_containing_context_supplier_id_requires_review(
     assert envelope.downstream_ready is False
     assert envelope.review is not None
     assert any(
+        "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID" in finding.codes
+        for finding in envelope.review.findings
+        if finding.field_name == "supplier_name"
+    )
+
+
+def test_single_character_supplier_slot_does_not_trigger_name_review(
+    quote_dictionary,
+) -> None:
+    batch = _batch(quote_dictionary)
+    context = batch.parsed_input.context.model_copy(update={"supplier_id": "A"})
+    parsed_input = batch.parsed_input.model_copy(update={"context": context})
+    batch = batch.model_copy(update={"parsed_input": parsed_input})
+    batch = _replace_candidate(
+        batch,
+        "supplier_name",
+        raw_value="Synthetic Meridian Supplier Ltd.",
+        normalized_value="Synthetic Meridian Supplier Ltd.",
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review is not None
+    assert not any(
         "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID" in finding.codes
         for finding in envelope.review.findings
         if finding.field_name == "supplier_name"
@@ -542,13 +642,24 @@ def test_tax_evidence_cannot_prove_other_fee_status(quote_dictionary) -> None:
     )
 
 
-def test_handling_and_admin_can_prove_other_fee_status(quote_dictionary) -> None:
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "Handling and admin Included in the quoted line rate",
+        "Ancillary charges NOT APPLICABLE",
+        "Extras policy AMOUNT",
+        "Administration fee status AMOUNT",
+    ],
+)
+def test_supported_other_fee_alias_can_prove_other_fee_status(
+    quote_dictionary,
+    evidence: str,
+) -> None:
     batch = _batch(quote_dictionary)
     candidate = next(
         item for item in batch.candidates if item.field_name == "other_fees_status"
     )
     source_id = candidate.source_refs[0].source_id
-    evidence = "Handling and admin Included in the quoted line rate"
     sources = tuple(
         source.model_copy(update={"raw_text": evidence})
         if source.source_id == source_id
