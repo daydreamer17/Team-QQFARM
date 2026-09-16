@@ -198,28 +198,33 @@ def test_included_fee_without_separate_amount_becomes_missing() -> None:
 
 
 def test_cleared_payment_received_event_uses_contract_value() -> None:
-    payload = ModelExtractionPayload.model_validate(
-        {
-            "candidates": [
-                {
-                    "field_name": "start_event",
-                    "raw_value": "Clock starts after cleared payment is received",
-                    "normalized_value": "PAYMENT_RECEIVED",
-                    "unit": None,
-                    "validation_status": "EXTRACTED",
-                    "source_refs": [
-                        {
-                            "source_id": "SRC-START",
-                            "quoted_text": "cleared payment is received",
-                        }
-                    ],
-                }
-            ]
-        }
-    )
+    for model_value in (
+        "PAYMENT_RECEIVED",
+        "CLEARED_PAYMENT_RECEIVED",
+        "PAYMENT_CLEARED",
+    ):
+        payload = ModelExtractionPayload.model_validate(
+            {
+                "candidates": [
+                    {
+                        "field_name": "start_event",
+                        "raw_value": "Clock starts after cleared payment is received",
+                        "normalized_value": model_value,
+                        "unit": None,
+                        "validation_status": "EXTRACTED",
+                        "source_refs": [
+                            {
+                                "source_id": "SRC-START",
+                                "quoted_text": "cleared payment is received",
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
 
-    normalized, events = normalize_model_payload(payload)
+        normalized, events = normalize_model_payload(payload)
 
-    assert normalized.candidates[0].normalized_value == "PAYMENT_RECEIPT"
-    assert len(events) == 1
-    assert events[0].rule_id == START_EVENT_PAYMENT_RECEIPT_RULE
+        assert normalized.candidates[0].normalized_value == "PAYMENT_RECEIPT"
+        assert len(events) == 1
+        assert events[0].rule_id == START_EVENT_PAYMENT_RECEIPT_RULE

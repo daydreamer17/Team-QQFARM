@@ -422,6 +422,53 @@ def test_competing_start_events_in_document_require_review(quote_dictionary) -> 
     )
 
 
+def test_non_order_date_start_event_requires_review(quote_dictionary) -> None:
+    batch = _replace_candidate(
+        _batch(quote_dictionary),
+        "start_event",
+        raw_value="When cleared payment is received",
+        normalized_value="PAYMENT_RECEIPT",
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review_status == ReviewStatus.REVIEW_REQUIRED
+    assert envelope.downstream_ready is False
+    assert envelope.review is not None
+    assert any(
+        "START_EVENT_UNSUPPORTED" in finding.codes
+        for finding in envelope.review.findings
+        if finding.field_name == "start_event"
+    )
+
+
+def test_supplier_name_containing_context_supplier_id_requires_review(
+    quote_dictionary,
+) -> None:
+    batch = _batch(quote_dictionary)
+    batch = _replace_candidate(
+        batch,
+        "supplier_name",
+        raw_value=(
+            f"Example Components ({batch.parsed_input.context.supplier_id}), Singapore"
+        ),
+        normalized_value=(
+            f"Example Components ({batch.parsed_input.context.supplier_id})"
+        ),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review_status == ReviewStatus.REVIEW_REQUIRED
+    assert envelope.downstream_ready is False
+    assert envelope.review is not None
+    assert any(
+        "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID" in finding.codes
+        for finding in envelope.review.findings
+        if finding.field_name == "supplier_name"
+    )
+
+
 def test_document_absence_statement_cannot_prove_fee_value(quote_dictionary) -> None:
     batch = _batch(quote_dictionary)
     shipping = next(
@@ -490,6 +537,119 @@ def test_tax_evidence_cannot_prove_other_fee_status(quote_dictionary) -> None:
     assert envelope.review is not None
     assert any(
         finding.field_name == "other_fees_status"
+        and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_handling_and_admin_can_prove_other_fee_status(quote_dictionary) -> None:
+    batch = _batch(quote_dictionary)
+    candidate = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    source_id = candidate.source_refs[0].source_id
+    evidence = "Handling and admin Included in the quoted line rate"
+    sources = tuple(
+        source.model_copy(update={"raw_text": evidence})
+        if source.source_id == source_id
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={
+            "parsed_input": batch.parsed_input.model_copy(update={"sources": sources})
+        }
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_status",
+        raw_value=evidence,
+        normalized_value="INCLUDED",
+        source_refs=(SourceCitation(source_id=source_id, quoted_text=evidence),),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review is not None
+    assert not any(
+        finding.field_name == "other_fees_status"
+        and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_other_fee_evidence_for_shipping_is_preserved_but_requires_review(
+    quote_dictionary,
+) -> None:
+    batch = _batch(quote_dictionary)
+    other_fee = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    citation = other_fee.source_refs[0]
+    batch = _replace_candidate(
+        batch,
+        "shipping_fee_status",
+        raw_value=citation.quoted_text,
+        normalized_value="NOT_APPLICABLE",
+        unit=None,
+        validation_status=ValidationStatus.EXTRACTED,
+        origin=Origin.DOCUMENT,
+        source_refs=(citation,),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review_status == ReviewStatus.REVIEW_REQUIRED
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "shipping_fee_status"
+        and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_order_increment_evidence_for_price_basis_requires_review(
+    quote_dictionary,
+) -> None:
+    batch = _batch(quote_dictionary)
+    order_multiple = next(
+        item for item in batch.candidates if item.field_name == "order_multiple_units"
+    )
+    source_id = order_multiple.source_refs[0].source_id
+    sources = tuple(
+        source.model_copy(
+            update={"raw_text": source.raw_text + " ORDER INCREMENT 100 pieces"}
+        )
+        if source.source_id == source_id
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={
+            "parsed_input": batch.parsed_input.model_copy(update={"sources": sources})
+        }
+    )
+    citation = SourceCitation(
+        source_id=source_id,
+        quoted_text="ORDER INCREMENT 100 pieces",
+    )
+    batch = _replace_candidate(
+        batch,
+        "price_basis_quantity",
+        raw_value=citation.quoted_text,
+        normalized_value="100",
+        unit="piece",
+        validation_status=ValidationStatus.EXTRACTED,
+        origin=Origin.DOCUMENT,
+        source_refs=(citation,),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review_status == ReviewStatus.REVIEW_REQUIRED
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "price_basis_quantity"
         and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
         for finding in envelope.review.findings
     )
