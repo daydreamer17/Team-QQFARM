@@ -210,7 +210,7 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 
 ## 10. 尚未完成的边界
 
-- `BLOCKED_EXTERNAL`：Lightsail 上的模型授权、重启、完整重建和资源测试尚未执行。解除条件是提供官方实例入口及模型访问配置；不得静默改用个人 API 作为 AWS 结果。
+- `BLOCKED_EXTERNAL`：Lightsail 上的模型授权、重启、完整重建和资源测试尚未执行。解除条件是提供官方实例入口及模型访问配置；不得静默改用个人 API 作为 AWS 结果。执行步骤和证据模板见 [`LIGHTSAIL_RAG_ACCEPTANCE.md`](LIGHTSAIL_RAG_ACCEPTANCE.md)。
 - 供应商身份、批准状态、RoHS、`ComplianceMatrix` 和确定性合规规则由合规负责人实现。
 - LangGraph 节点、snapshot 绑定、当前 revision 发布检查由集成人员实现。
 - React、审批、报告、公开问答和 chatbot 不属于本子系统。
@@ -227,5 +227,6 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 | BM25＋pgvector＋RRF＋rerank Top-3 | 已完成 | 固定适配器测试、真实 PostgreSQL 精确检索测试和 8 题真实模型评测 |
 | 引用核验、覆盖、冲突与错误状态 | 已完成 | 原文／哈希复核、旧有效期、无证据、冲突、rerank 映射及索引维度不匹配测试 |
 | 重启持久化 | 已完成（本地） | Compose PostgreSQL 重启后保留 26 条条款、2 个已发布索引和检索轨迹 |
-| Lightsail 官方环境验收 | `BLOCKED_EXTERNAL` | 当前没有官方实例或 AWS 访问入口；本地验证不作为替代 |
-| A／C 对制度业务语义签字 | 待对应负责人确认 | 本轮只保证格式、哈希、导入和检索约束，不伪造跨成员审阅结论 |
+| 干净卷完整重建 | 已完成（本地） | 独立 `supplier-rag-rebuild` Compose project 完成 migration、真实模型 smoke 和 24 条制度发布，并清理独立临时卷 |
+| Lightsail 官方环境验收 | `BLOCKED_EXTERNAL` | 当前没有官方实例或 AWS 访问入口；本地验证不作为替代；见 [`LIGHTSAIL_RAG_ACCEPTANCE.md`](LIGHTSAIL_RAG_ACCEPTANCE.md) |
+| A／C 对制度业务语义签字 | 待对应负责人确认 | 本轮只保证格式、哈希、导入和检索约束；逐条清单见 [`POLICY_SEMANTIC_REVIEW.md`](POLICY_SEMANTIC_REVIEW.md) |

@@ -178,7 +178,7 @@ Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进
 
 团队编写 3–5 份简短英文 Markdown 制度，覆盖报价完整性、总成本比较、批准供应商、Electronics RoHS 要求、审批与报价变更；每份按完整条款／章节切分，不能切掉否定条件或例外。首版预计 15–30 个条款，以语义完整性为准，不为数量凑文本。每份显著标记“Fictional procurement policy for demonstration”；不代表 NUS、AWS 或真实企业规定。
 
-制度应与现有确定性规则一致，A 编写、C 交叉复核。可执行条款绑定经审阅的 `control_code` 和适用参数，例如 `APPROVED_SUPPLIER_REQUIRED`、`ROHS_CERTIFICATE_REQUIRED` 以及对应的金额／品类／地区范围。结构化制度清单先确定必需控制码，RAG 再检索支持原文；漏召回不能减少检查项或默认合规。制度不能包含某个供应商的正确报价、隐藏测试问题、预期排名或主场景答案。
+制度应与现有确定性规则一致，A 编写、C 交叉复核。当前 `2026.09.1` manifest 绑定的候选控制码为 `QUOTE_COMPLETENESS`、`TOTAL_COST`、`APPROVED_SUPPLIER`、`ROHS_COMPLIANCE`、`AMOUNT_APPROVAL` 和 `QUOTE_CHANGE_REVIEW`；A／C 签字状态见 [`guide/POLICY_SEMANTIC_REVIEW.md`](guide/POLICY_SEMANTIC_REVIEW.md)。品类、地区和有效期保存在制度范围中，金额阈值等规则参数绑定具体条款。结构化制度清单先确定必需控制码，RAG 再检索支持原文；漏召回不能减少检查项或默认合规。制度不能包含某个供应商的正确报价、隐藏测试问题、预期排名或主场景答案。
 
 另行制作一个版本化供应商注册表，只包含主演示 A／B／C 所需的规范化身份、别名、批准状态和 RoHS 记录。批准事实和有效期由 PostgreSQL 精确查询，不进入向量检索。ISO 和框架合同不进入 Week2 数据集。
 

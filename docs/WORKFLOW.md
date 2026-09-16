@@ -315,12 +315,16 @@ ISO 和框架合同保留为未来扩展，不进入 Week2 主流程、数据制
   → LLM 仅根据已核验事实和条款生成引用解释
 ```
 
-制度条款在导入时绑定团队审阅过的机器可执行控制码，例如：
+制度条款在导入时绑定冻结的候选机器可执行控制码；A／C 必须完成语义审阅后，合规模块才可把它们用于最终判定。当前 `2026.09.1` manifest 使用：
 
-- `APPROVED_SUPPLIER_REQUIRED`；
-- `ROHS_CERTIFICATE_REQUIRED`。
+- `QUOTE_COMPLETENESS`；
+- `TOTAL_COST`；
+- `APPROVED_SUPPLIER`；
+- `ROHS_COMPLIANCE`；
+- `AMOUNT_APPROVAL`；
+- `QUOTE_CHANGE_REVIEW`。
 
-金额门槛、品类和地区作为上述控制码的结构化适用参数，例如总成本超过 S$5,000 时启用批准供应商和 RoHS 检查。所有最终推荐仍按统一流程接受一次人工审批。
+品类、地区和有效期属于制度适用范围；具体阈值保存在条款的结构化参数中。当前虚构制度只有 `AMOUNT_APPROVAL` 定义金额阈值：total landed cost 达到 SGD 10,000（含）时需要经理审批。当前 `APPROVED_SUPPLIER` 和 `ROHS_COMPLIANCE` 不以 S$5,000 为启用条件。所有最终推荐仍按统一流程接受一次人工审批。审阅状态见 [`guide/POLICY_SEMANTIC_REVIEW.md`](guide/POLICY_SEMANTIC_REVIEW.md)。
 
 适用的 control_code 先由制度清单中的结构化范围确定，不能依赖 Top-k 检索结果决定。BM25、pgvector 向量召回和 Rerank 只负责找到相应原文与解释依据；任何必需控制码没有检索到支持条款时进入 `REVIEW_REQUIRED`，不能少执行一项检查后仍判定合规。平均 Recall 只用于评价检索效果；一次具体采购必须达到全部 required control_code 的逐项证据覆盖，才允许生成 `COMPLIANT`。LLM 和 RAG 不能临时发明控制码、阈值或规则。批准状态、证书编号和有效期由 PostgreSQL 精确查询，不能用相似度分数代替。
 

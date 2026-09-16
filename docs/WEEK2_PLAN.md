@@ -129,7 +129,7 @@ RAG 是正式必交付模块，不能因时间不足改称拓展项。检索故�
 **时间：9/14–9/17。负责人：RAG 与合规组 B＋C；D 按冻结契约完成迁移和主图集成，A 使用固定响应开发展示。**
 
 - [ ] B 已提供 5 份虚构英文采购制度；C 仍需提供包含 A／B／C 的版本化批准供应商注册表和 RoHS 记录。ISO 与框架合同不进入 Week2 数据集。
-- [x] 制度条款绑定经团队审阅的 `control_code` 和适用参数；先由调用方确定必需 control code，再调用 RAG 定位原文。LLM／RAG 不动态创造规则。
+- [ ] 制度条款已绑定冻结的候选 `control_code` 和适用参数；A／C 仍需按 [`guide/POLICY_SEMANTIC_REVIEW.md`](guide/POLICY_SEMANTIC_REVIEW.md) 完成业务语义签字。调用方先确定必需 control code，再调用 RAG 定位原文；LLM／RAG 不动态创造规则。
 - [x] B 按 policy_set_version、control code、品类、地区和左闭右开有效期过滤制度，提供统一检索接口；BM25 Top-10 是可运行、可离线复现的稀疏检索基线。
 - [x] embedding API 生成条款和查询向量，pgvector 对 SQL 预过滤后的候选执行精确余弦 Top-10；与 BM25 结果通过 RRF 融合后，由 rerank API 重排取 Top-3。所有路径通过同一结果契约返回文档／版本／条款 ID、章节、原文、哈希和分数。
 - [x] 向量记录 provider、模型 ID、维度、预处理版本和内容哈希；pgvector 数据绑定制度集合及索引版本，并可从 PostgreSQL 中的权威条款完整重建。首版未建立 HNSW／IVFFlat。
