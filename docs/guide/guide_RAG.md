@@ -1,6 +1,6 @@
 # Week2 制度检索子系统交接指南
 
-> 状态：本地实现与真实 SiliconFlow 开发集验证完成（2026-09-16）。Lightsail、供应商合规门禁和 LangGraph 接入仍由对应负责人完成。
+> 状态：本地实现与真实 SiliconFlow 开发集验证完成（2026-09-16）。Lightsail 验收为 `BLOCKED_EXTERNAL`：当前工作环境没有 AWS CLI、AWS 环境变量、AWS profile 或实例入口，不能把本地结果计作 AWS 验收。供应商合规门禁和 LangGraph 接入仍由对应负责人完成。
 
 ## 1. 本轮交付
 
@@ -185,7 +185,7 @@ $output = "evaluation/results/local/$stamp/policy-rag-development.json"
 | rerank Recall@3 | 91.67% |
 | 引用支持率 | 100% |
 | 状态准确率 | 100% |
-| 平均总延迟 | 885.76 ms |
+| 平均总延迟 | 1856.16 ms |
 | ERROR | 0 / 8 |
 
 8 题覆盖正常答案、无证据、旧有效期过滤和冲突。该成绩是本地开发集结果，不代表留出集或 Lightsail 已通过。不要根据留出问题调参。
@@ -210,8 +210,22 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 
 ## 10. 尚未完成的边界
 
-- Lightsail 上的模型授权、重启、完整重建和资源测试尚未执行。
+- `BLOCKED_EXTERNAL`：Lightsail 上的模型授权、重启、完整重建和资源测试尚未执行。解除条件是提供官方实例入口及模型访问配置；不得静默改用个人 API 作为 AWS 结果。
 - 供应商身份、批准状态、RoHS、`ComplianceMatrix` 和确定性合规规则由合规负责人实现。
 - LangGraph 节点、snapshot 绑定、当前 revision 发布检查由集成人员实现。
 - React、审批、报告、公开问答和 chatbot 不属于本子系统。
 - 当前只提供受控解释契约与固定客户端；真实解释模型适配应由调用方按同一引用约束接入，并单独记录调用。
+
+## 11. 本轮完成性审计
+
+| 方案要求 | 状态 | 验收证据 |
+| --- | --- | --- |
+| 冻结契约、SiliconFlow 客户端与 1024 维 smoke | 已完成 | `tests/rag/test_contracts.py`、`tests/rag/test_clients.py`；本机和 Compose 真实 smoke 均成功 |
+| 5 份英文制度、24 个完整条款 | 已完成 | `data/policies/electronics-v1/`；manifest 结构测试 |
+| 版本化 PostgreSQL 表与原子发布 | 已完成 | migration 升级、降级、再升级；失败导入无部分向量测试 |
+| 幂等、安全路径导入与完整重建 | 已完成 | 重放、越界、重复 ID、同版本异哈希、模型／预处理换版测试 |
+| BM25＋pgvector＋RRF＋rerank Top-3 | 已完成 | 固定适配器测试、真实 PostgreSQL 精确检索测试和 8 题真实模型评测 |
+| 引用核验、覆盖、冲突与错误状态 | 已完成 | 原文／哈希复核、旧有效期、无证据、冲突、rerank 映射及索引维度不匹配测试 |
+| 重启持久化 | 已完成（本地） | Compose PostgreSQL 重启后保留 26 条条款、2 个已发布索引和检索轨迹 |
+| Lightsail 官方环境验收 | `BLOCKED_EXTERNAL` | 当前没有官方实例或 AWS 访问入口；本地验证不作为替代 |
+| A／C 对制度业务语义签字 | 待对应负责人确认 | 本轮只保证格式、哈希、导入和检索约束，不伪造跨成员审阅结论 |

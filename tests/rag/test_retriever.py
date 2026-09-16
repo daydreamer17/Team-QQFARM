@@ -212,3 +212,34 @@ def test_embedding_failure_persists_actual_attempt_count_and_bm25_diagnostics() 
     assert result.status == RetrievalStatus.ERROR
     assert result.attempts["embedding"] == 2
     assert result.candidates[0].bm25_rank == 1
+
+
+def test_index_model_or_dimension_mismatch_returns_error_before_model_calls() -> None:
+    clauses = [_clause("CLAUSE-1", "Shipping costs are required.", "TOTAL_COST")]
+
+    class MismatchedIndexRepository(FakeRepository):
+        def load_published_clauses(self, request):
+            self.request = request
+            return IndexContext(
+                embedding_model="unexpected-embedding-model",
+                embedding_dimension=1024,
+                clauses=self.clauses,
+            )
+
+    repository = MismatchedIndexRepository(clauses, ["CLAUSE-1"])
+    embedding = FixedEmbeddingClient(
+        {_request("TOTAL_COST").query: [0.1, 0.2]},
+        model_id="BAAI/bge-m3",
+        dimension=2,
+    )
+    result = HybridPolicyRetriever(
+        repository,
+        embedding,
+        FixedRerankClient([0], scores=[1.0], model_id="fixed-rerank"),
+    ).retrieve(_request("TOTAL_COST"))
+
+    assert result.status == RetrievalStatus.ERROR
+    assert result.error_code == "embedding_index_mismatch"
+    assert result.attempts == {"embedding": 0, "rerank": 0}
+    assert embedding.calls == []
+    assert repository.saved[0][1] == result
