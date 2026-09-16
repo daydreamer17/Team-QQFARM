@@ -8,6 +8,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY data/contracts ./data/contracts
+COPY data/policies ./data/policies
+COPY data/examples/policy_rag ./data/examples/policy_rag
+COPY evaluation/reference/policy_rag ./evaluation/reference/policy_rag
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir .
 

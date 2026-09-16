@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 
 from supplier_comparison.backend.models import Base
 from supplier_comparison.backend.migration_filter import include_alembic_object
+from supplier_comparison.rag import models as rag_models  # noqa: F401
 
 
 config = context.config

@@ -134,7 +134,7 @@ evaluation/results/          按模型环境区分的实测结果
 
 部署仅导入被选中的运行输入；参考答案、完整未遮蔽报价和生成来源映射不得挂载到 Agent 可读取目录或暴露为业务工具。历史查询仅提供受限 SQL 查询，不用于反推被遮蔽条款。模拟回答由测试驱动器经正常 API 提交，提交前不可被 Agent 读取。
 
-Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进入持久化文件卷，业务数据、制度条款、供应商注册记录、检索轨迹、pgvector 条款向量和检查点进入 PostgreSQL 专用卷，均需实例外备份。条款向量通过 embedding API 生成并保存为固定维度的 `vector(dim)`；批准状态和 RoHS 保存在普通关系表。两类导入都使用明确路径白名单，不能递归收录项目文档、生成器映射或 evaluation 目录。
+Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进入持久化文件卷，业务数据、制度条款、供应商注册记录、检索轨迹、pgvector 条款向量和检查点进入 PostgreSQL 专用卷，均需实例外备份。条款向量通过 SiliconFlow `BAAI/bge-m3` 生成并保存为固定维度的 `vector(1024)`；批准状态和 RoHS 保存在普通关系表。两类导入都使用明确路径白名单，不能递归收录项目文档、生成器映射或 evaluation 目录。
 
 ## 5. 共同主演示与参考答案
 
@@ -187,7 +187,7 @@ Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进
 | 制度集合 | policy_set_version、适用范围、成员文档版本、集合哈希；发布后不可变 |
 | 制度文档 | policy_id、document_version、title、language、scope、effective_from／effective_to、source_path、content_hash、is_synthetic |
 | 条款 | clause_id、章节标题、完整正文、文档版本和正文哈希；引用键为文档 ID＋版本＋条款 ID |
-| 条款向量／索引版本 | 条款 ID／版本／内容哈希、embedding provider／模型版本、维度、预处理版本、pgvector `vector(dim)`、索引版本、导入状态／错误；完整校验后才可用，旧索引不覆盖 |
+| 条款向量／索引版本 | 条款 ID／版本／内容哈希、embedding provider／模型版本、维度、预处理版本、pgvector `vector(1024)`、索引版本、导入状态／错误；完整校验后才可用，旧索引不覆盖 |
 | 检索轨迹 | retrieval_id、任务修订／快照、集合版本、查询、过滤、embedding／rerank 服务商与模型版本、维度／预处理／索引版本、召回与重排 Top-k ID／排名／分数、调用尝试与用量、引用与支持判断、状态／错误、耗时 |
 | 供应商主数据 | supplier_master_id、规范名称、别名、来源和身份匹配状态；上传请求中的 supplier_id 只是声明值 |
 | 供应商注册表版本 | supplier_registry_version、成员记录版本、集合哈希、发布时间和发布状态；发布后不可覆盖 |
@@ -197,7 +197,7 @@ Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进
 
 有效区间按 Asia/Singapore 日期使用左闭右开规则，effective_to 可空；制度及供应商记录在任务评估日需有效，不满足时记录冲突／无依据，不能混用其他版本。主演示数据的有效期需覆盖 2026-09-14，且不据此改变真实运行时钟。任务冻结 `policy_set_version` 和 `supplier_registry_version`；新版本不追溯改写旧结果。
 
-第一版使用英文问题和英文制度，中文界面按钮映射固定英文问题。embedding API 生成查询向量，版本和适用范围过滤后由 pgvector 执行精确余弦 Top-10，并与 BM25 稀疏召回融合，rerank API 重排取 Top-3；不足时取实际数量。条款向量记录内容哈希、服务商、模型版本、维度与预处理版本，文档／查询使用同一向量空间及模型规定的输入模式；同配置缓存复用，变更时完整重建，不混用向量。首版不建立 HNSW／IVFFlat，后续仅按实测规模和延迟决定。重排索引只映射本次候选条款。仅在开发问题上调节 Top-k 和无依据阈值；分数不能替代引用语义核验。报价事实、制度依据、人工输入三者分开展示。运行所需制度只读导入，API 不提供任意路径索引入口。
+第一版使用英文问题和英文制度，中文界面按钮映射固定英文问题。SiliconFlow `BAAI/bge-m3` 生成 1024 维查询向量，版本和适用范围过滤后由 pgvector 执行精确余弦 Top-10，并与 BM25 Top-10 通过 RRF `k=60` 融合，`BAAI/bge-reranker-v2-m3` 重排取 Top-3；不足时取实际数量。条款向量记录内容哈希、服务商、模型版本、维度与预处理版本，文档／查询使用同一向量空间；同配置幂等复用，变更时完整重建，不混用向量。首版不建立 HNSW／IVFFlat，后续仅按实测规模和延迟决定。重排索引只映射本次候选条款。不设置未经评测的相似度阈值；分数不能替代引用语义核验。报价事实、制度依据、人工输入三者分开展示。运行所需制度只读导入，API 不提供任意路径索引入口。
 
 ### 7.2 独立评测与通过标准
 

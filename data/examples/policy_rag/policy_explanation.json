@@ -1,0 +1,15 @@
+{
+  "explanation_id": "EXP-FIXED-POLICY-001",
+  "retrieval_id": "RET-FIXED-POLICY-001",
+  "confirmed_facts": {
+    "category": "Electronics",
+    "region": "SG",
+    "quote_currency": "SGD"
+  },
+  "claims": [
+    {
+      "text": "The applicable quote policy requires currency, price, quantity, shipping status, payment terms, and quote validity fields.",
+      "citation_ids": ["CIT-FIXED-POLICY-001-1"]
+    }
+  ]
+}

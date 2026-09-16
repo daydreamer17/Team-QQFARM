@@ -19,6 +19,13 @@ BUSINESS_TABLES = {
     "issues",
     "jobs",
     "idempotency_records",
+    "policy_sets",
+    "policy_documents",
+    "policy_clauses",
+    "policy_indexes",
+    "policy_clause_embeddings",
+    "policy_import_runs",
+    "retrieval_traces",
 }
 
 

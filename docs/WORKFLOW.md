@@ -345,7 +345,7 @@ ISO 和框架合同保留为未来扩展，不进入 Week2 主流程、数据制
 
 人工补充供应商资料会创建新记录版本并重新评估。人工确认检索或身份使用独立 `ComplianceReviewEvent`；它不等同于最终审批。Week2 不实现无证据的任意合规豁免。
 
-BM25、embedding、pgvector、rerank 和解释调用分别记录检索器／模型版本、次数、延迟、用量和错误。pgvector 向量记录绑定制度集合版本、条款 ID、内容哈希、embedding 模型、维度与预处理版本，并可从 PostgreSQL 权威条款完整重建。pgvector 或模型 API 不可用时可以按显式配置降级到 BM25，但必须保存失败与降级轨迹。`NO_EVIDENCE`、`CONFLICT` 和 `ERROR` 必须分别保存并映射为 `REVIEW_REQUIRED`。报价参考答案、评测标签和生成器映射不得进入运行索引或提示词。
+BM25、embedding、pgvector、rerank 和解释调用分别记录检索器／模型版本、次数、延迟、用量和错误。pgvector 向量记录绑定制度集合版本、条款 ID、内容哈希、embedding 模型、维度与预处理版本，并可从 PostgreSQL 权威条款完整重建。pgvector 或模型 API 不可用时可以保存 BM25 候选用于诊断，但检索结果必须为 `ERROR`，不能以稀疏结果继续判定合规。`NO_EVIDENCE`、`CONFLICT` 和 `ERROR` 必须分别保存并映射为 `REVIEW_REQUIRED`。报价参考答案、评测标签和生成器映射不得进入运行索引或提示词。
 
 ## 10. 人工审批与报告
 
@@ -451,7 +451,7 @@ Compose 重启但不删除卷时，任务、文件、问题、checkpoint 和历�
 | 5 | V5／V6 多供应商和混合输入 | 正确选择登记或模型路径，控制调用预算，未知潜在最优报价阻止提前推荐 |
 | 6 | B v1 更新为 v2 | 旧运行、问题、人工补充、结果和审批失效，重新比较后改荐 C |
 | 7 | 批准供应商＋有效 RoHS | BM25、pgvector 和 rerank 路径检索到正确制度，全部 required control_code 均有当前版本且支持主张的引用，结构化记录核验通过后发布推荐 |
-| 8 | 无证据、资质过期、冲突或检索组件故障 | 进入 `REVIEW_REQUIRED`；允许显式降级 BM25，但不得默认合规 |
+| 8 | 无证据、资质过期、冲突或检索组件故障 | 进入 `REVIEW_REQUIRED`；BM25 候选只作故障诊断，不得默认合规 |
 | 9 | 重复请求、旧 revision、worker／数据库重启 | 幂等和版本保护生效，LangGraph 从 checkpoint 恢复且不重复副作用 |
 | 10 | V4 异常文件及 V7 实验性 OCR／对抗输入 | 非法文件在模型调用前失败；OCR 关键字段集中进入现有人工审核，通过文件＋版本＋页码核对且不嵌入图片；确认／纠正后自动复核；隐藏文本冲突不得放行 |
 
@@ -475,7 +475,7 @@ OCR 层拆分验证关闭、开启、部分确认、`UNREADABLE`、纠正、重�
 | React 操作界面 | Week2 待实现 |
 | 通用多字段补问和人工排除 | Week2 待扩展 |
 | 实验性 OCR 辅助提取与关键字段确认 | Week2 待实现；正式无人值守放行不在本周范围 |
-| BM25＋pgvector＋Embedding／Rerank API 制度检索 | Week2 待实现；pgvector 扩展底座已配置，业务表和服务仍待实现 |
+| BM25＋pgvector＋Embedding／Rerank API 制度检索 | Week2 已实现本地子系统、固定测试、真实模型 smoke 和 8 题开发集评测；待 LangGraph／合规门禁接入及 Lightsail 验收 |
 | 批准供应商＋RoHS 结构化合规门禁 | Week2 待实现 |
 | 报价 v2 替换和需求更新 | Week2 待实现 |
 | 具名身份、审批和 HTML 报告 | Week2 待实现 |

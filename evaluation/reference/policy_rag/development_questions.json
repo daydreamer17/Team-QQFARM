@@ -1,0 +1,100 @@
+[
+  {
+    "case_id": "POLICY-DEV-001",
+    "scenario": "ANSWER",
+    "query": "Which commercial quote fields and landed-cost components are required before comparing suppliers?",
+    "required_control_codes": ["QUOTE_COMPLETENESS", "TOTAL_COST"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "OK",
+    "relevant_clause_ids": ["QTE-001", "TCO-001"],
+    "supported_clause_ids": ["QTE-001", "QTE-002", "QTE-003", "QTE-004", "TCO-001", "TCO-002", "TCO-003", "TCO-004"]
+  },
+  {
+    "case_id": "POLICY-DEV-002",
+    "scenario": "ANSWER",
+    "query": "What evidence is required to treat an electronics supplier as approved?",
+    "required_control_codes": ["APPROVED_SUPPLIER"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "OK",
+    "relevant_clause_ids": ["ASL-001", "ASL-002"],
+    "supported_clause_ids": ["ASL-001", "ASL-002", "ASL-003", "ASL-004"]
+  },
+  {
+    "case_id": "POLICY-DEV-003",
+    "scenario": "ANSWER",
+    "query": "What RoHS evidence is acceptable for electronics parts and how must identity be checked?",
+    "required_control_codes": ["ROHS_COMPLIANCE"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "OK",
+    "relevant_clause_ids": ["ROHS-002", "ROHS-003"],
+    "supported_clause_ids": ["ROHS-001", "ROHS-002", "ROHS-003", "ROHS-004"]
+  },
+  {
+    "case_id": "POLICY-DEV-004",
+    "scenario": "ANSWER",
+    "query": "At what total landed cost is manager approval required in Singapore dollars?",
+    "required_control_codes": ["AMOUNT_APPROVAL"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "OK",
+    "relevant_clause_ids": ["APR-001", "APR-002"],
+    "supported_clause_ids": ["APR-001", "APR-002", "APR-003", "APR-004"]
+  },
+  {
+    "case_id": "POLICY-DEV-005",
+    "scenario": "ANSWER",
+    "query": "Which quote changes require a new task revision and a fresh comparison?",
+    "required_control_codes": ["QUOTE_CHANGE_REVIEW"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "OK",
+    "relevant_clause_ids": ["CHG-001", "CHG-002"],
+    "supported_clause_ids": ["CHG-001", "CHG-002", "CHG-003", "CHG-004"]
+  },
+  {
+    "case_id": "POLICY-DEV-006",
+    "scenario": "NO_EVIDENCE",
+    "query": "How long must employee personal data be retained?",
+    "required_control_codes": ["DATA_RETENTION"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "NO_EVIDENCE",
+    "relevant_clause_ids": [],
+    "supported_clause_ids": []
+  },
+  {
+    "case_id": "POLICY-DEV-007",
+    "scenario": "OLD_VERSION",
+    "query": "What RoHS evidence was effective for electronics purchases in June 2025?",
+    "required_control_codes": ["ROHS_COMPLIANCE"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2025-06-01T00:00:00Z",
+    "expected_status": "NO_EVIDENCE",
+    "relevant_clause_ids": [],
+    "supported_clause_ids": []
+  },
+  {
+    "case_id": "POLICY-DEV-008",
+    "scenario": "CONFLICT",
+    "query": "What manager approval threshold applies to this proposed electronics award?",
+    "required_control_codes": ["AMOUNT_APPROVAL"],
+    "category": "Electronics",
+    "region": "SG",
+    "evaluated_at": "2026-09-16T00:00:00Z",
+    "expected_status": "CONFLICT",
+    "relevant_clause_ids": ["CONFLICT-APR-001", "CONFLICT-APR-002"],
+    "supported_clause_ids": ["CONFLICT-APR-001", "CONFLICT-APR-002"],
+    "policy_set_version": "development-conflict-v1",
+    "policy_index_version": "pidx-52ce651d9380fd20330899a7"
+  }
+]
