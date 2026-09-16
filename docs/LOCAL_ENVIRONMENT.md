@@ -23,6 +23,8 @@ Copy-Item .env.example .env
 
 ## 2. 启动 PostgreSQL
 
+Compose 使用固定镜像 `pgvector/pgvector:0.8.6-pg16-bookworm`，在 PostgreSQL 16 中提供 `vector` 扩展。已有 `database_data` 卷会继续挂载；切换镜像不需要删除卷。
+
 ```powershell
 docker compose up -d --wait postgres
 docker compose ps
@@ -39,6 +41,7 @@ docker compose exec -T postgres psql -U supplier_app -d supplier_comparison -c "
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m supplier_comparison.checkpoints setup
 .\.venv\Scripts\python.exe -m alembic check
+docker compose exec -T postgres psql -U supplier_app -d supplier_comparison -c "SELECT extversion FROM pg_extension WHERE extname = 'vector';"
 ```
 
 验证 migration 可逆：
@@ -48,7 +51,7 @@ docker compose exec -T postgres psql -U supplier_app -d supplier_comparison -c "
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-`downgrade` 只处理业务表；checkpoint 表由 LangGraph 保留。不要在有业务数据的共享环境中执行该可逆性检查。
+`downgrade` 只处理业务对象；checkpoint 表由 LangGraph 保留，`vector` 扩展作为共享数据库基础设施也不会被 migration 删除。不要在有业务数据的共享环境中执行该可逆性检查。
 
 ## 4. 启动 FastAPI
 

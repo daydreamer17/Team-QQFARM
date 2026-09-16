@@ -25,6 +25,19 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def test_pgvector_extension_is_enabled() -> None:
+    database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            extension_version = connection.scalar(
+                text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+            )
+        assert extension_version is not None
+    finally:
+        engine.dispose()
+
+
 def test_postgres_checkpoint_resumes_with_a_new_connection(tmp_path: Path) -> None:
     database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
     engine = create_engine(database_url)

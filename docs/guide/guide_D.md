@@ -4,7 +4,7 @@
 
 ## 1. 已实现范围
 
-- FastAPI、同步 SQLAlchemy／psycopg、PostgreSQL 16 和 Alembic 业务表。
+- FastAPI、同步 SQLAlchemy／psycopg、PostgreSQL 16／pgvector 和 Alembic 业务表。
 - 原始报价按 64 KiB 分块计算大小与 SHA-256，并写入不可覆盖的 ID 路径；保存文件版本、媒体类型和原始文件名元数据。
 - LangGraph 使用 `graph_run_id` 作为 `thread_id`；checkpoint 只保存业务 ID、artifact ID 和冻结时间，不保存 requirement 正文、报价内容或磁盘路径。checkpoint 表由独立命令初始化。
 - `ParsedInput`、`ExtractionBatch`、`ReviewEnvelope`、人工事件、输入快照和比较结果以不可变 JSON artifact 保存。
@@ -52,10 +52,11 @@ API 只创建持久化 job，不在 HTTP 请求中等待模型。worker 按 `job
 | `src/supplier_comparison/checkpoints.py` | checkpoint CLI | 提供 `python -m supplier_comparison.checkpoints setup`。 |
 | `src/supplier_comparison/worker.py` | 一次性 worker CLI | 创建 service、字典、真实模型 processor 和 `PostgresSaver`，然后执行指定 job；异常时只输出安全的通用错误。 |
 | `migrations/versions/ad0606803e8d_create_backend_workflow_schema.py` | 首个 Alembic migration | 创建全部业务表、索引、外键和唯一约束；支持 upgrade 和 downgrade。 |
+| `migrations/versions/b31f0f8c2a6e_enable_pgvector_extension.py` | pgvector 基础设施 migration | 在 PostgreSQL 幂等启用 `vector` 扩展；降级时保留共享扩展，避免破坏后续向量表或同库对象。 |
 | `migrations/env.py`、`alembic.ini` | Alembic 运行配置 | 从应用配置读取数据库 URL，并加载业务 metadata。 |
 | `src/supplier_comparison/backend/migration_filter.py` | Alembic include filter | 排除 LangGraph checkpoint 表，避免 Alembic 误删或接管它们。 |
 | `Dockerfile`、`.dockerignore` | 后端镜像 | API 和 worker 复用同一镜像，以不同命令启动。构建上下文排除 `.env`、本地结果和开发缓存。 |
-| `compose.yaml` | `postgres`、`api`、`worker` 服务 | API 和 worker 共享 `quote_files`；PostgreSQL 使用独立 `database_data`；worker 通过 profile 按需启动。 |
+| `compose.yaml` | `postgres`、`api`、`worker` 服务 | PostgreSQL 使用固定 pgvector／PostgreSQL 16 镜像和独立 `database_data`；API 和 worker 共享 `quote_files`；worker 通过 profile 按需启动。 |
 | `tests/backend/` | API、service、workflow、migration、checkpoint 和 PostgreSQL 测试 | 覆盖两次中断、跨进程恢复、幂等、并发 revision、迟到发布、预算和卷持久化相关逻辑。 |
 | `scripts/run_*evaluation.py`、`scripts/evaluate_*results.py` | 版本评测修复 | 统一 Windows 路径，为每份文档分配独立模型预算，并支持 V7 development 子集评分。 |
 
@@ -255,9 +256,10 @@ Compose 会把数据库主机覆盖为服务名 `postgres`，并只给 worker �
 docker compose up -d --wait postgres
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m supplier_comparison.checkpoints setup
+docker compose exec -T postgres psql -U supplier_app -d supplier_comparison -c "SELECT extversion FROM pg_extension WHERE extname = 'vector';"
 ```
 
-Alembic 只管理业务表。LangGraph checkpoint 表由第二条 Python 命令管理；不要把 checkpoint 表加入 Alembic migration。
+Alembic 管理业务表并启用 pgvector 扩展。LangGraph checkpoint 表由独立 Python 命令管理；不要把 checkpoint 表加入 Alembic migration。pgvector 业务表、固定向量维度和检索服务属于 Week2 的 B＋C 实现范围。
 
 ## 4. 启动方式
 
@@ -446,11 +448,11 @@ V1–V7 各数据版本的真实模型 runner、离线评分命令和 holdout �
 | `test_run_service.py` | START／RESUME job、issue 回答、幂等和冲突。 |
 | `test_workflow.py` | 两次 interrupt、草稿／最终结果、事件链、快照时间和迟到发布。 |
 | `test_document_budget.py` | 每文档模型调用预算及超限。 |
-| `test_postgres_recovery.py` | 新 checkpointer／processor 跨连接恢复和同 revision 并发写。 |
+| `test_postgres_recovery.py` | pgvector 扩展、checkpointer／processor 跨连接恢复和同 revision 并发写。 |
 | `test_migrations.py`、`test_migration_filter.py` | upgrade／downgrade／upgrade 及 checkpoint 表隔离。 |
 | `test_checkpoints.py`、`test_worker_cli.py` | checkpoint URL／初始化和 worker 安全错误。 |
 
-截至 2026-09-12，默认测试为 `379 passed, 2 skipped`；设置 `RUN_POSTGRES_TESTS=1` 后为 `381 passed`。V1–V7 的真实模型测试结果和判定规则见 `docs/guide/guide_V1_V7_TESTING.md`。
+截至 2026-09-12，默认测试为 `379 passed, 2 skipped`；设置 `RUN_POSTGRES_TESTS=1` 后为 `381 passed`。2026-09-15 加入 pgvector 扩展回归后，默认套件为 `379 passed, 3 skipped`，启用 PostgreSQL 后为 `382 passed`；Alembic check、扩展版本 0.8.6、事务内向量写入和精确余弦查询均通过。V1–V7 的真实模型测试结果和判定规则见 `docs/guide/guide_V1_V7_TESTING.md`。
 
 ## 10. 持久化检查
 
@@ -467,6 +469,7 @@ docker compose up -d --wait api
 
 - `database_unavailable`：检查 `docker compose ps` 和 `.env` 的 `DATABASE_URL`；本机使用 `localhost`，Compose 内部固定使用 `postgres`。
 - `relation ... does not exist`：重新执行 Alembic upgrade；checkpoint 表缺失则执行 checkpoint setup。
+- `type "vector" does not exist`：确认 `docker compose config` 使用 pgvector 镜像，执行 `alembic upgrade head`，再查询 `pg_extension`；不要删除现有数据库卷来修复。
 - `idempotency_key_reused` 或 `task_revision_conflict`：读取最新任务状态，换新 key，并使用当前 revision；不要用换 key 绕过一次有效操作。
 - `pdf_page_requires_ocr`：输入是扫描页且 OCR 默认关闭。换用原生文本 PDF；不要把它当成全字段缺失。
 - 模型配置错误：确认 `SUPPLIER_MODEL_*` 和 `SUPPLIER_MODEL_API_KEY_ENV`，但不要把 Key、provider 原响应或诊断文件放进日志、文档或 Git。

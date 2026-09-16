@@ -2,7 +2,7 @@ name: supplier-comparison
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.6-pg16-bookworm
     environment:
       TZ: UTC
       PGTZ: UTC
