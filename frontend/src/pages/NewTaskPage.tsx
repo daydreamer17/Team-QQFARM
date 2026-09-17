@@ -1,8 +1,8 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { CreateTaskRequest } from '../api/types'
+import type { CreateTaskRequest, PolicySetSummary } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 
 interface FormState {
@@ -135,6 +135,14 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024).toFixed(1)} KiB`
 }
 
+function policyKey(policy: PolicySetSummary) {
+  return JSON.stringify([
+    policy.policy_set_id,
+    policy.policy_set_version,
+    policy.policy_index_version,
+  ])
+}
+
 export function NewTaskPage() {
   const navigate = useNavigate()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -147,6 +155,18 @@ export function NewTaskPage() {
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionNotice, setExtractionNotice] = useState('')
   const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof FormState>>(new Set())
+  const [bindPolicy, setBindPolicy] = useState(false)
+  const [selectedPolicyKey, setSelectedPolicyKey] = useState('')
+  const [policyCategory, setPolicyCategory] = useState('')
+  const [policyRegion, setPolicyRegion] = useState('')
+
+  const policySets = useQuery({
+    queryKey: ['policy-sets', 'list', 'new-task'],
+    queryFn: () => api.listPolicySets({ limit: 100, offset: 0 }),
+  })
+  const selectedPolicy = policySets.data?.items.find(
+    (policy) => policyKey(policy) === selectedPolicyKey,
+  )
 
   const createTask = useMutation({
     mutationFn: ({ body, idempotencyKey }: Submission) => api.createTask(body, idempotencyKey),
@@ -182,6 +202,26 @@ export function NewTaskPage() {
       secondary_preference: current.secondary_preference === value ? '' : current.secondary_preference,
     }))
     setFieldErrors((current) => ({ ...current, ranking_preference: undefined, secondary_preference: undefined }))
+    setLocalError('')
+    createTask.reset()
+  }
+
+  function selectPolicy(value: string) {
+    const policy = policySets.data?.items.find((item) => policyKey(item) === value)
+    setSelectedPolicyKey(value)
+    setPolicyCategory(policy?.categories.length === 1 ? policy.categories[0] : '')
+    setPolicyRegion(policy?.regions.length === 1 ? policy.regions[0] : '')
+    setLocalError('')
+    createTask.reset()
+  }
+
+  function setPolicyMode(enabled: boolean) {
+    setBindPolicy(enabled)
+    if (!enabled) {
+      setSelectedPolicyKey('')
+      setPolicyCategory('')
+      setPolicyRegion('')
+    }
     setLocalError('')
     createTask.reset()
   }
@@ -240,10 +280,40 @@ export function NewTaskPage() {
       setLocalError('部分字段未通过前端校验，请修改标红内容后重新提交。')
       return null
     }
+    if (bindPolicy) {
+      if (policySets.isError) {
+        setLocalError('已发布 Policy 列表读取失败。请重试，或改选“不绑定 Policy”。')
+        return null
+      }
+      if (!selectedPolicyKey) {
+        setLocalError('请选择一个已发布 Policy，或改选“不绑定 Policy”。')
+        return null
+      }
+      if (!selectedPolicy) {
+        setLocalError('已选 Policy 不再存在于服务端目录中，请重新选择。')
+        return null
+      }
+      if (!policyCategory || !selectedPolicy.categories.includes(policyCategory)) {
+        setLocalError('请选择该 Policy 支持的具体分类。')
+        return null
+      }
+      if (!policyRegion || !selectedPolicy.regions.includes(policyRegion)) {
+        setLocalError('请选择该 Policy 支持的具体地区。')
+        return null
+      }
+    }
     return {
       idempotencyKey: createIdempotencyKey(),
       body: {
         scenario_id: form.scenario_id.trim() || null,
+        ...(bindPolicy && selectedPolicy ? {
+          policy_binding: {
+            policy_set_version: selectedPolicy.policy_set_version,
+            policy_index_version: selectedPolicy.policy_index_version,
+            category: policyCategory,
+            region: policyRegion,
+          },
+        } : {}),
         requirement: {
           manufacturer: form.manufacturer.trim(),
           manufacturer_part_number: form.manufacturer_part_number.trim(),
@@ -363,6 +433,39 @@ export function NewTaskPage() {
             <label className={fieldClass('ranking_preference')}><span>主要排序偏好</span><select value={form.ranking_preference} onChange={(event) => updateRankingPreference(event.target.value)}><option value="LOWEST_CONFIRMED_TOTAL_COST">最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY">最快已确认交付</option></select>{fieldError('ranking_preference')}</label>
             <label className={fieldClass('secondary_preference')}><span>次要偏好 <small>可选</small></span><select aria-invalid={Boolean(fieldErrors.secondary_preference)} value={form.secondary_preference} onChange={(event) => update('secondary_preference', event.target.value)}><option value="">无</option><option value="LOWEST_CONFIRMED_TOTAL_COST" disabled={form.ranking_preference === 'LOWEST_CONFIRMED_TOTAL_COST'}>最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY" disabled={form.ranking_preference === 'FASTEST_CONFIRMED_DELIVERY'}>最快已确认交付</option></select>{fieldError('secondary_preference')}</label>
           </div>
+        </fieldset>
+
+        <fieldset className="form-section policy-binding-section">
+          <legend>Policy / 制度检查 <small>可选</small></legend>
+          <p className="policy-binding-intro">绑定后，系统会将这个已发布的策略与索引版本冻结到任务。创建后不能在任务内修改。</p>
+          <div className="policy-mode-options">
+            <label className={!bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={!bindPolicy} onChange={() => setPolicyMode(false)} /><span><strong>不绑定 Policy</strong><small>默认选项，按现有采购流程创建任务</small></span></label>
+            <label className={bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={bindPolicy} onChange={() => setPolicyMode(true)} /><span><strong>绑定已发布 Policy</strong><small>在分析中执行制度证据检索</small></span></label>
+          </div>
+
+          {bindPolicy && (
+            <div className="policy-binding-picker">
+              {policySets.isPending && <div className="policy-picker-state">正在读取已发布 Policy…</div>}
+              {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>Policy 目录读取失败。仍可改为不绑定并继续创建。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
+              {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>当前没有已发布 Policy。请先到规则资源库完成发布，或选择不绑定。</span><Link to="/resources">前往规则资源库</Link></div>}
+              {policySets.data && policySets.data.items.length > 0 && (
+                <>
+                  <label className="field policy-picker-wide"><span>已发布 Policy</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择策略及索引版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · {policy.policy_set_version} · {policy.policy_index_version}</option>)}</select></label>
+                  {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">已选 Policy 已从服务端目录消失，请重新选择后再提交。</div>}
+                  {selectedPolicy && (
+                    <>
+                      <div className="policy-binding-fields">
+                        <label className="field"><span>适用分类</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体分类</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+                        <label className="field"><span>适用地区</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体地区</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
+                      </div>
+                      <dl className="policy-picker-summary"><div><dt>索引版本</dt><dd>{selectedPolicy.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{selectedPolicy.document_count} / {selectedPolicy.clause_count}</dd></div><div><dt>Embedding</dt><dd>{selectedPolicy.embedding_model}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
+                    </>
+                  )}
+                  {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">目录共有 {policySets.data.total} 个版本，当前显示最近的 {policySets.data.items.length} 个。</small>}
+                </>
+              )}
+            </div>
+          )}
         </fieldset>
 
         {(localError || createTask.isError) && (

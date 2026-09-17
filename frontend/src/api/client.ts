@@ -4,13 +4,26 @@ import type {
   CreateTaskRequest,
   FieldCorrectionInput,
   HealthResponse,
+  IssueAnswer,
+  IssueHistoryItem,
+  PolicyClauseInput,
+  PolicyImportListQuery,
+  PolicyImportListResponse,
+  PolicyImportMetadata,
+  PolicyImportResponse,
+  PolicySetListQuery,
+  PolicySetListResponse,
   QuoteFieldsResponse,
+  QuoteDraftCorrectionInput,
+  QuoteDraftListResponse,
+  QuoteDraftResponse,
   QuoteHistoryResponse,
   QuoteUploadResponse,
   StartRunResponse,
   TaskDetail,
   TaskListResponse,
   TaskSummary,
+  ResultHistoryItem,
 } from './types'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
@@ -46,6 +59,15 @@ function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
       'code' in error &&
       'message' in error,
   )
+}
+
+function queryString(values: object) {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const encoded = params.toString()
+  return encoded ? `?${encoded}` : ''
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -139,6 +161,99 @@ export const api = {
       },
     )
   },
+  listQuoteDrafts: (taskId: string) =>
+    request<QuoteDraftListResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
+    ),
+  uploadQuoteDraft: (
+    taskId: string,
+    input: {
+      expectedTaskRevision: number
+      supplierId: string
+      isSynthetic: boolean
+      file: File
+    },
+    idempotencyKey: string,
+  ) => {
+    const body = new FormData()
+    body.append('expected_task_revision', String(input.expectedTaskRevision))
+    body.append('supplier_id', input.supplierId)
+    body.append('is_synthetic', String(input.isSynthetic))
+    body.append('file', input.file)
+    return request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body,
+      },
+    )
+  },
+  correctQuoteDraft: (
+    taskId: string,
+    draftId: string,
+    expectedDraftRevision: number,
+    corrections: QuoteDraftCorrectionInput[],
+    idempotencyKey: string,
+  ) =>
+    request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}/corrections`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_draft_revision: expectedDraftRevision,
+          corrections: corrections.map((item) => ({
+            field_name: item.fieldName,
+            raw_value: item.rawValue,
+            normalized_value: item.normalizedValue,
+            unit: item.unit,
+            reason: item.reason,
+          })),
+        }),
+      },
+    ),
+  submitQuoteDraft: (
+    taskId: string,
+    draftId: string,
+    expectedTaskRevision: number,
+    expectedDraftRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<QuoteUploadResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}/submit`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+          expected_draft_revision: expectedDraftRevision,
+        }),
+      },
+    ),
+  discardQuoteDraft: (
+    taskId: string,
+    draftId: string,
+    expectedDraftRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}/discard`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ expected_draft_revision: expectedDraftRevision }),
+      },
+    ),
   startRun: (
     taskId: string,
     expectedTaskRevision: number,
@@ -184,9 +299,7 @@ export const api = {
     taskId: string,
     issueId: string,
     expectedTaskRevision: number,
-    answer:
-      | { answer_type: 'CONFIRM_MISSING' }
-      | { answer_type: 'SHIPPING_AMOUNT'; amount: string; currency: string },
+    answer: IssueAnswer,
     idempotencyKey: string,
   ) =>
     request<StartRunResponse>(
@@ -206,6 +319,14 @@ export const api = {
           answer,
         }),
       },
+    ),
+  listIssues: (taskId: string) =>
+    request<IssueHistoryItem[]>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/issues`,
+    ),
+  listResults: (taskId: string) =>
+    request<ResultHistoryItem[]>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/results`,
     ),
   getResult: (taskId: string, resultId: string) =>
     request<ComparisonResultResponse>(
@@ -283,6 +404,67 @@ export const api = {
           unit: input.unit,
           reason: input.reason,
         }),
+      },
+    ),
+  uploadPolicy: (
+    input: { metadata: PolicyImportMetadata; file: File },
+    idempotencyKey: string,
+  ) => {
+    const body = new FormData()
+    body.append('metadata', JSON.stringify(input.metadata))
+    body.append('file', input.file)
+    return request<PolicyImportResponse>('/api/v1/policy-imports', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body,
+    })
+  },
+  listPolicyImports: (query: PolicyImportListQuery = {}) =>
+    request<PolicyImportListResponse>(
+      '/api/v1/policy-imports' + queryString(query),
+    ),
+  listPolicySets: (query: PolicySetListQuery = {}) =>
+    request<PolicySetListResponse>(
+      '/api/v1/policy-sets' + queryString(query),
+    ),
+  getPolicyImport: (policyImportId: string) =>
+    request<PolicyImportResponse>(
+      `/api/v1/policy-imports/${encodeURIComponent(policyImportId)}`,
+    ),
+  reviewPolicyClauses: (
+    policyImportId: string,
+    expectedRevision: number,
+    clauses: PolicyClauseInput[],
+    idempotencyKey: string,
+  ) =>
+    request<PolicyImportResponse>(
+      `/api/v1/policy-imports/${encodeURIComponent(policyImportId)}/clauses`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_revision: expectedRevision,
+          clauses,
+        }),
+      },
+    ),
+  publishPolicy: (
+    policyImportId: string,
+    expectedRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<PolicyImportResponse>(
+      `/api/v1/policy-imports/${encodeURIComponent(policyImportId)}/publish`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ expected_revision: expectedRevision }),
       },
     ),
 }

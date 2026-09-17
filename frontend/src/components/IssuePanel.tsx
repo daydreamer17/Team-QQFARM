@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { TaskDetail } from '../api/types'
+import type { IssueAnswer, PolicyRetrievalStatus, TaskDetail } from '../api/types'
 
 interface IssuePanelProps {
   task: TaskDetail
@@ -19,11 +19,7 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
   const [amount, setAmount] = useState('')
 
   const answer = useMutation({
-    mutationFn: (
-      payload:
-        | { answer_type: 'CONFIRM_MISSING' }
-        | { answer_type: 'SHIPPING_AMOUNT'; amount: string; currency: string },
-    ) => {
+    mutationFn: (payload: IssueAnswer) => {
       if (!issue) throw new Error('Current issue is missing.')
       return api.answerIssue(
         task.task_id,
@@ -64,6 +60,33 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
         <div><dt>字段</dt><dd>{issue.field_name ?? '—'}</dd></div>
         <div><dt>问题类型</dt><dd>{issue.issue_type}</dd></div>
       </dl>
+
+      {issue.issue_type === 'POLICY_EVIDENCE_REVIEW' && (
+        <div className="issue-action policy-issue-action">
+          <p>
+            仅在网络、模型服务或临时索引故障已经修复时重试。若制度内容或索引版本发生变化，必须使用新 Policy Binding 创建新任务。
+          </p>
+          <div className="policy-issue-statuses">
+            {Object.entries(issue.answer_schema.retrieval_statuses ?? {}).map(([controlCode, status]) => (
+              <div key={controlCode}>
+                <strong>{controlCode}</strong>
+                <span className={`policy-retrieval-status policy-status-${String(status).toLowerCase().replace('_', '-')}`}>
+                  {status as PolicyRetrievalStatus}
+                </span>
+              </div>
+            ))}
+          </div>
+          <button
+            className="button button-submit"
+            type="button"
+            disabled={answer.isPending}
+            onClick={() => answer.mutate({ answer_type: 'RETRY_POLICY_RETRIEVAL' })}
+          >
+            {answer.isPending ? '正在创建续跑 Job…' : '修复后重新检索'}
+          </button>
+          <small>当前任务仍固定使用原 Policy 版本与索引版本。</small>
+        </div>
+      )}
 
       {issue.issue_type === 'CONFIRM_MISSING' && (
         <div className="issue-action">

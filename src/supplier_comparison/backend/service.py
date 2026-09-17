@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
@@ -17,7 +17,9 @@ from supplier_comparison.extraction import (
     CorrectionEvent,
     CriticalityContext,
     ExtractionBatch,
+    ReviewEnvelope,
     ReviewSeverity,
+    ValidationStatus,
     apply_candidate_correction,
     review_extraction_batch,
 )
@@ -31,6 +33,7 @@ from .models import (
     Issue,
     Job,
     Quote,
+    QuoteDraft,
     RequirementRecord,
     Task,
     TaskRevision,
@@ -78,7 +81,8 @@ class BackendService:
         self.session_factory = session_factory
         self.storage_root = Path(storage_root)
         self.actor_id = actor_id
-        self.quote_dictionary = QuoteDictionary.load(quote_dictionary_path)
+        self.quote_dictionary_path = Path(quote_dictionary_path)
+        self.quote_dictionary = QuoteDictionary.load(self.quote_dictionary_path)
 
     @staticmethod
     def _supersede_current_graph(session: Session, task: Task) -> GraphRun | None:
@@ -505,6 +509,707 @@ class BackendService:
                     for quote in quotes
                 ],
             }
+
+    def upload_quote_draft_stream(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        supplier_id: str,
+        original_filename: str,
+        media_type: str,
+        stream: BinaryIO,
+        idempotency_key: str,
+        is_synthetic: bool = False,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+        max_bytes: int = 5 * 1024 * 1024,
+        chunk_size: int = 64 * 1024,
+    ) -> dict[str, Any]:
+        """Persist a review draft without changing authoritative task inputs."""
+
+        if media_type not in {"application/pdf", "text/csv"}:
+            raise BackendError(
+                "unsupported_media_type",
+                "Only application/pdf and text/csv quote files are supported.",
+            )
+        if max_bytes < 1 or chunk_size < 1:
+            raise ValueError("upload limits must be positive")
+
+        staging_directory = self.storage_root / ".staging"
+        staging_directory.mkdir(parents=True, exist_ok=True)
+        staged_path = staging_directory / f"{new_id('draft_upload')}.tmp"
+        digest = hashlib.sha256()
+        size_bytes = 0
+        try:
+            with staged_path.open("xb") as handle:
+                while True:
+                    chunk = stream.read(chunk_size)
+                    if not chunk:
+                        break
+                    if not isinstance(chunk, (bytes, bytearray)):
+                        raise BackendError(
+                            "upload_stream_invalid",
+                            "Quote draft upload stream must produce bytes.",
+                        )
+                    size_bytes += len(chunk)
+                    if size_bytes > max_bytes:
+                        raise BackendError(
+                            "file_too_large",
+                            "Quote file exceeds the 5 MiB limit.",
+                            max_file_size_bytes=max_bytes,
+                        )
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if size_bytes == 0:
+                raise BackendError("empty_file", "Quote draft file is empty.")
+        except Exception:
+            if staged_path.exists():
+                staged_path.unlink()
+            raise
+
+        file_sha = digest.hexdigest()
+        dictionary_sha = hashlib.sha256(self.quote_dictionary_path.read_bytes()).hexdigest()
+        request = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "supplier_id": supplier_id,
+            "original_filename": Path(original_filename).name,
+            "media_type": media_type,
+            "content_sha256": file_sha,
+            "is_synthetic": is_synthetic,
+            "provider": provider,
+            "model_id": model_id,
+            "environment": environment,
+            "prompt_version": prompt_version,
+        }
+        request_sha = content_hash(request)
+        operation = f"upload_quote_draft:{task_id}"
+        final_path: Path | None = None
+        try:
+            with self.session_factory.begin() as session:
+                repeated = self._existing_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                )
+                if repeated is not None:
+                    return repeated
+                task = session.scalar(
+                    select(Task).where(Task.task_id == task_id).with_for_update()
+                )
+                if task is None or task.owner_id != self.actor_id:
+                    raise NotFoundError("task_not_found", "Task was not found.")
+                self._require_revision(task, expected_task_revision)
+                for stale in session.scalars(
+                    select(QuoteDraft).where(
+                        QuoteDraft.task_id == task_id,
+                        QuoteDraft.status.in_(
+                            ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+                        ),
+                        QuoteDraft.base_task_revision != task.current_revision,
+                    )
+                ):
+                    stale.status = "STALE"
+                    stale.revision += 1
+                active = session.scalar(
+                    select(QuoteDraft).where(
+                        QuoteDraft.task_id == task_id,
+                        QuoteDraft.status.in_(
+                            ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+                        ),
+                    )
+                )
+                if active is not None:
+                    raise ConflictError(
+                        "active_quote_draft_exists",
+                        "Discard or submit the active quote draft before uploading another.",
+                        quote_draft_id=active.quote_draft_id,
+                    )
+                draft_id = new_id("draft")
+                quote_id = new_id("quote")
+                document_id = new_id("doc")
+                job_id = new_id("job")
+                extension = ".pdf" if media_type == "application/pdf" else ".csv"
+                final_path = (
+                    self.storage_root
+                    / ".drafts"
+                    / task_id
+                    / draft_id
+                    / f"source{extension}"
+                )
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                staged_path.rename(final_path)
+                draft = QuoteDraft(
+                    quote_draft_id=draft_id,
+                    task_id=task_id,
+                    actor_id=self.actor_id,
+                    base_task_revision=task.current_revision,
+                    revision=1,
+                    status="PROCESSING",
+                    proposed_quote_id=quote_id,
+                    proposed_document_id=document_id,
+                    supplier_id=supplier_id.strip(),
+                    original_filename=Path(original_filename).name,
+                    media_type=media_type,
+                    size_bytes=size_bytes,
+                    sha256=file_sha,
+                    storage_path=str(final_path),
+                    is_synthetic=is_synthetic,
+                    provider=provider,
+                    model_id=model_id,
+                    environment=environment,
+                    prompt_version=prompt_version,
+                    dictionary_sha256=dictionary_sha,
+                )
+                session.add(draft)
+                session.add(
+                    Job(
+                        job_id=job_id,
+                        task_id=task_id,
+                        graph_run_id=None,
+                        quote_draft_id=draft_id,
+                        job_type="DRAFT_REVIEW",
+                        status="PENDING",
+                        task_revision=task.current_revision,
+                    )
+                )
+                session.flush()
+                response = self._quote_draft_response(session, draft)
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=202,
+                    response=response,
+                )
+                return response
+        except Exception:
+            if final_path is not None and final_path.exists():
+                final_path.unlink()
+            raise
+        finally:
+            if staged_path.exists():
+                staged_path.unlink()
+
+    def list_quote_drafts(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            for stale in session.scalars(
+                select(QuoteDraft).where(
+                    QuoteDraft.task_id == task_id,
+                    QuoteDraft.status.in_(
+                        ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+                    ),
+                    QuoteDraft.base_task_revision != task.current_revision,
+                )
+            ):
+                stale.status = "STALE"
+                stale.revision += 1
+            drafts = session.scalars(
+                select(QuoteDraft)
+                .where(QuoteDraft.task_id == task_id)
+                .order_by(QuoteDraft.created_at.desc(), QuoteDraft.quote_draft_id.desc())
+            ).all()
+            return {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "items": [self._quote_draft_response(session, draft) for draft in drafts],
+            }
+
+    def get_quote_draft(self, task_id: str, draft_id: str) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            draft = self._owned_quote_draft(session, task_id, draft_id)
+            task = session.get(Task, task_id)
+            if (
+                task is not None
+                and task.current_revision != draft.base_task_revision
+                and draft.status in {"UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT"}
+            ):
+                draft.status = "STALE"
+                draft.revision += 1
+            return self._quote_draft_response(session, draft)
+
+    def quote_draft_job_context(self, job_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            job = session.get(Job, job_id)
+            if job is None or job.job_type != "DRAFT_REVIEW" or not job.quote_draft_id:
+                raise NotFoundError("draft_job_not_found", "Quote draft job was not found.")
+            draft = session.get(QuoteDraft, job.quote_draft_id)
+            task = session.get(Task, job.task_id)
+            requirement = session.scalar(
+                select(RequirementRecord)
+                .where(RequirementRecord.task_id == job.task_id)
+                .order_by(RequirementRecord.requirement_version.desc())
+            )
+            if draft is None or task is None or requirement is None:
+                raise NotFoundError("draft_job_context_missing", "Quote draft job context is missing.")
+            return {
+                "job_id": job.job_id,
+                "task_id": task.task_id,
+                "task_revision": draft.base_task_revision,
+                "scenario_id": task.scenario_id,
+                "quote_draft_id": draft.quote_draft_id,
+                "quote_id": draft.proposed_quote_id,
+                "document_id": draft.proposed_document_id,
+                "supplier_id": draft.supplier_id,
+                "media_type": draft.media_type,
+                "storage_path": draft.storage_path,
+                "document_sha256": draft.sha256,
+                "is_synthetic": draft.is_synthetic,
+                "calls_used": draft.calls_used,
+                "max_calls": draft.max_calls,
+                "requirement": dict(requirement.payload),
+            }
+
+    def claim_quote_draft_job(self, job_id: str) -> dict[str, Any]:
+        from .models import utc_now
+
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or job.job_type != "DRAFT_REVIEW" or not job.quote_draft_id:
+                raise NotFoundError("draft_job_not_found", "Quote draft job was not found.")
+            draft = session.scalar(
+                select(QuoteDraft)
+                .where(QuoteDraft.quote_draft_id == job.quote_draft_id)
+                .with_for_update()
+            )
+            task = session.scalar(select(Task).where(Task.task_id == job.task_id).with_for_update())
+            if draft is None or task is None:
+                raise NotFoundError("draft_job_context_missing", "Quote draft job context is missing.")
+            if job.status != "PENDING":
+                raise ConflictError("job_not_pending", "Job is not pending.")
+            if task.current_revision != draft.base_task_revision:
+                draft.status = "STALE"
+                draft.revision += 1
+                job.status = "SUPERSEDED"
+                raise ConflictError("quote_draft_stale", "Task changed while the quote draft was open.")
+            if job.attempts >= 3:
+                raise BackendError("job_attempt_budget_exceeded", "Job attempt budget was exceeded.")
+            job.status = "RUNNING"
+            job.attempts += 1
+            job.started_at = utc_now()
+            draft.status = "PROCESSING"
+            return self._job_response(job)
+
+    def record_quote_draft_calls(self, draft_id: str, calls_after: int) -> None:
+        with self.session_factory.begin() as session:
+            draft = session.scalar(
+                select(QuoteDraft).where(QuoteDraft.quote_draft_id == draft_id).with_for_update()
+            )
+            if draft is not None:
+                draft.calls_used = calls_after
+
+    def complete_quote_draft_job(
+        self,
+        job_id: str,
+        *,
+        parsed_artifact_id: str,
+        batch_artifact_id: str,
+        review_artifact_id: str,
+        downstream_ready: bool,
+    ) -> dict[str, Any]:
+        from .models import utc_now
+
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or not job.quote_draft_id:
+                raise NotFoundError("draft_job_not_found", "Quote draft job was not found.")
+            draft = session.scalar(
+                select(QuoteDraft).where(QuoteDraft.quote_draft_id == job.quote_draft_id).with_for_update()
+            )
+            if draft is None:
+                raise NotFoundError("quote_draft_not_found", "Quote draft was not found.")
+            draft.parsed_artifact_id = parsed_artifact_id
+            draft.batch_artifact_id = batch_artifact_id
+            draft.review_artifact_id = review_artifact_id
+            draft.status = "READY_TO_SUBMIT" if downstream_ready else "REVIEW_REQUIRED"
+            draft.error_code = None
+            draft.error_message = None
+            job.status = "SUCCEEDED"
+            job.finished_at = utc_now()
+            return self._quote_draft_response(session, draft)
+
+    def fail_quote_draft_job(self, job_id: str, *, code: str, message: str) -> None:
+        from .models import utc_now
+
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or not job.quote_draft_id:
+                return
+            draft = session.scalar(
+                select(QuoteDraft).where(QuoteDraft.quote_draft_id == job.quote_draft_id).with_for_update()
+            )
+            job.status = "FAILED"
+            job.error_code = code
+            job.error_message = message[:1000]
+            job.finished_at = utc_now()
+            if draft is not None:
+                draft.status = "FAILED"
+                draft.error_code = code
+                draft.error_message = message[:1000]
+
+    def correct_quote_draft(
+        self,
+        task_id: str,
+        draft_id: str,
+        *,
+        expected_draft_revision: int,
+        corrections: list[dict[str, Any]],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "draft_id": draft_id,
+            "expected_draft_revision": expected_draft_revision,
+            "corrections": corrections,
+        }
+        request_sha = content_hash(request)
+        operation = f"correct_quote_draft:{draft_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key, request_sha256=request_sha
+            )
+            if repeated is not None:
+                return repeated
+            draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            if task.current_revision != draft.base_task_revision:
+                draft.status = "STALE"
+                draft.revision += 1
+                raise ConflictError("quote_draft_stale", "Task changed while the quote draft was open.")
+            if draft.revision != expected_draft_revision:
+                raise ConflictError(
+                    "quote_draft_revision_conflict",
+                    "Quote draft revision has changed.",
+                    expected=expected_draft_revision,
+                    actual=draft.revision,
+                )
+            if draft.status != "REVIEW_REQUIRED" or not draft.batch_artifact_id or not draft.review_artifact_id:
+                raise ConflictError("quote_draft_not_reviewable", "Quote draft is not awaiting field corrections.")
+            envelope = ReviewEnvelope.model_validate(
+                session.get(WorkflowArtifact, draft.review_artifact_id).payload
+            )
+            blocking = {
+                finding.field_name
+                for finding in (envelope.review.findings if envelope.review else ())
+                if finding.severity == ReviewSeverity.BLOCKING and not finding.resolved
+            }
+            targets = {str(item.get("field_name", "")) for item in corrections}
+            if not corrections or not targets.issubset(blocking):
+                raise BackendError(
+                    "draft_correction_scope_invalid",
+                    "Only unresolved blocking fields can be corrected.",
+                    blocking_fields=sorted(blocking),
+                )
+            batch_artifact = session.get(WorkflowArtifact, draft.batch_artifact_id)
+            if batch_artifact is None:
+                raise ConflictError("draft_batch_missing", "Quote draft extraction batch is missing.")
+            batch = ExtractionBatch.model_validate(batch_artifact.payload)
+            events: list[CorrectionEvent] = []
+            reviewed_at = datetime.now(timezone.utc)
+            for item in corrections:
+                field_name = str(item["field_name"])
+                candidate = next((c for c in batch.candidates if c.field_name == field_name), None)
+                action = (
+                    CorrectionAction.USER_INPUT
+                    if candidate is not None and candidate.validation_status == ValidationStatus.MISSING
+                    else CorrectionAction.USER_CORRECTION
+                )
+                try:
+                    batch, event = apply_candidate_correction(
+                        batch,
+                        field_name=field_name,
+                        action=action,
+                        raw_value=str(item["raw_value"]),
+                        normalized_value=item["normalized_value"],
+                        unit=item.get("unit"),
+                        reason_code="QUOTE_DRAFT_FIELD_CORRECTION",
+                        reason=str(item["reason"]),
+                        reviewer_id=self.actor_id,
+                        reviewed_at=reviewed_at,
+                    )
+                except (ValueError, TypeError) as exc:
+                    raise BackendError(
+                        "field_correction_invalid",
+                        "Quote draft field correction is invalid.",
+                        field_name=field_name,
+                    ) from exc
+                events.append(event)
+            requirement_record = session.scalar(
+                select(RequirementRecord)
+                .where(RequirementRecord.task_id == task_id)
+                .order_by(RequirementRecord.requirement_version.desc())
+            )
+            if requirement_record is None:
+                raise ConflictError("requirement_missing", "The task has no procurement requirement.")
+            requirement = ProcurementRequirement.model_validate(requirement_record.payload)
+            corrected_payload = batch.model_dump(mode="json")
+            corrected_artifact = WorkflowArtifact(
+                artifact_id=new_id("artifact"),
+                task_id=task_id,
+                task_revision=draft.base_task_revision,
+                artifact_type="EXTRACTION_BATCH",
+                schema_version=batch.schema_version,
+                parent_artifact_id=batch_artifact.artifact_id,
+                quote_id=draft.proposed_quote_id,
+                document_id=draft.proposed_document_id,
+                payload=corrected_payload,
+                content_sha256=content_hash(corrected_payload),
+            )
+            session.add(corrected_artifact)
+            for event in events:
+                payload = event.model_dump(mode="json")
+                session.add(
+                    WorkflowArtifact(
+                        artifact_id=new_id("artifact"),
+                        task_id=task_id,
+                        task_revision=draft.base_task_revision,
+                        artifact_type="CORRECTION_EVENT",
+                        parent_artifact_id=corrected_artifact.artifact_id,
+                        quote_id=draft.proposed_quote_id,
+                        document_id=draft.proposed_document_id,
+                        payload=payload,
+                        content_sha256=content_hash(payload),
+                    )
+                )
+            reviewed = review_extraction_batch(
+                batch,
+                self.quote_dictionary,
+                CriticalityContext(required_revision=requirement.revision, base_unit=requirement.base_unit),
+                input_is_synthetic=draft.is_synthetic,
+                reviewed_at=reviewed_at,
+                corrections=tuple(events),
+            )
+            review_payload = reviewed.model_dump(mode="json")
+            review_artifact = WorkflowArtifact(
+                artifact_id=new_id("artifact"),
+                task_id=task_id,
+                task_revision=draft.base_task_revision,
+                artifact_type="REVIEW_ENVELOPE",
+                schema_version=reviewed.schema_version,
+                parent_artifact_id=corrected_artifact.artifact_id,
+                quote_id=draft.proposed_quote_id,
+                document_id=draft.proposed_document_id,
+                payload=review_payload,
+                content_sha256=content_hash(review_payload),
+            )
+            session.add(review_artifact)
+            draft.batch_artifact_id = corrected_artifact.artifact_id
+            draft.review_artifact_id = review_artifact.artifact_id
+            draft.revision += 1
+            draft.status = "READY_TO_SUBMIT" if reviewed.downstream_ready else "REVIEW_REQUIRED"
+            session.flush()
+            response = self._quote_draft_response(session, draft)
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=200,
+                response=response,
+            )
+            return response
+
+    def submit_quote_draft(
+        self,
+        task_id: str,
+        draft_id: str,
+        *,
+        expected_task_revision: int,
+        expected_draft_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        from .models import utc_now
+
+        request = {
+            "task_id": task_id,
+            "draft_id": draft_id,
+            "expected_task_revision": expected_task_revision,
+            "expected_draft_revision": expected_draft_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"submit_quote_draft:{draft_id}"
+        source_path: Path | None = None
+        final_path: Path | None = None
+        try:
+            with self.session_factory.begin() as session:
+                repeated = self._existing_idempotent(
+                    session, operation=operation, key=idempotency_key, request_sha256=request_sha
+                )
+                if repeated is not None:
+                    return repeated
+                task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+                draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+                if task is None:
+                    raise NotFoundError("task_not_found", "Task was not found.")
+                self._require_revision(task, expected_task_revision)
+                if task.current_revision != draft.base_task_revision:
+                    draft.status = "STALE"
+                    draft.revision += 1
+                    raise ConflictError("quote_draft_stale", "Task changed while the quote draft was open.")
+                if draft.revision != expected_draft_revision:
+                    raise ConflictError(
+                        "quote_draft_revision_conflict",
+                        "Quote draft revision has changed.",
+                        expected=expected_draft_revision,
+                        actual=draft.revision,
+                    )
+                if draft.status != "READY_TO_SUBMIT" or not draft.batch_artifact_id:
+                    raise ConflictError(
+                        "quote_draft_not_ready",
+                        "Resolve every blocking field before formally submitting the quote.",
+                    )
+                self._supersede_current_graph(session, task)
+                extension = ".pdf" if draft.media_type == "application/pdf" else ".csv"
+                source_path = Path(draft.storage_path)
+                final_path = (
+                    self.storage_root
+                    / task_id
+                    / draft.proposed_quote_id
+                    / "v1"
+                    / draft.proposed_document_id
+                    / f"source{extension}"
+                )
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                if not source_path.exists():
+                    raise ConflictError("draft_file_missing", "Quote draft file is missing.")
+                if final_path.exists():
+                    raise ConflictError("immutable_storage_conflict", "Quote storage location already exists.")
+                source_path.rename(final_path)
+                session.add(
+                    Quote(
+                        quote_id=draft.proposed_quote_id,
+                        task_id=task_id,
+                        supplier_id=draft.supplier_id,
+                        current_version=1,
+                    )
+                )
+                session.flush()
+                session.add(
+                    Document(
+                        document_id=draft.proposed_document_id,
+                        task_id=task_id,
+                        quote_id=draft.proposed_quote_id,
+                        quote_version=1,
+                        document_version=1,
+                        original_filename=draft.original_filename,
+                        media_type=draft.media_type,
+                        size_bytes=draft.size_bytes,
+                        sha256=draft.sha256,
+                        storage_path=str(final_path),
+                        is_synthetic=draft.is_synthetic,
+                    )
+                )
+                task.current_revision += 1
+                task.status = "DRAFT"
+                draft.status = "SUBMITTED"
+                draft.revision += 1
+                draft.submitted_at = utc_now()
+                draft.storage_path = str(final_path)
+                session.add(
+                    TaskRevision(
+                        revision_id=new_id("rev"),
+                        task_id=task_id,
+                        revision=task.current_revision,
+                        change_type="QUOTE_DRAFT_SUBMITTED",
+                        actor_id=self.actor_id,
+                        request_sha256=request_sha,
+                    )
+                )
+                response = {
+                    "task_id": task_id,
+                    "task_revision": task.current_revision,
+                    "quote_draft_id": draft.quote_draft_id,
+                    "draft_revision": draft.revision,
+                    "status": draft.status,
+                    "quote_id": draft.proposed_quote_id,
+                    "quote_version": 1,
+                    "document_id": draft.proposed_document_id,
+                    "document_version": 1,
+                    "document_sha256": draft.sha256,
+                }
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=201,
+                    response=response,
+                )
+                return response
+        except Exception:
+            if final_path is not None and final_path.exists() and source_path is not None:
+                source_path.parent.mkdir(parents=True, exist_ok=True)
+                final_path.rename(source_path)
+            raise
+
+    def discard_quote_draft(
+        self,
+        task_id: str,
+        draft_id: str,
+        *,
+        expected_draft_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "draft_id": draft_id,
+            "expected_draft_revision": expected_draft_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"discard_quote_draft:{draft_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key, request_sha256=request_sha
+            )
+            if repeated is not None:
+                return repeated
+            draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            if draft.revision != expected_draft_revision:
+                raise ConflictError(
+                    "quote_draft_revision_conflict",
+                    "Quote draft revision has changed.",
+                    expected=expected_draft_revision,
+                    actual=draft.revision,
+                )
+            if draft.status in {"SUBMITTED", "DISCARDED"}:
+                raise ConflictError("quote_draft_terminal", "Quote draft is already closed.")
+            draft.status = "DISCARDED"
+            draft.revision += 1
+            for job in session.scalars(
+                select(Job).where(
+                    Job.quote_draft_id == draft_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )
+            ):
+                job.status = "SUPERSEDED"
+            session.flush()
+            response = self._quote_draft_response(session, draft)
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=200,
+                response=response,
+            )
+            return response
+
+    def job_type(self, job_id: str) -> str:
+        with self.session_factory() as session:
+            job = session.get(Job, job_id)
+            if job is None:
+                raise NotFoundError("job_not_found", "Job was not found.")
+            return job.job_type
 
     def list_tasks(self, *, limit: int = 20) -> dict[str, Any]:
         with self.session_factory() as session:
@@ -1740,6 +2445,40 @@ class BackendService:
                     prompt_version=prompt_version,
                 )
             )
+            session.flush()
+            dictionary_sha = hashlib.sha256(self.quote_dictionary_path.read_bytes()).hexdigest()
+            documents = session.scalars(
+                select(Document).where(Document.task_id == task_id)
+            ).all()
+            for document in documents:
+                reviewed_draft = session.scalar(
+                    select(QuoteDraft).where(
+                        QuoteDraft.task_id == task_id,
+                        QuoteDraft.proposed_document_id == document.document_id,
+                        QuoteDraft.status == "SUBMITTED",
+                        QuoteDraft.sha256 == document.sha256,
+                        QuoteDraft.provider == provider,
+                        QuoteDraft.model_id == model_id,
+                        QuoteDraft.environment == environment,
+                        QuoteDraft.prompt_version == prompt_version,
+                        QuoteDraft.dictionary_sha256 == dictionary_sha,
+                        QuoteDraft.batch_artifact_id.is_not(None),
+                    )
+                )
+                if reviewed_draft is not None:
+                    session.add(
+                        DocumentExecution(
+                            document_execution_id=new_id("docexec"),
+                            graph_run_id=graph_run_id,
+                            document_id=document.document_id,
+                            status="EXTRACTED",
+                            calls_used=reviewed_draft.calls_used,
+                            max_calls=reviewed_draft.max_calls,
+                            parsed_artifact_id=reviewed_draft.parsed_artifact_id,
+                            batch_artifact_id=reviewed_draft.batch_artifact_id,
+                            review_artifact_id=None,
+                        )
+                    )
             session.add(
                 Job(
                     job_id=job_id,
@@ -2103,6 +2842,135 @@ class BackendService:
                 response=response,
             )
             return response
+
+    def _owned_quote_draft(
+        self,
+        session: Session,
+        task_id: str,
+        draft_id: str,
+        *,
+        lock: bool = False,
+    ) -> QuoteDraft:
+        query = select(QuoteDraft).where(
+            QuoteDraft.quote_draft_id == draft_id,
+            QuoteDraft.task_id == task_id,
+            QuoteDraft.actor_id == self.actor_id,
+        )
+        if lock:
+            query = query.with_for_update()
+        draft = session.scalar(query)
+        if draft is None:
+            raise NotFoundError("quote_draft_not_found", "Quote draft was not found.")
+        return draft
+
+    def _quote_draft_response(self, session: Session, draft: QuoteDraft) -> dict[str, Any]:
+        batch_artifact = (
+            session.get(WorkflowArtifact, draft.batch_artifact_id)
+            if draft.batch_artifact_id
+            else None
+        )
+        review_artifact = (
+            session.get(WorkflowArtifact, draft.review_artifact_id)
+            if draft.review_artifact_id
+            else None
+        )
+        batch_payload = dict(batch_artifact.payload) if batch_artifact is not None else {}
+        sources = {
+            source.get("source_id"): source
+            for source in batch_payload.get("parsed_input", {}).get("sources", [])
+        }
+        fields: list[dict[str, Any]] = []
+        for candidate in batch_payload.get("candidates", []):
+            evidence = []
+            for citation in candidate.get("source_refs", []):
+                source = sources.get(citation.get("source_id"), {})
+                evidence.append(
+                    {
+                        "source_id": citation.get("source_id"),
+                        "quoted_text": citation.get("quoted_text"),
+                        "kind": source.get("kind"),
+                        "page_number": source.get("page_number"),
+                        "row_number": source.get("row_number"),
+                        "column_name": source.get("column_name"),
+                        "bbox": source.get("bbox"),
+                        "coordinate_space": source.get("coordinate_space"),
+                    }
+                )
+            fields.append(
+                {
+                    key: candidate.get(key)
+                    for key in (
+                        "field_name",
+                        "field_version",
+                        "raw_value",
+                        "normalized_value",
+                        "unit",
+                        "validation_status",
+                        "origin",
+                    )
+                }
+                | {"evidence": evidence}
+            )
+        review_payload = dict(review_artifact.payload) if review_artifact is not None else {}
+        review = review_payload.get("review") or {}
+        job = session.scalar(
+            select(Job)
+            .where(Job.quote_draft_id == draft.quote_draft_id)
+            .order_by(Job.created_at.desc(), Job.job_id.desc())
+        )
+        task = session.get(Task, draft.task_id)
+        effective_status = draft.status
+        if (
+            task is not None
+            and task.current_revision != draft.base_task_revision
+            and draft.status in {"UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT"}
+        ):
+            effective_status = "STALE"
+        return {
+            "quote_draft_id": draft.quote_draft_id,
+            "task_id": draft.task_id,
+            "base_task_revision": draft.base_task_revision,
+            "draft_revision": draft.revision,
+            "status": effective_status,
+            "proposed_quote_id": draft.proposed_quote_id,
+            "proposed_document_id": draft.proposed_document_id,
+            "supplier_id": draft.supplier_id,
+            "original_filename": draft.original_filename,
+            "media_type": draft.media_type,
+            "size_bytes": draft.size_bytes,
+            "document_sha256": draft.sha256,
+            "is_synthetic": draft.is_synthetic,
+            "review_status": review_payload.get("review_status"),
+            "review_findings": review.get("findings", []),
+            "fields": fields,
+            "calls_used": draft.calls_used,
+            "max_calls": draft.max_calls,
+            "error_code": draft.error_code,
+            "error_message": draft.error_message,
+            "job": (
+                {
+                    "job_id": job.job_id,
+                    "job_type": job.job_type,
+                    "job_status": job.status,
+                    "attempts": job.attempts,
+                    "created_at": self._aware_datetime(job.created_at).isoformat(),
+                    "started_at": (
+                        self._aware_datetime(job.started_at).isoformat()
+                        if job.started_at is not None
+                        else None
+                    ),
+                }
+                if job is not None
+                else None
+            ),
+            "created_at": self._aware_datetime(draft.created_at).isoformat(),
+            "updated_at": self._aware_datetime(draft.updated_at).isoformat(),
+            "submitted_at": (
+                self._aware_datetime(draft.submitted_at).isoformat()
+                if draft.submitted_at is not None
+                else None
+            ),
+        }
 
     @staticmethod
     def _require_revision(task: Task, expected: int) -> None:

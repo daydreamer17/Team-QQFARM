@@ -50,10 +50,6 @@ export function AppShell() {
           <span className="nav-icon" aria-hidden="true">＋</span>
           <span>新建任务</span>
         </NavLink>
-        <NavLink to="/reviews" className={navClass}>
-          <span className="nav-icon" aria-hidden="true">✓</span>
-          <span>审核与分析</span>
-        </NavLink>
         <NavLink to="/resources" className={navClass}>
           <span className="nav-icon" aria-hidden="true">▤</span>
           <span>规则资源库</span>
@@ -106,7 +102,7 @@ export function AppShell() {
           </section>
           <div className="sidebar-note">
             <strong>当前工作区</strong>
-            <span>任务、报价、审核与比较结果均以当前 revision 为准。</span>
+            <span>需求、报价审核与决策结果均以当前 revision 为准。</span>
           </div>
       </nav>
       <div className="app-main">

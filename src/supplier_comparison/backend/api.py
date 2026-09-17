@@ -113,6 +113,28 @@ class BatchFieldCorrectionRequest(ApiModel):
     corrections: list[BatchFieldCorrectionItem] = Field(min_length=1, max_length=100)
 
 
+class QuoteDraftCorrectionItem(ApiModel):
+    field_name: str = Field(min_length=1)
+    raw_value: str = Field(min_length=1)
+    normalized_value: StrictStr | StrictInt | StrictBool
+    unit: str | None = None
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class QuoteDraftCorrectionRequest(ApiModel):
+    expected_draft_revision: int = Field(ge=1)
+    corrections: list[QuoteDraftCorrectionItem] = Field(min_length=1, max_length=100)
+
+
+class SubmitQuoteDraftRequest(ApiModel):
+    expected_task_revision: int = Field(ge=1)
+    expected_draft_revision: int = Field(ge=1)
+
+
+class DiscardQuoteDraftRequest(ApiModel):
+    expected_draft_revision: int = Field(ge=1)
+
+
 class ReviewPolicyClausesRequest(ApiModel):
     expected_revision: int = Field(ge=1)
     clauses: list[PolicyDraftClauseInput] = Field(min_length=1, max_length=200)
@@ -152,6 +174,7 @@ def create_app(
     *,
     readiness_check,
     policy_file_import_service: PolicyFileImportService | None = None,
+    allow_legacy_direct_quote_upload: bool = True,
 ) -> FastAPI:
     app = FastAPI(title="Supplier Comparison API", version="0.1.0")
 
@@ -235,7 +258,7 @@ def create_app(
     def get_task(task_id: str):
         return service.get_task(task_id)
 
-    @app.post("/api/v1/tasks/{task_id}/quotes", status_code=201)
+    @app.post("/api/v1/tasks/{task_id}/quotes", status_code=201, deprecated=True)
     def upload_quote(
         task_id: str,
         idempotency_key: IdempotencyKey,
@@ -244,6 +267,11 @@ def create_app(
         is_synthetic: Annotated[bool, Form()] = False,
         file: UploadFile = File(...),
     ):
+        if not allow_legacy_direct_quote_upload:
+            raise BackendError(
+                "quote_draft_required",
+                "Upload and review a quote draft before formal submission.",
+            )
         result = service.upload_quote_stream(
             task_id,
             expected_task_revision=expected_task_revision,
@@ -255,6 +283,82 @@ def create_app(
             is_synthetic=is_synthetic,
         )
         return {key: value for key, value in result.items() if key != "storage_path"}
+
+    @app.post("/api/v1/tasks/{task_id}/quote-drafts", status_code=202)
+    def upload_quote_draft(
+        task_id: str,
+        idempotency_key: IdempotencyKey,
+        expected_task_revision: Annotated[int, Form(ge=1)],
+        supplier_id: Annotated[str, Form(min_length=1, max_length=128)],
+        is_synthetic: Annotated[bool, Form()] = False,
+        file: UploadFile = File(...),
+    ):
+        return service.upload_quote_draft_stream(
+            task_id,
+            expected_task_revision=expected_task_revision,
+            supplier_id=supplier_id,
+            original_filename=file.filename or "quote",
+            media_type=file.content_type or "application/octet-stream",
+            stream=file.file,
+            idempotency_key=idempotency_key,
+            is_synthetic=is_synthetic,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/quote-drafts")
+    def list_quote_drafts(task_id: str):
+        return service.list_quote_drafts(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}")
+    def get_quote_draft(task_id: str, draft_id: str):
+        return service.get_quote_draft(task_id, draft_id)
+
+    @app.put("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/corrections")
+    def correct_quote_draft(
+        task_id: str,
+        draft_id: str,
+        body: QuoteDraftCorrectionRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.correct_quote_draft(
+            task_id,
+            draft_id,
+            expected_draft_revision=body.expected_draft_revision,
+            corrections=[item.model_dump(mode="json") for item in body.corrections],
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/submit", status_code=201)
+    def submit_quote_draft(
+        task_id: str,
+        draft_id: str,
+        body: SubmitQuoteDraftRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.submit_quote_draft(
+            task_id,
+            draft_id,
+            expected_task_revision=body.expected_task_revision,
+            expected_draft_revision=body.expected_draft_revision,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/discard")
+    def discard_quote_draft(
+        task_id: str,
+        draft_id: str,
+        body: DiscardQuoteDraftRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.discard_quote_draft(
+            task_id,
+            draft_id,
+            expected_draft_revision=body.expected_draft_revision,
+            idempotency_key=idempotency_key,
+        )
 
     @app.get("/api/v1/tasks/{task_id}/quotes")
     def list_quotes(task_id: str):
@@ -498,4 +602,5 @@ app = create_app(
     ),
     readiness_check=readiness_probe(_engine),
     policy_file_import_service=_policy_file_import_service,
+    allow_legacy_direct_quote_upload=settings.allow_legacy_direct_quote_upload,
 )

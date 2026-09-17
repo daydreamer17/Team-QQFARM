@@ -12,7 +12,7 @@ from .backend.checkpoints import checkpoint_connection_string
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
-from .backend.workflow import DefaultQuoteProcessor, WorkflowRunner
+from .backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
 from .extraction.dictionary import QuoteDictionary
 from .extraction.errors import ExtractionError
 from .rag.clients import (
@@ -35,6 +35,12 @@ def run_job(job_id: str) -> dict:
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
+    if service.job_type(job_id) == "DRAFT_REVIEW":
+        return DraftReviewRunner(
+            service,
+            processor=processor,
+            dictionary_path=settings.quote_dictionary_path,
+        ).run_job(job_id)
     policy_retriever = HybridPolicyRetriever(
         SQLPolicyRepository(sessions),
         SiliconFlowEmbeddingClient(EmbeddingConfig.from_env()),

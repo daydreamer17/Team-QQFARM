@@ -150,6 +150,114 @@ class DefaultQuoteProcessor:
         )
 
 
+class DraftReviewRunner:
+    """Parse and deterministically review a quote before it becomes task input."""
+
+    def __init__(
+        self,
+        service: BackendService,
+        *,
+        processor: QuoteProcessor,
+        dictionary_path: str | Path,
+    ) -> None:
+        self.service = service
+        self.processor = processor
+        self.dictionary = QuoteDictionary.load(dictionary_path)
+
+    def run_job(self, job_id: str) -> dict[str, Any]:
+        job = self.service.claim_quote_draft_job(job_id)
+        context = self.service.quote_draft_job_context(job_id)
+        budget = ModelCallBudget(
+            graph_run_id=context["quote_draft_id"],
+            calls_used=context["calls_used"],
+            max_calls=context["max_calls"],
+        )
+        try:
+            document_context = DocumentContext(
+                task_id=context["task_id"],
+                task_revision=context["task_revision"],
+                scenario_id=context["scenario_id"],
+                quote_id=context["quote_id"],
+                quote_version=1,
+                document_id=context["document_id"],
+                document_version=1,
+                supplier_id=context["supplier_id"],
+            )
+            try:
+                batch = self.processor.process(
+                    path=Path(context["storage_path"]),
+                    media_type=context["media_type"],
+                    context=document_context,
+                    budget=budget,
+                )
+            finally:
+                self.service.record_quote_draft_calls(
+                    context["quote_draft_id"], budget.calls_used
+                )
+            parsed_artifact = self.service.append_artifact(
+                task_id=context["task_id"],
+                task_revision=context["task_revision"],
+                artifact_type="PARSED_INPUT",
+                schema_version=batch.schema_version,
+                payload=batch.parsed_input.model_dump(mode="json"),
+                quote_id=context["quote_id"],
+                document_id=context["document_id"],
+            )
+            batch_artifact = self.service.append_artifact(
+                task_id=context["task_id"],
+                task_revision=context["task_revision"],
+                artifact_type="EXTRACTION_BATCH",
+                schema_version=batch.schema_version,
+                payload=batch.model_dump(mode="json"),
+                parent_artifact_id=parsed_artifact["artifact_id"],
+                quote_id=context["quote_id"],
+                document_id=context["document_id"],
+            )
+            requirement = ProcurementRequirement.model_validate(context["requirement"])
+            envelope = review_extraction_batch(
+                batch,
+                self.dictionary,
+                CriticalityContext(
+                    required_revision=requirement.revision,
+                    base_unit=requirement.base_unit,
+                ),
+                input_is_synthetic=context["is_synthetic"],
+                reviewed_at=datetime.now(timezone.utc),
+            )
+            review_artifact = self.service.append_artifact(
+                task_id=context["task_id"],
+                task_revision=context["task_revision"],
+                artifact_type="REVIEW_ENVELOPE",
+                schema_version=envelope.schema_version,
+                payload=envelope.model_dump(mode="json"),
+                parent_artifact_id=batch_artifact["artifact_id"],
+                quote_id=context["quote_id"],
+                document_id=context["document_id"],
+            )
+            completed = self.service.complete_quote_draft_job(
+                job_id,
+                parsed_artifact_id=parsed_artifact["artifact_id"],
+                batch_artifact_id=batch_artifact["artifact_id"],
+                review_artifact_id=review_artifact["artifact_id"],
+                downstream_ready=envelope.downstream_ready,
+            )
+            return {
+                "job_id": job_id,
+                "quote_draft_id": context["quote_draft_id"],
+                "status": completed["status"],
+            }
+        except Exception as exc:
+            logger.exception("Quote draft job %s failed", job_id)
+            if isinstance(exc, BackendError):
+                code, message = exc.code, exc.message
+            elif isinstance(exc, ExtractionError):
+                code, message = exc.code, str(exc)
+            else:
+                code, message = "draft_review_failed", "Quote draft review failed."
+            self.service.fail_quote_draft_job(job_id, code=code, message=message)
+            raise
+
+
 class WorkflowState(TypedDict, total=False):
     task_id: str
     graph_run_id: str

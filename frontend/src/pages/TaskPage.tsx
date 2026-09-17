@@ -57,6 +57,7 @@ export function TaskPage() {
         resultId={task.data.current_result_id}
         quoteCount={task.data.quotes.length}
         reviewBlocked={reviewBlocked}
+        policyReviewBlocked={task.data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
         active="overview"
       />
 
@@ -85,6 +86,8 @@ export function TaskPage() {
           <div><dt>交付地点</dt><dd>{requirement.delivery_location}</dd></div>
           <div><dt>主要排序偏好</dt><dd>{requirement.ranking_preference}</dd></div>
           <div><dt>次要偏好</dt><dd>{requirement.secondary_preference ?? '—'}</dd></div>
+          <div><dt>Policy 绑定</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.policy_set_version} / ${task.data.policy_binding.policy_index_version}` : '未绑定'}</dd></div>
+          <div><dt>制度范围</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.category} · ${task.data.policy_binding.region}` : '未执行制度检索'}</dd></div>
         </dl>
         <div className="requirement-actions">
           <div className="inline-actions">

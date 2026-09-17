@@ -32,6 +32,32 @@ dist/
 .ocr-tools/
 .local-data/
 .DS_Store
+._*
+Thumbs.db
+
+# Local credentials and package-manager authentication.
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.pypirc
+
+# Local logs, process files, and browser-test artifacts.
+*.log
+*.pid
+logs/
+coverage/
+.nyc_output/
+.eslintcache
+playwright-report/
+test-results/
+
+# Local editor metadata and temporary files.
+.idea/
+*.swp
+*.swo
+*~
 
 # Real-model evaluation outputs are local evidence and may contain provider diagnostics.
 /evaluation/results/local/

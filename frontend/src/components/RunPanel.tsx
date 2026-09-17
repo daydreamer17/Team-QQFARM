@@ -44,14 +44,14 @@ function statusCopy(task: TaskDetail) {
     case 'FAILED':
       return ['分析失败', '运行没有完成，请查看安全错误信息并决定是否重试。']
     default:
-      return ['准备启动分析', '报价上传完成后，可创建一次新的分析运行。']
+      return ['准备启动分析', '正式报价提交后，可创建一次新的决策分析运行。']
   }
 }
 
 function jobErrorMessage(task: TaskDetail) {
   const code = task.current_job?.error_code
   const messages: Record<string, string> = {
-    review_required: '报价中有字段需要人工核对。请进入“人工审核”，一次性处理全部阻塞项。',
+    review_required: '报价中有字段需要人工核对。请返回“报价与证据”，一次性处理全部阻塞项。',
     csv_header_unregistered: 'CSV 表头不是当前支持的报价模板。请使用 V1、V2、V3、V5 的已登记供应商模板，或 V6 固定模板。',
     csv_duplicate_headers: 'CSV 表头包含重复列名，无法确定字段来源。请修正重复列后重新上传。',
     csv_header_missing: 'CSV 没有表头，无法识别字段。',

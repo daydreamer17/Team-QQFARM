@@ -187,6 +187,7 @@ export function ResultPage() {
   }
 
   const payload = resultQuery.data.result
+  const policyRetrievals = resultQuery.data.policy_retrievals
   const recommended = new Set(payload.recommended_quote_ids)
   const recommendedNames = suppliers
     .filter((supplier) => recommended.has(supplier.quote_id))
@@ -198,6 +199,16 @@ export function ResultPage() {
   const selectedSupplier = selectedSupplierIndex === null ? null : suppliers[selectedSupplierIndex]
   const selectedFieldsQuery = selectedSupplierIndex === null ? null : fieldQueries[selectedSupplierIndex]
   const currency = task?.requirement.currency
+  const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
+  let policyState = '未绑定 Policy'
+  if (taskQuery.isPending) policyState = '正在读取 Policy 绑定'
+  else if (taskQuery.isError) policyState = 'Policy 绑定读取失败'
+  else if (task?.policy_binding && policyRetrievals.length === 0) policyState = '未执行制度检索'
+  else if (task?.policy_binding && successfulPolicyRetrievals === policyRetrievals.length) {
+    policyState = `${successfulPolicyRetrievals} / ${policyRetrievals.length} 找到证据`
+  } else if (task?.policy_binding) {
+    policyState = `${policyRetrievals.length - successfulPolicyRetrievals} 项需复核`
+  }
 
   return (
     <div className="page-stack result-page">
@@ -211,6 +222,8 @@ export function ResultPage() {
           revision={task.task_revision}
           resultId={resultQuery.data.result_id}
           quoteCount={task.quotes.length}
+          reviewBlocked={Boolean(task.current_issue)}
+          policyReviewBlocked={task.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
           active="decision"
         />
       ) : (
@@ -239,8 +252,7 @@ export function ResultPage() {
         <article><span>任务</span><strong>{task?.status ?? '已生成结果'}</strong></article>
         <article><span>字段证据</span><strong>{loadedEvidenceCount} / {suppliers.length} 已读取</strong></article>
         <article><span>可行性</span><strong>{feasibleCount} 可行 · {pendingCount} 待确认</strong></article>
-        <article><span>合规</span><strong>未接入 · Target</strong></article>
-        <article><span>审批</span><strong>尚不可用</strong></article>
+        <article><span>制度证据</span><strong>{policyState}</strong></article>
       </section>
 
       {task && (
@@ -252,6 +264,25 @@ export function ResultPage() {
           <span>✓ 截止 {task.requirement.delivery_deadline}</span>
         </section>
       )}
+
+      <section className="result-policy-summary">
+        <div>
+          <p className="eyebrow">POLICY EVIDENCE</p>
+          <h2>制度证据摘要</h2>
+          <p>{policyState}。制度检索结果仅证明找到或未找到可引用条款，不代表最终合规审批。</p>
+        </div>
+        <div className="result-policy-checks">
+          {policyRetrievals.length > 0 ? policyRetrievals.map((retrieval) => {
+            const codes = [...new Set([...retrieval.covered_control_codes, ...retrieval.missing_control_codes])]
+            return (
+              <span className={`policy-retrieval-status policy-status-${retrieval.status.toLowerCase().replace('_', '-')}`} key={retrieval.retrieval_id}>
+                {codes.join('、') || '控制项'} · {retrieval.status}
+              </span>
+            )
+          }) : <span className="status-pill status-muted">无制度检索记录</span>}
+        </div>
+        {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/compliance`}>查看完整制度证据</Link>}
+      </section>
 
       <section className="decision-grid">
         <div className="comparison-table-wrap">
@@ -312,7 +343,7 @@ export function ResultPage() {
             <span>{displayDate(payload.evaluated_at)}</span>
           </div>
           <div className="gate-warning">
-            合规和审批阶段尚未接入，因此此处只展示“初步推荐”，不能视为最终中标或采购批准。
+            制度证据不等于最终合规审批，审批功能仍为 Target；此处只能作为初步推荐，不能视为中标或采购批准。
           </div>
           <div className="recommendation-actions">
             {suppliers.length > 0 && (
@@ -324,7 +355,7 @@ export function ResultPage() {
                 查看关键证据
               </button>
             )}
-            <button className="button button-submit" type="button" disabled>进入合规 · Target</button>
+            {task && <Link className="button button-submit" to={`/tasks/${task.task_id}/compliance`}>查看制度证据</Link>}
           </div>
         </aside>
       </section>

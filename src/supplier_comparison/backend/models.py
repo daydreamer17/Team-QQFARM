@@ -121,6 +121,47 @@ class Document(Base):
     )
 
 
+class QuoteDraft(Base):
+    __tablename__ = "quote_drafts"
+
+    quote_draft_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    base_task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="UPLOADED")
+    proposed_quote_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    proposed_document_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    supplier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    is_synthetic: Mapped[bool] = mapped_column(nullable=False, default=False)
+    parsed_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    batch_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    review_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    calls_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    environment: Mapped[str | None] = mapped_column(String(32))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    dictionary_sha256: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
 class WorkflowArtifact(Base):
     __tablename__ = "workflow_artifacts"
 
@@ -206,9 +247,14 @@ class Job(Base):
     task_id: Mapped[str] = mapped_column(
         ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
     )
-    graph_run_id: Mapped[str] = mapped_column(
+    graph_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("graph_runs.graph_run_id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    quote_draft_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quote_drafts.quote_draft_id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
     issue_id: Mapped[str | None] = mapped_column(String(64))
