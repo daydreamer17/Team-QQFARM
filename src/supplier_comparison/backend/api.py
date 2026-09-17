@@ -364,6 +364,52 @@ def create_app(
 
     if policy_file_import_service is not None:
 
+        @app.get("/api/v1/policy-sets")
+        def list_policy_sets(
+            status: Literal["PUBLISHED"] = "PUBLISHED",
+            category: Annotated[
+                str | None, Query(min_length=1, max_length=128)
+            ] = None,
+            region: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+            limit: Annotated[int, Query(ge=1, le=100)] = 50,
+            offset: Annotated[int, Query(ge=0)] = 0,
+        ):
+            return policy_file_import_service.list_policy_sets(
+                status=status,
+                category=category,
+                region=region,
+                limit=limit,
+                offset=offset,
+            )
+
+        @app.get("/api/v1/policy-imports")
+        def list_policy_imports(
+            status: Literal[
+                "REVIEW_REQUIRED",
+                "READY_TO_PUBLISH",
+                "PUBLISHING",
+                "PUBLISHED",
+            ]
+            | None = None,
+            policy_set_version: Annotated[
+                str | None, Query(min_length=1, max_length=128)
+            ] = None,
+            category: Annotated[
+                str | None, Query(min_length=1, max_length=128)
+            ] = None,
+            region: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+            limit: Annotated[int, Query(ge=1, le=100)] = 50,
+            offset: Annotated[int, Query(ge=0)] = 0,
+        ):
+            return policy_file_import_service.list_imports(
+                status=status,
+                policy_set_version=policy_set_version,
+                category=category,
+                region=region,
+                limit=limit,
+                offset=offset,
+            )
+
         @app.post("/api/v1/policy-imports", status_code=201)
         def upload_policy_file(
             idempotency_key: IdempotencyKey,
