@@ -39,6 +39,12 @@ def test_initial_migration_supports_upgrade_downgrade_upgrade(tmp_path: Path) ->
     command.upgrade(config, "head")
     engine = create_engine(config.get_main_option("sqlalchemy.url"))
     assert BUSINESS_TABLES.issubset(set(inspect(engine).get_table_names()))
+    assert {
+        "policy_set_version",
+        "policy_index_version",
+        "policy_category",
+        "policy_region",
+    }.issubset({column["name"] for column in inspect(engine).get_columns("tasks")})
 
     command.downgrade(config, "base")
     assert BUSINESS_TABLES.isdisjoint(set(inspect(engine).get_table_names()))

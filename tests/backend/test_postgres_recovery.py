@@ -17,6 +17,11 @@ from supplier_comparison.backend.settings import settings
 from supplier_comparison.backend.workflow import WorkflowRunner
 
 from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
+from .test_workflow_policy_rag import (
+    POLICY_INDEX_VERSION,
+    POLICY_SET_VERSION,
+    RecordingPolicyRetriever,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -216,3 +221,76 @@ def test_postgres_serializes_same_revision_quote_uploads(tmp_path: Path) -> None
                 text("DELETE FROM idempotency_records WHERE actor_id = :actor_id"),
                 {"actor_id": actor_id},
             )
+
+
+def test_postgres_workflow_persists_policy_gate_and_citations(tmp_path: Path) -> None:
+    database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    actor_id = f"postgres-policy-{uuid4().hex}"
+    service = BackendService(sessions, tmp_path / "quotes", actor_id=actor_id)
+    task = service.create_task(
+        _requirement(),
+        idempotency_key=f"create-{actor_id}",
+        scenario_id="POSTGRES-POLICY-GATE",
+        policy_set_version=POLICY_SET_VERSION,
+        policy_index_version=POLICY_INDEX_VERSION,
+        policy_category="Electronics",
+        policy_region="SG",
+    )
+    uploaded = service.upload_quote(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-024",
+        original_filename="supplier-c.csv",
+        media_type="text/csv",
+        content=b"postgres-policy-placeholder",
+        idempotency_key=f"upload-{actor_id}",
+        is_synthetic=True,
+    )
+    started = service.start_run(
+        task["task_id"],
+        expected_task_revision=uploaded["task_revision"],
+        idempotency_key=f"run-{actor_id}",
+    )
+    connection_string = checkpoint_connection_string(database_url)
+    try:
+        with PostgresSaver.from_conn_string(connection_string) as saver:
+            outcome = WorkflowRunner(
+                service,
+                processor=CanonicalCsvProcessor(tmp_path),
+                policy_retriever=RecordingPolicyRetriever(),
+                checkpointer=saver,
+                dictionary_path=DICTIONARY_PATH,
+                evaluated_at=datetime(2026, 9, 17, 1, 0, tzinfo=timezone.utc),
+            ).run_job(started["job_id"])
+        assert outcome["status"] == "SUCCEEDED"
+
+        engine.dispose()
+        reopened_engine = create_engine(database_url)
+        reopened_sessions = sessionmaker(reopened_engine, expire_on_commit=False)
+        reopened_service = BackendService(
+            reopened_sessions, tmp_path / "quotes", actor_id=actor_id
+        )
+        current = reopened_service.list_results(task["task_id"])[0]
+        assert current["is_current"] is True
+        assert len(current["policy_retrievals"]) == 3
+        assert {item["status"] for item in current["policy_retrievals"]} == {"OK"}
+        reopened_engine.dispose()
+    finally:
+        cleanup_engine = create_engine(database_url)
+        with cleanup_engine.begin() as connection:
+            for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                connection.execute(
+                    text(f"DELETE FROM {table} WHERE thread_id = :thread_id"),
+                    {"thread_id": started["graph_run_id"]},
+                )
+            connection.execute(
+                text("DELETE FROM tasks WHERE task_id = :task_id"),
+                {"task_id": task["task_id"]},
+            )
+            connection.execute(
+                text("DELETE FROM idempotency_records WHERE actor_id = :actor_id"),
+                {"actor_id": actor_id},
+            )
+        cleanup_engine.dispose()

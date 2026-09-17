@@ -80,6 +80,30 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert loaded.json()["requirement"]["budget_amount"] == "8000.00"
 
 
+def test_create_task_freezes_policy_set_and_index_binding(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    policy_binding = {
+        "policy_set_version": "2026.09.1",
+        "policy_index_version": "pidx-api-test",
+        "category": "Electronics",
+        "region": "SG",
+    }
+
+    created = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-with-policy"},
+        json={"requirement": REQUIREMENT, "policy_binding": policy_binding},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["policy_binding"] == policy_binding
+    loaded = http.get(f"/api/v1/tasks/{created.json()['task_id']}")
+    assert loaded.status_code == 200
+    assert loaded.json()["policy_binding"] == policy_binding
+
+
 def test_stale_mutation_returns_stable_error_envelope(
     client: tuple[TestClient, BackendService],
 ) -> None:

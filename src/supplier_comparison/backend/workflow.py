@@ -32,10 +32,36 @@ from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.hybrid_csv import RegisteredHybridCsvParser
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.service import extract_quote_candidates
-from supplier_comparison.rules import ProcurementRequirement, compare_reviewed_extractions
+from supplier_comparison.rag.contracts import (
+    PolicyRetriever,
+    RetrievalRequest,
+    RetrievalResult,
+    RetrievalStatus,
+)
+from supplier_comparison.rules import (
+    ComparisonResult,
+    ProcurementRequirement,
+    compare_reviewed_extractions,
+)
 from supplier_comparison.rules.contracts import RULE_VERSION
 
 from .service import BackendError, BackendService, ConflictError, new_id
+
+
+POLICY_RETRIEVAL_QUERIES = {
+    "APPROVED_SUPPLIER": (
+        "What procurement policy evidence is required to use an approved supplier "
+        "for an electronics purchase in Singapore?"
+    ),
+    "ROHS_COMPLIANCE": (
+        "What procurement policy evidence is required to verify current RoHS "
+        "compliance for an electronics supplier?"
+    ),
+    "AMOUNT_APPROVAL": (
+        "What procurement approval policy applies to the confirmed total amount "
+        "of an electronics purchase in Singapore?"
+    ),
+}
 
 
 class QuoteProcessor(Protocol):
@@ -117,6 +143,9 @@ class WorkflowState(TypedDict, total=False):
     missing_issue_id: str
     shipping_issue_id: str
     draft_result_id: str
+    snapshot_id: str
+    comparison_result_id: str
+    policy_retrieval_artifact_ids: dict[str, str]
     final_result_id: str
     evaluated_at: str
 
@@ -127,12 +156,14 @@ class WorkflowRunner:
         service: BackendService,
         *,
         processor: QuoteProcessor,
+        policy_retriever: PolicyRetriever | None = None,
         checkpointer,
         dictionary_path: str | Path,
         evaluated_at: datetime | None = None,
     ) -> None:
         self.service = service
         self.processor = processor
+        self.policy_retriever = policy_retriever
         self.dictionary_path = Path(dictionary_path)
         self.dictionary = QuoteDictionary.load(self.dictionary_path)
         self.dictionary_sha256 = hashlib.sha256(
@@ -151,6 +182,9 @@ class WorkflowRunner:
         builder.add_node("await_shipping_amount", self._await_shipping_amount)
         builder.add_node("apply_shipping_amount", self._apply_shipping_amount)
         builder.add_node("freeze_final_and_compare", self._freeze_final_and_compare)
+        builder.add_node("retrieve_policies", self._retrieve_policies)
+        builder.add_node("await_policy_evidence_review", self._await_policy_evidence_review)
+        builder.add_node("publish_final_result", self._publish_final_result)
         builder.add_edge(START, "load_context")
         builder.add_edge("load_context", "extract_documents")
         builder.add_edge("extract_documents", "review_quotes")
@@ -167,7 +201,17 @@ class WorkflowRunner:
         builder.add_edge("freeze_draft_and_compare", "await_shipping_amount")
         builder.add_edge("await_shipping_amount", "apply_shipping_amount")
         builder.add_edge("apply_shipping_amount", "freeze_final_and_compare")
-        builder.add_edge("freeze_final_and_compare", END)
+        builder.add_edge("freeze_final_and_compare", "retrieve_policies")
+        builder.add_conditional_edges(
+            "retrieve_policies",
+            self._route_after_policy_retrieval,
+            {
+                "ready": "publish_final_result",
+                "review_required": "await_policy_evidence_review",
+            },
+        )
+        builder.add_edge("publish_final_result", END)
+        builder.add_edge("await_policy_evidence_review", "freeze_final_and_compare")
         self.graph = builder.compile(checkpointer=checkpointer)
 
     def run_job(self, job_id: str) -> dict[str, Any]:
@@ -569,10 +613,21 @@ class WorkflowRunner:
         }
 
     def _freeze_final_and_compare(self, state: WorkflowState) -> WorkflowState:
-        _snapshot_id, result_id = self._freeze_compare_publish(state)
-        return {"final_result_id": result_id}
+        snapshot_id, result_id = self._freeze_compare_artifacts(state)
+        return {"snapshot_id": snapshot_id, "comparison_result_id": result_id}
 
     def _freeze_compare_publish(self, state: WorkflowState) -> tuple[str, str]:
+        snapshot_id, result_id = self._freeze_compare_artifacts(state)
+        self.service.publish_result(
+            task_id=state["task_id"],
+            graph_run_id=state["graph_run_id"],
+            task_revision=state["task_revision"],
+            snapshot_id=snapshot_id,
+            result_id=result_id,
+        )
+        return snapshot_id, result_id
+
+    def _freeze_compare_artifacts(self, state: WorkflowState) -> tuple[str, str]:
         context = self.service.workflow_context(state["graph_run_id"])
         envelopes = tuple(
             ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
@@ -593,7 +648,10 @@ class WorkflowRunner:
             "dictionary_version": self.dictionary.version,
             "dictionary_sha256": self.dictionary_sha256,
             "rule_version": RULE_VERSION,
-            "policy_set_version": None,
+            "policy_set_version": context["policy_set_version"],
+            "policy_index_version": context["policy_index_version"],
+            "policy_category": context["policy_category"],
+            "policy_region": context["policy_region"],
             "evaluated_at": evaluated_at.isoformat(),
         }
         snapshot_artifact = self.service.append_artifact(
@@ -613,14 +671,172 @@ class WorkflowRunner:
             parent_artifact_id=snapshot_artifact["artifact_id"],
             graph_run_id=state["graph_run_id"],
         )
+        return snapshot_artifact["artifact_id"], result_artifact["artifact_id"]
+
+    def _retrieve_policies(self, state: WorkflowState) -> WorkflowState:
+        context = self.service.workflow_context(state["graph_run_id"])
+        comparison = ComparisonResult.model_validate(
+            self.service.artifact_payload(state["comparison_result_id"])
+        )
+        if not comparison.final_recommendation_allowed:
+            return {"policy_retrieval_artifact_ids": {}}
+        binding = (
+            context["policy_set_version"],
+            context["policy_index_version"],
+            context["policy_category"],
+            context["policy_region"],
+        )
+        if not any(binding):
+            return {"policy_retrieval_artifact_ids": {}}
+        if not all(binding):
+            raise BackendError(
+                "policy_binding_incomplete",
+                "The task policy binding is incomplete.",
+            )
+
+        artifacts: dict[str, str] = {}
+        for control_code, query in POLICY_RETRIEVAL_QUERIES.items():
+            request = RetrievalRequest(
+                task_id=state["task_id"],
+                task_revision=state["task_revision"],
+                snapshot_id=state["snapshot_id"],
+                policy_set_version=context["policy_set_version"],
+                policy_index_version=context["policy_index_version"],
+                query=query,
+                required_control_codes=[control_code],
+                category=context["policy_category"],
+                region=context["policy_region"],
+                evaluated_at=self._state_evaluated_at(state),
+            )
+            result = self._safe_policy_retrieval(request, control_code)
+            artifact = self.service.append_artifact(
+                task_id=state["task_id"],
+                task_revision=state["task_revision"],
+                artifact_type="POLICY_RETRIEVAL_RESULT",
+                schema_version="policy-retrieval/1.0.0",
+                payload=result.model_dump(mode="json"),
+                parent_artifact_id=state["comparison_result_id"],
+                graph_run_id=state["graph_run_id"],
+            )
+            artifacts[control_code] = artifact["artifact_id"]
+        return {"policy_retrieval_artifact_ids": artifacts}
+
+    def _safe_policy_retrieval(
+        self, request: RetrievalRequest, control_code: str
+    ) -> RetrievalResult:
+        if self.policy_retriever is None:
+            return self._policy_error_result(
+                request, control_code, "policy_retriever_not_configured"
+            )
+        try:
+            result = self.policy_retriever.retrieve(request)
+        except Exception:
+            return self._policy_error_result(
+                request, control_code, "policy_retriever_failed"
+            )
+        if (
+            result.policy_set_version != request.policy_set_version
+            or result.policy_index_version != request.policy_index_version
+            or (
+                result.status == RetrievalStatus.OK
+                and (
+                    control_code not in result.covered_control_codes
+                    or not any(
+                        citation.control_code == control_code
+                        for citation in result.citations
+                    )
+                )
+            )
+        ):
+            return self._policy_error_result(
+                request, control_code, "policy_retrieval_contract_invalid"
+            )
+        return result
+
+    @staticmethod
+    def _policy_error_result(
+        request: RetrievalRequest, control_code: str, error_code: str
+    ) -> RetrievalResult:
+        return RetrievalResult(
+            retrieval_id=new_id("retrieval"),
+            status=RetrievalStatus.ERROR,
+            policy_set_version=request.policy_set_version,
+            policy_index_version=request.policy_index_version,
+            embedding_model="unavailable",
+            rerank_model="unavailable",
+            filters={
+                "control_codes": [control_code],
+                "category": request.category,
+                "region": request.region,
+                "evaluated_at": request.evaluated_at.isoformat(),
+            },
+            covered_control_codes=[],
+            missing_control_codes=[control_code],
+            citations=[],
+            candidates=[],
+            latency_ms={"total": 0.0},
+            attempts={"embedding": 0, "rerank": 0},
+            error_code=error_code,
+        )
+
+    def _route_after_policy_retrieval(self, state: WorkflowState) -> str:
+        artifact_ids = state.get("policy_retrieval_artifact_ids", {})
+        if not artifact_ids:
+            return "ready"
+        for artifact_id in artifact_ids.values():
+            result = RetrievalResult.model_validate(
+                self.service.artifact_payload(artifact_id)
+            )
+            if result.status != RetrievalStatus.OK:
+                return "review_required"
+        return "ready"
+
+    def _await_policy_evidence_review(self, state: WorkflowState) -> WorkflowState:
+        statuses = {
+            control_code: RetrievalResult.model_validate(
+                self.service.artifact_payload(artifact_id)
+            ).status.value
+            for control_code, artifact_id in state["policy_retrieval_artifact_ids"].items()
+        }
+        issue = self.service.open_issue(
+            task_id=state["task_id"],
+            graph_run_id=state["graph_run_id"],
+            task_revision=state["task_revision"],
+            issue_type="POLICY_EVIDENCE_REVIEW",
+            quote_id=None,
+            field_name=f"policy_retrieval:{state['task_revision']}",
+            question=(
+                "采购制度证据缺失、冲突或检索失败。修复临时故障后可重试；"
+                "制度内容或索引发生变化时，应使用新发布版本创建新任务。"
+            ),
+            answer_schema={
+                "answer_type": "RETRY_POLICY_RETRIEVAL",
+                "changed_policy_requires": "NEW_TASK_WITH_NEW_POLICY_BINDING",
+                "retrieval_statuses": statuses,
+            },
+        )
+        resumed = interrupt(self._safe_interrupt(issue))
+        if not isinstance(resumed, dict) or resumed.get("issue_id") != issue["issue_id"]:
+            raise ConflictError(
+                "resume_issue_mismatch", "Resume token does not match the issue."
+            )
+        resolved = self.service.get_issue(issue["issue_id"])
+        if resolved["status"] != "RESOLVED":
+            raise ConflictError("issue_not_resolved", "Issue must be resolved before resume.")
+        return {
+            "task_revision": resolved["resolved_revision"],
+            "policy_retrieval_artifact_ids": {},
+        }
+
+    def _publish_final_result(self, state: WorkflowState) -> WorkflowState:
         self.service.publish_result(
             task_id=state["task_id"],
             graph_run_id=state["graph_run_id"],
             task_revision=state["task_revision"],
-            snapshot_id=snapshot_artifact["artifact_id"],
-            result_id=result_artifact["artifact_id"],
+            snapshot_id=state["snapshot_id"],
+            result_id=state["comparison_result_id"],
         )
-        return snapshot_artifact["artifact_id"], result_artifact["artifact_id"]
+        return {"final_result_id": state["comparison_result_id"]}
 
     def _missing_shipping_quote(self, state: WorkflowState) -> str:
         matches: list[str] = []

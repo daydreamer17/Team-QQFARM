@@ -479,7 +479,7 @@ OCR 层拆分验证关闭、开启、部分确认、`UNREADABLE`、纠正、重�
 | React 操作界面 | Week2 待实现 |
 | 通用多字段补问和人工排除 | Week2 待扩展 |
 | 实验性 OCR 辅助提取与关键字段确认 | Week2 待实现；正式无人值守放行不在本周范围 |
-| BM25＋pgvector＋Embedding／Rerank API 制度检索 | Week2 已实现本地子系统、固定测试、真实模型 smoke 和 8 题开发集评测；待 LangGraph／合规门禁接入及 Lightsail 验收 |
+| BM25＋pgvector＋Embedding／Rerank API 制度检索 | Week2 已实现本地子系统、真实模型 smoke、8 题开发集评测及 LangGraph 发布门禁；待供应商合规矩阵接入及 Lightsail 验收 |
 | 批准供应商＋RoHS 结构化合规门禁 | Week2 待实现 |
 | 报价 v2 替换和需求更新 | Week2 待实现 |
 | 具名身份、审批和 HTML 报告 | Week2 待实现 |

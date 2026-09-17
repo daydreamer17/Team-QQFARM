@@ -42,9 +42,17 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class PolicyBindingRequest(ApiModel):
+    policy_set_version: str = Field(min_length=1, max_length=128)
+    policy_index_version: str = Field(min_length=1, max_length=128)
+    category: str = Field(min_length=1, max_length=128)
+    region: str = Field(min_length=1, max_length=64)
+
+
 class CreateTaskRequest(ApiModel):
     requirement: ProcurementRequirement
     scenario_id: str | None = Field(default=None, max_length=128)
+    policy_binding: PolicyBindingRequest | None = None
 
 
 class StartRunRequest(ApiModel):
@@ -68,9 +76,15 @@ class ShippingAmountAnswer(ApiModel):
         return value
 
 
+class RetryPolicyRetrievalAnswer(ApiModel):
+    answer_type: Literal["RETRY_POLICY_RETRIEVAL"]
+
+
 class IssueAnswerRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
-    answer: ConfirmMissingAnswer | ShippingAmountAnswer = Field(discriminator="answer_type")
+    answer: ConfirmMissingAnswer | ShippingAmountAnswer | RetryPolicyRetrievalAnswer = Field(
+        discriminator="answer_type"
+    )
 
 
 class FieldCorrectionRequest(ApiModel):
@@ -185,6 +199,14 @@ def create_app(
             body.requirement,
             idempotency_key=idempotency_key,
             scenario_id=body.scenario_id,
+            policy_set_version=(
+                body.policy_binding.policy_set_version if body.policy_binding else None
+            ),
+            policy_index_version=(
+                body.policy_binding.policy_index_version if body.policy_binding else None
+            ),
+            policy_category=(body.policy_binding.category if body.policy_binding else None),
+            policy_region=(body.policy_binding.region if body.policy_binding else None),
         )
 
     @app.get("/api/v1/tasks/{task_id}")

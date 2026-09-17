@@ -46,7 +46,7 @@ docker compose ps
 curl --fail --silent http://127.0.0.1:8000/health/ready
 ```
 
-通过条件：工作区没有意外改动；commit 与待验收提交一致；迁移 head 为 `c83a72d80b1f`；PostgreSQL 和 API 均为 healthy；ready 响应为 `ready`。
+通过条件：工作区没有意外改动；commit 与待验收提交一致；迁移 head 为 `f3b5d7e9a1c2`；PostgreSQL 和 API 均为 healthy；ready 响应为 `ready`。
 
 ## 4. 官方模型与制度发布
 
@@ -129,7 +129,7 @@ unset POSTGRES_PORT API_PORT
 | 验收项 | 本地预检 | Lightsail 官方结果 | 证据摘要 |
 | --- | --- | --- | --- |
 | Compose 构建与健康检查 | `PASSED` | `BLOCKED_EXTERNAL` | API 与 PostgreSQL 均 healthy；`/health/ready` 返回 `ready`；构建镜像与运行镜像均为 `sha256:ddf62265...8992507` |
-| Alembic head | `PASSED` | `BLOCKED_EXTERNAL` | 容器内执行 `upgrade head` 成功，`alembic current` 为 `c83a72d80b1f (head)` |
+| Alembic head | `PASSED` | `BLOCKED_EXTERNAL` | 本地数据库执行 `upgrade head` 成功，`alembic current` 为 `f3b5d7e9a1c2 (head)` |
 | Embedding 授权与 1024 维 | `PASSED` | `BLOCKED_EXTERNAL` | `BAAI/bge-m3` 一次调用成功，返回 1024 维 |
 | Rerank 授权与映射 | `PASSED` | `BLOCKED_EXTERNAL` | `BAAI/bge-reranker-v2-m3` 一次调用成功，返回合法且唯一的索引 `[0, 1]` |
 | 主制度原子发布与幂等重放 | `PASSED` | `BLOCKED_EXTERNAL` | 主环境重放返回 `replayed=true`；干净卷首次发布 24 条条款和 24 个向量，索引为 `pidx-375fa65c082096e41d4f6b66`；冲突夹具 2 条并可重放 |
