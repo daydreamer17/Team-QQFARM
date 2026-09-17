@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
@@ -586,6 +586,7 @@ class BackendService:
                     "graph_run_id": artifact.graph_run_id,
                     "is_current": artifact.artifact_id == task.current_result_id,
                     "result": dict(artifact.payload),
+                    "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
                     "policy_retrievals": self._policy_retrieval_payloads(
                         session, artifact.artifact_id
                     ),
@@ -611,10 +612,19 @@ class BackendService:
                 "graph_run_id": artifact.graph_run_id,
                 "is_current": artifact.artifact_id == task.current_result_id,
                 "result": dict(artifact.payload),
+                "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
                 "policy_retrievals": self._policy_retrieval_payloads(
                     session, artifact.artifact_id
                 ),
             }
+
+    @staticmethod
+    def _decision_impact_payload(session: Session, result_id: str) -> dict[str, Any] | None:
+        result = session.get(WorkflowArtifact, result_id)
+        snapshot = session.get(WorkflowArtifact, result.parent_artifact_id) if result and result.parent_artifact_id else None
+        impact_id = snapshot.payload.get("decision_impact_artifact_id") if snapshot else None
+        artifact = session.get(WorkflowArtifact, impact_id) if impact_id else None
+        return dict(artifact.payload) if artifact is not None else None
 
     def list_quote_fields(self, task_id: str, quote_id: str) -> dict[str, Any]:
         with self.session_factory() as session:
@@ -703,6 +713,246 @@ class BackendService:
                 "fields": fields,
             }
 
+    def list_review_problems(self, task_id: str) -> dict[str, Any]:
+        """Read all current findings together without inventing human approvals."""
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            quotes = session.scalars(select(Quote).where(
+                Quote.task_id == task_id, Quote.active.is_(True)
+            ).order_by(Quote.quote_id)).all()
+            reports = []
+            problems = []
+            impact = session.scalar(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task_id,
+                WorkflowArtifact.graph_run_id == task.current_graph_run_id,
+                WorkflowArtifact.task_revision == task.current_revision,
+                WorkflowArtifact.artifact_type == "DECISION_IMPACT_RESULT",
+            ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc()))
+            nonblocking = set(impact.payload.get("nonblocking_unknown_quote_ids", [])) if impact else set()
+            for quote in quotes:
+                execution = session.scalar(select(DocumentExecution).join(
+                    Document, Document.document_id == DocumentExecution.document_id
+                ).where(
+                    DocumentExecution.graph_run_id == task.current_graph_run_id,
+                    Document.quote_id == quote.quote_id,
+                    Document.quote_version == quote.current_version,
+                ).order_by(DocumentExecution.document_execution_id))
+                batch_artifact = session.get(WorkflowArtifact, execution.batch_artifact_id) if execution and execution.batch_artifact_id else None
+                review_artifact = session.get(WorkflowArtifact, execution.review_artifact_id) if execution and execution.review_artifact_id else None
+                # Corrections queue a new batch, but do not reuse an old review.
+                batch = batch_artifact.payload if batch_artifact else {}
+                candidates = {c["field_name"]: c for c in batch.get("candidates", [])}
+                document = session.get(Document, execution.document_id) if execution else None
+                current_review = bool(
+                    review_artifact and batch_artifact
+                    and review_artifact.graph_run_id == task.current_graph_run_id
+                    and review_artifact.task_revision <= task.current_revision
+                    and review_artifact.payload.get("batch") == batch_artifact.payload
+                )
+                envelope = review_artifact.payload if current_review else {}
+                report = {
+                    "quote_id": quote.quote_id, "supplier_id": quote.supplier_id,
+                    "quote_version": quote.current_version,
+                    "document_id": document.document_id if document else None,
+                    "original_filename": document.original_filename if document else None,
+                    "batch_artifact_id": batch_artifact.artifact_id if batch_artifact else None,
+                    "review_artifact_id": review_artifact.artifact_id if current_review else None,
+                    "review_status": envelope.get("review_status"),
+                    "review_pending": not current_review,
+                    "fields": list(candidates.values()),
+                    "evidence_sources": [
+                        {key: source.get(key) for key in (
+                            "source_id", "kind", "raw_text", "page_number", "row_number", "column_name"
+                        )}
+                        for source in batch.get("parsed_input", {}).get("sources", [])
+                    ],
+                }
+                reports.append(report)
+                for finding in (envelope.get("review") or {}).get("findings", []):
+                    if finding.get("resolved") or finding.get("decision") == "PASS":
+                        continue
+                    candidate = candidates.get(finding["field_name"], {})
+                    is_blocking = finding.get("severity") == "BLOCKING" or finding.get("decision") == "REJECTED"
+                    # Dominance proof applies only to audited missing fees.
+                    needs_resolution = is_blocking and quote.quote_id not in nonblocking
+                    problems.append(dict(finding) | {
+                        "quote_id": quote.quote_id, "quote_version": quote.current_version,
+                        "field_version": candidate.get("field_version"),
+                        "raw_value": candidate.get("raw_value"),
+                        "normalized_value": candidate.get("normalized_value"),
+                        "unit": candidate.get("unit"),
+                        "document_id": report["document_id"],
+                        "original_filename": report["original_filename"],
+                        "needs_resolution": needs_resolution,
+                        "resolution": "FIELD_CORRECTION" if candidate and finding.get("review_reason") != "SYSTEM_IDENTITY_ERROR" else "REEXTRACT_OR_SYSTEM_REPAIR",
+                    })
+                # The comparison boundary can detect issues beyond extraction
+                # findings (for example FREE shipping with a positive amount).
+                comparison_rows = (impact.payload.get("comparison") or {}).get("supplier_results", []) if impact else []
+                comparison_row = next((row for row in comparison_rows if row["quote_id"] == quote.quote_id), {})
+                for issue in comparison_row.get("pending_reasons", []):
+                    for field_name in issue.get("fields", []):
+                        if any(p["quote_id"] == quote.quote_id and p["field_name"] == field_name
+                               and issue["code"] in p["codes"] for p in problems):
+                            continue
+                        candidate = candidates.get(field_name, {})
+                        problems.append({
+                            "finding_id": f"comparison:{quote.quote_id}:{field_name}:{issue['code']}",
+                            "field_name": field_name, "codes": [issue["code"]],
+                            "message": issue["message"], "decision": "REVIEW_REQUIRED",
+                            "severity": "BLOCKING", "review_reason": "COMPARISON_INPUT_ISSUE",
+                            "quote_id": quote.quote_id, "quote_version": quote.current_version,
+                            "field_version": candidate.get("field_version"),
+                            "raw_value": candidate.get("raw_value"),
+                            "normalized_value": candidate.get("normalized_value"), "unit": candidate.get("unit"),
+                            "document_id": report["document_id"], "original_filename": report["original_filename"],
+                            "needs_resolution": quote.quote_id not in nonblocking,
+                            "resolution": "FIELD_CORRECTION" if candidate else "REEXTRACT_OR_SYSTEM_REPAIR",
+                        })
+            return {
+                "task_id": task_id, "task_revision": task.current_revision,
+                "graph_run_id": task.current_graph_run_id, "task_status": task.status,
+                "review_pending": not reports or any(report["review_pending"] for report in reports),
+                "quotes": reports, "problems": problems,
+                "blocking_problem_count": sum(p["needs_resolution"] for p in problems),
+                "problem_count": len(problems),
+            }
+
+    def selection_analysis_input(self, task_id: str, *, expected_task_revision: int,
+                                 evaluated_at: datetime | None = None):
+        """Current audited quote scope only; never turn form values into reviewed facts."""
+        from supplier_comparison.extraction import ReviewEnvelope
+        from supplier_comparison.extraction.errors import DownstreamNotReadyError
+        from supplier_comparison.rules import ComparisonRequest, DecisionImpactRequest, quote_input_for_decision_impact
+
+        task = self.get_task(task_id)
+        review = self.list_review_problems(task_id)
+        if task['task_revision'] != expected_task_revision or review['task_revision'] != expected_task_revision:
+            raise ConflictError('task_revision_conflict', 'Analysis requires the current task revision.')
+        if review['review_pending'] or not task['current_graph_run_id']:
+            raise ConflictError('selection_review_required', 'Run extraction and review before selection analysis.')
+        context = self.workflow_context(task['current_graph_run_id'])
+        documents = {d['quote_id']: d for d in context['documents']}
+        envelopes = []
+        try:
+            for row in review['quotes']:
+                envelope = ReviewEnvelope.model_validate(self.artifact_payload(row['review_artifact_id']))
+                batch = envelope.batch
+                document = documents[row['quote_id']]
+                if batch is None:
+                    raise ConflictError('selection_review_required', 'A model-failed quote cannot be analyzed.')
+                parsed = batch.parsed_input
+                identity = parsed.context
+                if (identity.task_id != task_id or identity.quote_id != row['quote_id']
+                        or identity.quote_version != document['quote_version']
+                        or identity.document_id != document['document_id']
+                        or identity.document_version != document['document_version']
+                        or parsed.document_sha256 != document['document_sha256']):
+                    raise ConflictError('selection_input_stale', 'Reviewed input identity no longer matches the quote.')
+                envelopes.append(envelope)
+            if set(documents) != {r['quote_id'] for r in review['quotes']}:
+                raise ConflictError('selection_input_stale', 'Analysis must cover every active quote.')
+            quotes = tuple(quote_input_for_decision_impact(e) for e in envelopes)
+        except DownstreamNotReadyError as exc:
+            raise ConflictError('selection_review_required', 'Resolve unsafe review findings before analysis.') from exc
+        # Freeze the workflow evaluation instant instead of silently changing quote validity.
+        if evaluated_at is None:
+            with self.session_factory() as session:
+                report = session.scalar(select(WorkflowArtifact).where(
+                    WorkflowArtifact.task_id == task_id,
+                    WorkflowArtifact.graph_run_id == task['current_graph_run_id'],
+                    WorkflowArtifact.task_revision == expected_task_revision,
+                    WorkflowArtifact.artifact_type == 'DECISION_IMPACT_RESULT',
+                ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc()))
+                stamp = report.payload.get('comparison', {}).get('evaluated_at') if report else None
+            if not stamp:
+                raise ConflictError('selection_review_required', 'A frozen preliminary comparison is required.')
+            evaluated_at = datetime.fromisoformat(stamp)
+        result = DecisionImpactRequest(
+            task_id=task_id, task_revision=expected_task_revision,
+            comparison=ComparisonRequest(requirement=ProcurementRequirement.model_validate(task['requirement']),
+                                         quotes=quotes, evaluated_at=evaluated_at),
+            policy_binding={key: context[key] for key in (
+                'policy_set_version', 'policy_index_version', 'policy_category', 'policy_region')},
+            review_bindings={e.batch.parsed_input.context.quote_id:
+                            e.batch.parsed_input.document_sha256 + ':' + e.review.review_run_id for e in envelopes},
+        )
+        latest = self.get_task(task_id)
+        if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != task['current_graph_run_id']:
+            raise ConflictError('selection_input_stale', 'Input changed during analysis.')
+        return result
+
+    def selection_gaps(self, task_id: str, *, expected_task_revision: int):
+        from supplier_comparison.rules import analyze_selection_gap, draft_clarification
+        before = self.get_task(task_id)
+        result = analyze_selection_gap(self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision))
+        latest = self.get_task(task_id)
+        if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != before['current_graph_run_id']:
+            raise ConflictError('selection_input_stale', 'Input changed during analysis.')
+        return result.model_dump(mode='json') | {'clarification_drafts': [draft_clarification(gap) for gap in result.gaps]}
+
+    def requirement_simulation(self, task_id: str, *, expected_task_revision: int, changes, user_authorized: bool):
+        from supplier_comparison.rules import simulate_requirement_change
+        before = self.get_task(task_id)
+        request = self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision)
+        try:
+            result = simulate_requirement_change(request, changes, user_authorized=user_authorized)
+        except ValueError as exc:
+            raise BackendError('simulation_change_invalid', 'Authorized changes must satisfy the requirement contract.') from exc
+        latest = self.get_task(task_id)
+        if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != before['current_graph_run_id']:
+            raise ConflictError('selection_input_stale', 'Input changed during simulation.')
+        return {'task_id': task_id, 'task_revision': expected_task_revision,
+                'result': result.model_dump(mode='json')}
+
+    def reserve_policy_retry(self, task_id: str, *, graph_run_id: str, task_revision: int,
+                             max_attempts: int, payload: dict) -> bool:
+        """Reserve a durable graph-wide retry BEFORE external IO (including replay)."""
+        with self.session_factory.begin() as session:
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError('task_not_found', 'Task was not found.')
+            if task.current_revision != task_revision or task.current_graph_run_id != graph_run_id:
+                raise ConflictError('investigation_input_changed', 'Policy retry inputs are stale.')
+            attempts = session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task_id, WorkflowArtifact.graph_run_id == graph_run_id,
+                WorkflowArtifact.artifact_type == 'POLICY_RETRY_ATTEMPT',
+            )).all()
+            if len(attempts) >= max_attempts:
+                return False
+            session.add(WorkflowArtifact(
+                artifact_id=new_id('artifact'), task_id=task_id, task_revision=task_revision,
+                graph_run_id=graph_run_id, artifact_type='POLICY_RETRY_ATTEMPT',
+                payload=payload, content_sha256=content_hash(payload), schema_version='policy-investigation/1.0.0',
+            ))
+        return True
+
+    def list_investigations(self, task_id: str) -> list[dict[str, Any]]:
+        """Latest public snapshot per case; historical records never become authority."""
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            artifacts = session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task_id,
+                WorkflowArtifact.artifact_type == "INVESTIGATION_CASE",
+            ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())).all()
+            records = {}
+            for artifact in artifacts:
+                case_id = artifact.payload["case_id"]
+                if case_id in records:
+                    continue
+                current = artifact.graph_run_id == task.current_graph_run_id and artifact.task_revision == task.current_revision
+                records[case_id] = dict(artifact.payload) | {
+                    "artifact_id": artifact.artifact_id, "is_current": current,
+                    "stored_status": artifact.payload["status"],
+                    "status": artifact.payload["status"] if current else "STALE",
+                    "stop_reason": artifact.payload["stop_reason"] if current else "INPUT_CHANGED",
+                }
+            return list(records.values())
+
     def correction_event_payloads_for_batch(
         self, batch_artifact_id: str
     ) -> list[dict[str, Any]]:
@@ -723,35 +973,61 @@ class BackendService:
                 )
                 .order_by(WorkflowArtifact.created_at, WorkflowArtifact.artifact_id)
             ).all()
-            return [dict(artifact.payload) for artifact in artifacts]
+            payloads = [dict(artifact.payload) for artifact in artifacts]
+            # A second submission must retain audit events for previously
+            # corrected fields. Follow immutable ancestry, never another quote.
+            candidates = {c["field_name"]: c for c in batch_artifact.payload.get("candidates", [])}
+            seen_fields = {payload["field_name"] for payload in payloads}
+            visited = {batch_artifact.artifact_id}
+            parent_id = batch_artifact.parent_artifact_id
+            while parent_id and parent_id not in visited:
+                visited.add(parent_id)
+                parent = session.get(WorkflowArtifact, parent_id)
+                if parent is None or parent.task_id != batch_artifact.task_id or parent.quote_id != batch_artifact.quote_id:
+                    break
+                historical = [parent] if parent.artifact_type == "CORRECTION_EVENT" else []
+                if parent.artifact_type == "EXTRACTION_BATCH":
+                    historical = session.scalars(select(WorkflowArtifact).where(
+                        WorkflowArtifact.graph_run_id == parent.graph_run_id,
+                        WorkflowArtifact.task_revision == parent.task_revision,
+                        WorkflowArtifact.quote_id == parent.quote_id,
+                        WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
+                    ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())).all()
+                for event in historical:
+                    payload = event.payload
+                    candidate = candidates.get(payload.get("field_name"), {})
+                    if payload["field_name"] not in seen_fields and payload.get("after", {}).get("field_id") == candidate.get("field_id"):
+                        payloads.append(dict(payload))
+                        seen_fields.add(payload["field_name"])
+                parent_id = parent.parent_artifact_id
+            return payloads
 
-    def correct_field(
-        self,
-        *,
-        task_id: str,
-        quote_id: str,
-        field_name: str,
-        expected_task_revision: int,
-        raw_value: str,
-        normalized_value: str | int | bool,
-        unit: str | None,
-        reason: str,
-        idempotency_key: str,
-    ) -> dict[str, Any]:
+    def correct_field(self, *, task_id: str, quote_id: str, field_name: str,
+                      expected_task_revision: int, raw_value: str,
+                      normalized_value: str | int | bool, unit: str | None,
+                      reason: str, idempotency_key: str) -> dict[str, Any]:
+        return self.correct_fields(task_id=task_id, expected_task_revision=expected_task_revision,
+            corrections=[dict(quote_id=quote_id, field_name=field_name, raw_value=raw_value,
+                              normalized_value=normalized_value, unit=unit, reason=reason)],
+            idempotency_key=idempotency_key, _single=True)
+
+    def correct_fields(self, *, task_id: str, expected_task_revision: int,
+                       corrections: list[dict[str, Any]], idempotency_key: str,
+                       _single: bool = False) -> dict[str, Any]:
         from .models import utc_now
 
-        request = {
-            "task_id": task_id,
-            "quote_id": quote_id,
-            "field_name": field_name,
-            "expected_task_revision": expected_task_revision,
-            "raw_value": raw_value,
-            "normalized_value": normalized_value,
-            "unit": unit,
-            "reason": reason,
-        }
+        if not corrections or len(corrections) > 100:
+            raise BackendError("field_correction_invalid", "Submit between 1 and 100 corrections.")
+        pairs = [(c.get("quote_id"), c.get("field_name")) for c in corrections]
+        if any(not q or not n for q, n in pairs) or len(set(pairs)) != len(pairs):
+            raise BackendError("field_correction_invalid", "Duplicate or empty correction fields.")
+        request = {"task_id": task_id, "expected_task_revision": expected_task_revision,
+                   "corrections": corrections}
+        if _single:
+            request = {"task_id": task_id, "expected_task_revision": expected_task_revision, **corrections[0]}
         request_sha = content_hash(request)
-        operation = f"correct_field:{task_id}:{quote_id}:{field_name}"
+        operation = (f"correct_field:{task_id}:{pairs[0][0]}:{pairs[0][1]}" if _single
+                     else f"correct_fields:{task_id}")
         with self.session_factory.begin() as session:
             repeated = self._existing_idempotent(
                 session,
@@ -764,14 +1040,12 @@ class BackendService:
             task = session.scalar(
                 select(Task).where(Task.task_id == task_id).with_for_update()
             )
-            quote = session.get(Quote, quote_id)
-            if (
-                task is None
-                or task.owner_id != self.actor_id
-                or quote is None
-                or quote.task_id != task_id
-            ):
+            if task is None or task.owner_id != self.actor_id:
                 raise NotFoundError("quote_not_found", "Quote was not found.")
+            for quote_id, _field in pairs:
+                quote = session.get(Quote, quote_id)
+                if quote is None or quote.task_id != task_id or not quote.active:
+                    raise NotFoundError("quote_not_found", "Active quote was not found.")
             repeated = self._existing_idempotent(
                 session,
                 operation=operation,
@@ -804,27 +1078,53 @@ class BackendService:
                         "Every active quote must have an extraction batch before correction.",
                         quote_id=active_quote.quote_id,
                     )
+                parsed = ExtractionBatch.model_validate(artifact.payload).parsed_input
+                document = session.get(Document, parsed.context.document_id)
+                if (
+                    parsed.context.task_id != task_id
+                    or parsed.context.quote_id != active_quote.quote_id
+                    or parsed.context.quote_version != active_quote.current_version
+                    or document is None or document.task_id != task_id
+                    or document.quote_id != active_quote.quote_id
+                    or document.quote_version != active_quote.current_version
+                    or parsed.context.document_version != document.document_version
+                    or parsed.document_sha256 != document.sha256
+                ):
+                    raise ConflictError("extraction_batch_stale", "Re-extract the current quote before correction.", quote_id=active_quote.quote_id)
                 latest_batches[active_quote.quote_id] = artifact
-            source_artifact = latest_batches[quote_id]
-            source_batch = ExtractionBatch.model_validate(source_artifact.payload)
             reviewed_at = utc_now()
-            try:
-                corrected_batch, correction = apply_candidate_correction(
-                    source_batch,
-                    field_name=field_name,
-                    action=CorrectionAction.USER_CORRECTION,
-                    raw_value=raw_value,
-                    normalized_value=normalized_value,
-                    unit=unit,
-                    reason_code="AUTHORIZED_FIELD_CORRECTION",
-                    reason=reason,
-                    reviewer_id=self.actor_id,
-                    reviewed_at=reviewed_at,
-                )
-            except (ValueError, TypeError) as exc:
-                raise BackendError(
-                    "field_correction_invalid", "Field correction is invalid."
-                ) from exc
+            corrected_batches = {}
+            events = []
+            errors = []
+            for item in corrections:
+                quote_id = item["quote_id"]
+                source_artifact = latest_batches[quote_id]
+                source_batch = corrected_batches.get(quote_id) or ExtractionBatch.model_validate(source_artifact.payload)
+                candidate = next((c for c in source_batch.candidates if c.field_name == item["field_name"]), None)
+                if "expected_field_version" in item and (
+                    candidate is None or candidate.field_version != item["expected_field_version"]
+                ):
+                    errors.append({"quote_id": quote_id, "field_name": item["field_name"],
+                                   "code": "field_version_conflict", "actual": candidate.field_version if candidate else None})
+                    continue
+                try:
+                    corrected_batch, correction = apply_candidate_correction(
+                        source_batch, field_name=item["field_name"], action=CorrectionAction.USER_CORRECTION,
+                        raw_value=item["raw_value"], normalized_value=item["normalized_value"],
+                        unit=item.get("unit"), reason_code="AUTHORIZED_FIELD_CORRECTION",
+                        reason=item["reason"], reviewer_id=self.actor_id, reviewed_at=reviewed_at)
+                except (ValueError, TypeError, KeyError) as exc:
+                    errors.append({"quote_id": quote_id, "field_name": item["field_name"],
+                                   "code": "field_correction_invalid"})
+                    continue
+                corrected_batches[quote_id] = corrected_batch
+                events.append((quote_id, correction))
+            if errors:
+                if _single and errors[0]["code"] == "field_correction_invalid":
+                    raise BackendError("field_correction_invalid", "Field correction is invalid.",
+                                       quote_id=errors[0]["quote_id"], field_name=errors[0]["field_name"])
+                error_type = ConflictError if any(e["code"] == "field_version_conflict" for e in errors) else BackendError
+                raise error_type("field_correction_batch_invalid", "No corrections were saved; resolve all reported errors.", errors=errors)
             next_revision = task.current_revision + 1
             old_graph = (
                 session.get(GraphRun, task.current_graph_run_id)
@@ -849,35 +1149,26 @@ class BackendService:
                 ),
             )
             session.add(graph)
-            correction_artifact = WorkflowArtifact(
-                artifact_id=new_id("artifact"),
-                task_id=task_id,
-                task_revision=next_revision,
-                artifact_type="CORRECTION_EVENT",
-                quote_id=quote_id,
-                graph_run_id=graph_run_id,
-                parent_artifact_id=source_artifact.artifact_id,
-                payload=correction.model_dump(mode="json"),
-                content_sha256=content_hash(correction.model_dump(mode="json")),
-            )
-            session.add(correction_artifact)
-            corrected_payload = corrected_batch.model_dump(mode="json")
-            corrected_artifact = WorkflowArtifact(
-                artifact_id=new_id("artifact"),
-                task_id=task_id,
-                task_revision=next_revision,
-                artifact_type="EXTRACTION_BATCH",
-                schema_version=corrected_batch.schema_version,
-                quote_id=quote_id,
-                graph_run_id=graph_run_id,
-                parent_artifact_id=correction_artifact.artifact_id,
-                payload=corrected_payload,
-                content_sha256=content_hash(corrected_payload),
-            )
-            session.add(corrected_artifact)
-            latest_batches[quote_id] = corrected_artifact
+            parents = {qid: artifact.artifact_id for qid, artifact in latest_batches.items()}
+            for quote_id, correction in events:
+                payload = correction.model_dump(mode="json")
+                artifact = WorkflowArtifact(artifact_id=new_id("artifact"), task_id=task_id,
+                    task_revision=next_revision, artifact_type="CORRECTION_EVENT", quote_id=quote_id,
+                    graph_run_id=graph_run_id, parent_artifact_id=parents[quote_id],
+                    payload=payload, content_sha256=content_hash(payload))
+                session.add(artifact)
+                parents[quote_id] = artifact.artifact_id
+            for quote_id, corrected_batch in corrected_batches.items():
+                payload = corrected_batch.model_dump(mode="json")
+                artifact = WorkflowArtifact(artifact_id=new_id("artifact"), task_id=task_id,
+                    task_revision=next_revision, artifact_type="EXTRACTION_BATCH",
+                    schema_version=corrected_batch.schema_version, quote_id=quote_id,
+                    graph_run_id=graph_run_id, parent_artifact_id=parents[quote_id],
+                    payload=payload, content_sha256=content_hash(payload))
+                session.add(artifact)
+                latest_batches[quote_id] = artifact
             documents = session.scalars(
-                select(Document).where(Document.task_id == task_id)
+                select(Document).where(Document.task_id == task_id, Document.quote_id.in_(latest_batches))
             ).all()
             for document in documents:
                 selected_batch = latest_batches[document.quote_id]
@@ -902,7 +1193,7 @@ class BackendService:
                     revision_id=new_id("rev"),
                     task_id=task_id,
                     revision=next_revision,
-                    change_type=f"FIELD_CORRECTED:{field_name}",
+                    change_type=(f"FIELD_CORRECTED:{pairs[0][1]}" if _single else "FIELDS_CORRECTED_BATCH"),
                     actor_id=self.actor_id,
                     request_sha256=request_sha,
                 )
@@ -1151,11 +1442,23 @@ class BackendService:
         artifact_id = new_id("artifact")
         payload_sha = content_hash(payload)
         with self.session_factory.begin() as session:
-            if session.get(Task, task_id) is None:
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None:
                 raise NotFoundError("task_not_found", "Task was not found.")
+            # Windows can produce equal clock ticks for successive saves. Random
+            # artifact UUIDs must not decide which investigation snapshot is latest.
+            latest_stamp = session.scalar(select(WorkflowArtifact.created_at).where(
+                WorkflowArtifact.task_id == task_id,
+            ).order_by(WorkflowArtifact.created_at.desc()).limit(1))
+            stamp = datetime.now(timezone.utc)
+            if latest_stamp is not None:
+                latest_stamp = latest_stamp.replace(tzinfo=timezone.utc) if latest_stamp.tzinfo is None else latest_stamp
+                if latest_stamp >= stamp:
+                    stamp = latest_stamp + timedelta(microseconds=1)
             session.add(
                 WorkflowArtifact(
                     artifact_id=artifact_id,
+                    created_at=stamp,
                     task_id=task_id,
                     task_revision=task_revision,
                     artifact_type=artifact_type,
@@ -1444,6 +1747,8 @@ class BackendService:
                 raise NotFoundError("issue_not_found", "Issue was not found.")
             if issue.status != "OPEN":
                 raise ConflictError("issue_not_open", "Issue is no longer open.")
+            if issue.issue_type == "BATCH_FIELD_REVIEW":
+                raise BackendError("batch_review_requires_correction", "Use the versioned batch field correction endpoint.")
             expected_answer_type = issue.answer_schema.get("answer_type")
             if answer.get("answer_type") != expected_answer_type:
                 raise BackendError(

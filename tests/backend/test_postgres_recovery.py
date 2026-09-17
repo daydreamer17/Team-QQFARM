@@ -8,13 +8,15 @@ from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.postgres import PostgresSaver
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.checkpoints import checkpoint_connection_string
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.settings import settings
 from supplier_comparison.backend.workflow import WorkflowRunner
+from supplier_comparison.backend.investigation import AgentConfig, InvestigationRunner, LiveInvestigationPlanner
+from supplier_comparison.backend.models import WorkflowArtifact
 
 from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
 from .test_workflow_policy_rag import (
@@ -22,6 +24,8 @@ from .test_workflow_policy_rag import (
     POLICY_SET_VERSION,
     RecordingPolicyRetriever,
 )
+from .test_investigation import ScriptedPlanner, call
+from .test_policy_investigation import FlakyRetriever
 
 
 pytestmark = pytest.mark.skipif(
@@ -294,3 +298,133 @@ def test_postgres_workflow_persists_policy_gate_and_citations(tmp_path: Path) ->
                 {"actor_id": actor_id},
             )
         cleanup_engine.dispose()
+
+
+@pytest.fixture
+def postgres_agent_task(tmp_path):
+    """Unique owner, task and checkpoint; cleanup never touches another run."""
+    url = os.getenv('TEST_DATABASE_URL', settings.database_url)
+    engine = create_engine(url, connect_args={'connect_timeout': 5})
+    service = BackendService(sessionmaker(engine, expire_on_commit=False), tmp_path / 'quotes',
+                             actor_id='pg-agent-' + uuid4().hex)
+    task = service.create_task(_requirement(), idempotency_key='create',
+        policy_set_version=POLICY_SET_VERSION, policy_index_version=POLICY_INDEX_VERSION,
+        policy_category='Electronics', policy_region='SG')
+    upload = service.upload_quote(task['task_id'], expected_task_revision=1, supplier_id='SUP-024',
+        original_filename='synthetic-c.csv', media_type='text/csv', content=b'pg-agent-synthetic',
+        idempotency_key='upload', is_synthetic=True)
+    started = service.start_run(task['task_id'], expected_task_revision=upload['task_revision'], idempotency_key='start')
+    try:
+        yield url, engine, service, task, started
+    finally:
+        engine.dispose()
+        cleanup = create_engine(url, connect_args={'connect_timeout': 5})
+        try:
+            with cleanup.begin() as connection:
+                for table in ('checkpoint_writes', 'checkpoint_blobs', 'checkpoints'):
+                    connection.execute(text(f'DELETE FROM {table} WHERE thread_id = :thread_id'),
+                                       {'thread_id': started['graph_run_id']})
+                connection.execute(text('DELETE FROM tasks WHERE task_id = :task_id'), {'task_id': task['task_id']})
+                connection.execute(text('DELETE FROM idempotency_records WHERE actor_id = :actor'), {'actor': service.actor_id})
+        finally:
+            cleanup.dispose()
+
+
+def test_postgres_agent_investigation_retry_cap_survives_new_connection_and_resume(postgres_agent_task, tmp_path):
+    url, engine, service, task, started = postgres_agent_task
+    retriever = FlakyRetriever(failures=99)
+    planner = ScriptedPlanner([call('get_policy_retrieval_status'), call('retry_policy_retrieval'),
+                               call('retry_policy_retrieval'), call('request_clarification')])
+    with PostgresSaver.from_conn_string(checkpoint_connection_string(url)) as saver:
+        first = WorkflowRunner(service, processor=CanonicalCsvProcessor(tmp_path), checkpointer=saver,
+            dictionary_path=DICTIONARY_PATH, policy_retriever=retriever,
+            investigator=InvestigationRunner(planner),
+            evaluated_at=datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc)).run_job(started['job_id'])
+    assert first['status'] == 'WAITING_INPUT'
+    assert retriever.rohs_calls == 3  # original plus two reserved automatic retries
+    engine.dispose()
+    reopened = create_engine(url, connect_args={'connect_timeout': 5})
+    try:
+        recovered = BackendService(sessionmaker(reopened, expire_on_commit=False), tmp_path / 'quotes', actor_id=service.actor_id)
+        record = recovered.list_investigations(task['task_id'])[0]
+        assert record['kind'] == 'POLICY' and record['status'] == 'WAITING_INPUT'
+        assert record['model_calls'] == 4 and len(record['observations']) == 4
+        assert record['observations'][1]['result']['data']['retrieval_artifact_id']
+        assert recovered.reserve_policy_retry(task['task_id'], graph_run_id=started['graph_run_id'],
+                                              task_revision=2, max_attempts=2, payload={}) is False
+        with recovered.session_factory() as session:
+            attempts = session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task['task_id'], WorkflowArtifact.artifact_type == 'POLICY_RETRY_ATTEMPT')).all()
+            assert len(attempts) == 2
+            assert attempts[0].payload['request'] == attempts[1].payload['request']
+        resumed = recovered.answer_issue(task['task_id'], first['issue']['issue_id'], expected_task_revision=2,
+            answer={'answer_type': 'RETRY_POLICY_RETRIEVAL'}, idempotency_key='operator-repaired-retry')
+        processor = CanonicalCsvProcessor(tmp_path)
+        with PostgresSaver.from_conn_string(checkpoint_connection_string(url)) as saver:
+            final = WorkflowRunner(recovered, processor=processor, checkpointer=saver,
+                dictionary_path=DICTIONARY_PATH, policy_retriever=RecordingPolicyRetriever(),
+                investigator=InvestigationRunner(ScriptedPlanner([])),
+                evaluated_at=datetime(2026, 9, 30, tzinfo=timezone.utc)).run_job(resumed['job_id'])
+        assert final['status'] == 'SUCCEEDED' and processor.calls == []
+        assert recovered.list_results(task['task_id'])[0]['result']['evaluated_at'] == '2026-09-14T01:00:00Z'
+        assert recovered.list_investigations(task['task_id'])[0]['status'] == 'STALE'
+        assert recovered.reserve_policy_retry(task['task_id'], graph_run_id=started['graph_run_id'],
+                                              task_revision=3, max_attempts=2, payload={}) is False
+    finally:
+        reopened.dispose()
+
+
+def test_postgres_agent_concurrent_retry_reservations_cannot_exceed_cap(postgres_agent_task):
+    url, engine, service, task, started = postgres_agent_task
+
+    def reserve(index):
+        return service.reserve_policy_retry(task['task_id'], graph_run_id=started['graph_run_id'],
+            task_revision=2, max_attempts=2, payload={'control_code': 'ROHS_COMPLIANCE', 'test_request': index})
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(reserve, range(8)))
+    assert results.count(True) == 2 and results.count(False) == 6
+    engine.dispose()
+    reopened = create_engine(url, connect_args={'connect_timeout': 5})
+    try:
+        recovered = BackendService(sessionmaker(reopened, expire_on_commit=False), service.storage_root, actor_id=service.actor_id)
+        assert recovered.reserve_policy_retry(task['task_id'], graph_run_id=started['graph_run_id'],
+                                              task_revision=2, max_attempts=2, payload={}) is False
+        with recovered.session_factory() as session:
+            assert len(session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task['task_id'], WorkflowArtifact.artifact_type == 'POLICY_RETRY_ATTEMPT')).all()) == 2
+    finally:
+        reopened.dispose()
+
+
+@pytest.mark.skipif(os.getenv('RUN_AGENT_LIVE_TESTS') != '1', reason='set RUN_AGENT_LIVE_TESTS=1 for paid live Agent acceptance')
+def test_postgres_live_agent_policy_recovery_persists_real_tool_observation(postgres_agent_task, tmp_path):
+    url, engine, service, task, started = postgres_agent_task
+    config = AgentConfig.from_env()
+    assert config.model_id and os.getenv(config.api_key_env), 'Configure the existing model and API key.'
+    planner = LiveInvestigationPlanner(config)
+    retriever = FlakyRetriever(failures=1)
+    with PostgresSaver.from_conn_string(checkpoint_connection_string(url)) as saver:
+        outcome = WorkflowRunner(service, processor=CanonicalCsvProcessor(tmp_path), checkpointer=saver,
+            dictionary_path=DICTIONARY_PATH, policy_retriever=retriever,
+            investigator=InvestigationRunner(planner),
+            evaluated_at=datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc)).run_job(started['job_id'])
+    assert outcome['status'] == 'SUCCEEDED' and retriever.rohs_calls == 2
+    engine.dispose()
+    reopened = create_engine(url, connect_args={'connect_timeout': 5})
+    try:
+        recovered = BackendService(sessionmaker(reopened, expire_on_commit=False), service.storage_root, actor_id=service.actor_id)
+        case = recovered.list_investigations(task['task_id'])[0]
+        assert case['status'] == 'RESOLVED' and case['stop_reason'] == 'EVIDENCE_CONFIRMED'
+        observation = next(o for o in case['observations'] if o['result']['tool_name'] == 'retry_policy_retrieval')
+        assert observation['result']['status'] == 'OK' and observation['result']['sources']
+        assert recovered.get_task(task['task_id'])['current_result_id'] == outcome['result_id']
+        with recovered.session_factory() as session:
+            attempts = session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task['task_id'], WorkflowArtifact.artifact_type == 'POLICY_RETRY_ATTEMPT')).all()
+            assert len(attempts) == 1
+        print({'scenario': 'postgres_live_policy_recovery', 'model_id': config.model_id,
+               'status': case['status'], 'stop_reason': case['stop_reason'], 'reopened_tool_status': observation['result']['status'],
+               'model_calls': case['model_calls']})
+    finally:
+        reopened.dispose()

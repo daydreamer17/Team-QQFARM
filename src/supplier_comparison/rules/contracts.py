@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from supplier_comparison.extraction.contracts import QuoteFieldCandidate
 
 
-RULE_VERSION = "supplier-comparison/1.0.0"
+RULE_VERSION = "supplier-comparison/1.1.0"
 
 
 class FrozenModel(BaseModel):

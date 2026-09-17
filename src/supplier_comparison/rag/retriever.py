@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from rank_bm25 import BM25Okapi
 
-from .clients import EmbeddingClient, RerankClient
+from .clients import EmbeddingClient, RerankClient, is_transient_model_error
 from .contracts import (
     PolicyCitation,
     RetrievalCandidate,
@@ -145,7 +145,7 @@ class HybridPolicyRetriever:
                 timings,
                 attempts,
                 total_started,
-                "embedding_or_vector_failed",
+                "embedding_transient_error" if is_transient_model_error(exc) else "embedding_or_vector_failed",
             )
         vector_ids = [row.clause_id for row in vector_rows]
         vector_scores = {row.clause_id: row.score for row in vector_rows}
@@ -179,7 +179,7 @@ class HybridPolicyRetriever:
                 timings,
                 attempts,
                 total_started,
-                "rerank_response_invalid",
+                "rerank_transient_error" if is_transient_model_error(exc) else "rerank_response_invalid",
             )
 
         rerank_by_clause = {

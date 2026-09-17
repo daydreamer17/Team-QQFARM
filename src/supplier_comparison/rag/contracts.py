@@ -106,6 +106,7 @@ class RetrievalResult(FrozenModel):
 class ExplanationClaim(FrozenModel):
     text: str = Field(min_length=1)
     citation_ids: list[str] = Field(min_length=1)
+    evidence_quotes: dict[str, str] = Field(default_factory=dict)
 
 
 class PolicyExplanation(FrozenModel):

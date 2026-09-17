@@ -22,6 +22,15 @@ class ModelClientError(ValueError):
         self.error_code = error_code
 
 
+def is_transient_model_error(exc: Exception) -> bool:
+    """Only transport failures and proven retryable HTTP responses qualify."""
+    return isinstance(exc, ModelClientError) and (
+        exc.error_code == 'model_transport_error'
+        or (exc.error_code == 'model_http_error' and isinstance(exc.__cause__, urllib.error.HTTPError)
+            and exc.__cause__.code in {429, 500, 502, 503, 504})
+    )
+
+
 class EmbeddingConfig(ClientModel):
     provider: str = "siliconflow"
     model_id: str = "BAAI/bge-m3"

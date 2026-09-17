@@ -1,6 +1,10 @@
 # Supplier Comparison 项目 Workflow
 
+2026-09-17 本地流程更新：全量审核后新增 `analyze_decision_impact`，先判断合法未知费用是否影响推荐，再决定是否进入现有运费补问。无影响的报价保留未知和原审核状态，比较快照与结果接口提供影响报告；冲突、证据与身份错误以及必查制度门禁仍然阻塞。新增 `GET /api/v1/tasks/{task_id}/review` 集中读取问题及 `POST /api/v1/tasks/{task_id}/fields/corrections` 跨报价批量修改，事务提交后统一重审和重算，不绕过审核。参见 [批量审核指引](guide/guide_BATCH_REVIEW.md) 与 [决策影响交付指引](guide/guide_DECISION_IMPACT.md)。前端批量页面与自主调查 Agent 执行器仍待实现。下文固定流程说明需结合这些更新阅读。
+
 > 文档状态：Final（2026-09-15，pgvector 选型已冻结）。后续实施以无版本后缀的 [WORKFLOW.md](WORKFLOW.md) 为正式入口。
+
+2026-09-18 本地更新：新增可选 `investigate_quotes` 和 `await_batch_review` 分支，真实模型在审核/影响分析后选择受控工具，并记录计划、观察及停止。未解决字段集中交给原批量纠正接口，不能自动写回或绕过发布门禁。默认 `SUPPLIER_AGENT_ENABLED=false`，开启说明及剩余边界见 [自主调查指引](guide/guide_INVESTIGATION_AGENT.md)。前一段的“执行器待实现”为历史状态；前端页面、结果提问与制度异常自主重试仍未完成。
 >
 > 本文说明项目从创建采购任务到推荐、审批和重新比较的完整工作流，并明确当前已实现功能与 Week2 待实现功能。业务边界以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，实施安排见 [WEEK2_PLAN.md](WEEK2_PLAN.md)。
 
@@ -290,6 +294,12 @@ Q = ceil(max(需求数量, MOQ) / 订购步长) × 订购步长
 结果发布前，后端再次确认 graph run 仍属于当前任务版本。旧 worker 的迟到结果可以保留为历史 artifact，但不能写入 `tasks.current_result_id`。
 
 ## 9. 采购合规与供应商资质核验
+
+2026-09-17：真实 LLM 制度解释已作为独立 CLI 实现，输入已确认事实与完整检索 bundle；逐条说明附当前引用及原文摘录。使用与验证边界见 [guide_RAG_EXPLANATION.md](guide/guide_RAG_EXPLANATION.md)，主流程仍未调用该模块。
+
+实现进展（2026-09-16）：新制度 `2026.09.2` 与要求级检索编排已完成本地真实验证，24／24 要求被有效引用覆盖。现有主图尚未调用该编排，READY 不等于供应商合规。实现入口及限制见 [guide_RAG_ORCHESTRATION.md](guide/guide_RAG_ORCHESTRATION.md)。下方旧版本制度描述保留为历史设计背景，新集成应显式绑定复核后的新版本。
+
+2026-09-16 设计基线见 [RAG_FULL_FLOW_DESIGN.md](RAG_FULL_FLOW_DESIGN.md)：每个 control_code 单独调用现有 Top-3 检索接口，聚合后进行要求级覆盖检查；不把六类控制码压入单次 Top-3。制度一致性审查为 CHANGES_REQUESTED，修订前禁止最终合规放行。本文后续链路仍是实现目标，不代表已接入主图。
 
 Week2 将 RAG 用于检索适用采购制度，并用结构化供应商注册表核验批准状态和 RoHS。系统判断的是“该供应商是否具备进入当前采购建议和人工审批的合规依据”，不是是否可以自动下单。
 

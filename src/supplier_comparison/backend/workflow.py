@@ -40,12 +40,20 @@ from supplier_comparison.rag.contracts import (
 )
 from supplier_comparison.rules import (
     ComparisonResult,
+    DecisionImpactResult,
+    ImpactStatus,
     ProcurementRequirement,
-    compare_reviewed_extractions,
+    analyze_reviewed_decision_impact,
 )
+from supplier_comparison.rag.clients import is_transient_model_error
+from supplier_comparison.extraction.errors import DownstreamNotReadyError
+from supplier_comparison.extraction.contracts import ValidationStatus
 from supplier_comparison.rules.contracts import RULE_VERSION
 
 from .service import BackendError, BackendService, ConflictError, new_id
+from .investigation import CaseStatus, InvestigationRunner
+from .investigation_tools import ScopedInvestigationTools
+from .policy_investigation import ScopedPolicyInvestigationTools, diagnose_policy
 
 
 POLICY_RETRIEVAL_QUERIES = {
@@ -146,8 +154,14 @@ class WorkflowState(TypedDict, total=False):
     snapshot_id: str
     comparison_result_id: str
     policy_retrieval_artifact_ids: dict[str, str]
+    decision_impact_artifact_id: str
+    nonblocking_unknown_quote_ids: list[str]
+    blocking_unknown_quote_ids: list[str]
+    undetermined_quote_ids: list[str]
     final_result_id: str
     evaluated_at: str
+    investigation_waiting: bool
+    investigation_case_ids: list[str]
 
 
 class WorkflowRunner:
@@ -160,10 +174,16 @@ class WorkflowRunner:
         checkpointer,
         dictionary_path: str | Path,
         evaluated_at: datetime | None = None,
+        investigator: InvestigationRunner | None = None,
+        policy_max_retries: int = 2,
     ) -> None:
         self.service = service
         self.processor = processor
         self.policy_retriever = policy_retriever
+        self.investigator = investigator
+        if not 0 <= policy_max_retries <= 3:
+            raise ValueError('policy retry cap must be between 0 and 3')
+        self.policy_max_retries = policy_max_retries
         self.dictionary_path = Path(dictionary_path)
         self.dictionary = QuoteDictionary.load(self.dictionary_path)
         self.dictionary_sha256 = hashlib.sha256(
@@ -176,6 +196,9 @@ class WorkflowRunner:
         builder.add_node("load_context", self._load_context)
         builder.add_node("extract_documents", self._extract_documents)
         builder.add_node("review_quotes", self._review_quotes)
+        builder.add_node("analyze_decision_impact", self._analyze_decision_impact)
+        builder.add_node("investigate_quotes", self._investigate_quotes)
+        builder.add_node("await_batch_review", self._await_batch_review)
         builder.add_node("await_missing_confirmation", self._await_missing_confirmation)
         builder.add_node("apply_missing_confirmation", self._apply_missing_confirmation)
         builder.add_node("freeze_draft_and_compare", self._freeze_draft_and_compare)
@@ -183,17 +206,21 @@ class WorkflowRunner:
         builder.add_node("apply_shipping_amount", self._apply_shipping_amount)
         builder.add_node("freeze_final_and_compare", self._freeze_final_and_compare)
         builder.add_node("retrieve_policies", self._retrieve_policies)
+        builder.add_node('investigate_policies', self._investigate_policies)
         builder.add_node("await_policy_evidence_review", self._await_policy_evidence_review)
         builder.add_node("publish_final_result", self._publish_final_result)
         builder.add_edge(START, "load_context")
         builder.add_edge("load_context", "extract_documents")
         builder.add_edge("extract_documents", "review_quotes")
+        builder.add_edge("review_quotes", "analyze_decision_impact")
+        builder.add_edge("analyze_decision_impact", "investigate_quotes")
         builder.add_conditional_edges(
-            "review_quotes",
+            "investigate_quotes",
             self._route_after_review,
             {
                 "needs_shipping_confirmation": "await_missing_confirmation",
                 "ready": "freeze_final_and_compare",
+                "needs_batch_review": "await_batch_review",
             },
         )
         builder.add_edge("await_missing_confirmation", "apply_missing_confirmation")
@@ -202,8 +229,9 @@ class WorkflowRunner:
         builder.add_edge("await_shipping_amount", "apply_shipping_amount")
         builder.add_edge("apply_shipping_amount", "freeze_final_and_compare")
         builder.add_edge("freeze_final_and_compare", "retrieve_policies")
+        builder.add_edge('retrieve_policies', 'investigate_policies')
         builder.add_conditional_edges(
-            "retrieve_policies",
+            "investigate_policies",
             self._route_after_policy_retrieval,
             {
                 "ready": "publish_final_result",
@@ -211,6 +239,7 @@ class WorkflowRunner:
             },
         )
         builder.add_edge("publish_final_result", END)
+        builder.add_edge("await_batch_review", END)
         builder.add_edge("await_policy_evidence_review", "freeze_final_and_compare")
         self.graph = builder.compile(checkpointer=checkpointer)
 
@@ -376,13 +405,117 @@ class WorkflowRunner:
             review_ids[quote_id] = artifact["artifact_id"]
         return {"review_artifact_ids": review_ids}
 
+    def _impact_report(self, state: WorkflowState) -> DecisionImpactResult:
+        context = self.service.workflow_context(state["graph_run_id"])
+        envelopes = tuple(
+            ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
+            for _, artifact_id in sorted(state["review_artifact_ids"].items())
+        )
+        documents = {item["quote_id"]: item for item in context["documents"]}
+        if context["effective_revision"] != state["task_revision"]:
+            raise BackendError("decision_impact_revision_mismatch", "Impact revision is stale.")
+        if set(state["review_artifact_ids"]) != set(documents):
+            raise BackendError("decision_impact_scope_mismatch", "Review scope must include all active quotes.")
+        for quote_id, envelope in zip(sorted(state["review_artifact_ids"]), envelopes):
+            if envelope.batch is None:
+                continue  # The strict adapter below rejects model-failed envelopes.
+            parsed = envelope.batch.parsed_input
+            document = documents.get(parsed.context.quote_id)
+            if document is None or (
+                parsed.context.quote_id != quote_id
+                or parsed.context.quote_version != document["quote_version"]
+                or parsed.context.document_id != document["document_id"]
+                or parsed.context.document_version != document["document_version"]
+                or parsed.document_sha256 != document["document_sha256"]
+            ):
+                raise BackendError("decision_impact_identity_mismatch", "Impact input is stale.")
+        try:
+            return analyze_reviewed_decision_impact(
+                ProcurementRequirement.model_validate(context["requirement"]), envelopes,
+                task_id=state["task_id"], task_revision=state["task_revision"],
+                evaluated_at=self._state_evaluated_at(state),
+                policy_binding={key: context[key] for key in (
+                    "policy_set_version", "policy_index_version", "policy_category", "policy_region"
+                )},
+            )
+        except DownstreamNotReadyError as exc:
+            raise BackendError(
+                "review_required", "Unsafe review findings must be resolved before impact analysis."
+            ) from exc
+
+    def _analyze_decision_impact(self, state: WorkflowState) -> WorkflowState:
+        try:
+            report = self._impact_report(state)
+        except BackendError as exc:
+            if self.investigator is None or exc.code != "review_required":
+                raise
+            # No impact proof for unsafe fields. The agent may only investigate
+            # and ask for correction; it cannot release this review gate.
+            return {"decision_impact_artifact_id": "", "undetermined_quote_ids": sorted(state["review_artifact_ids"]),
+                    "nonblocking_unknown_quote_ids": [], "blocking_unknown_quote_ids": sorted(state["review_artifact_ids"])}
+        artifact = self.service.append_artifact(
+            task_id=state["task_id"], task_revision=state["task_revision"],
+            artifact_type="DECISION_IMPACT_RESULT", schema_version=report.schema_version,
+            payload=report.model_dump(mode="json"), graph_run_id=state["graph_run_id"],
+        )
+        return {
+            "decision_impact_artifact_id": artifact["artifact_id"],
+            "nonblocking_unknown_quote_ids": list(report.nonblocking_unknown_quote_ids),
+            "blocking_unknown_quote_ids": list(report.blocking_quote_ids),
+            "undetermined_quote_ids": [
+                impact.quote_id for impact in report.quote_impacts
+                if impact.status == ImpactStatus.UNDETERMINED
+            ],
+        }
+
+    def _investigate_quotes(self, state: WorkflowState) -> WorkflowState:
+        if self.investigator is None:
+            return {"investigation_waiting": False, "investigation_case_ids": []}
+        tools = ScopedInvestigationTools(
+            self.service, task_id=state["task_id"], graph_run_id=state["graph_run_id"],
+            task_revision=state["task_revision"], impact_artifact_id=state.get("decision_impact_artifact_id") or None,
+            evaluated_at=self._state_evaluated_at(state), policy_retriever=self.policy_retriever,
+        )
+        cases = self.investigator.run(tools.cases(), tools, tools.save)
+        if any(case.status == CaseStatus.STALE for case in cases) or not tools.current():
+            raise ConflictError("investigation_input_changed", "Investigation inputs changed; restart on current inputs.")
+        unresolved = any(case.status != CaseStatus.RESOLVED for case in cases)
+        if state.get("undetermined_quote_ids") and not cases:
+            raise BackendError("review_required", "No safe field investigation is available; operator repair required.")
+        return {"investigation_waiting": unresolved, "investigation_case_ids": [case.case_id for case in cases]}
+
+    def _await_batch_review(self, state: WorkflowState) -> WorkflowState:
+        records = self.service.list_investigations(state["task_id"])
+        cards = [card for record in records if record["is_current"]
+                 and record["case_id"] in state["investigation_case_ids"] for card in record["clarification"]]
+        issue = self.service.open_issue(
+            task_id=state["task_id"], graph_run_id=state["graph_run_id"], task_revision=state["task_revision"],
+            issue_type="BATCH_FIELD_REVIEW", quote_id=None, field_name=f"batch_review:{state['task_revision']}",
+            question="请一次核对本轮各报价的待确认字段，统一提交纠正；系统会重新审核与计算。",
+            answer_schema={"answer_type": "BATCH_FIELD_CORRECTIONS",
+                           "submit_to": f"/api/v1/tasks/{state['task_id']}/fields/corrections",
+                           "expected_task_revision": state["task_revision"], "cards": cards},
+        )
+        interrupt(self._safe_interrupt(issue))
+        # Batch correction starts a new versioned graph, never resumes this one.
+        raise ConflictError("batch_review_requires_correction", "Submit corrections to start a new reviewed input version.")
+
     def _route_after_review(self, state: WorkflowState) -> str:
+        if state.get("investigation_waiting"):
+            return "needs_batch_review"
+        if state.get("undetermined_quote_ids"):
+            raise BackendError(
+                "review_required", "Resolve unsupported or non-fee facts before requesting fees.",
+                quote_ids=state["undetermined_quote_ids"],
+            )
         missing = []
         not_ready = []
         for quote_id, artifact_id in state["review_artifact_ids"].items():
             envelope = ReviewEnvelope.model_validate(
                 self.service.artifact_payload(artifact_id)
             )
+            if quote_id in state.get("nonblocking_unknown_quote_ids", []):
+                continue
             if envelope.downstream_ready:
                 continue
             not_ready.append(quote_id)
@@ -391,14 +524,21 @@ class WorkflowRunner:
                 and "shipping_fee_status" in envelope.review.blocking_fields
             ):
                 missing.append(quote_id)
-        if not not_ready:
+        if not not_ready and not state.get("blocking_unknown_quote_ids"):
             return "ready"
         if len(not_ready) == 1 and missing == not_ready:
+            envelope = ReviewEnvelope.model_validate(
+                self.service.artifact_payload(state["review_artifact_ids"][missing[0]])
+            )
+            assert envelope.batch is not None
+            status = next(c for c in envelope.batch.candidates if c.field_name == "shipping_fee_status")
+            if status.validation_status != ValidationStatus.MISSING:
+                raise BackendError("review_required", "Unknown fee status needs a typed correction.")
             return "needs_shipping_confirmation"
         raise BackendError(
             "review_required",
             "One or more quotes require a correction before comparison.",
-            quote_ids=sorted(not_ready),
+            quote_ids=sorted(set(not_ready) | set(state.get("blocking_unknown_quote_ids", []))),
         )
 
     def _await_missing_confirmation(self, state: WorkflowState) -> WorkflowState:
@@ -601,6 +741,7 @@ class WorkflowRunner:
         self.service.link_document_artifacts(
             execution["document_execution_id"],
             review_artifact_id=review_artifact["artifact_id"],
+            batch_artifact_id=batch_artifact["artifact_id"],
             status="REVIEWED",
         )
         batch_ids = dict(state["batch_artifact_ids"])
@@ -629,14 +770,13 @@ class WorkflowRunner:
 
     def _freeze_compare_artifacts(self, state: WorkflowState) -> tuple[str, str]:
         context = self.service.workflow_context(state["graph_run_id"])
-        envelopes = tuple(
-            ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
-            for _quote_id, artifact_id in sorted(state["review_artifact_ids"].items())
-        )
-        requirement = ProcurementRequirement.model_validate(context["requirement"])
         evaluated_at = self._state_evaluated_at(state)
-        result = compare_reviewed_extractions(
-            requirement, envelopes, evaluated_at=evaluated_at
+        report = self._impact_report(state)
+        result = report.comparison
+        impact_artifact = self.service.append_artifact(
+            task_id=state["task_id"], task_revision=state["task_revision"],
+            artifact_type="DECISION_IMPACT_RESULT", schema_version=report.schema_version,
+            payload=report.model_dump(mode="json"), graph_run_id=state["graph_run_id"],
         )
         snapshot = {
             "task_id": state["task_id"],
@@ -645,6 +785,7 @@ class WorkflowRunner:
             "requirement": context["requirement"],
             "batch_artifact_ids": state["batch_artifact_ids"],
             "review_artifact_ids": state["review_artifact_ids"],
+            "decision_impact_artifact_id": impact_artifact["artifact_id"],
             "dictionary_version": self.dictionary.version,
             "dictionary_sha256": self.dictionary_sha256,
             "rule_version": RULE_VERSION,
@@ -730,19 +871,29 @@ class WorkflowRunner:
             )
         try:
             result = self.policy_retriever.retrieve(request)
-        except Exception:
+        except Exception as exc:
             return self._policy_error_result(
-                request, control_code, "policy_retriever_failed"
+                request, control_code, "policy_transport_transient" if is_transient_model_error(exc) else "policy_retriever_failed"
             )
+        try:
+            # Revalidate copies too: adapters must not release a gate with a
+            # model_copy() that bypassed citation/result shape validation.
+            result = RetrievalResult.model_validate(result.model_dump(mode='python') if isinstance(result, RetrievalResult) else result)
+        except (TypeError, ValueError):
+            return self._policy_error_result(request, control_code, 'policy_retrieval_contract_invalid')
         if (
             result.policy_set_version != request.policy_set_version
             or result.policy_index_version != request.policy_index_version
+            or any(c.policy_set_version != request.policy_set_version
+                   or hashlib.sha256(c.text.encode('utf-8')).hexdigest() != c.content_sha256 for c in result.citations)
             or (
                 result.status == RetrievalStatus.OK
                 and (
                     control_code not in result.covered_control_codes
                     or not any(
                         citation.control_code == control_code
+                        and citation.policy_set_version == request.policy_set_version
+                        and citation.retrieval_id == result.retrieval_id
                         for citation in result.citations
                     )
                 )
@@ -752,6 +903,42 @@ class WorkflowRunner:
                 request, control_code, "policy_retrieval_contract_invalid"
             )
         return result
+
+    def _investigate_policies(self, state: WorkflowState) -> WorkflowState:
+        artifacts = state.get('policy_retrieval_artifact_ids', {})
+        if self.investigator is None or not artifacts:
+            return {}
+        context = self.service.workflow_context(state['graph_run_id'])
+        requests = {code: RetrievalRequest(
+            task_id=state['task_id'], task_revision=state['task_revision'], snapshot_id=state['snapshot_id'],
+            policy_set_version=context['policy_set_version'], policy_index_version=context['policy_index_version'],
+            query=POLICY_RETRIEVAL_QUERIES[code], required_control_codes=[code],
+            category=context['policy_category'], region=context['policy_region'],
+            evaluated_at=self._state_evaluated_at(state),
+        ) for code in artifacts}
+
+        def retry(request, code):
+            result = self._safe_policy_retrieval(request, code)
+            # Bind the frozen control scope in the audit trace even for adapters
+            # that return minimal test/legacy filter metadata.
+            payload = result.model_dump(mode='json')
+            payload['filters'] = dict(payload['filters']) | {'control_codes': [code]}
+            artifact = self.service.append_artifact(
+                task_id=state['task_id'], task_revision=state['task_revision'], graph_run_id=state['graph_run_id'],
+                artifact_type='POLICY_RETRIEVAL_RESULT', schema_version='policy-retrieval/1.0.0',
+                parent_artifact_id=state['comparison_result_id'], payload=payload,
+            )
+            return artifact['artifact_id']
+
+        tools = ScopedPolicyInvestigationTools(
+            self.service, task_id=state['task_id'], task_revision=state['task_revision'],
+            graph_run_id=state['graph_run_id'], comparison_result_id=state['comparison_result_id'],
+            requests=requests, artifact_ids=artifacts, retry=retry, max_retries=self.policy_max_retries,
+        )
+        cases = self.investigator.run(tools.cases(), tools, tools.save)
+        if any(c.status == CaseStatus.STALE for c in cases) or not tools.current():
+            raise ConflictError('investigation_input_changed', 'Policy investigation inputs changed.')
+        return {'policy_retrieval_artifact_ids': tools.artifact_ids}
 
     @staticmethod
     def _policy_error_result(
@@ -813,6 +1000,10 @@ class WorkflowRunner:
                 "answer_type": "RETRY_POLICY_RETRIEVAL",
                 "changed_policy_requires": "NEW_TASK_WITH_NEW_POLICY_BINDING",
                 "retrieval_statuses": statuses,
+                'diagnoses': {code: diagnose_policy(RetrievalResult.model_validate(self.service.artifact_payload(aid)))
+                              for code, aid in state['policy_retrieval_artifact_ids'].items()},
+                'investigations': [record for record in self.service.list_investigations(state['task_id'])
+                                   if record['is_current'] and record.get('kind') == 'POLICY'],
             },
         )
         resumed = interrupt(self._safe_interrupt(issue))
@@ -841,6 +1032,8 @@ class WorkflowRunner:
     def _missing_shipping_quote(self, state: WorkflowState) -> str:
         matches: list[str] = []
         for quote_id, artifact_id in state["review_artifact_ids"].items():
+            if quote_id in state.get("nonblocking_unknown_quote_ids", []):
+                continue
             envelope = ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
             if (
                 envelope.review is not None

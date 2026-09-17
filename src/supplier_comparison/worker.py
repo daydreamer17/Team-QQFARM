@@ -11,6 +11,7 @@ from .backend.database import create_session_factory
 from .backend.service import BackendService
 from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, WorkflowRunner
+from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
 from .extraction.dictionary import QuoteDictionary
 from .rag.clients import (
     EmbeddingConfig,
@@ -35,6 +36,10 @@ def run_job(job_id: str) -> dict:
         SiliconFlowRerankClient(RerankConfig.from_env()),
     )
     connection_string = checkpoint_connection_string(settings.database_url)
+    investigator = (
+        InvestigationRunner(LiveInvestigationPlanner(AgentConfig.from_env()), limits=AgentLimits.from_env())
+        if settings.supplier_agent_enabled else None
+    )
     with PostgresSaver.from_conn_string(connection_string) as saver:
         runner = WorkflowRunner(
             service,
@@ -42,6 +47,8 @@ def run_job(job_id: str) -> dict:
             policy_retriever=policy_retriever,
             checkpointer=saver,
             dictionary_path=settings.quote_dictionary_path,
+            investigator=investigator,
+            policy_max_retries=settings.supplier_agent_policy_max_retries,
         )
         return runner.run_job(job_id)
 

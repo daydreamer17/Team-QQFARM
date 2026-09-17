@@ -1,4 +1,7 @@
 from datetime import date, datetime, timezone
+from decimal import Decimal
+
+import pytest
 
 from supplier_comparison.extraction.contracts import (
     CandidateProducer,
@@ -14,6 +17,9 @@ from supplier_comparison.rules import (
     QuoteInput,
     compare_suppliers,
     evaluate_supplier,
+    DecisionImpactRequest,
+    ImpactStatus,
+    analyze_decision_impact,
 )
 
 
@@ -385,3 +391,85 @@ def test_unsupported_ranking_preference_requires_input() -> None:
     assert [issue.code for issue in result.comparison_reasons] == [
         "RANKING_PREFERENCE_UNSUPPORTED"
     ]
+
+
+def _impact_example(*, pending_price: str = "9.80", task_revision: int = 1):
+    requirement = _requirement().model_copy(update={"budget_amount": Decimal("20000.00")})
+    winner = _supplier_c()
+    winner = winner.model_copy(update={"candidates": tuple(
+        _candidate(winner.quote_id, c.field_name, "3400.00", unit="SGD")
+        if c.field_name == "shipping_fee_amount" else c for c in winner.candidates
+    )})
+    return DecisionImpactRequest(
+        task_id="TASK-IMPACT", task_revision=task_revision,
+        comparison=_request(winner, _supplier_b(unit_price=pending_price), requirement=requirement),
+    )
+
+
+@pytest.mark.parametrize("price,status,threshold", [
+    ("9.80", ImpactStatus.REQUIRES_INVESTIGATION, Decimal("200.00")),
+    ("10.00", ImpactStatus.REQUIRES_INVESTIGATION, Decimal("0.00")),
+    ("15.00", ImpactStatus.NON_BLOCKING, None),
+])
+def test_decision_impact_reports_fee_threshold_without_filling_unknown(price, status, threshold):
+    report = analyze_decision_impact(_impact_example(pending_price=price))
+    impact = next(i for i in report.quote_impacts if i.quote_id == "QUOTE-B")
+    supplier = next(i for i in report.comparison.supplier_results if i.quote_id == "QUOTE-B")
+    assert impact.status == status
+    assert impact.additional_cost_to_tie == threshold
+    assert impact.best_confirmed_cost == Decimal("10000.00")
+    assert impact.cost_lower_bound == Decimal(price) * 1000
+    assert supplier.total_cost is None
+    assert supplier.status == FeasibilityStatus.PENDING
+    assert bool(report.blocking_quote_ids) == (status != ImpactStatus.NON_BLOCKING)
+    assert report.comparison.final_recommendation_allowed == (status == ImpactStatus.NON_BLOCKING)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("currency", "USD"), ("price_basis_unit", "tray"),
+    ("tax_mode", "EXCLUSIVE"), ("package", None),
+])
+def test_high_subtotal_does_not_hide_unproven_cost_or_nonfee_unknown(field, value):
+    quote = _supplier_b(unit_price="15.00")
+    quote = quote.model_copy(update={"candidates": tuple(
+        _candidate(quote.quote_id, field, value,
+                   status=ValidationStatus.MISSING if value is None else ValidationStatus.VERIFIED)
+        if c.field_name == field else c for c in quote.candidates
+    )})
+    requirement = _requirement().model_copy(update={"budget_amount": Decimal("20000.00")})
+    report = analyze_decision_impact(DecisionImpactRequest(
+        task_id="TASK-IMPACT", task_revision=1,
+        comparison=_request(_supplier_c(), quote, requirement=requirement),
+    ))
+    impact = next(i for i in report.quote_impacts if i.quote_id == quote.quote_id)
+    assert impact.status == ImpactStatus.UNDETERMINED
+    assert impact.cost_lower_bound is None
+    assert report.comparison.blocking_pending_quote_ids == (quote.quote_id,)
+    assert not report.comparison.final_recommendation_allowed
+
+
+def test_expensive_unknown_without_feasible_baseline_still_needs_investigation():
+    request = _impact_example(pending_price="15.00")
+    request = request.model_copy(update={"comparison": request.comparison.model_copy(
+        update={"quotes": (request.comparison.quotes[1],)}
+    )})
+    report = analyze_decision_impact(request)
+    assert report.quote_impacts[0].status == ImpactStatus.REQUIRES_INVESTIGATION
+    assert report.quote_impacts[0].reason_code == "NO_CONFIRMED_FEASIBLE_BASELINE"
+    assert not report.comparison.final_recommendation_allowed
+
+
+def test_impact_proof_is_bound_to_revision_requirement_quote_and_policy():
+    original = _impact_example()
+    digest = analyze_decision_impact(original).input_sha256
+    variants = (
+        original.model_copy(update={"task_revision": 2}),
+        _impact_example(pending_price="15.00"),
+        original.model_copy(update={"policy_binding": {"policy_set_version": "next"}}),
+        original.model_copy(update={"comparison": original.comparison.model_copy(update={
+            "requirement": original.comparison.requirement.model_copy(update={
+                "ranking_preference": "FASTEST_DELIVERY"
+            })
+        })}),
+    )
+    assert all(analyze_decision_impact(v).input_sha256 != digest for v in variants)

@@ -31,6 +31,9 @@ from supplier_comparison.rules import (
     ProcurementRequirement,
     compare_reviewed_extractions,
     quote_input_from_reviewed_extraction,
+    quote_input_for_decision_impact,
+    analyze_reviewed_decision_impact,
+    ImpactStatus,
 )
 
 
@@ -91,6 +94,44 @@ def test_unreviewed_missing_quote_is_blocked_before_c() -> None:
         quote_input_from_reviewed_extraction(supplier_b)
     assert raised.value.code == "extraction_not_ready_for_downstream"
     assert raised.value.details["review_status"] == "REVIEW_REQUIRED"
+
+
+def test_partial_impact_scope_does_not_fabricate_human_review_or_ready_status():
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    batches = _batches(dictionary)
+    missing = _review(batches["B"], dictionary)
+    before = missing.model_dump(mode="json")
+    report = analyze_reviewed_decision_impact(
+        _requirement(), (missing, _review(batches["C"], dictionary)),
+        task_id="TASK-MCU-DEMO-001", task_revision=1, evaluated_at=NOW,
+    )
+    assert report.blocking_quote_ids == ("QUOTE-MCU-DEMO-001-B",)
+    assert next(i for i in report.quote_impacts if i.quote_id.endswith("-B")).status == ImpactStatus.REQUIRES_INVESTIGATION
+    assert missing.model_dump(mode="json") == before
+    assert not missing.downstream_ready
+    assert not missing.review_events
+    assert quote_input_for_decision_impact(missing).quote_id.endswith("-B")
+
+
+@pytest.mark.parametrize("field", ["revision", "shipping_fee_status"])
+def test_partial_impact_scope_rejects_critical_conflicts(field):
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    payload = _batches(dictionary)["A"].model_dump(mode="json")
+    candidate = next(c for c in payload["candidates"] if c["field_name"] == field)
+    candidate["validation_status"] = "CONFLICT"
+    envelope = _review(ExtractionBatch.model_validate(payload), dictionary)
+    with pytest.raises(DownstreamNotReadyError):
+        quote_input_for_decision_impact(envelope)
+
+
+def test_partial_impact_scope_rejects_another_task():
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    with pytest.raises(DownstreamNotReadyError) as raised:
+        analyze_reviewed_decision_impact(
+            _requirement(), (_review(_batches(dictionary)["C"], dictionary),),
+            task_id="OTHER-TASK", task_revision=1, evaluated_at=NOW,
+        )
+    assert raised.value.code == "decision_impact_task_mismatch"
 
 
 def test_schema_1_1_reviewed_batch_reaches_c_without_changing_rule_input() -> None:
