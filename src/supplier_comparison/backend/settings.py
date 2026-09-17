@@ -11,6 +11,10 @@ class BackendSettings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://supplier_app:supplier_dev_password@localhost:5432/supplier_comparison"
     quote_storage_path: Path = Path(".local-data/quotes")
+    policy_upload_storage_path: Path = Path(".local-data/policy-uploads")
+    policy_upload_max_bytes: int = Field(default=5 * 1024 * 1024, ge=1)
+    policy_upload_max_pdf_pages: int = Field(default=50, ge=1)
+    policy_upload_max_extracted_characters: int = Field(default=200_000, ge=1)
     quote_dictionary_path: Path = Path("data/contracts/quote_data_field.csv")
     test_user_id: str = "local-test-user"
     supplier_model_provider: str | None = None

@@ -13,13 +13,15 @@
 | `src/supplier_comparison/rag/contracts.py` | `RetrievalRequest`、`RetrievalResult`、`PolicyCitation`、`PolicyExplanation` 和 `PolicyRetriever` 冻结契约 |
 | `src/supplier_comparison/rag/clients.py` | SiliconFlow embedding／rerank 客户端与无网络固定客户端 |
 | `src/supplier_comparison/rag/manifest.py` | manifest 白名单、Markdown 条款边界、日期、重复 ID 和内容哈希校验 |
-| `src/supplier_comparison/rag/models.py` | 7 张制度、索引、导入和检索轨迹表 |
+| `src/supplier_comparison/rag/models.py` | 制度、文件草稿、索引、导入和检索轨迹表 |
 | `src/supplier_comparison/rag/importer.py` | 幂等导入、索引版本计算、失败隔离和原子发布 |
+| `src/supplier_comparison/rag/uploads.py` | PDF／TXT 不可变保存、文本提取、人工审核草稿与发布服务 |
 | `src/supplier_comparison/rag/repository.py` | SQL 范围过滤、pgvector 精确余弦 Top-10、引用原文／哈希复核和轨迹持久化 |
 | `src/supplier_comparison/rag/retriever.py` | BM25 Top-10、RRF `k=60`、rerank Top-3、覆盖／冲突／错误状态 |
 | `src/supplier_comparison/rag/explanation.py` | 只允许调用方确认事实及本次 citation ID 的解释边界 |
 | `src/supplier_comparison/rag/evaluation.py` | 分阶段 Recall、引用支持率、状态准确率、延迟和错误评测 |
 | `migrations/versions/c83a72d80b1f_create_policy_retrieval_schema.py` | RAG 业务表 migration；不管理 LangGraph checkpoint 表 |
+| `migrations/versions/e2a4c6d8f0b1_create_policy_file_import_schema.py` | 文件导入草稿、修订和审核条款表 |
 
 主演示制度位于 `data/policies/electronics-v1/`，共 5 个虚构英文文档、24 个完整条款。`data/policies/development-conflict/` 只用于冲突评测，不能作为主演示制度。固定交接示例位于 `data/examples/policy_rag/`。
 
@@ -49,7 +51,7 @@ docker compose up -d postgres
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-当前 head 为 `c83a72d80b1f`。新表为：
+当前 head 为 `e2a4c6d8f0b1`。RAG 表为：
 
 - `policy_sets`
 - `policy_documents`
@@ -58,6 +60,8 @@ docker compose up -d postgres
 - `policy_clause_embeddings`
 - `policy_import_runs`
 - `retrieval_traces`
+- `policy_file_imports`
+- `policy_file_import_clauses`
 
 `policy_clause_embeddings.embedding` 固定为 `vector(1024)`。首版只有普通唯一索引和外键索引，没有 HNSW 或 IVFFlat。
 
@@ -110,6 +114,46 @@ development-conflict: pidx-52ce651d9380fd20330899a7
 ```
 
 这些值由内容和配置计算；修改制度后以导入命令输出为准，并同步更新评测夹具中的显式冲突索引版本。
+
+### 5.1 从后端上传 PDF／TXT 制度
+
+文件上传接口和 CLI 最终复用同一个 `PolicyImporter`。上传接口只接受 `application/pdf` 的 `.pdf` 文件和 UTF-8 `text/plain` 的 `.txt` 文件，单文件默认上限 5 MiB，PDF 默认上限 50 页，提取正文默认上限 200,000 字符。PDF 使用 pdfplumber 提取原生文本；扫描件或无可提取文字的 PDF 返回 `policy_pdf_requires_ocr`，当前不会自动 OCR。
+
+后端流程固定为：
+
+```text
+上传并提取 → REVIEW_REQUIRED → 替换审核后条款 → READY_TO_PUBLISH → 发布 → PUBLISHED
+```
+
+接口如下：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `POST` | `/api/v1/policy-imports` | multipart 上传 PDF／TXT；`metadata` 为 JSON 字符串 |
+| `GET` | `/api/v1/policy-imports/{policy_import_id}` | 查询提取正文、草稿条款、修订和状态 |
+| `PUT` | `/api/v1/policy-imports/{policy_import_id}/clauses` | 以 `expected_revision` 替换整组已审核条款 |
+| `POST` | `/api/v1/policy-imports/{policy_import_id}/publish` | 显式生成 embedding 并原子发布索引 |
+
+三个写接口都要求 `Idempotency-Key`。API 不返回文件系统路径，原始文件使用生成 ID 写入不可覆盖位置；Compose 使用独立 `policy_files` 卷。上传生成的草稿没有 `control_code`，不能直接发布。审核请求必须为每条条款提供唯一 `clause_id`、标题、完整原文、`control_code` 和可选的 `rule_parameters`。
+
+可在启动 API 后从 `http://localhost:8000/docs` 使用 Swagger 完成完整流程。上传表单中的 `metadata` 示例：
+
+```json
+{
+  "policy_set_id": "uploaded-electronics-policy",
+  "policy_set_version": "2026.09.1",
+  "policy_id": "POL-UPLOAD-001",
+  "document_id": "DOC-UPLOAD-001",
+  "document_version": "1.0.0",
+  "title": "Uploaded Electronics Policy",
+  "effective_from": "2026-09-17T00:00:00Z",
+  "effective_to": null,
+  "categories": ["Electronics"],
+  "regions": ["SG"]
+}
+```
+
+当前一个上传草稿对应一个文档和一个制度集合版本。已发布内容不可修改；修改正文时应创建新的 `policy_set_version` 并重新上传。上传和发布使用现有服务端操作者身份，不接受请求体覆盖身份。正式部署前仍需由统一认证模块限制制度管理接口的访问角色。
 
 ## 6. 检索顺序和状态
 

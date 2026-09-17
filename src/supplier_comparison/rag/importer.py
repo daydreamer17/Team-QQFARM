@@ -57,6 +57,11 @@ class PolicyImporter:
 
     def import_manifest(self, manifest_path: Path | str, *, publish: bool) -> PolicyImportOutcome:
         manifest = load_policy_manifest(manifest_path, allowed_root=self._allowed_root)
+        return self.import_loaded(manifest, publish=publish)
+
+    def import_loaded(
+        self, manifest: LoadedPolicyManifest, *, publish: bool
+    ) -> PolicyImportOutcome:
         index_version = _index_version(
             manifest,
             provider=self._provider,

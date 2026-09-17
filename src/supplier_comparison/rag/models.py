@@ -189,3 +189,62 @@ class RetrievalTrace(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
+
+
+class PolicyFileImport(Base):
+    __tablename__ = "policy_file_imports"
+
+    policy_import_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    extracted_text: Mapped[str] = mapped_column(Text, nullable=False)
+    extraction_metadata: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    policy_set_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy_set_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    document_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    document_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    categories: Mapped[list] = mapped_column(JSON_VALUE, nullable=False)
+    regions: Mapped[list] = mapped_column(JSON_VALUE, nullable=False)
+    policy_index_version: Mapped[str | None] = mapped_column(String(128))
+    published_import_run_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class PolicyFileImportClause(Base):
+    __tablename__ = "policy_file_import_clauses"
+
+    policy_file_import_clause_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    policy_import_id: Mapped[str] = mapped_column(
+        ForeignKey("policy_file_imports.policy_import_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    clause_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    control_code: Mapped[str | None] = mapped_column(String(128))
+    rule_parameters: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint("policy_import_id", "clause_id"),
+        UniqueConstraint("policy_import_id", "position"),
+    )

@@ -26,6 +26,8 @@ BUSINESS_TABLES = {
     "policy_clause_embeddings",
     "policy_import_runs",
     "retrieval_traces",
+    "policy_file_imports",
+    "policy_file_import_clauses",
 }
 
 
