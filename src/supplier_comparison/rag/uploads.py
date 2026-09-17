@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pdfplumber
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from supplier_comparison.backend.models import IdempotencyRecord, utc_now
@@ -23,7 +23,14 @@ from supplier_comparison.backend.service import (
 
 from .importer import PolicyImportError, PolicyImporter
 from .manifest import LoadedClause, LoadedDocument, LoadedPolicyManifest
-from .models import PolicyFileImport, PolicyFileImportClause
+from .models import (
+    PolicyClause,
+    PolicyDocument,
+    PolicyFileImport,
+    PolicyFileImportClause,
+    PolicyIndex,
+    PolicySet,
+)
 
 
 _CLAUSE_HEADING = re.compile(r"^## \[([^\]]+)\]\s+(.+?)\s*$", re.MULTILINE)
@@ -249,6 +256,177 @@ class PolicyFileImportService:
         with self._sessions() as session:
             record = self._owned_record(session, policy_import_id)
             return self._serialize(session, record)
+
+    def list_imports(
+        self,
+        *,
+        status: str | None = None,
+        policy_set_version: str | None = None,
+        category: str | None = None,
+        region: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List the current actor's imports without returning document bodies."""
+        with self._sessions() as session:
+            statement = select(PolicyFileImport).where(
+                PolicyFileImport.actor_id == self._actor_id
+            )
+            if status is not None:
+                statement = statement.where(PolicyFileImport.status == status)
+            if policy_set_version is not None:
+                statement = statement.where(
+                    PolicyFileImport.policy_set_version == policy_set_version
+                )
+            records = list(
+                session.scalars(
+                    statement.order_by(
+                        PolicyFileImport.updated_at.desc(),
+                        PolicyFileImport.policy_import_id,
+                    )
+                )
+            )
+            records = [
+                record
+                for record in records
+                if (category is None or category in record.categories)
+                and (region is None or region in record.regions)
+            ]
+            total = len(records)
+            page = records[offset : offset + limit]
+            import_ids = [record.policy_import_id for record in page]
+            clause_counts: dict[str, int] = {}
+            if import_ids:
+                clause_counts = {
+                    policy_import_id: int(count)
+                    for policy_import_id, count in session.execute(
+                        select(
+                            PolicyFileImportClause.policy_import_id,
+                            func.count(PolicyFileImportClause.policy_file_import_clause_id),
+                        )
+                        .where(PolicyFileImportClause.policy_import_id.in_(import_ids))
+                        .group_by(PolicyFileImportClause.policy_import_id)
+                    )
+                }
+            return {
+                "items": [
+                    self._serialize_summary(
+                        record,
+                        clause_count=clause_counts.get(record.policy_import_id, 0),
+                    )
+                    for record in page
+                ],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
+
+    def list_policy_sets(
+        self,
+        *,
+        status: str = "PUBLISHED",
+        category: str | None = None,
+        region: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List published policy set/index bindings that tasks can safely freeze."""
+        with self._sessions() as session:
+            published_pairs = list(
+                session.execute(
+                    select(PolicySet, PolicyIndex)
+                    .join(
+                        PolicyIndex,
+                        PolicyIndex.policy_set_record_id
+                        == PolicySet.policy_set_record_id,
+                    )
+                    .where(
+                        PolicySet.status == status,
+                        PolicyIndex.status == status,
+                    )
+                    .order_by(
+                        PolicyIndex.published_at.desc(),
+                        PolicySet.policy_set_id,
+                        PolicySet.policy_set_version,
+                        PolicyIndex.policy_index_version,
+                    )
+                )
+            )
+            policy_set_record_ids = {
+                policy_set.policy_set_record_id for policy_set, _index in published_pairs
+            }
+            documents_by_set: dict[str, list[PolicyDocument]] = {
+                record_id: [] for record_id in policy_set_record_ids
+            }
+            clause_counts: dict[str, int] = {}
+            if policy_set_record_ids:
+                for document in session.scalars(
+                    select(PolicyDocument)
+                    .where(
+                        PolicyDocument.policy_set_record_id.in_(policy_set_record_ids)
+                    )
+                    .order_by(PolicyDocument.document_id)
+                ):
+                    documents_by_set[document.policy_set_record_id].append(document)
+                clause_counts = {
+                    record_id: int(count)
+                    for record_id, count in session.execute(
+                        select(
+                            PolicyClause.policy_set_record_id,
+                            func.count(PolicyClause.policy_clause_record_id),
+                        )
+                        .where(PolicyClause.policy_set_record_id.in_(policy_set_record_ids))
+                        .group_by(PolicyClause.policy_set_record_id)
+                    )
+                }
+
+            items: list[dict[str, Any]] = []
+            for policy_set, index in published_pairs:
+                documents = documents_by_set[policy_set.policy_set_record_id]
+                matching_documents = [
+                    document
+                    for document in documents
+                    if (category is None or category in document.categories)
+                    and (region is None or region in document.regions)
+                ]
+                if not matching_documents:
+                    continue
+                categories = sorted(
+                    {value for document in documents for value in document.categories}
+                )
+                regions = sorted(
+                    {value for document in documents for value in document.regions}
+                )
+                published_at = index.published_at or policy_set.published_at
+                items.append(
+                    {
+                        "policy_set_id": policy_set.policy_set_id,
+                        "policy_set_version": policy_set.policy_set_version,
+                        "policy_index_version": index.policy_index_version,
+                        "status": status,
+                        "categories": categories,
+                        "regions": regions,
+                        "document_count": len(documents),
+                        "clause_count": clause_counts.get(
+                            policy_set.policy_set_record_id, 0
+                        ),
+                        "provider": index.provider,
+                        "embedding_model": index.embedding_model,
+                        "embedding_dimension": index.embedding_dimension,
+                        "preprocessing_version": index.preprocessing_version,
+                        "published_at": (
+                            _utc_isoformat(published_at) if published_at else None
+                        ),
+                    }
+                )
+
+            total = len(items)
+            return {
+                "items": items[offset : offset + limit],
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+            }
 
     def replace_clauses(
         self,
@@ -495,6 +673,31 @@ class PolicyFileImportService:
                 }
                 for clause in clauses
             ],
+        }
+
+    @staticmethod
+    def _serialize_summary(
+        record: PolicyFileImport, *, clause_count: int
+    ) -> dict[str, Any]:
+        return {
+            "policy_import_id": record.policy_import_id,
+            "status": record.status,
+            "revision": record.revision,
+            "original_filename": record.original_filename,
+            "media_type": record.media_type,
+            "size_bytes": record.size_bytes,
+            "policy_set_id": record.policy_set_id,
+            "policy_set_version": record.policy_set_version,
+            "policy_id": record.policy_id,
+            "document_id": record.document_id,
+            "document_version": record.document_version,
+            "title": record.title,
+            "categories": list(record.categories),
+            "regions": list(record.regions),
+            "policy_index_version": record.policy_index_version,
+            "clause_count": clause_count,
+            "created_at": _utc_isoformat(record.created_at),
+            "updated_at": _utc_isoformat(record.updated_at),
         }
 
     def _build_manifest(

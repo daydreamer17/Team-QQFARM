@@ -46,7 +46,7 @@ API 只创建持久化 job，不在 HTTP 请求中等待模型。worker 按 `job
 | `src/supplier_comparison/backend/database.py` | engine、session factory、readiness probe | 为 API 和 worker 提供相同的同步 SQLAlchemy／psycopg 会话；`pool_pre_ping` 检查失效连接。 |
 | `src/supplier_comparison/backend/models.py` | 11 张业务表的 ORM 模型 | 保存任务、修订、文件、不可变 artifact、图运行、问题、job、模型预算和幂等结果。 |
 | `src/supplier_comparison/backend/service.py` | `BackendService` | application service；集中实现事务、行锁、revision、幂等、文件写入、issue、纠正、artifact 和结果发布。路由和图节点不直接写业务表。 |
-| `src/supplier_comparison/backend/api.py` | FastAPI 应用与 10 个业务接口 | 校验 Pydantic 请求、注入服务端身份、调用 application service，并返回统一错误格式。 |
+| `src/supplier_comparison/backend/api.py` | FastAPI 任务与制度管理接口 | 校验 Pydantic 请求、注入服务端身份、调用 application service，并返回统一错误格式。 |
 | `src/supplier_comparison/backend/workflow.py` | `DefaultQuoteProcessor`、`WorkflowRunner` | 调用 B 的 PDF／CSV 与审核接口、调用 C 的比较接口、调用制度 RAG，并实现十二个 LangGraph 节点及报价／制度中断。 |
 | `src/supplier_comparison/backend/checkpoints.py` | checkpoint URL 转换和初始化函数 | 将 SQLAlchemy PostgreSQL URL 转为 `PostgresSaver` URL，并调用 `setup()` 建表。 |
 | `src/supplier_comparison/checkpoints.py` | checkpoint CLI | 提供 `python -m supplier_comparison.checkpoints setup`。 |
@@ -434,6 +434,12 @@ MCU-DEMO-001 的 revision 推进如下：
 | POST | `/api/v1/tasks/{task_id}/quotes/{quote_id}/fields/{field_name}/corrections` | expected revision、值、单位、理由；202 | 保存人工纠正、推进 revision，并创建复用既有提取的新图运行。 |
 | GET | `/api/v1/tasks/{task_id}/results` | 200 | 返回当前和历史 ComparisonResult、对应制度检索结果及 `is_current`。 |
 | GET | `/api/v1/tasks/{task_id}/results/{result_id}` | 200 | 按 result ID 读取指定历史结果及冻结引用。 |
+| GET | `/api/v1/policy-sets` | `category`、`region`、分页；200 | 列出可以绑定到新任务的已发布制度集／索引组合。 |
+| GET | `/api/v1/policy-imports` | 状态、版本、品类、地区、分页；200 | 列出当前操作者的制度导入摘要，不返回全文、条款正文或磁盘路径。 |
+| POST | `/api/v1/policy-imports` | PDF／TXT、metadata、幂等键；201 | 上传并提取制度文件，创建待审核条款草稿。 |
+| GET | `/api/v1/policy-imports/{policy_import_id}` | 200 | 读取单次制度导入的正文、草稿条款、revision 和状态。 |
+| PUT | `/api/v1/policy-imports/{policy_import_id}/clauses` | expected revision、审核后条款、幂等键；200 | 替换整组审核条款并进入待发布状态。 |
+| POST | `/api/v1/policy-imports/{policy_import_id}/publish` | expected revision、幂等键；200 | 生成 embedding 并原子发布制度索引。 |
 | GET | `/health/live` | 200 | 只证明 API 进程存活。 |
 | GET | `/health/ready` | 200 或 503 | 执行 `SELECT 1`，证明数据库连接可用。 |
 

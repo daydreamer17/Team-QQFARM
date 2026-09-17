@@ -130,12 +130,16 @@ development-conflict: pidx-52ce651d9380fd20330899a7
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
+| `GET` | `/api/v1/policy-sets` | 列出可以绑定到新任务的已发布制度集／索引组合 |
+| `GET` | `/api/v1/policy-imports` | 列出当前操作者的制度文件导入摘要和状态 |
 | `POST` | `/api/v1/policy-imports` | multipart 上传 PDF／TXT；`metadata` 为 JSON 字符串 |
 | `GET` | `/api/v1/policy-imports/{policy_import_id}` | 查询提取正文、草稿条款、修订和状态 |
 | `PUT` | `/api/v1/policy-imports/{policy_import_id}/clauses` | 以 `expected_revision` 替换整组已审核条款 |
 | `POST` | `/api/v1/policy-imports/{policy_import_id}/publish` | 显式生成 embedding 并原子发布索引 |
 
 三个写接口都要求 `Idempotency-Key`。API 不返回文件系统路径，原始文件使用生成 ID 写入不可覆盖位置；Compose 使用独立 `policy_files` 卷。上传生成的草稿没有 `control_code`，不能直接发布。审核请求必须为每条条款提供唯一 `clause_id`、标题、完整原文、`control_code` 和可选的 `rule_parameters`。
+
+两个列表接口返回 `{items, total, limit, offset}`，默认 `limit=50`，最大为 100。`policy-imports` 可按 `status`、`policy_set_version`、`category` 和 `region` 筛选，只返回当前服务端操作者的记录；列表摘要不包含提取全文、条款正文或文件路径。`policy-sets` 只返回制度集与索引均为 `PUBLISHED` 的可用组合，可按 `category` 和 `region` 筛选，并返回创建任务所需的 `policy_set_version` 与 `policy_index_version`。前端应从该接口选择冻结版本，不应从导入草稿推断可用索引。
 
 可在启动 API 后从 `http://localhost:8000/docs` 使用 Swagger 完成完整流程。上传表单中的 `metadata` 示例：
 

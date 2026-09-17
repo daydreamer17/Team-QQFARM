@@ -85,6 +85,55 @@ def test_policy_txt_upload_review_and_publish_api(client: TestClient) -> None:
     draft = uploaded.json()
     assert draft["status"] == "REVIEW_REQUIRED"
     assert "storage_path" not in draft
+
+    import_list = http.get(
+        "/api/v1/policy-imports",
+        params={
+            "status": "REVIEW_REQUIRED",
+            "category": "Electronics",
+            "region": "SG",
+            "limit": 1,
+            "offset": 0,
+        },
+    )
+    assert import_list.status_code == 200
+    assert import_list.json()["total"] == 1
+    assert import_list.json()["limit"] == 1
+    assert import_list.json()["offset"] == 0
+    assert import_list.json()["items"] == [
+        {
+            "policy_import_id": draft["policy_import_id"],
+            "status": "REVIEW_REQUIRED",
+            "revision": 1,
+            "original_filename": "policy.txt",
+            "media_type": "text/plain",
+            "size_bytes": len(b"Suppliers must provide current RoHS evidence."),
+            "policy_set_id": "uploaded-electronics-policy",
+            "policy_set_version": "2026.09.1",
+            "policy_id": "POL-UPLOAD-001",
+            "document_id": "DOC-UPLOAD-001",
+            "document_version": "1.0.0",
+            "title": "Uploaded Electronics Policy",
+            "categories": ["Electronics"],
+            "regions": ["SG"],
+            "policy_index_version": None,
+            "clause_count": 1,
+            "created_at": import_list.json()["items"][0]["created_at"],
+            "updated_at": import_list.json()["items"][0]["updated_at"],
+        }
+    ]
+    assert "extracted_text" not in import_list.json()["items"][0]
+    assert "clauses" not in import_list.json()["items"][0]
+    assert "storage_path" not in import_list.json()["items"][0]
+    next_page = http.get(
+        "/api/v1/policy-imports", params={"limit": 1, "offset": 1}
+    )
+    assert next_page.json() == {"items": [], "total": 1, "limit": 1, "offset": 1}
+
+    assert http.get(
+        "/api/v1/policy-imports", params={"category": "Packaging"}
+    ).json()["total"] == 0
+
     loaded = http.get(f"/api/v1/policy-imports/{draft['policy_import_id']}")
     assert loaded.status_code == 200
     assert loaded.json() == draft
@@ -117,6 +166,45 @@ def test_policy_txt_upload_review_and_publish_api(client: TestClient) -> None:
     assert published.json()["status"] == "PUBLISHED"
     assert published.json()["policy_index_version"].startswith("pidx-")
 
+    published_imports = http.get(
+        "/api/v1/policy-imports",
+        params={"status": "PUBLISHED", "policy_set_version": "2026.09.1"},
+    )
+    assert published_imports.status_code == 200
+    assert published_imports.json()["total"] == 1
+    assert published_imports.json()["items"][0]["status"] == "PUBLISHED"
+
+    policy_sets = http.get(
+        "/api/v1/policy-sets",
+        params={"category": "Electronics", "region": "SG", "limit": 10},
+    )
+    assert policy_sets.status_code == 200
+    payload = policy_sets.json()
+    assert payload["total"] == 1
+    assert payload["limit"] == 10
+    assert payload["offset"] == 0
+    assert payload["items"] == [
+        {
+            "policy_set_id": "uploaded-electronics-policy",
+            "policy_set_version": "2026.09.1",
+            "policy_index_version": published.json()["policy_index_version"],
+            "status": "PUBLISHED",
+            "categories": ["Electronics"],
+            "regions": ["SG"],
+            "document_count": 1,
+            "clause_count": 1,
+            "provider": "fixed",
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_dimension": 1024,
+            "preprocessing_version": "policy-text/nfkc-en-hyphen-v1",
+            "published_at": payload["items"][0]["published_at"],
+        }
+    ]
+    assert payload["items"][0]["published_at"].endswith("Z")
+    assert http.get(
+        "/api/v1/policy-sets", params={"region": "US"}
+    ).json()["total"] == 0
+
 
 def test_policy_upload_rejects_invalid_metadata_with_standard_error(
     client: TestClient,
@@ -131,3 +219,21 @@ def test_policy_upload_rejects_invalid_metadata_with_standard_error(
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "policy_metadata_invalid"
+
+
+@pytest.mark.parametrize(
+    ("path", "params"),
+    [
+        ("/api/v1/policy-imports", {"status": "FAILED"}),
+        ("/api/v1/policy-imports", {"limit": 101}),
+        ("/api/v1/policy-sets", {"status": "DRAFT"}),
+        ("/api/v1/policy-sets", {"offset": -1}),
+    ],
+)
+def test_policy_list_rejects_unsupported_filters(
+    client: TestClient, path: str, params: dict[str, object]
+) -> None:
+    response = client.get(path, params=params)
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "request_validation_failed"
