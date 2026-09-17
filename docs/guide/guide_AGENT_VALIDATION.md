@@ -115,4 +115,4 @@ Remove-Item Env:RUN_AGENT_LIVE_TESTS, Env:RUN_POSTGRES_TESTS, Env:TEST_DATABASE_
 
 本次使用真实 LLM，但报价采用合成结构化数据，制度结果和故障采用可控测试夹具；不代表原始 PDF 提取准确率或外部 embedding/rerank 服务效果已验收。通过这些场景不保证模型在所有业务场景中都正确。
 
-未新增前端聊天、调查时间线或聊天授权入口；未修改 A/B 文件夹，未提交或推送 GitHub。完整功能说明见 [调查 Agent 指南](../docs/guide/guide_INVESTIGATION_AGENT.md) 和 [入选差距与制度调查指南](../docs/guide/guide_SELECTION_GAP_POLICY.md)。
+未新增前端聊天、调查时间线或聊天授权入口；未修改 A/B 文件夹。相关实现已随提交 `88ca867` 推送到 `main`；本指南统一放在 `docs/guide`，不再保留 `docx` 副本。完整功能说明见 [调查 Agent 指南](guide_INVESTIGATION_AGENT.md) 和 [入选差距与制度调查指南](guide_SELECTION_GAP_POLICY.md)。
