@@ -55,6 +55,19 @@ const fieldLabels: Record<string, string> = {
   manufacturer_revision: '物料版本',
   package: '封装',
   condition: '物料状态',
+  currency: '币种',
+  packaging_type: '包装类型',
+  units_per_pack: '每包装数量',
+  order_multiple_units: '订购倍数',
+  lead_time_days: '交期天数',
+  day_basis: '交期日历口径',
+  delivery_semantics: '交付语义',
+  start_event: '交期起算事件',
+  start_date: '交期起算日期',
+  delivery_date: '明确交付日期',
+  payment_terms: '付款条件',
+  quote_date: '报价日期',
+  valid_until: '报价有效期',
 }
 
 const findingCodeLabels: Record<string, string> = {
@@ -147,6 +160,13 @@ function editableValue(value: unknown) {
   return String(value)
 }
 
+function displayFieldValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '未提供'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
 function preserveValueType(value: string, original: unknown) {
   if (typeof original === 'boolean') return value.trim().toLowerCase() === 'true'
   if (typeof original === 'number') {
@@ -164,6 +184,14 @@ function actionableFindings(response: QuoteFieldsResponse) {
         finding.decision === 'REJECTED' ||
         finding.decision === 'WARNING'),
   )
+}
+
+function groupFindingsByField(findings: ReviewFinding[]) {
+  const groups = new Map<string, ReviewFinding[]>()
+  findings.forEach((finding) => {
+    groups.set(finding.field_name, [...(groups.get(finding.field_name) ?? []), finding])
+  })
+  return Array.from(groups.values())
 }
 
 function isDeferredShippingFinding(
@@ -353,27 +381,65 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
             )}
             {query.data && findings.length > 0 && (
               <ul className="review-finding-list">
-                {findings.map((finding) => (
-                  <li key={finding.finding_id}>
-                    <div>
-                      <code>{finding.field_name}</code>
-                      <span className={'review-severity review-severity-' + finding.severity.toLowerCase()}>
-                        {finding.severity}
-                      </span>
-                      {drafts[quote.quote_id + ':' + finding.field_name] && (
-                        <span className="review-staged">已暂存</span>
+                {groupFindingsByField(findings).map((findingGroup) => {
+                  const finding = findingGroup[0]
+                  const key = quote.quote_id + ':' + finding.field_name
+                  const field = query.data.fields.find(
+                    (item) => item.field_name === finding.field_name,
+                  )
+                  const staged = drafts[key]
+                  const isEditing = editor?.quote.quote_id === quote.quote_id &&
+                    editor.field.field_name === finding.field_name
+                  const canConfirm =
+                    field?.raw_value !== null && field?.raw_value !== undefined &&
+                    field?.normalized_value !== null && field?.normalized_value !== undefined
+                  const severity = findingGroup.some((item) => item.severity === 'BLOCKING')
+                    ? 'BLOCKING'
+                    : findingGroup.some((item) => item.severity === 'WARNING')
+                      ? 'WARNING'
+                      : finding.severity
+                  const reasonCodes = Array.from(new Set(findingGroup.flatMap((item) => item.codes)))
+                  const messages = Array.from(new Set(findingGroup.map(findingDisplayMessage)))
+
+                  return (
+                    <li className={isEditing ? 'review-finding review-finding-editing' : 'review-finding'} key={finding.field_name}>
+                      <div className="review-finding-title">
+                        <strong>{fieldLabels[finding.field_name] ?? finding.field_name}</strong>
+                        <code>{finding.field_name}</code>
+                        <span className={'review-severity review-severity-' + severity.toLowerCase()}>
+                          {severity}
+                        </span>
+                        {staged && <span className="review-staged">已暂存</span>}
+                      </div>
+
+                      <div className="review-current-values" aria-label="当前字段值">
+                        <div>
+                          <span>当前原文值</span>
+                          <strong>{displayFieldValue(field?.raw_value)}</strong>
+                        </div>
+                        <div>
+                          <span>当前标准化值</span>
+                          <strong>
+                            {displayFieldValue(field?.normalized_value)}
+                            {field?.unit ? ` ${field.unit}` : ''}
+                          </strong>
+                        </div>
+                      </div>
+
+                      <div className="review-finding-reason">
+                        <span>待审核原因</span>
+                        <strong>{reasonCodes.map(findingCodeLabel).join(' / ')}</strong>
+                        {messages.map((message) => <p key={message}>{message}</p>)}
+                      </div>
+
+                      {staged && (
+                        <div className="review-staged-value">
+                          暂存为：{displayFieldValue(staged.normalizedValue)}{staged.unit ? ` ${staged.unit}` : ''}
+                        </div>
                       )}
-                    </div>
-                    <strong>{finding.codes.map(findingCodeLabel).join(' / ')}</strong>
-                    <p>{findingDisplayMessage(finding)}</p>
-                    {(() => {
-                      const field = query.data.fields.find(
-                        (item) => item.field_name === finding.field_name,
-                      )
-                      const canConfirm =
-                        field?.raw_value !== null && field?.raw_value !== undefined &&
-                        field?.normalized_value !== null && field?.normalized_value !== undefined
-                      return canConfirm ? (
+
+                      <div className="review-finding-actions">
+                        {canConfirm && (
                         <button
                           className='button button-secondary button-small'
                           type='button'
@@ -381,115 +447,99 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                         >
                           确认当前值正确
                         </button>
-                      ) : null
-                    })()}
-                    <button
-                      className="button button-secondary button-small"
-                      type="button"
-                      onClick={() => openEditor(quote, finding, query.data)}
-                    >
-                      {drafts[quote.quote_id + ':' + finding.field_name]
-                        ? '修改暂存内容'
-                        : '核对并修正字段'}
-                    </button>
-                  </li>
-                ))}
+                        )}
+                        <button
+                          className="button button-secondary button-small"
+                          type="button"
+                          disabled={!field}
+                          onClick={() => openEditor(quote, finding, query.data)}
+                        >
+                          {staged ? '修改暂存内容' : '核对并修正字段'}
+                        </button>
+                      </div>
+
+                      {isEditing && editor && (
+                        <form className="review-editor review-editor-inline" onSubmit={submitCorrection}>
+                          <div className="section-heading compact-heading">
+                            <div>
+                              <p className="eyebrow">FIELD CORRECTION</p>
+                              <h3>核对：{fieldLabels[editor.field.field_name] ?? editor.field.field_name}</h3>
+                            </div>
+                            <button className="button button-secondary button-small" type="button" onClick={() => setEditor(null)}>
+                              取消
+                            </button>
+                          </div>
+                          <p className="review-editor-warning">
+                            此处只暂存。请填写从原报价或供应商确认得到的值，不要猜测。
+                          </p>
+                          <div className="review-editor-grid">
+                            <label>
+                              原文或人工确认依据
+                              <input
+                                required
+                                placeholder={
+                                  feeStatusFields.has(editor.field.field_name)
+                                    ? '例如：供应商确认运费免费'
+                                    : undefined
+                                }
+                                value={editor.rawValue}
+                                onChange={(event) => setEditor({ ...editor, rawValue: event.target.value })}
+                              />
+                            </label>
+                            <label>
+                              标准化值
+                              {feeStatusFields.has(editor.field.field_name) ? (
+                                <>
+                                  <select
+                                    required
+                                    value={editor.normalizedValue}
+                                    onChange={(event) => setEditor({ ...editor, normalizedValue: event.target.value })}
+                                  >
+                                    <option value="">请选择已经人工确认的实际状态</option>
+                                    {resolvingFeeStatuses
+                                      .filter(([value]) => value !== 'KNOWN_AMOUNT' || editor.knownAmountAvailable)
+                                      .map(([value, label]) => (
+                                        <option key={value} value={value}>{value} — {label}</option>
+                                      ))}
+                                  </select>
+                                  <small>
+                                    UNKNOWN 表示仍然未知，不能解除成本计算阻塞。
+                                    {!editor.knownAmountAvailable && ' 当前报价没有对应费用金额，因此不能选择 KNOWN_AMOUNT。'}
+                                  </small>
+                                </>
+                              ) : (
+                                <input
+                                  required
+                                  value={editor.normalizedValue}
+                                  onChange={(event) => setEditor({ ...editor, normalizedValue: event.target.value })}
+                                />
+                              )}
+                            </label>
+                            <label>
+                              单位（没有可留空）
+                              <input value={editor.unit} onChange={(event) => setEditor({ ...editor, unit: event.target.value })} />
+                            </label>
+                            <label>
+                              修正原因
+                              <input
+                                required
+                                minLength={3}
+                                value={editor.reason}
+                                onChange={(event) => setEditor({ ...editor, reason: event.target.value })}
+                              />
+                            </label>
+                          </div>
+                          <button className="button button-submit" type="submit">加入待提交清单</button>
+                        </form>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </article>
         ))}
       </div>
-
-      {editor && (
-        <form className="review-editor" onSubmit={submitCorrection}>
-          <div className="section-heading compact-heading">
-            <div>
-              <p className="eyebrow">FIELD CORRECTION</p>
-              <h3>{editor.quote.supplier_id} · {editor.field.field_name}</h3>
-            </div>
-            <button className="button button-secondary button-small" type="button" onClick={() => setEditor(null)}>
-              取消
-            </button>
-          </div>
-          <p className="review-editor-warning">
-            此处只暂存，不会创建 Job。请只填写你从原报价或供应商确认得到的值，不要猜测。
-          </p>
-          <div className="review-editor-grid">
-            <label>
-              原文或人工确认依据
-              <input
-                required
-                placeholder={
-                  feeStatusFields.has(editor.field.field_name)
-                    ? '例如：供应商确认运费免费'
-                    : undefined
-                }
-                value={editor.rawValue}
-                onChange={(event) => setEditor({ ...editor, rawValue: event.target.value })}
-              />
-            </label>
-            <label>
-              标准化值
-              {feeStatusFields.has(editor.field.field_name) ? (
-                <>
-                  <select
-                    required
-                    value={editor.normalizedValue}
-                    onChange={(event) =>
-                      setEditor({ ...editor, normalizedValue: event.target.value })
-                    }
-                  >
-                    <option value="">请选择已经人工确认的实际状态</option>
-                    {resolvingFeeStatuses
-                      .filter(
-                        ([value]) =>
-                          value !== 'KNOWN_AMOUNT' ||
-                          editor.knownAmountAvailable,
-                      )
-                      .map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {value} — {label}
-                      </option>
-                      ))}
-                  </select>
-                  <small>
-                    UNKNOWN 表示仍然未知，不能解除成本计算阻塞。
-                    {!editor.knownAmountAvailable &&
-                      ' 当前报价没有对应费用金额，因此不能选择 KNOWN_AMOUNT。'}
-                  </small>
-                </>
-              ) : (
-                <input
-                  required
-                  value={editor.normalizedValue}
-                  onChange={(event) =>
-                    setEditor({ ...editor, normalizedValue: event.target.value })
-                  }
-                />
-              )}
-            </label>
-            <label>
-              单位（没有可留空）
-              <input
-                value={editor.unit}
-                onChange={(event) => setEditor({ ...editor, unit: event.target.value })}
-              />
-            </label>
-            <label>
-              修正原因
-              <input
-                required
-                minLength={3}
-                value={editor.reason}
-                onChange={(event) => setEditor({ ...editor, reason: event.target.value })}
-              />
-            </label>
-          </div>
-          <button className="button button-submit" type="submit">
-            加入待提交清单
-          </button>
-        </form>
-      )}
 
       <div className="review-batch-actions">
         <div>

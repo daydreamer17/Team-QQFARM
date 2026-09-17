@@ -65,7 +65,7 @@ export function ReviewQueuePage() {
       <section className='review-queue-header'>
         <div>
           <p className='eyebrow'>HUMAN REVIEW</p>
-          <h1>人工审核</h1>
+          <h1>审核与分析</h1>
           <p>集中查看所有采购任务的审核状态，并一次性处理每个任务的全部阻塞项。</p>
         </div>
         <div className='review-queue-count'>

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
-import { RunPanel } from '../components/RunPanel'
+import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 export function TaskPage() {
   const { taskId = '' } = useParams()
@@ -39,7 +39,7 @@ export function TaskPage() {
   }
 
   const requirement = task.data.requirement
-  const reviewRequired =
+  const reviewBlocked =
     task.data.status === 'NEEDS_INPUT' ||
     (task.data.status === 'FAILED' &&
       task.data.current_job?.error_code === 'review_required') ||
@@ -47,42 +47,18 @@ export function TaskPage() {
 
   return (
     <div className="page-stack">
-      <section className="task-header">
-        <div>
-          <p className="eyebrow">PROCUREMENT TASK</p>
-          <h1>{requirement.manufacturer_part_number}</h1>
-          <p className="task-id">{task.data.task_id}</p>
-        </div>
-        <div className="task-badges">
-          <span className="status-pill status-ready">{task.data.status}</span>
-          <span className="revision-badge">Revision {task.data.task_revision}</span>
-        </div>
-      </section>
-
-      <section className="card next-action-card">
-        <div>
-          <p className="eyebrow">NEXT STEP</p>
-          <h2>继续登记报价</h2>
-          <p>可以继续添加供应商报价；上传新文件会推进 task revision。</p>
-        </div>
-        <Link className="button button-submit" to={`/tasks/${task.data.task_id}/quotes/new`}>
-          上传供应商报价
-        </Link>
-      </section>
-
-      <RunPanel task={task.data} onRefresh={() => task.refetch()} />
-      {reviewRequired && (
-        <section className='card task-review-callout'>
-          <div>
-            <p className='eyebrow'>HUMAN REVIEW REQUIRED</p>
-            <h2>该任务需要人工审核</h2>
-            <p>请前往独立审核页面，一次处理当前任务的全部阻塞字段或待确认问题。</p>
-          </div>
-          <Link className='button button-submit' to={'/reviews/' + task.data.task_id}>
-            进入人工审核
-          </Link>
-        </section>
-      )}
+      <TaskWorkspaceHeader
+        taskId={task.data.task_id}
+        scenarioId={task.data.scenario_id}
+        title={requirement.manufacturer_part_number}
+        subtitle={`${requirement.required_quantity} ${requirement.quantity_unit} · ${requirement.currency} · 最晚交付 ${requirement.delivery_deadline}`}
+        status={task.data.status}
+        revision={task.data.task_revision}
+        resultId={task.data.current_result_id}
+        quoteCount={task.data.quotes.length}
+        reviewBlocked={reviewBlocked}
+        active="overview"
+      />
 
       <section>
         <div className="section-heading">
@@ -90,7 +66,6 @@ export function TaskPage() {
             <p className="eyebrow">REQUIREMENT SNAPSHOT</p>
             <h2>采购需求</h2>
           </div>
-          <span>由后端返回</span>
         </div>
         <dl className="detail-grid">
           <div><dt>场景编号</dt><dd>{task.data.scenario_id ?? '—'}</dd></div>
@@ -111,6 +86,16 @@ export function TaskPage() {
           <div><dt>主要排序偏好</dt><dd>{requirement.ranking_preference}</dd></div>
           <div><dt>次要偏好</dt><dd>{requirement.secondary_preference ?? '—'}</dd></div>
         </dl>
+        <div className="requirement-actions">
+          <div className="inline-actions">
+            <button className="button button-secondary" type="button" disabled title="后端接口待接入">
+              修改采购需求
+            </button>
+            <button className="button button-danger" type="button" disabled title="后端接口待接入">
+              废弃任务
+            </button>
+          </div>
+        </div>
       </section>
     </div>
   )

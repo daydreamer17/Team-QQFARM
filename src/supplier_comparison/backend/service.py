@@ -389,6 +389,12 @@ class BackendService:
                         "error_message": job.error_message,
                         "has_corrections": graph_has_corrections,
                         "correction_batch_incomplete": correction_batch_incomplete,
+                        "created_at": job.created_at.isoformat(),
+                        "started_at": (
+                            job.started_at.isoformat()
+                            if job.started_at is not None
+                            else None
+                        ),
                     }
                     if job is not None
                     else None
@@ -491,6 +497,7 @@ class BackendService:
                         "manufacturer_part_number": payload.get(
                             "manufacturer_part_number"
                         ),
+                        "planned_order_date": payload.get("planned_order_date"),
                         "created_at": task.created_at.isoformat(),
                         "updated_at": task.updated_at.isoformat(),
                     }
@@ -655,6 +662,17 @@ class BackendService:
             graph.status = "RUNNING"
             task.status = "RUNNING"
             return self._job_response(job)
+
+    def next_pending_job_id(self) -> str | None:
+        """Return the oldest pending job for the single background worker."""
+
+        with self.session_factory() as session:
+            return session.scalar(
+                select(Job.job_id)
+                .where(Job.status == "PENDING")
+                .order_by(Job.created_at.asc(), Job.job_id.asc())
+                .limit(1)
+            )
 
     def finish_job(self, job_id: str, *, waiting_input: bool) -> dict[str, Any]:
         from .models import utc_now

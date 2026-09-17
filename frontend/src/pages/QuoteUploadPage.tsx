@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { TaskDetail } from '../api/types'
+import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
+import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024
 
@@ -62,6 +64,7 @@ export function QuoteUploadPage() {
   const [supplierId, setSupplierId] = useState('')
   const [isSynthetic, setIsSynthetic] = useState(true)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
   const [lastSubmission, setLastSubmission] = useState<UploadSubmission | null>(null)
 
@@ -154,16 +157,26 @@ export function QuoteUploadPage() {
 
   return (
     <div className="page-stack">
-      <section className="page-heading">
-        <div>
-          <p className="eyebrow">QUOTE INTAKE</p>
-          <h1>上传供应商报价</h1>
-          <p>
-            任务 <code>{taskId}</code> · 当前 Revision {task.data?.task_revision ?? '…'}
-          </p>
-        </div>
-        <Link className="button button-secondary" to={`/tasks/${taskId}`}>返回任务</Link>
-      </section>
+      {task.data ? (
+        <TaskWorkspaceHeader
+          taskId={task.data.task_id}
+          scenarioId={task.data.scenario_id}
+          title={task.data.requirement.manufacturer_part_number}
+          subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} 份报价`}
+          status={task.data.status}
+          revision={task.data.task_revision}
+          resultId={task.data.current_result_id}
+          quoteCount={task.data.quotes.length}
+          reviewBlocked={
+            task.data.status === 'NEEDS_INPUT' ||
+            (task.data.status === 'FAILED' && task.data.current_job?.error_code === 'review_required') ||
+            Boolean(task.data.current_job?.correction_batch_incomplete)
+          }
+          active="quotes"
+        />
+      ) : (
+        <section className="card loading-panel">正在读取任务工作台…</section>
+      )}
 
       <section className="upload-layout">
         <form className="card upload-form" onSubmit={handleSubmit}>
@@ -200,8 +213,19 @@ export function QuoteUploadPage() {
 
           {selectedFile && (
             <div className="selected-file">
-              <strong>{selectedFile.name}</strong>
-              <span>{formatBytes(selectedFile.size)} · {selectedFile.type}</span>
+              <div>
+                <strong>{selectedFile.name}</strong>
+                <span>{formatBytes(selectedFile.size)} · {selectedFile.type}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreview({
+                  name: selectedFile.name,
+                  mediaType: selectedFile.type,
+                  sizeBytes: selectedFile.size,
+                  file: selectedFile,
+                })}
+              >预览文件</button>
             </div>
           )}
 
@@ -297,6 +321,16 @@ export function QuoteUploadPage() {
                       <div>
                         <span>{version.is_current ? '当前使用' : '历史版本'}</span>
                         <code>{version.document_sha256.slice(0, 12)}…</code>
+                        <button
+                          className="quote-preview-action"
+                          type="button"
+                          onClick={() => setPreview({
+                            name: version.original_filename,
+                            mediaType: version.media_type,
+                            sizeBytes: version.size_bytes,
+                            description: '后端目前只返回文件元数据，尚未提供带权限控制的文件内容流。原型保留了预览入口，接入内容接口后可直接显示 PDF 或文本。',
+                          })}
+                        >预览</button>
                       </div>
                     </div>
                   ))}
@@ -307,6 +341,7 @@ export function QuoteUploadPage() {
         )}
         <p className="session-note">刷新或关闭浏览器后，历史报价和文件哈希仍可查询。</p>
       </section>
+      {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }

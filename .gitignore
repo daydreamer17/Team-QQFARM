@@ -30,6 +30,7 @@ dist/
 .venv-ocr/
 .ocr-cache/
 .ocr-tools/
+.local-data/
 .DS_Store
 
 # Real-model evaluation outputs are local evidence and may contain provider diagnostics.

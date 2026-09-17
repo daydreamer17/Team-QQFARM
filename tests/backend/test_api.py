@@ -133,6 +133,7 @@ def test_list_tasks_returns_safe_recent_summaries(
                 "current_result_id": None,
                 "manufacturer": "QQ Demo Components",
                 "manufacturer_part_number": "QW-MCU9-DEMO",
+                "planned_order_date": "2026-09-14",
                 "created_at": response.json()["items"][0]["created_at"],
                 "updated_at": response.json()["items"][0]["updated_at"],
             }

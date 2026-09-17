@@ -40,6 +40,7 @@ export interface TaskListItem extends TaskSummary {
   current_result_id: string | null
   manufacturer: string | null
   manufacturer_part_number: string | null
+  planned_order_date: string | null
   created_at: string
   updated_at: string
 }
@@ -57,6 +58,8 @@ export interface CurrentJob {
   error_message: string | null
   has_corrections: boolean
   correction_batch_incomplete: boolean
+  created_at: string | null
+  started_at: string | null
 }
 
 export interface TaskQuote {

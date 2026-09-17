@@ -72,7 +72,6 @@ services:
   worker:
     build:
       context: .
-    profiles: ["worker"]
     environment:
       TZ: UTC
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
@@ -109,7 +108,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["python", "-m", "supplier_comparison.worker", "--help"]
+    command: ["python", "-m", "supplier_comparison.worker", "run-loop", "--poll-interval", "1"]
+    restart: unless-stopped
 
 volumes:
   database_data:

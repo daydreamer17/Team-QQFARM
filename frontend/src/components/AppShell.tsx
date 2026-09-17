@@ -33,22 +33,31 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <NavLink className="brand" to="/" aria-label="Supplier Compare 首页">
+      <nav className="sidebar" aria-label="主导航">
+        <NavLink className="brand" to="/" aria-label="QuoteWise 首页">
           <span className="brand-mark" aria-hidden="true">Q</span>
           <span>
-            <strong>Supplier Compare</strong>
-            <small>采购报价比较工作台</small>
+            <strong>QuoteWise</strong>
+            <small>Supplier Intelligence</small>
           </span>
         </NavLink>
-        <span className="environment-badge">LOCAL</span>
-      </header>
-      <div className="app-frame">
-        <nav className="sidebar" aria-label="主导航">
-          <p className="nav-label">工作区</p>
-          <NavLink to="/" end className={navClass}>工作台</NavLink>
-          <NavLink to="/tasks/new" className={navClass}>新建任务</NavLink>
-          <NavLink to="/reviews" className={navClass}>人工审核</NavLink>
+        <p className="nav-label">采购工作区</p>
+        <NavLink to="/" end className={navClass}>
+          <span className="nav-icon" aria-hidden="true">▦</span>
+          <span>任务中心</span>
+        </NavLink>
+        <NavLink to="/tasks/new" className={navClass}>
+          <span className="nav-icon" aria-hidden="true">＋</span>
+          <span>新建任务</span>
+        </NavLink>
+        <NavLink to="/reviews" className={navClass}>
+          <span className="nav-icon" aria-hidden="true">✓</span>
+          <span>审核与分析</span>
+        </NavLink>
+        <NavLink to="/resources" className={navClass}>
+          <span className="nav-icon" aria-hidden="true">▤</span>
+          <span>规则资源库</span>
+        </NavLink>
           <section className="sidebar-history" aria-label="历史任务">
             <div className="sidebar-history-heading">
               <span>历史任务</span>
@@ -96,10 +105,21 @@ export function AppShell() {
             </div>
           </section>
           <div className="sidebar-note">
-            <strong>Week 2</strong>
-            <span>先打通任务、上传、审核和比较闭环。</span>
+            <strong>当前工作区</strong>
+            <span>任务、报价、审核与比较结果均以当前 revision 为准。</span>
           </div>
-        </nav>
+      </nav>
+      <div className="app-main">
+        <header className="topbar">
+          <div className="topbar-title">
+            <small>Electronics Procurement</small>
+            <strong>供应商比选工作区</strong>
+          </div>
+          <div className="topbar-actions">
+            <span className="environment-badge">LOCAL</span>
+            <span className="user-avatar" aria-label="当前用户 LC">LC</span>
+          </div>
+        </header>
         <main className="page-content"><Outlet /></main>
       </div>
     </div>

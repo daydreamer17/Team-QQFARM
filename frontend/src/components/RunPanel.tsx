@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { StartRunResponse, TaskDetail } from '../api/types'
@@ -12,6 +12,7 @@ interface RunSubmission {
 interface RunPanelProps {
   task: TaskDetail
   onRefresh: () => void
+  compact?: boolean
 }
 
 function runErrorMessage(error: unknown) {
@@ -67,7 +68,38 @@ function jobErrorMessage(task: TaskDetail) {
   return task.current_job?.error_message ?? '工作流未提供更多安全错误信息。'
 }
 
-export function RunPanel({ task, onRefresh }: RunPanelProps) {
+function elapsedLabel(totalSeconds: number) {
+  if (totalSeconds < 60) return `${totalSeconds} 秒`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes} 分 ${String(seconds).padStart(2, '0')} 秒`
+}
+
+function ActiveRunIndicator({ task }: { task: TaskDetail }) {
+  const [fallbackStartedAt] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
+  const timestamp = task.status === 'RUNNING'
+    ? task.current_job?.started_at ?? task.current_job?.created_at
+    : task.current_job?.created_at
+  const parsedTimestamp = timestamp ? Date.parse(timestamp) : Number.NaN
+  const startedAt = Number.isNaN(parsedTimestamp) ? fallbackStartedAt : parsedTimestamp
+  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1_000))
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  return (
+    <span className={`run-state run-state-${task.status.toLowerCase()} run-state-active`}>
+      <i className="activity-spinner" aria-hidden="true" />
+      <span>{task.status === 'RUNNING' ? '分析中' : '等待执行'}</span>
+      <small>已运行 {elapsedLabel(elapsedSeconds)}</small>
+    </span>
+  )
+}
+
+export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
   const queryClient = useQueryClient()
   const [lastSubmission, setLastSubmission] = useState<RunSubmission | null>(null)
 
@@ -94,6 +126,8 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
                 error_message: null,
                 has_corrections: false,
                 correction_batch_incomplete: false,
+                created_at: new Date().toISOString(),
+                started_at: null,
               },
             }
           : current,
@@ -125,6 +159,8 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
                 has_corrections: current.current_job?.has_corrections ?? false,
                 correction_batch_incomplete:
                   current.current_job?.correction_batch_incomplete ?? false,
+                created_at: current.current_job?.created_at ?? new Date().toISOString(),
+                started_at: null,
               },
             }
           : current,
@@ -144,9 +180,6 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
 
   const [title, description] = statusCopy(task)
   const jobId = task.current_job?.job_id
-  const workerCommand = jobId
-    ? `docker compose --profile worker run --rm worker python -m supplier_comparison.worker run-job --job-id ${jobId}`
-    : ''
   const canRetryResume =
     task.status === 'FAILED' &&
     task.current_job?.job_type === 'RESUME' &&
@@ -163,23 +196,27 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
     startRun.error.code === 'task_revision_conflict'
 
   return (
-    <section className="card run-panel">
+    <section className={`card run-panel${compact ? ' run-panel-compact' : ''}`}>
       <div className="run-heading">
         <div>
           <p className="eyebrow">ANALYSIS RUN</p>
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
-        <span className={`run-state run-state-${task.status.toLowerCase()}`}>
-          {task.status}
-        </span>
+        {isActive ? (
+          <ActiveRunIndicator task={task} />
+        ) : (
+          <span className={`run-state run-state-${task.status.toLowerCase()}`}>
+            {task.status}
+          </span>
+        )}
       </div>
 
       {task.task_revision === 1 && task.status === 'DRAFT' && (
         <p className="run-notice">至少登记一份报价后才能启动分析。</p>
       )}
 
-      {jobId && (
+      {jobId && !compact && (
         <dl className="job-summary">
           <div><dt>Job ID</dt><dd>{jobId}</dd></div>
           <div><dt>Job type</dt><dd>{task.current_job?.job_type}</dd></div>
@@ -197,12 +234,12 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
       )}
 
       {task.status === 'QUEUED' &&
-        workerCommand &&
+        jobId &&
         !task.current_job?.correction_batch_incomplete && (
         <div className="worker-instruction">
-          <strong>本地开发环境需要执行一次性 Worker</strong>
-          <code>{workerCommand}</code>
-          <small>运行会调用解析器或模型；执行前请确认本地 provider 配置和调用预算。</small>
+          <strong>后台分析已排队</strong>
+          <span>Worker 会自动领取任务并调用解析器或模型，无需复制命令或离开当前页面。</span>
+          <small>页面会自动刷新；若模型或网络失败，可以按当前版本重新分析。</small>
         </div>
       )}
 
@@ -218,7 +255,7 @@ export function RunPanel({ task, onRefresh }: RunPanelProps) {
         </div>
       )}
 
-      {task.status === 'COMPLETED' && task.current_result_id && (
+      {task.status === 'COMPLETED' && task.current_result_id && !compact && (
         <div className="run-notice">
           当前结果：<code>{task.current_result_id}</code>
         </div>

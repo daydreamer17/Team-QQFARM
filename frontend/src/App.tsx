@@ -4,11 +4,13 @@ import { NewTaskPage } from './pages/NewTaskPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { QuoteUploadPage } from './pages/QuoteUploadPage'
+import { ResourcePage } from './pages/ResourcePage'
 import { ResultPage } from './pages/ResultPage'
 import { ReviewQueuePage } from './pages/ReviewQueuePage'
 import { ReviewTaskPage } from './pages/ReviewTaskPage'
 import { TaskPage } from './pages/TaskPage'
 import './App.css'
+import './styles/blueprint.css'
 
 function App() {
   return (
@@ -16,6 +18,7 @@ function App() {
       <Route element={<AppShell />}>
         <Route path='reviews' element={<ReviewQueuePage />} />
         <Route path='reviews/:taskId' element={<ReviewTaskPage />} />
+        <Route path='resources' element={<ResourcePage />} />
         <Route index element={<OverviewPage />} />
         <Route path="tasks/new" element={<NewTaskPage />} />
         <Route path="tasks/:taskId" element={<TaskPage />} />

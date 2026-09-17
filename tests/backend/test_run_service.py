@@ -95,6 +95,8 @@ def test_answer_issue_advances_revision_and_creates_idempotent_resume_job(
         "error_message": None,
         "has_corrections": False,
         "correction_batch_incomplete": False,
+        "created_at": task_state["current_job"]["created_at"],
+        "started_at": None,
     }
     answer = {"answer_type": "CONFIRM_MISSING"}
 
