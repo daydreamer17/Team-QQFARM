@@ -15,6 +15,14 @@ from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, WorkflowRunner
 from .extraction.dictionary import QuoteDictionary
 from .extraction.errors import ExtractionError
+from .rag.clients import (
+    EmbeddingConfig,
+    RerankConfig,
+    SiliconFlowEmbeddingClient,
+    SiliconFlowRerankClient,
+)
+from .rag.repository import SQLPolicyRepository
+from .rag.retriever import HybridPolicyRetriever
 
 
 def run_job(job_id: str) -> dict:
@@ -27,11 +35,17 @@ def run_job(job_id: str) -> dict:
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
+    policy_retriever = HybridPolicyRetriever(
+        SQLPolicyRepository(sessions),
+        SiliconFlowEmbeddingClient(EmbeddingConfig.from_env()),
+        SiliconFlowRerankClient(RerankConfig.from_env()),
+    )
     connection_string = checkpoint_connection_string(settings.database_url)
     with PostgresSaver.from_conn_string(connection_string) as saver:
         runner = WorkflowRunner(
             service,
             processor=processor,
+            policy_retriever=policy_retriever,
             checkpointer=saver,
             dictionary_path=settings.quote_dictionary_path,
         )

@@ -30,6 +30,10 @@ services:
       TZ: UTC
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
       QUOTE_STORAGE_PATH: /var/lib/supplier-comparison/quotes
+      POLICY_UPLOAD_STORAGE_PATH: /var/lib/supplier-comparison/policy-uploads
+      POLICY_UPLOAD_MAX_BYTES: ${POLICY_UPLOAD_MAX_BYTES:-5242880}
+      POLICY_UPLOAD_MAX_PDF_PAGES: ${POLICY_UPLOAD_MAX_PDF_PAGES:-50}
+      POLICY_UPLOAD_MAX_EXTRACTED_CHARACTERS: ${POLICY_UPLOAD_MAX_EXTRACTED_CHARACTERS:-200000}
       SUPPLIER_POLICY_ROOT: /app/data/policies
       TEST_USER_ID: ${TEST_USER_ID:-local-test-user}
       SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-}
@@ -54,6 +58,7 @@ services:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     volumes:
       - quote_files:/var/lib/supplier-comparison/quotes
+      - policy_files:/var/lib/supplier-comparison/policy-uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -114,3 +119,4 @@ services:
 volumes:
   database_data:
   quote_files:
+  policy_files:

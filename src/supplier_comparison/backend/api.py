@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 
+from supplier_comparison.rag.clients import EmbeddingConfig, SiliconFlowEmbeddingClient
+from supplier_comparison.rag.importer import PolicyImporter
+from supplier_comparison.rag.uploads import (
+    PolicyDraftClauseInput,
+    PolicyFileImportMetadata,
+    PolicyFileImportService,
+)
 from supplier_comparison.rules import ProcurementRequirement
 
 from .database import create_session_factory, readiness_probe
@@ -25,9 +42,17 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class PolicyBindingRequest(ApiModel):
+    policy_set_version: str = Field(min_length=1, max_length=128)
+    policy_index_version: str = Field(min_length=1, max_length=128)
+    category: str = Field(min_length=1, max_length=128)
+    region: str = Field(min_length=1, max_length=64)
+
+
 class CreateTaskRequest(ApiModel):
     requirement: ProcurementRequirement
     scenario_id: str | None = Field(default=None, max_length=128)
+    policy_binding: PolicyBindingRequest | None = None
 
 
 class StartRunRequest(ApiModel):
@@ -55,9 +80,15 @@ class ShippingAmountAnswer(ApiModel):
         return value
 
 
+class RetryPolicyRetrievalAnswer(ApiModel):
+    answer_type: Literal["RETRY_POLICY_RETRIEVAL"]
+
+
 class IssueAnswerRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
-    answer: ConfirmMissingAnswer | ShippingAmountAnswer = Field(discriminator="answer_type")
+    answer: ConfirmMissingAnswer | ShippingAmountAnswer | RetryPolicyRetrievalAnswer = Field(
+        discriminator="answer_type"
+    )
 
 
 class FieldCorrectionRequest(ApiModel):
@@ -80,6 +111,15 @@ class BatchFieldCorrectionItem(ApiModel):
 class BatchFieldCorrectionRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
     corrections: list[BatchFieldCorrectionItem] = Field(min_length=1, max_length=100)
+
+
+class ReviewPolicyClausesRequest(ApiModel):
+    expected_revision: int = Field(ge=1)
+    clauses: list[PolicyDraftClauseInput] = Field(min_length=1, max_length=200)
+
+
+class PublishPolicyRequest(ApiModel):
+    expected_revision: int = Field(ge=1)
 
 
 def _request_id(request: Request) -> str:
@@ -111,6 +151,7 @@ def create_app(
     service: BackendService,
     *,
     readiness_check,
+    policy_file_import_service: PolicyFileImportService | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Supplier Comparison API", version="0.1.0")
 
@@ -176,6 +217,14 @@ def create_app(
             body.requirement,
             idempotency_key=idempotency_key,
             scenario_id=body.scenario_id,
+            policy_set_version=(
+                body.policy_binding.policy_set_version if body.policy_binding else None
+            ),
+            policy_index_version=(
+                body.policy_binding.policy_index_version if body.policy_binding else None
+            ),
+            policy_category=(body.policy_binding.category if body.policy_binding else None),
+            policy_region=(body.policy_binding.region if body.policy_binding else None),
         )
 
     @app.get("/api/v1/tasks")
@@ -313,10 +362,87 @@ def create_app(
     def get_result(task_id: str, result_id: str):
         return service.get_result(task_id, result_id)
 
+    if policy_file_import_service is not None:
+
+        @app.post("/api/v1/policy-imports", status_code=201)
+        def upload_policy_file(
+            idempotency_key: IdempotencyKey,
+            metadata: Annotated[str, Form(min_length=2, max_length=32_768)],
+            file: UploadFile = File(...),
+        ):
+            try:
+                parsed_metadata = PolicyFileImportMetadata.model_validate_json(metadata)
+            except ValidationError as exc:
+                raise BackendError(
+                    "policy_metadata_invalid",
+                    "Policy upload metadata is invalid.",
+                    errors=[
+                        {
+                            "location": list(item["loc"]),
+                            "message": item["msg"],
+                            "type": item["type"],
+                        }
+                        for item in exc.errors()
+                    ],
+                ) from exc
+            return policy_file_import_service.upload_stream(
+                metadata=parsed_metadata,
+                original_filename=file.filename or "policy",
+                media_type=file.content_type or "application/octet-stream",
+                stream=file.file,
+                idempotency_key=idempotency_key,
+            )
+
+        @app.get("/api/v1/policy-imports/{policy_import_id}")
+        def get_policy_import(policy_import_id: str):
+            return policy_file_import_service.get(policy_import_id)
+
+        @app.put("/api/v1/policy-imports/{policy_import_id}/clauses")
+        def review_policy_clauses(
+            policy_import_id: str,
+            body: ReviewPolicyClausesRequest,
+            idempotency_key: IdempotencyKey,
+        ):
+            return policy_file_import_service.replace_clauses(
+                policy_import_id,
+                expected_revision=body.expected_revision,
+                clauses=body.clauses,
+                idempotency_key=idempotency_key,
+            )
+
+        @app.post("/api/v1/policy-imports/{policy_import_id}/publish")
+        def publish_policy_import(
+            policy_import_id: str,
+            body: PublishPolicyRequest,
+            idempotency_key: IdempotencyKey,
+        ):
+            return policy_file_import_service.publish(
+                policy_import_id,
+                expected_revision=body.expected_revision,
+                idempotency_key=idempotency_key,
+            )
+
     return app
 
 
 _engine, _sessions = create_session_factory(settings.database_url)
+_embedding_config = EmbeddingConfig.from_env()
+_embedding_client = SiliconFlowEmbeddingClient(_embedding_config)
+_policy_importer = PolicyImporter(
+    _sessions,
+    _embedding_client,
+    allowed_root=Path("data/policies").resolve(),
+    provider=_embedding_config.provider,
+)
+_policy_file_import_service = PolicyFileImportService(
+    _sessions,
+    settings.policy_upload_storage_path,
+    _policy_importer,
+    actor_id=settings.test_user_id,
+    max_bytes=settings.policy_upload_max_bytes,
+    max_pdf_pages=settings.policy_upload_max_pdf_pages,
+    max_extracted_characters=settings.policy_upload_max_extracted_characters,
+)
 app = create_app(
     BackendService(
         _sessions,
@@ -325,4 +451,5 @@ app = create_app(
         quote_dictionary_path=settings.quote_dictionary_path,
     ),
     readiness_check=readiness_probe(_engine),
+    policy_file_import_service=_policy_file_import_service,
 )

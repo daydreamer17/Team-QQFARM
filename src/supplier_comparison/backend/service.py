@@ -162,10 +162,40 @@ class BackendService:
         *,
         idempotency_key: str,
         scenario_id: str | None = None,
+        policy_set_version: str | None = None,
+        policy_index_version: str | None = None,
+        policy_category: str | None = None,
+        policy_region: str | None = None,
     ) -> dict[str, Any]:
+        policy_binding = (
+            policy_set_version,
+            policy_index_version,
+            policy_category,
+            policy_region,
+        )
+        if any(value is not None for value in policy_binding) and not all(
+            isinstance(value, str) and value.strip() for value in policy_binding
+        ):
+            raise BackendError(
+                "policy_binding_incomplete",
+                "Policy set, index, category, and region must be supplied together.",
+            )
+        normalized_policy_binding = tuple(
+            value.strip() if isinstance(value, str) else None for value in policy_binding
+        )
+        (
+            policy_set_version,
+            policy_index_version,
+            policy_category,
+            policy_region,
+        ) = normalized_policy_binding
         request = {
             "requirement": requirement.model_dump(mode="json"),
             "scenario_id": scenario_id,
+            "policy_set_version": policy_set_version,
+            "policy_index_version": policy_index_version,
+            "policy_category": policy_category,
+            "policy_region": policy_region,
         }
         request_sha = content_hash(request)
         with self.session_factory.begin() as session:
@@ -184,6 +214,10 @@ class BackendService:
                 scenario_id=scenario_id,
                 current_revision=1,
                 status="DRAFT",
+                policy_set_version=policy_set_version,
+                policy_index_version=policy_index_version,
+                policy_category=policy_category,
+                policy_region=policy_region,
             )
             session.add(task)
             # SQLAlchemy cannot infer object dependency ordering from scalar FK
@@ -214,6 +248,7 @@ class BackendService:
                 "task_id": task_id,
                 "task_revision": 1,
                 "status": "DRAFT",
+                "policy_binding": self._policy_binding_response(task),
             }
             self._save_idempotent(
                 session,
@@ -378,6 +413,7 @@ class BackendService:
                 "current_graph_run_id": task.current_graph_run_id,
                 "current_snapshot_id": task.current_snapshot_id,
                 "current_result_id": task.current_result_id,
+                "policy_binding": self._policy_binding_response(task),
                 "current_issue": self._issue_response(issue) if issue is not None else None,
                 "current_job": (
                     {
@@ -580,6 +616,10 @@ class BackendService:
                 "effective_revision": graph.effective_revision,
                 "graph_run_id": graph.graph_run_id,
                 "thread_id": graph.thread_id,
+                "policy_set_version": task.policy_set_version,
+                "policy_index_version": task.policy_index_version,
+                "policy_category": task.policy_category,
+                "policy_region": task.policy_region,
                 "requirement": dict(requirement.payload) if requirement else None,
                 "documents": [
                     {
@@ -796,6 +836,9 @@ class BackendService:
                     "graph_run_id": artifact.graph_run_id,
                     "is_current": artifact.artifact_id == task.current_result_id,
                     "result": dict(artifact.payload),
+                    "policy_retrievals": self._policy_retrieval_payloads(
+                        session, artifact.artifact_id
+                    ),
                 }
                 for artifact in artifacts
             ]
@@ -818,6 +861,9 @@ class BackendService:
                 "graph_run_id": artifact.graph_run_id,
                 "is_current": artifact.artifact_id == task.current_result_id,
                 "result": dict(artifact.payload),
+                "policy_retrievals": self._policy_retrieval_payloads(
+                    session, artifact.artifact_id
+                ),
             }
 
     def list_quote_fields(self, task_id: str, quote_id: str) -> dict[str, Any]:
@@ -2006,6 +2052,8 @@ class BackendService:
                 )
             task.current_revision += 1
             task.status = "QUEUED"
+            task.current_snapshot_id = None
+            task.current_result_id = None
             graph.effective_revision = task.current_revision
             graph.status = "PENDING"
             graph.current_interrupt_issue_id = None
@@ -2081,6 +2129,35 @@ class BackendService:
             "created_revision": issue.created_revision,
             "created_by": issue.created_by,
         }
+
+    @staticmethod
+    def _policy_binding_response(task: Task) -> dict[str, str] | None:
+        values = (
+            task.policy_set_version,
+            task.policy_index_version,
+            task.policy_category,
+            task.policy_region,
+        )
+        if not all(values):
+            return None
+        return {
+            "policy_set_version": task.policy_set_version,
+            "policy_index_version": task.policy_index_version,
+            "category": task.policy_category,
+            "region": task.policy_region,
+        }
+
+    @staticmethod
+    def _policy_retrieval_payloads(session, result_id: str) -> list[dict[str, Any]]:
+        artifacts = session.scalars(
+            select(WorkflowArtifact)
+            .where(
+                WorkflowArtifact.parent_artifact_id == result_id,
+                WorkflowArtifact.artifact_type == "POLICY_RETRIEVAL_RESULT",
+            )
+            .order_by(WorkflowArtifact.created_at, WorkflowArtifact.artifact_id)
+        ).all()
+        return [dict(artifact.payload) for artifact in artifacts]
 
     @staticmethod
     def _document_execution_response(execution: DocumentExecution) -> dict[str, Any]:

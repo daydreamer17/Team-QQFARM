@@ -44,7 +44,7 @@ COPY alembic.ini ./
 COPY migrations ./migrations
 
 RUN useradd --create-home --uid 10001 supplier \
-    && mkdir -p /var/lib/supplier-comparison/quotes \
+    && mkdir -p /var/lib/supplier-comparison/quotes /var/lib/supplier-comparison/policy-uploads \
     && chown -R supplier:supplier /var/lib/supplier-comparison
 USER supplier
 

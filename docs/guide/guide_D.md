@@ -47,7 +47,7 @@ API 只创建持久化 job，不在 HTTP 请求中等待模型。worker 按 `job
 | `src/supplier_comparison/backend/models.py` | 11 张业务表的 ORM 模型 | 保存任务、修订、文件、不可变 artifact、图运行、问题、job、模型预算和幂等结果。 |
 | `src/supplier_comparison/backend/service.py` | `BackendService` | application service；集中实现事务、行锁、revision、幂等、文件写入、issue、纠正、artifact 和结果发布。路由和图节点不直接写业务表。 |
 | `src/supplier_comparison/backend/api.py` | FastAPI 应用与 10 个业务接口 | 校验 Pydantic 请求、注入服务端身份、调用 application service，并返回统一错误格式。 |
-| `src/supplier_comparison/backend/workflow.py` | `DefaultQuoteProcessor`、`WorkflowRunner` | 调用 B 的 PDF／CSV 与审核接口、调用 C 的比较接口，并实现九个 LangGraph 节点及两次中断。 |
+| `src/supplier_comparison/backend/workflow.py` | `DefaultQuoteProcessor`、`WorkflowRunner` | 调用 B 的 PDF／CSV 与审核接口、调用 C 的比较接口、调用制度 RAG，并实现十二个 LangGraph 节点及报价／制度中断。 |
 | `src/supplier_comparison/backend/checkpoints.py` | checkpoint URL 转换和初始化函数 | 将 SQLAlchemy PostgreSQL URL 转为 `PostgresSaver` URL，并调用 `setup()` 建表。 |
 | `src/supplier_comparison/checkpoints.py` | checkpoint CLI | 提供 `python -m supplier_comparison.checkpoints setup`。 |
 | `src/supplier_comparison/worker.py` | 一次性 worker CLI | 创建 service、字典、真实模型 processor 和 `PostgresSaver`，然后执行指定 job；异常时只输出安全的通用错误。 |
@@ -147,7 +147,10 @@ FastAPI 路由只做请求解析和响应转换。所有修改都进入 `Backend
 | 6 | `freeze_draft_and_compare` | 冻结当前回答后的 InputSnapshot（MCU 演示为 revision 5），调用 C 生成 PENDING 草稿并保存历史结果。 |
 | 7 | `await_shipping_amount` | 创建 `SHIPPING_AMOUNT` issue，再次 `interrupt()`。 |
 | 8 | `apply_shipping_amount` | 从数据库读取 SGD 金额，分别纠正 `shipping_fee_status` 和 `shipping_fee_amount`，保存两个 CorrectionEvent 并重新审核。 |
-| 9 | `freeze_final_and_compare` | 冻结最终 InputSnapshot，调用 C 重新计算，保存 ComparisonResult，并受控发布为当前结果。 |
+| 9 | `freeze_final_and_compare` | 冻结最终 InputSnapshot，调用 C 重新计算并保存 ComparisonResult；此时尚未发布。 |
+| 10 | `retrieve_policies` | 对存在可发布推荐的结果，按任务冻结的制度集合和索引分别检索批准供应商、RoHS 和金额审批控制码，保存完整检索 artifact；没有可行报价时跳过。 |
+| 11 | `await_policy_evidence_review` | 任一检索无证据、冲突、故障或契约不一致时创建审核 issue 并 `interrupt()`；临时故障可受控重试。 |
+| 12 | `publish_final_result` | 只有全部检索均为 `OK`，才在当前 revision 检查后把 ComparisonResult 发布为当前结果。 |
 
 如果初次审核的所有报价都可以进入下游，图会从 `review_quotes` 直接进入最终比较。如果除固定单一运费缺失之外还有其他报价未通过审核，图会以 `review_required` 失败，不会把不合格的 `ReviewEnvelope` 静默传给 C。
 
@@ -291,6 +294,12 @@ docker compose up -d --wait api
 ```json
 {
   "scenario_id": "MCU-DEMO-001",
+  "policy_binding": {
+    "policy_set_version": "2026.09.1",
+    "policy_index_version": "pidx-375fa65c082096e41d4f6b66",
+    "category": "Electronics",
+    "region": "SG"
+  },
   "requirement": {
     "manufacturer": "QQ Demo Components",
     "manufacturer_part_number": "QW-MCU9-DEMO",
@@ -367,7 +376,18 @@ docker compose --profile worker run --rm worker python -m supplier_comparison.wo
 }
 ```
 
-6. 执行返回的第二个 `RESUME` job。最终 B 总成本为 S$7,000，并成为唯一推荐。草稿和最终结果均可通过 `GET /api/v1/tasks/{task_id}/results` 查询。
+6. 执行返回的第二个 `RESUME` job。worker 会先得到 B 总成本 S$7,000 的确定性比较，再对三个必需控制码执行 RAG。全部为 `OK` 时 B 才成为当前唯一推荐。草稿、最终结果及其 `policy_retrievals` 均可通过 `GET /api/v1/tasks/{task_id}/results` 查询。
+
+如果 embedding、pgvector、rerank、制度覆盖或引用核验失败，worker 返回第三个 `POLICY_EVIDENCE_REVIEW` issue，并保持 `current_result_id=null`。临时故障修复后提交：
+
+```json
+{
+  "expected_task_revision": 6,
+  "answer": {"answer_type": "RETRY_POLICY_RETRIEVAL"}
+}
+```
+
+执行返回的 RESUME job 后，图会以新 revision 重新冻结 snapshot、重新比较和检索。制度内容或索引本身发生变化时，应以新的 `policy_binding` 创建任务，不能让旧任务静默切换依据版本。
 
 每个回答都必须使用新的 `Idempotency-Key`。使用相同 key 和相同请求会返回原响应；相同 key 配不同请求、旧 revision 或已解决 issue 返回 409。
 
@@ -381,7 +401,8 @@ MCU-DEMO-001 的 revision 推进如下：
 | 上传 C | 4 | 无 |
 | 创建 START job | 4 | 创建 graph run，不推进 revision |
 | 回答 `CONFIRM_MISSING` | 5 | 恢复原 graph run |
-| 回答 `SHIPPING_AMOUNT` | 6 | 再次恢复原 graph run，并发布最终结果 |
+| 回答 `SHIPPING_AMOUNT` | 6 | 再次恢复原 graph run；比较并完成制度检索后才发布最终结果 |
+| 回答 `POLICY_EVIDENCE_REVIEW`（仅故障路径） | 7 | 修复临时故障后恢复同一 graph run，并重新冻结、比较和检索 |
 
 ## 7. 人工纠正与历史结果
 
@@ -403,7 +424,7 @@ MCU-DEMO-001 的 revision 推进如下：
 
 | 方法 | 路径 | 关键输入／返回 | 作用 |
 | --- | --- | --- | --- |
-| POST | `/api/v1/tasks` | requirement、scenario；201 | 创建 task、revision 1 和 requirement version 1。 |
+| POST | `/api/v1/tasks` | requirement、scenario、可选的冻结 `policy_binding`；201 | 创建 task、revision 1 和 requirement version 1。主演示必须绑定已发布制度集合及索引。 |
 | GET | `/api/v1/tasks/{task_id}` | 200 | 返回当前状态、revision、issue/job 摘要、snapshot/result ID 和需求。 |
 | POST | `/api/v1/tasks/{task_id}/quotes` | multipart、expected revision；201 | 上传 PDF／注册 CSV，返回 quote/document ID 与新 revision。 |
 | POST | `/api/v1/tasks/{task_id}/runs` | expected revision；202 | 创建 graph run 和一次性 START job。 |
@@ -411,8 +432,8 @@ MCU-DEMO-001 的 revision 推进如下：
 | GET | `/api/v1/tasks/{task_id}/issues` | 200 | 返回当前及历史问题、回答、操作者和解决 revision。 |
 | POST | `/api/v1/tasks/{task_id}/issues/{issue_id}/answers` | expected revision、判别联合 answer；202 | 解决当前问题、推进 revision 并返回 RESUME job。 |
 | POST | `/api/v1/tasks/{task_id}/quotes/{quote_id}/fields/{field_name}/corrections` | expected revision、值、单位、理由；202 | 保存人工纠正、推进 revision，并创建复用既有提取的新图运行。 |
-| GET | `/api/v1/tasks/{task_id}/results` | 200 | 返回当前和历史 ComparisonResult，明确 `is_current`。 |
-| GET | `/api/v1/tasks/{task_id}/results/{result_id}` | 200 | 按 result ID 读取指定历史结果。 |
+| GET | `/api/v1/tasks/{task_id}/results` | 200 | 返回当前和历史 ComparisonResult、对应制度检索结果及 `is_current`。 |
+| GET | `/api/v1/tasks/{task_id}/results/{result_id}` | 200 | 按 result ID 读取指定历史结果及冻结引用。 |
 | GET | `/health/live` | 200 | 只证明 API 进程存活。 |
 | GET | `/health/ready` | 200 或 503 | 执行 `SELECT 1`，证明数据库连接可用。 |
 
@@ -429,7 +450,7 @@ $env:RUN_POSTGRES_TESTS = "1"
 Remove-Item Env:RUN_POSTGRES_TESTS
 ```
 
-该 PostgreSQL 测试文件会用四个独立 processor／checkpointer 实例执行两次中断、恢复、最终发布和主动纠正，验证三份文档只提取一次；同时验证两个同 revision 上传并发时只有一个成功，另一个得到版本冲突。
+该 PostgreSQL 测试文件会用四个独立 processor／checkpointer 实例执行两次报价中断、恢复、最终发布和主动纠正，验证三份文档只提取一次；同时验证制度检索 artifact／引用跨数据库连接保留，以及两个同 revision 上传并发时只有一个成功、另一个得到版本冲突。
 
 模型 Key 配置完成后，再用第 5–6 节的 V1 PDF 走一次真实模型 smoke test。固定输出测试只验证编排和规则，不能替代真实模型提取验收。
 

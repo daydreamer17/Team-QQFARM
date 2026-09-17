@@ -1,6 +1,6 @@
 # Week2 制度检索子系统交接指南
 
-> 状态：本地实现与真实 SiliconFlow 开发集验证完成（2026-09-16）。Lightsail 验收为 `BLOCKED_EXTERNAL`：当前工作环境没有 AWS CLI、AWS 环境变量、AWS profile 或实例入口，不能把本地结果计作 AWS 验收。供应商合规门禁和 LangGraph 接入仍由对应负责人完成。
+> 状态：本地实现与真实 SiliconFlow 开发集验证完成（2026-09-16）；制度检索发布门禁已接入 LangGraph（2026-09-17）。Lightsail 验收为 `BLOCKED_EXTERNAL`：当前工作环境没有 AWS CLI、AWS 环境变量、AWS profile 或实例入口，不能把本地结果计作 AWS 验收。供应商注册表和完整合规矩阵仍由对应负责人完成。
 
 ## 1. 本轮交付
 
@@ -13,13 +13,16 @@
 | `src/supplier_comparison/rag/contracts.py` | `RetrievalRequest`、`RetrievalResult`、`PolicyCitation`、`PolicyExplanation` 和 `PolicyRetriever` 冻结契约 |
 | `src/supplier_comparison/rag/clients.py` | SiliconFlow embedding／rerank 客户端与无网络固定客户端 |
 | `src/supplier_comparison/rag/manifest.py` | manifest 白名单、Markdown 条款边界、日期、重复 ID 和内容哈希校验 |
-| `src/supplier_comparison/rag/models.py` | 7 张制度、索引、导入和检索轨迹表 |
+| `src/supplier_comparison/rag/models.py` | 制度、文件草稿、索引、导入和检索轨迹表 |
 | `src/supplier_comparison/rag/importer.py` | 幂等导入、索引版本计算、失败隔离和原子发布 |
+| `src/supplier_comparison/rag/uploads.py` | PDF／TXT 不可变保存、文本提取、人工审核草稿与发布服务 |
 | `src/supplier_comparison/rag/repository.py` | SQL 范围过滤、pgvector 精确余弦 Top-10、引用原文／哈希复核和轨迹持久化 |
 | `src/supplier_comparison/rag/retriever.py` | BM25 Top-10、RRF `k=60`、rerank Top-3、覆盖／冲突／错误状态 |
 | `src/supplier_comparison/rag/explanation.py` | 只允许调用方确认事实及本次 citation ID 的解释边界 |
 | `src/supplier_comparison/rag/evaluation.py` | 分阶段 Recall、引用支持率、状态准确率、延迟和错误评测 |
 | `migrations/versions/c83a72d80b1f_create_policy_retrieval_schema.py` | RAG 业务表 migration；不管理 LangGraph checkpoint 表 |
+| `migrations/versions/e2a4c6d8f0b1_create_policy_file_import_schema.py` | 文件导入草稿、修订和审核条款表 |
+| `migrations/versions/f3b5d7e9a1c2_bind_policy_versions_to_tasks.py` | 将冻结的制度集合、索引、品类和地区绑定到采购任务 |
 
 主演示制度位于 `data/policies/electronics-v1/`，共 5 个虚构英文文档、24 个完整条款。`data/policies/development-conflict/` 只用于冲突评测，不能作为主演示制度。固定交接示例位于 `data/examples/policy_rag/`。
 
@@ -49,7 +52,7 @@ docker compose up -d postgres
 .\.venv\Scripts\python.exe -m alembic current
 ```
 
-当前 head 为 `c83a72d80b1f`。新表为：
+当前 head 为 `f3b5d7e9a1c2`。RAG 表为：
 
 - `policy_sets`
 - `policy_documents`
@@ -58,6 +61,8 @@ docker compose up -d postgres
 - `policy_clause_embeddings`
 - `policy_import_runs`
 - `retrieval_traces`
+- `policy_file_imports`
+- `policy_file_import_clauses`
 
 `policy_clause_embeddings.embedding` 固定为 `vector(1024)`。首版只有普通唯一索引和外键索引，没有 HNSW 或 IVFFlat。
 
@@ -111,6 +116,46 @@ development-conflict: pidx-52ce651d9380fd20330899a7
 
 这些值由内容和配置计算；修改制度后以导入命令输出为准，并同步更新评测夹具中的显式冲突索引版本。
 
+### 5.1 从后端上传 PDF／TXT 制度
+
+文件上传接口和 CLI 最终复用同一个 `PolicyImporter`。上传接口只接受 `application/pdf` 的 `.pdf` 文件和 UTF-8 `text/plain` 的 `.txt` 文件，单文件默认上限 5 MiB，PDF 默认上限 50 页，提取正文默认上限 200,000 字符。PDF 使用 pdfplumber 提取原生文本；扫描件或无可提取文字的 PDF 返回 `policy_pdf_requires_ocr`，当前不会自动 OCR。
+
+后端流程固定为：
+
+```text
+上传并提取 → REVIEW_REQUIRED → 替换审核后条款 → READY_TO_PUBLISH → 发布 → PUBLISHED
+```
+
+接口如下：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `POST` | `/api/v1/policy-imports` | multipart 上传 PDF／TXT；`metadata` 为 JSON 字符串 |
+| `GET` | `/api/v1/policy-imports/{policy_import_id}` | 查询提取正文、草稿条款、修订和状态 |
+| `PUT` | `/api/v1/policy-imports/{policy_import_id}/clauses` | 以 `expected_revision` 替换整组已审核条款 |
+| `POST` | `/api/v1/policy-imports/{policy_import_id}/publish` | 显式生成 embedding 并原子发布索引 |
+
+三个写接口都要求 `Idempotency-Key`。API 不返回文件系统路径，原始文件使用生成 ID 写入不可覆盖位置；Compose 使用独立 `policy_files` 卷。上传生成的草稿没有 `control_code`，不能直接发布。审核请求必须为每条条款提供唯一 `clause_id`、标题、完整原文、`control_code` 和可选的 `rule_parameters`。
+
+可在启动 API 后从 `http://localhost:8000/docs` 使用 Swagger 完成完整流程。上传表单中的 `metadata` 示例：
+
+```json
+{
+  "policy_set_id": "uploaded-electronics-policy",
+  "policy_set_version": "2026.09.1",
+  "policy_id": "POL-UPLOAD-001",
+  "document_id": "DOC-UPLOAD-001",
+  "document_version": "1.0.0",
+  "title": "Uploaded Electronics Policy",
+  "effective_from": "2026-09-17T00:00:00Z",
+  "effective_to": null,
+  "categories": ["Electronics"],
+  "regions": ["SG"]
+}
+```
+
+当前一个上传草稿对应一个文档和一个制度集合版本。已发布内容不可修改；修改正文时应创建新的 `policy_set_version` 并重新上传。上传和发布使用现有服务端操作者身份，不接受请求体覆盖身份。正式部署前仍需由统一认证模块限制制度管理接口的访问角色。
+
 ## 6. 检索顺序和状态
 
 每次检索按以下顺序运行：
@@ -154,13 +199,37 @@ request = RetrievalRequest(
 result = retriever.retrieve(request)
 ```
 
-普通自动测试使用 `FixedPolicyRetriever` 以及 `data/examples/policy_rag/retrieval_result.json`，不得访问网络。集成人员需把 `policy_set_version + policy_index_version + retrieval_id` 冻结到 snapshot，并在发布结果前按现有规则再次检查 task revision。
+普通自动测试使用固定检索适配器，不访问网络。创建采购任务时可提交冻结的制度绑定：
+
+```json
+{
+  "policy_binding": {
+    "policy_set_version": "2026.09.1",
+    "policy_index_version": "pidx-375fa65c082096e41d4f6b66",
+    "category": "Electronics",
+    "region": "SG"
+  }
+}
+```
+
+绑定制度且存在可发布推荐的任务，在最终确定性比较之后、发布推荐之前，分别检索 `APPROVED_SUPPLIER`、`ROHS_COMPLIANCE` 和 `AMOUNT_APPROVAL`。没有可行报价时直接发布确定性的 `NO_FEASIBLE_QUOTES`，不让无关制度服务故障阻塞该结论。每个控制码单独执行一次 Top-3 检索，避免一个 Top-3 结果无法覆盖三个以上控制码。LangGraph checkpoint 只保存 snapshot、ComparisonResult 和检索 artifact ID；引用正文保存在 PostgreSQL artifact／retrieval trace 中。
+
+三个结果均为 `OK` 且实际包含对应控制码引用时，图才调用现有 revision 保护发布结果。任一结果为 `NO_EVIDENCE`、`CONFLICT`、`ERROR`，或返回错误制度版本／缺少对应引用时，图创建 `POLICY_EVIDENCE_REVIEW` issue 并 `interrupt()`，不会设置 `current_result_id`。临时模型或数据库故障修复后，可以提交：
+
+```json
+{
+  "expected_task_revision": 2,
+  "answer": {"answer_type": "RETRY_POLICY_RETRIEVAL"}
+}
+```
+
+恢复后会用新 task revision 重新冻结 snapshot、重新比较和重新检索。制度正文或索引版本发生变化时不能沿用旧绑定，应以新发布版本创建新任务。未提交 `policy_binding` 的旧任务保留 Week1 行为，不调用 RAG。
 
 合规模块只能消费引用、覆盖和状态。批准供应商状态、RoHS 记录和供应商身份必须通过对应的结构化表精确查询；相似度和 RAG 文本不能决定这些事实。
 
 `PolicyExplanationService` 只把调用方已确认事实和本次 Top-3 引用交给解释客户端，并验证返回 claim 的 citation ID。该说明不能产生 `COMPLIANT`／`NON_COMPLIANT`、修改报价字段或改变供应商排序。
 
-本轮没有增加公开搜索或 chatbot API，也没有修改现有 LangGraph。
+本轮没有增加公开搜索或 chatbot API。LangGraph 只调用内部 `PolicyRetriever`，不接受用户提供任意查询或任意制度路径。
 
 ## 8. 开发集评测
 
@@ -212,7 +281,7 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 
 - `BLOCKED_EXTERNAL`：Lightsail 上的模型授权、重启、完整重建和资源测试尚未执行。解除条件是提供官方实例入口及模型访问配置；不得静默改用个人 API 作为 AWS 结果。执行步骤和证据模板见 [`LIGHTSAIL_RAG_ACCEPTANCE.md`](LIGHTSAIL_RAG_ACCEPTANCE.md)。
 - 供应商身份、批准状态、RoHS、`ComplianceMatrix` 和确定性合规规则由合规负责人实现。
-- LangGraph 节点、snapshot 绑定、当前 revision 发布检查由集成人员实现。
+- LangGraph 检索节点、snapshot 版本绑定、失败中断、受控重试和当前 revision 发布检查已实现；供应商注册事实及完整合规矩阵尚未接入。
 - React、审批、报告、公开问答和 chatbot 不属于本子系统。
 - 当前只提供受控解释契约与固定客户端；真实解释模型适配应由调用方按同一引用约束接入，并单独记录调用。
 
@@ -226,6 +295,7 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 | 幂等、安全路径导入与完整重建 | 已完成 | 重放、越界、重复 ID、同版本异哈希、模型／预处理换版测试 |
 | BM25＋pgvector＋RRF＋rerank Top-3 | 已完成 | 固定适配器测试、真实 PostgreSQL 精确检索测试和 8 题真实模型评测 |
 | 引用核验、覆盖、冲突与错误状态 | 已完成 | 原文／哈希复核、旧有效期、无证据、冲突、rerank 映射及索引维度不匹配测试 |
+| LangGraph 制度检索发布门禁 | 已完成（固定适配器集成测试） | 三控制码独立检索、snapshot 绑定、成功发布、失败中断、不发布及 transient retry 恢复测试 |
 | 重启持久化 | 已完成（本地） | Compose PostgreSQL 重启后保留 26 条条款、2 个已发布索引和检索轨迹 |
 | 干净卷完整重建 | 已完成（本地） | 独立 `supplier-rag-rebuild` Compose project 完成 migration、真实模型 smoke 和 24 条制度发布，并清理独立临时卷 |
 | Lightsail 官方环境验收 | `BLOCKED_EXTERNAL` | 当前没有官方实例或 AWS 访问入口；本地验证不作为替代；见 [`LIGHTSAIL_RAG_ACCEPTANCE.md`](LIGHTSAIL_RAG_ACCEPTANCE.md) |

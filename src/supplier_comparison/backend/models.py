@@ -37,6 +37,10 @@ class Task(Base):
     current_graph_run_id: Mapped[str | None] = mapped_column(String(64))
     current_snapshot_id: Mapped[str | None] = mapped_column(String(64))
     current_result_id: Mapped[str | None] = mapped_column(String(64))
+    policy_set_version: Mapped[str | None] = mapped_column(String(128))
+    policy_index_version: Mapped[str | None] = mapped_column(String(128))
+    policy_category: Mapped[str | None] = mapped_column(String(128))
+    policy_region: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
