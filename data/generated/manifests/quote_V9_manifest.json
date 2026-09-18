@@ -3,8 +3,12 @@
   "scenario_id": "MCU-V9-TRADEOFF",
   "files": [
     {
+      "path": "data/generated/inputs/development/quote_V9/README.md",
+      "sha256": "cdc4a5b0abededdfbc73c1fef219da56431b49e5d68e855ecd77ea50a5324d01"
+    },
+    {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost.csv",
-      "sha256": "321214af05a2dabbbb7427d092fb22c6cffe398792eee27b67dcce68b3a6ce92"
+      "sha256": "0d6f54a3fbbe3781214ddbc655fc46e088c6534faa1f4c697c141b6d59d97d8b"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost.pdf",
@@ -12,7 +16,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost_then_fastest.csv",
-      "sha256": "25cba5974e54894ba18462695d321a57b900e02ff508ca33b6ecdc80ce7cf708"
+      "sha256": "dce4012739ff35ffa198ef1e6c055e4e02763efd5e2d60cf87c98ed7bbf36191"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost_then_fastest.pdf",
@@ -20,7 +24,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_fastest.csv",
-      "sha256": "308d1e9d6ab6bff7e723b9031d5b234593fbeb596288aff4d7cec6301ff6e86e"
+      "sha256": "af6987e8388a25d4c4d2785b32ced9c1445d116c0ac221201cbf81c93d86a03a"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_fastest.pdf",
@@ -28,15 +32,11 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/quotes_v9_all.csv",
-      "sha256": "7103eadb0188f242797892dc262d485105bfdd372aaebd8e27080fb3cbe9e6f4"
-    },
-    {
-      "path": "data/generated/inputs/development/quote_V9/README.md",
-      "sha256": "e2975f9e699191d0a3cd5b57aa5c33a0b47100f6a74ec4a1f615acc8d4d304d6"
+      "sha256": "347fc1128abc69848eb9d0590a95cac9760e17403232c89f626e2c992f1ecce4"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_a.csv",
-      "sha256": "9da360da11da81cebfcd5fe33e70321061b31d6f2eac0ed3a675311602cc8786"
+      "sha256": "091a8495fd85c9e313783bd1a443ff17cafcfcecb52a98759995c18007e5e1be"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_a.pdf",
@@ -44,7 +44,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_b.csv",
-      "sha256": "882152309041f03df1781e337258cf3765d76758190bf25ad1d240f0ff084c5a"
+      "sha256": "f683cf43481846caf6e3a3e8a95c062decadda0871a0aff6e304552325d2cd68"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_b.pdf",
@@ -52,7 +52,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_c.csv",
-      "sha256": "297f01b8b8a9197a1f12bc694c3a677fa236a318783e3c4797f1832cbfda6f84"
+      "sha256": "5c01d45f00cb6b773a71cf6a3be9d9715919aa96a24fe75e39762a4540c22520"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_c.pdf",
@@ -60,7 +60,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_d.csv",
-      "sha256": "4eec928a480866cd2db8a40c61dcca01f6879396487720c50c0ade67675ea38f"
+      "sha256": "b15b1e90131e995c1448f6934bc31f320df8eaccddac5b10eb36d13be1914aea"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_d.pdf",
@@ -68,7 +68,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_e.csv",
-      "sha256": "c25e15dbced92d3031a37cf41e887fda4103e408632360ee4316b5a032d4cdda"
+      "sha256": "5da4249fd3de1f692a2f499a6b36143760073d1e773e65c4289baf0cb2133849"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_e.pdf",
@@ -76,7 +76,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_f.csv",
-      "sha256": "68f25293dba8ff24e171d555457644a4830d757ecf4e52ed5c1a12a28cf1ddd5"
+      "sha256": "071a58be2b005ac6cbaf06beafc477d1232f82f5c3b0b46dde255d35cd97bb46"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_f.pdf",
@@ -84,7 +84,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_g.csv",
-      "sha256": "c4417acca03c6fe3e0e9a046667b136307767ae9bf4ea0000cfa4d4fb20fe89d"
+      "sha256": "b9b20299a9a5bfbdf10e8271d23a36013a02d89acffdcd6a52c48c824a52d039"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_g.pdf",
@@ -92,7 +92,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_h.csv",
-      "sha256": "c54d4998c8a47103431972981a3b350988ebf799648234ed9fc6175b397ed268"
+      "sha256": "44ec282f367ff2a4f4c6a7ce495fe3020e349122052c39d9a0668fd09145ea73"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_h.pdf",
@@ -100,7 +100,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_i.csv",
-      "sha256": "0da72c497f45e678a49281861db40d07834f1ce1fd6bdbc369fc9db42ba93f6b"
+      "sha256": "4747401f96588e0714b2191d50409fb575943e50f636ff06233ba2022c7b2cad"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_i.pdf",
@@ -108,7 +108,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_j.csv",
-      "sha256": "9227752181a4695836467f807029cf5e01c12c5b9724640b213e77a38d945ca9"
+      "sha256": "5a2c99c37c4f98d152e0f15ff033a31b32c63e60423d916c7fad223e576fbded"
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_j.pdf",
@@ -116,7 +116,7 @@
     },
     {
       "path": "data/generated/inputs/development/quote_V9/v9_supplier_k_usd.csv",
-      "sha256": "9b3323ad9d4fac7d50e80546e655bbff66b7768485bfe77b56f8a5ec92f6cc82"
+      "sha256": "b54410013c78bdddc17f2976e21c4900cbdd6e894082d341ff4fe50f9c9a6af9"
     }
   ]
 }

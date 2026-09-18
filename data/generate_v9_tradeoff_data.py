@@ -174,7 +174,12 @@ def quote_row(q: dict[str, object]) -> dict[str, str]:
 
 def write_csv(path: Path, rows: list[dict[str, str]], columns: tuple[str, ...]) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns, extrasaction="raise")
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=columns,
+            extrasaction="raise",
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
 
