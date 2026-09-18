@@ -59,6 +59,10 @@ class StartRunRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
 
 
+class RetryJobRequest(ApiModel):
+    expected_task_revision: int = Field(ge=1)
+
+
 class RequirementSimulationRequest(ApiModel):
     model_config = ConfigDict(extra='forbid')
     expected_task_revision: int = Field(ge=1)

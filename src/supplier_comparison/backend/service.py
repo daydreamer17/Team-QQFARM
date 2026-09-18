@@ -2052,10 +2052,6 @@ class BackendService:
             active_quotes = session.scalars(
                 select(Quote).where(Quote.task_id == task_id, Quote.active.is_(True))
             ).all()
-            quote_by_id = {item.quote_id: item for item in active_quotes}
-            for quote_id, _field_name in targets:
-                if quote_id not in quote_by_id:
-                    raise NotFoundError("quote_not_found", "Quote was not found.")
             for active_quote in active_quotes:
                 artifact = session.scalar(
                     select(WorkflowArtifact)

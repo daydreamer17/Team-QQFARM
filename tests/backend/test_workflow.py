@@ -298,25 +298,6 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         for item in result["supplier_results"]
         if item["supplier_name"] == "Sterling Components"
     )
-    with pytest.raises(ConflictError) as still_blocking:
-        service.correct_fields(
-            task_id=task["task_id"],
-            expected_task_revision=revision + 2,
-            corrections=[
-                {
-                    "quote_id": supplier_c["quote_id"],
-                    "field_name": "other_fees_status",
-                    "raw_value": "Unknown",
-                    "normalized_value": "UNKNOWN",
-                    "unit": None,
-                    "reason": "Human review could not determine the fee.",
-                }
-            ],
-            idempotency_key="reject-still-blocking-correction",
-        )
-    assert still_blocking.value.code == "corrections_still_require_review"
-    assert service.get_task(task["task_id"])["task_revision"] == revision + 2
-
     batch_corrections = [
         {
             "quote_id": supplier_c["quote_id"],

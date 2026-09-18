@@ -21,6 +21,7 @@ class BackendSettings(BaseSettings):
     supplier_model_model_id: str | None = None
     supplier_model_environment: str = "LOCAL"
     supplier_prompt_version: str = "quote-extraction/1.0.0"
+    allow_legacy_direct_quote_upload: bool = False
     supplier_agent_enabled: bool = False
     supplier_agent_policy_max_retries: int = Field(default=2, ge=0, le=3)
 
