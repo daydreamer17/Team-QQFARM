@@ -1,0 +1,122 @@
+{
+  "generator": "data/generate_v9_tradeoff_data.py",
+  "scenario_id": "MCU-V9-TRADEOFF",
+  "files": [
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost.csv",
+      "sha256": "321214af05a2dabbbb7427d092fb22c6cffe398792eee27b67dcce68b3a6ce92"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost.pdf",
+      "sha256": "76ce7e9b8aba3e3b5573d601a93da6b334bb32dbab184eab9682b865ba266e90"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost_then_fastest.csv",
+      "sha256": "25cba5974e54894ba18462695d321a57b900e02ff508ca33b6ecdc80ce7cf708"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost_then_fastest.pdf",
+      "sha256": "e1001d65c523d0004c86db50fc8e6f060ad77033feda3808cdde6bc686e4b458"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_fastest.csv",
+      "sha256": "308d1e9d6ab6bff7e723b9031d5b234593fbeb596288aff4d7cec6301ff6e86e"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/procurement_requirement_v9_fastest.pdf",
+      "sha256": "2d8805e9143b10429b3f7fd4c9613a7ac3c10e62fce34fd142defd8bf303e191"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/quotes_v9_all.csv",
+      "sha256": "7103eadb0188f242797892dc262d485105bfdd372aaebd8e27080fb3cbe9e6f4"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/README.md",
+      "sha256": "e2975f9e699191d0a3cd5b57aa5c33a0b47100f6a74ec4a1f615acc8d4d304d6"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_a.csv",
+      "sha256": "9da360da11da81cebfcd5fe33e70321061b31d6f2eac0ed3a675311602cc8786"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_a.pdf",
+      "sha256": "dc60b4dba84e4a24f1ca6d239f222882cb2164d615b12ff0fb2e480331c60dc3"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_b.csv",
+      "sha256": "882152309041f03df1781e337258cf3765d76758190bf25ad1d240f0ff084c5a"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_b.pdf",
+      "sha256": "14e5edc860ea5aa9ea233caebb0c2f0bfc9b41304c6305fc892513818997886d"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_c.csv",
+      "sha256": "297f01b8b8a9197a1f12bc694c3a677fa236a318783e3c4797f1832cbfda6f84"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_c.pdf",
+      "sha256": "a512efbb15d8270dc50f70f53f4c2b9e1e2f89051a9028c5e71e46501ecefefb"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_d.csv",
+      "sha256": "4eec928a480866cd2db8a40c61dcca01f6879396487720c50c0ade67675ea38f"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_d.pdf",
+      "sha256": "77655319c5b9413d5ba6c258a0fb1a3b0813f906cf47e5c780077f61d6be9f38"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_e.csv",
+      "sha256": "c25e15dbced92d3031a37cf41e887fda4103e408632360ee4316b5a032d4cdda"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_e.pdf",
+      "sha256": "be9487b056a85e97126c94d079bb143bee371643e42d87257d402ff576e85014"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_f.csv",
+      "sha256": "68f25293dba8ff24e171d555457644a4830d757ecf4e52ed5c1a12a28cf1ddd5"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_f.pdf",
+      "sha256": "a72a78b9b8012887398c8626f266572852530236a3ed026c5f3a18cd036d39ba"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_g.csv",
+      "sha256": "c4417acca03c6fe3e0e9a046667b136307767ae9bf4ea0000cfa4d4fb20fe89d"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_g.pdf",
+      "sha256": "773fdafb1583646cdc963e56e283c0e5f600079b9d595d3a34b0854dc4ea7557"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_h.csv",
+      "sha256": "c54d4998c8a47103431972981a3b350988ebf799648234ed9fc6175b397ed268"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_h.pdf",
+      "sha256": "45a0de7ab8c145ccc15b2d67a31ef1c4f94a2b87b31535472a932a7530ec93d5"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_i.csv",
+      "sha256": "0da72c497f45e678a49281861db40d07834f1ce1fd6bdbc369fc9db42ba93f6b"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_i.pdf",
+      "sha256": "cc5eee21c47fd626329f59de88897c1139f494a5ffeea265a83aa21c8cd1ed03"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_j.csv",
+      "sha256": "9227752181a4695836467f807029cf5e01c12c5b9724640b213e77a38d945ca9"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_j.pdf",
+      "sha256": "0f27faffe6d11b35927e44f2f7d3c5e9add5d5a1a92b621c91f375ae1b544ca4"
+    },
+    {
+      "path": "data/generated/inputs/development/quote_V9/v9_supplier_k_usd.csv",
+      "sha256": "9b3323ad9d4fac7d50e80546e655bbff66b7768485bfe77b56f8a5ec92f6cc82"
+    }
+  ]
+}

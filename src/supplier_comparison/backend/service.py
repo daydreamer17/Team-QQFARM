@@ -666,6 +666,10 @@ class BackendService:
                     dictionary_sha256=dictionary_sha,
                 )
                 session.add(draft)
+                # Persist the parent row before scheduling the job that references it.
+                # Without this explicit flush SQLAlchemy may emit the jobs INSERT first
+                # because no ORM relationship links these two pending objects.
+                session.flush([draft])
                 session.add(
                     Job(
                         job_id=job_id,
