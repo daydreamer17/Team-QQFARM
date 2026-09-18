@@ -1,0 +1,13 @@
+{
+  "task_id": "task_rag_v2_demo",
+  "task_revision": 1,
+  "snapshot_id": "snapshot_rag_v2_demo",
+  "policy_set_version": "2026.09.2",
+  "policy_index_version": "pidx-1e949b8d56785cede49f712c",
+  "category": "Electronics",
+  "region": "SG",
+  "evaluated_at": "2026-09-16T08:00:00+08:00",
+  "currency": "SGD",
+  "total_cost": "7000.00",
+  "tax_mode": "NOT_APPLICABLE"
+}

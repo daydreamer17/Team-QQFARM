@@ -1,0 +1,11 @@
+{
+  "category": "Electronics",
+  "procurement_region": "SG",
+  "currency": "SGD",
+  "total_cost": "7000.00",
+  "tax_mode": "NOT_APPLICABLE",
+  "supplier_identity_status": "UNCONFIRMED",
+  "supplier_approval_record": null,
+  "supplier_rohs_record": null,
+  "source": "DEMO_CONFIRMED_FACTS_NOT_REAL_SUPPLIER_RECORDS"
+}

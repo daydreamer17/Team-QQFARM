@@ -19,7 +19,7 @@ from supplier_comparison.rag.contracts import (
     RetrievalStatus,
 )
 
-from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
+from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement, _run_impact_quotes
 
 
 POLICY_SET_VERSION = "2026.09.1"
@@ -249,3 +249,21 @@ def test_no_feasible_result_does_not_call_policy_retrieval(tmp_path: Path) -> No
     assert current["is_current"] is True
     assert current["result"]["disposition"] == "NO_FEASIBLE_QUOTES"
     assert current["policy_retrievals"] == []
+
+
+def test_nonblocking_quote_unknown_does_not_bypass_mandatory_policy_gate(tmp_path):
+    retriever = RecordingPolicyRetriever(failing_control_code="ROHS_COMPLIANCE")
+    service, _sessions, task, started, runner = _run_impact_quotes(
+        tmp_path, policy_retriever=retriever,
+        policy_binding=dict(policy_set_version=POLICY_SET_VERSION,
+                            policy_index_version=POLICY_INDEX_VERSION,
+                            policy_category="Electronics", policy_region="SG"),
+    )
+    outcome = runner.run_job(started["job_id"])
+    assert outcome["status"] == "WAITING_INPUT"
+    assert outcome["issue"]["issue_type"] == "POLICY_EVIDENCE_REVIEW"
+    assert service.get_task(task["task_id"])["current_result_id"] is None
+    record = service.list_results(task["task_id"])[0]
+    assert record["decision_impact"]["nonblocking_unknown_quote_ids"]
+    assert record["result"]["final_recommendation_allowed"]
+    assert {r.required_control_codes[0] for r in retriever.calls} == REQUIRED_CONTROL_CODES

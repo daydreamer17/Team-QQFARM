@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from supplier_comparison.rag.clients import (
     FixedEmbeddingClient,
     FixedRerankClient,
@@ -243,3 +245,33 @@ def test_index_model_or_dimension_mismatch_returns_error_before_model_calls() ->
     assert result.attempts == {"embedding": 0, "rerank": 0}
     assert embedding.calls == []
     assert repository.saved[0][1] == result
+
+
+@pytest.mark.parametrize('stage', ['embedding', 'rerank'])
+@pytest.mark.parametrize('transient', [True, False])
+def test_proven_model_transport_failures_preserve_retryable_diagnosis(stage, transient):
+    clauses = [_clause('CLAUSE-1', 'Shipping costs are required.', 'TOTAL_COST')]
+    repository = FakeRepository(clauses, ['CLAUSE-1'])
+    retriever = _retriever(repository, rerank_indexes=[0])
+    error = ModelClientError('sanitized', attempts=2,
+                             error_code='model_transport_error' if transient else 'api_key_missing')
+
+    class Failure:
+        model_id = 'BAAI/bge-m3'
+        dimension = 2
+
+        def embed(self, texts):
+            raise error
+
+        def rerank(self, query, documents, *, top_n):
+            raise error
+
+    if stage == 'embedding':
+        retriever._embedding = Failure()
+    else:
+        retriever._rerank = Failure()
+    result = retriever.retrieve(_request('TOTAL_COST'))
+    assert result.status == RetrievalStatus.ERROR
+    assert result.error_code == (stage + '_transient_error' if transient else
+                                  'embedding_or_vector_failed' if stage == 'embedding' else 'rerank_response_invalid')
+    assert result.attempts[stage] == 2 and repository.saved[-1][1] == result

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from supplier_comparison.backend.models import (
 )
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import ConflictError
+from supplier_comparison.backend.service import BackendError, NotFoundError
 from supplier_comparison.backend.workflow import WorkflowRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
 from supplier_comparison.extraction.contracts import (
@@ -49,11 +51,12 @@ def _requirement() -> ProcurementRequirement:
 class CanonicalCsvProcessor:
     """Deterministic B parser boundary; only the external model is replaced."""
 
-    def __init__(self, work_dir: Path) -> None:
+    def __init__(self, work_dir: Path, *, row_overrides: dict[str, dict[str, str]] | None = None) -> None:
         self.work_dir = work_dir
         self.dictionary = QuoteDictionary.load(DICTIONARY_PATH)
         self.calls: list[str] = []
         self.budget_graph_run_ids: list[str] = []
+        self.row_overrides = row_overrides or {}
 
     def process(
         self,
@@ -63,13 +66,14 @@ class CanonicalCsvProcessor:
         context: DocumentContext,
         budget: ModelCallBudget,
     ) -> ExtractionBatch:
-        del path, media_type
+        del media_type
         self.calls.append(context.document_id)
         self.budget_graph_run_ids.append(budget.graph_run_id)
         with CANONICAL_QUOTES.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
             fieldnames = list(reader.fieldnames or ())
             source = next(row for row in reader if row["supplier_id"] == context.supplier_id)
+        source.update(self.row_overrides.get(context.supplier_id or "", {}))
         source.update(
             scenario_id=context.scenario_id or "",
             quote_id=context.quote_id,
@@ -83,27 +87,14 @@ class CanonicalCsvProcessor:
             writer.writeheader()
             writer.writerow(source)
         batch = FixedCsvQuoteParser(self.dictionary).parse_row(generated, context, 2)
-        if context.supplier_id == 'SUP-023':
-            batch = batch.model_copy(
-                update={
-                    'candidates': tuple(
-                        candidate.model_copy(
-                            update={
-                                'raw_value': None,
-                                'normalized_value': None,
-                                'unit': None,
-                                'validation_status': ValidationStatus.MISSING,
-                                'origin': None,
-                                'source_refs': (),
-                            }
-                        )
-                        if candidate.field_name == 'shipping_fee_status'
-                        else candidate
-                        for candidate in batch.candidates
-                    )
-                }
-            )
-        return batch
+        # This fixed processor supplies synthetic canonical evidence for the
+        # placeholder upload; bind that evidence to the authoritative upload.
+        payload = batch.model_dump(mode="json")
+        upload_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+        payload["parsed_input"]["document_sha256"] = upload_hash
+        for evidence in payload["parsed_input"]["sources"]:
+            evidence["document_sha256"] = upload_hash
+        return ExtractionBatch.model_validate(payload)
 
 
 def test_two_interrupt_workflow_resumes_without_reextracting_documents(
@@ -230,6 +221,9 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     ).run_job(shipping["job_id"])
 
     assert final["status"] == "SUCCEEDED"
+    combined_review = service.list_review_problems(task["task_id"])
+    assert not combined_review["review_pending"]
+    assert combined_review["blocking_problem_count"] == 0
     result = service.list_results(task["task_id"])[0]["result"]
     assert result["disposition"] == "RECOMMENDATION_AVAILABLE"
     assert result["recommended_quote_ids"] == [supplier_b["quote_id"]]
@@ -456,57 +450,142 @@ def test_worker_failure_does_not_persist_raw_exception_text(tmp_path: Path) -> N
     assert job.error_message == "Workflow execution failed."
 
 
-def test_extraction_failure_persists_safe_actionable_error(tmp_path: Path) -> None:
-    class OcrRequiredProcessor:
-        def process(self, **_kwargs):
-            raise UnsupportedInputError(
-                "pdf_page_requires_ocr",
-                "PDF contains image-backed pages that require OCR; OCR is disabled",
-                page_numbers=[1, 2],
-            )
-
+def _run_impact_quotes(tmp_path, *, overrides=None, policy_retriever=None, policy_binding=None):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     service = BackendService(sessions, tmp_path / "quotes", actor_id="test-user")
-    task = service.create_task(
-        _requirement(), idempotency_key="ocr-failure-create", scenario_id="MCU-DEMO-001"
+    requirement = ProcurementRequirement.model_validate(
+        _requirement().model_dump(mode="json") | {"budget_amount": "20000.00"}
     )
-    uploaded = service.upload_quote(
-        task["task_id"],
-        expected_task_revision=1,
-        supplier_id="SUP-023",
-        original_filename="scan.pdf",
-        media_type="application/pdf",
-        content=b"placeholder",
-        idempotency_key="ocr-failure-upload",
-        is_synthetic=True,
-    )
-    started = service.start_run(
-        task["task_id"],
-        expected_task_revision=uploaded["task_revision"],
-        idempotency_key="ocr-failure-run",
-    )
-
+    task = service.create_task(requirement, idempotency_key="create", **(policy_binding or {}))
+    revision = task["task_revision"]
+    for supplier in ("SUP-023", "SUP-024"):
+        uploaded = service.upload_quote(
+            task["task_id"], expected_task_revision=revision, supplier_id=supplier,
+            original_filename=f"{supplier}.csv", media_type="text/csv",
+            content=supplier.encode(), idempotency_key=f"upload-{supplier}", is_synthetic=True,
+        )
+        revision = uploaded["task_revision"]
+    started = service.start_run(task["task_id"], expected_task_revision=revision, idempotency_key="run")
+    rows = {"SUP-023": {"unit_price": "15.00"}, "SUP-024": {"shipping_fee_amount": "3400.00"}}
+    for supplier, fields in (overrides or {}).items():
+        rows.setdefault(supplier, {}).update(fields)
     runner = WorkflowRunner(
-        service,
-        processor=OcrRequiredProcessor(),
-        checkpointer=InMemorySaver(),
+        service, processor=CanonicalCsvProcessor(tmp_path, row_overrides=rows),
+        policy_retriever=policy_retriever, checkpointer=InMemorySaver(),
         dictionary_path=DICTIONARY_PATH,
         evaluated_at=datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc),
     )
-    with pytest.raises(UnsupportedInputError, match="require OCR"):
-        runner.run_job(started["job_id"])
+    return service, sessions, task, started, runner
 
+
+@pytest.mark.parametrize("fee_fields", [
+    {}, {"shipping_fee_status": "UNKNOWN"}, {"other_fees_status": "", "other_fees_amount": ""},
+])
+def test_dominated_unknown_shipping_does_not_interrupt_or_fabricate_review(tmp_path, fee_fields):
+    service, sessions, task, started, runner = _run_impact_quotes(
+        tmp_path, overrides={"SUP-023": fee_fields}
+    )
+    outcome = runner.run_job(started["job_id"])
+    assert outcome["status"] == "SUCCEEDED"
+    assert service.list_issues(task["task_id"]) == []
+    record = service.get_result(task["task_id"], outcome["result_id"])
+    comparison = record["result"]
+    missing = next(s for s in comparison["supplier_results"] if s["supplier_name"] == "Schwarzwald Circuits")
+    assert missing["status"] == "PENDING"
+    assert missing["total_cost"] is None
+    assert missing["known_cost_subtotal"] == "15000.00"
+    assert comparison["final_recommendation_allowed"]
+    assert comparison["pending_quote_ids"] == [missing["quote_id"]]
+    assert comparison["blocking_pending_quote_ids"] == []
+    impact = record["decision_impact"]
+    assert impact["nonblocking_unknown_quote_ids"] == [missing["quote_id"]]
+    combined_review = service.list_review_problems(task["task_id"])
+    assert combined_review["blocking_problem_count"] == 0
+    assert any(p["quote_id"] == missing["quote_id"] and not p["needs_resolution"]
+               for p in combined_review["problems"])
+    assert next(i for i in impact["quote_impacts"] if i["quote_id"] == missing["quote_id"])["reason_code"] == "COST_LOWER_BOUND_DOMINATED"
+    fields = service.list_quote_fields(task["task_id"], missing["quote_id"])
+    assert fields["review_status"] == "REVIEW_REQUIRED"
+    shipping = next(f for f in fields["fields"] if f["field_name"] == "shipping_fee_status")
+    assert shipping["validation_status"] == ("EXTRACTED" if fee_fields.get("shipping_fee_status") else "MISSING")
+    assert shipping["normalized_value"] == fee_fields.get("shipping_fee_status")
     with sessions() as session:
-        job = session.get(Job, started["job_id"])
-    assert job is not None
-    assert job.error_code == "pdf_page_requires_ocr"
-    assert job.error_message == (
-        "PDF contains image-backed pages that require OCR; OCR is disabled"
+        fake_events = session.scalars(select(WorkflowArtifact).where(
+            WorkflowArtifact.graph_run_id == started["graph_run_id"],
+            WorkflowArtifact.artifact_type.in_(["REVIEW_EVENT", "CORRECTION_EVENT"]),
+        )).all()
+    assert not fake_events
+    assert len(runner.processor.calls) == 2
+    assert service.list_results(task["task_id"])[0]["decision_impact"] == impact
+    outsider = BackendService(sessions, tmp_path / "quotes", actor_id="other-user")
+    with pytest.raises(NotFoundError):
+        outsider.get_result(task["task_id"], outcome["result_id"])
+
+
+def test_document_hash_mismatch_cannot_enter_impact_scope(tmp_path):
+    service, _sessions, task, started, runner = _run_impact_quotes(tmp_path)
+
+    class WrongDocumentProcessor(CanonicalCsvProcessor):
+        def process(self, **kwargs):
+            batch = super().process(**kwargs)
+            payload = batch.model_dump(mode="json")
+            payload["parsed_input"]["document_sha256"] = "0" * 64
+            for source in payload["parsed_input"]["sources"]:
+                source["document_sha256"] = "0" * 64
+            return ExtractionBatch.model_validate(payload)
+
+    runner.processor = WrongDocumentProcessor(tmp_path)
+    with pytest.raises(BackendError) as raised:
+        runner.run_job(started["job_id"])
+    assert raised.value.code == "decision_impact_identity_mismatch"
+    assert service.get_task(task["task_id"])["current_result_id"] is None
+
+
+@pytest.mark.parametrize("price,threshold", [("9.80", "200.00"), ("10.00", "0.00")])
+def test_relevant_unknown_shipping_still_interrupts_including_tie(tmp_path, price, threshold):
+    service, sessions, task, started, runner = _run_impact_quotes(
+        tmp_path, overrides={"SUP-023": {"unit_price": price}}
     )
-    detail = service.get_task(task["task_id"])
-    assert detail["current_job"]["error_code"] == "pdf_page_requires_ocr"
-    assert detail["current_job"]["error_message"] == (
-        "PDF contains image-backed pages that require OCR; OCR is disabled"
+    outcome = runner.run_job(started["job_id"])
+    assert outcome["status"] == "WAITING_INPUT"
+    assert outcome["issue"]["issue_type"] == "CONFIRM_MISSING"
+    assert service.get_task(task["task_id"])["current_result_id"] is None
+    with sessions() as session:
+        report = session.scalar(select(WorkflowArtifact).where(
+            WorkflowArtifact.graph_run_id == started["graph_run_id"],
+            WorkflowArtifact.artifact_type == "DECISION_IMPACT_RESULT",
+        ))
+    impact = next(i for i in report.payload["quote_impacts"] if i["status"] == "REQUIRES_INVESTIGATION")
+    assert impact["additional_cost_to_tie"] == threshold
+
+
+@pytest.mark.parametrize("fields", [
+    {"package": ""}, {"currency": "USD"},
+    {"tax_mode": "INCLUSIVE"}, {"shipping_fee_status": "FREE", "shipping_fee_amount": "10.00"},
+])
+def test_high_price_does_not_bypass_nonfee_or_inconsistent_review(tmp_path, fields):
+    service, _sessions, task, started, runner = _run_impact_quotes(tmp_path, overrides={"SUP-023": fields})
+    with pytest.raises(BackendError):
+        runner.run_job(started["job_id"])
+    assert service.get_task(task["task_id"])["current_result_id"] is None
+
+
+def test_impact_recomputed_after_cost_correction_old_proof_stays_historical(tmp_path):
+    service, _sessions, task, started, runner = _run_impact_quotes(tmp_path)
+    outcome = runner.run_job(started["job_id"])
+    old = service.get_result(task["task_id"], outcome["result_id"])
+    winner_quote_id = old["result"]["recommended_quote_ids"][0]
+    correction = service.correct_field(
+        task_id=task["task_id"], quote_id=winner_quote_id, field_name="shipping_fee_amount",
+        expected_task_revision=3, raw_value="S$10000.00", normalized_value="10000.00", unit="SGD",
+        reason="Correct a confirmed extraction error in the shipping amount.", idempotency_key="correct-shipping",
     )
+    resumed = runner.run_job(correction["job_id"])
+    assert resumed["status"] == "WAITING_INPUT"
+    assert resumed["issue"]["issue_type"] == "CONFIRM_MISSING"
+    history = service.get_result(task["task_id"], outcome["result_id"])
+    assert not history["is_current"]
+    assert history["decision_impact"] == old["decision_impact"]
+    assert len(runner.processor.calls) == 2

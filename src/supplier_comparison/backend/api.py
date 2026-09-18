@@ -26,7 +26,7 @@ from supplier_comparison.rag.uploads import (
     PolicyFileImportMetadata,
     PolicyFileImportService,
 )
-from supplier_comparison.rules import ProcurementRequirement
+from supplier_comparison.rules import ProcurementRequirement, RequirementChanges
 
 from .database import create_session_factory, readiness_probe
 from .service import BackendError, BackendService, ConflictError, NotFoundError
@@ -59,8 +59,18 @@ class StartRunRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
 
 
-class RetryJobRequest(ApiModel):
+class RequirementSimulationRequest(ApiModel):
+    model_config = ConfigDict(extra='forbid')
     expected_task_revision: int = Field(ge=1)
+    confirm_hypothetical: Literal[True]
+    changes: RequirementChanges
+
+    @field_validator('confirm_hypothetical', mode='before')
+    @classmethod
+    def explicit_authorization(cls, value):
+        if value is not True:
+            raise ValueError('explicit hypothetical authorization is required')
+        return value
 
 
 class ConfirmMissingAnswer(ApiModel):
@@ -99,9 +109,11 @@ class FieldCorrectionRequest(ApiModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
-class BatchFieldCorrectionItem(ApiModel):
-    quote_id: str = Field(min_length=1)
-    field_name: str = Field(min_length=1)
+class BatchFieldCorrection(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    quote_id: str = Field(min_length=1, max_length=64)
+    field_name: str = Field(min_length=1, max_length=128)
+    expected_field_version: int = Field(ge=1)
     raw_value: str = Field(min_length=1)
     normalized_value: StrictStr | StrictInt | StrictBool
     unit: str | None = None
@@ -109,30 +121,9 @@ class BatchFieldCorrectionItem(ApiModel):
 
 
 class BatchFieldCorrectionRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
     expected_task_revision: int = Field(ge=1)
-    corrections: list[BatchFieldCorrectionItem] = Field(min_length=1, max_length=100)
-
-
-class QuoteDraftCorrectionItem(ApiModel):
-    field_name: str = Field(min_length=1)
-    raw_value: str = Field(min_length=1)
-    normalized_value: StrictStr | StrictInt | StrictBool
-    unit: str | None = None
-    reason: str = Field(min_length=3, max_length=1000)
-
-
-class QuoteDraftCorrectionRequest(ApiModel):
-    expected_draft_revision: int = Field(ge=1)
-    corrections: list[QuoteDraftCorrectionItem] = Field(min_length=1, max_length=100)
-
-
-class SubmitQuoteDraftRequest(ApiModel):
-    expected_task_revision: int = Field(ge=1)
-    expected_draft_revision: int = Field(ge=1)
-
-
-class DiscardQuoteDraftRequest(ApiModel):
-    expected_draft_revision: int = Field(ge=1)
+    corrections: list[BatchFieldCorrection] = Field(min_length=1, max_length=100)
 
 
 class ReviewPolicyClausesRequest(ApiModel):
@@ -401,6 +392,36 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/quotes/{quote_id}/fields")
     def list_quote_fields(task_id: str, quote_id: str):
         return service.list_quote_fields(task_id, quote_id)
+
+    @app.get("/api/v1/tasks/{task_id}/review")
+    def list_review_problems(task_id: str):
+        return service.list_review_problems(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/investigations")
+    def list_investigations(task_id: str):
+        return service.list_investigations(task_id)
+
+    @app.get('/api/v1/tasks/{task_id}/selection-gaps')
+    def selection_gaps(task_id: str, expected_task_revision: int = Query(ge=1)):
+        return service.selection_gaps(task_id, expected_task_revision=expected_task_revision)
+
+    @app.post('/api/v1/tasks/{task_id}/requirement-simulations')
+    def requirement_simulation(task_id: str, body: RequirementSimulationRequest):
+        return service.requirement_simulation(task_id, expected_task_revision=body.expected_task_revision,
+                                             changes=body.changes, user_authorized=body.confirm_hypothetical)
+
+    @app.post("/api/v1/tasks/{task_id}/fields/corrections", status_code=202)
+    def correct_fields(
+        task_id: str,
+        body: BatchFieldCorrectionRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.correct_fields(
+            task_id=task_id,
+            expected_task_revision=body.expected_task_revision,
+            corrections=[item.model_dump(mode="json") for item in body.corrections],
+            idempotency_key=idempotency_key,
+        )
 
     @app.post(
         "/api/v1/tasks/{task_id}/issues/{issue_id}/answers", status_code=202

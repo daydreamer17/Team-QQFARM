@@ -1,490 +1,350 @@
 # Supplier Comparison 项目 Workflow
 
-> 文档状态：Final（2026-09-15，pgvector 选型已冻结）。后续实施以无版本后缀的 [WORKFLOW.md](WORKFLOW.md) 为正式入口。
->
-> 本文说明项目从创建采购任务到推荐、审批和重新比较的完整工作流，并明确当前已实现功能与 Week2 待实现功能。业务边界以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，实施安排见 [WEEK2_PLAN.md](WEEK2_PLAN.md)。
+> 文档状态：Final，按 2026-09-18 `main` 分支更新。本文描述当前已实现的后端流程，并把尚未实现的功能明确标为后续工作。业务边界以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，开发安排见 [WEEK2_PLAN.md](WEEK2_PLAN.md)。
 
-## 1. Workflow 概览
+## 1. 系统目标与核心边界
 
-本项目采用一个有状态的采购比选工作流。系统不是由多个 Agent 自由对话组成，而是由一个 LangGraph 主图编排 PDF 解析、LLM 字段理解、证据审核、人工补问、确定性计算和结果发布。
+本项目使用 FastAPI、PostgreSQL 和 LangGraph 编排供应商报价比较。主流程负责：
 
-遇到缺失或冲突字段时，工作流将问题写入 PostgreSQL，通过 LangGraph `interrupt` 暂停。用户提交结构化回答后，后端检查任务版本、保存操作者和回答，再从 PostgreSQL checkpoint 恢复原图运行。
+- 创建版本化采购任务并上传报价；
+- 从 PDF 或注册 CSV 中抽取字段和证据；
+- 审核字段、处理人工确认与纠正；
+- 用确定性规则计算数量、成本、交期和推荐；
+- 检索任务绑定的采购制度，并校验引用；
+- 在任务 revision、快照和 graph run 仍有效时发布结果。
+
+系统包含可选的受控调查 Agent。Agent 可以选择后端提供的只读分析工具、制度重试工具和澄清工具，但不能直接修改业务事实、执行任意 SQL、读取任意文件、裁决供应商合规或发布结果。所有正式写入仍由 application service 执行版本、身份、幂等和审计检查。
+
+LLM 不负责权威金额计算、供应商排序或发布许可。RAG 只提供制度证据，当前也不能证明某家供应商已经获得批准或具有有效 RoHS 证书。
+
+## 2. 当前端到端流程
 
 ```mermaid
 flowchart TD
-    A[创建采购任务] --> B[上传供应商报价]
-    B --> C[创建 START 作业]
-    C --> D[页级路由与 pdfplumber 解析]
-    D -->|原生文本| E[LLM 提取字段]
-    D -->|实验性扫描／混合页| D1[OCR 识别并保存页级证据]
-    D1 --> E
-    E --> F[证据与字段审核]
+    A[创建采购任务<br/>可选绑定已发布制度版本] --> B[上传供应商报价]
+    B --> C[创建 START job]
+    C --> D[load_context]
+    D --> E[extract_documents<br/>PDF/注册 CSV 解析与 LLM 抽取]
+    E --> F[review_quotes<br/>证据和字段审核]
+    F --> G[analyze_decision_impact<br/>确定性影响分析]
+    G --> H[investigate_quotes<br/>可选受控 Agent 调查]
 
-    F -->|存在阻塞问题| G[创建结构化问题]
-    G --> H[LangGraph interrupt]
-    H --> I[用户回答或纠正]
-    I --> J[推进 task revision]
-    J --> K[创建 RESUME 作业]
-    K --> F
+    H -->|字段已满足或未知不影响决策| N[freeze_final_and_compare]
+    H -->|单一报价缺运费| I[CONFIRM_MISSING interrupt]
+    I --> J[确认缺失并生成比较草稿]
+    J --> K[SHIPPING_AMOUNT interrupt]
+    K --> N
+    H -->|其他字段需人工核对| L[BATCH_FIELD_REVIEW interrupt]
+    L --> M[原子批量纠正<br/>推进 revision 并创建新 graph]
+    M --> D
 
-    F -->|可以进入比较| L[冻结输入快照]
-    L --> M[确定性计算成本与可行性]
-    M --> N[生成初步价格与可行性结果]
+    N --> O{存在可发布推荐且任务绑定制度?}
+    O -->|否| T[publish_final_result]
+    O -->|是| P[retrieve_policies<br/>三个固定 control code]
+    P --> Q[investigate_policies<br/>可选诊断及受控重试]
+    Q -->|全部 OK| T
+    Q -->|NO_EVIDENCE / CONFLICT / ERROR| R[POLICY_EVIDENCE_REVIEW interrupt]
+    R --> S[修复临时故障并提交重试回答]
+    S --> N
 
-    N --> O[确定适用 control_code]
-    O --> P[制度版本与有效期过滤]
-    P --> Q[BM25＋pgvector 召回与 Rerank API 重排条款]
-    Q --> R[SQL 查询批准供应商与 RoHS]
-    R --> R1[确定性合规门禁]
-    R1 -->|证据缺失、身份未确认、冲突或过期| R3[创建合规问题]
-    R3 --> R4[LangGraph interrupt]
-    R4 --> R5[审核人补充证据或确认结论]
-    R5 --> R6[推进 revision 并创建 RESUME 作业]
-    R6 --> O
-    R1 -->|存在可发布的 COMPLIANT 候选| R2[发布最终推荐与带引用解释]
-    R1 -->|所有候选均 NON_COMPLIANT| R7[发布无合规供应商结果]
+    T --> U[保存当前结果和完整历史]
 
-    R2 --> S[人工审批]
-    S --> T[生成 HTML 报告]
-
-    T --> U{需求或报价是否更新}
-    U -->|是| V[旧结果与审批失效]
-    V --> C
-    U -->|否| W[保留当前有效结果]
+    U -. 后续工作 .-> V[供应商身份与资质注册表]
+    V -. 后续工作 .-> W[ComplianceMatrix / 审批 / 报告]
 ```
 
-图中的任务创建、PDF 上传、提取、审核、两次补问、快照、确定性比较和结果发布已经完成 Week1 集成。React、通用多字段补问、制度 RAG 与供应商合规门禁、审批、报告、报价 v2 替换和常驻 worker 属于 Week2 目标。
+LangGraph 当前包含 16 个节点。报价批量纠正不会恢复已经过期的旧图，而是推进任务 revision、使旧图失效并创建新的 START job。制度证据问题可以在原图中通过受控回答恢复，但恢复后仍会重新冻结快照、比较并检索制度。
 
-## 2. 角色和模块边界
+## 3. 任务、revision 与 graph run
 
-| 角色／模块 | 负责内容 | 不拥有的权限 |
-| --- | --- | --- |
-| 采购用户 | 创建需求、上传报价、回答补问、纠正字段、调整比较范围 | 直接修改计算结果或批准采购建议 |
-| 审核人 | 查看来源、推荐和制度依据，批准当前有效版本 | 批准存在阻塞问题或已经失效的版本 |
-| React | 收集输入、显示状态、问题、来源、比较结果和审批操作 | 在浏览器内计算权威金额或绕过后端版本检查 |
-| FastAPI application service | 校验身份、幂等键和 revision，推进业务状态 | 重新实现解析、审核和成本规则 |
-| LangGraph | 编排节点、暂停、恢复和发布流程 | 将 checkpoint 当作权威业务数据库 |
-| B 的解析／审核模块 | 解析 PDF／注册 CSV、调用模型、校验证据、生成 ReviewEnvelope | 计算最终采购金额或批准建议 |
-| C 的规则模块 | 计算数量、MOQ、成本、交期和可行性 | 猜测未知字段或使用制度文本修改硬规则 |
-| RAG 模块 | 用 BM25、pgvector 及 Embedding／Rerank API 检索适用制度，返回可核验引用 | 通过语义搜索猜测批准状态、证书有效期或独立裁决合规 |
-| 供应商注册表 | 用结构化记录保存批准供应商和 RoHS 证书，并精确查询当前版本 | 接受客户端声明的 supplier_id 作为可信身份 |
-| 合规门禁 | 用确定性规则和具名人工事件把制度要求及结构化证据映射为合规状态 | 让 LLM 在无证据时默认通过或修改价格排序 |
-| PostgreSQL | 保存业务状态、版本、artifact、问题、结果、审批和 checkpoint | 生成业务判断或推荐 |
+用户通过 `POST /api/v1/tasks` 提交 `ProcurementRequirement`。任务可选绑定一个已发布制度组合：
 
-## 3. 创建采购任务
+- `policy_set_version`；
+- `policy_index_version`；
+- `policy_category`；
+- `policy_region`。
 
-用户先提交一份 `ProcurementRequirement`，内容包括：
+绑定必须完整。没有绑定制度的任务保留基础报价比较路径；只填写部分绑定会被拒绝。已创建任务不会静默切换到新制度版本，需要使用新绑定重新创建任务。
 
-- 指定制造商和 MCU 料号；
-- 封装及 revision；
-- 商品必须为全新，不允许替代型号；
-- 需求数量、预算和币种；
-- 最晚到货日期；
-- 成本或交期优先级。
+`task_revision` 是并发和失效边界。上传报价、回答有效问题或主动纠正字段都会推进 revision。所有改变业务事实的请求必须携带 `expected_task_revision`，旧 revision 返回 409。
 
-后端创建：
+每次 START 或主动纠正产生独立 `graph_run_id`，LangGraph `thread_id` 使用 graph run ID。上传新报价或主动纠正时，旧 graph、未完成 job、未解决 issue 和旧 current result 会失效。旧 worker 可以保留迟到 artifact，但不能覆盖当前结果。
 
-- `task`；
-- `requirement version 1`；
-- `task revision 1`；
-- 后续用于绑定的 `policy_set_version` 和 `supplier_registry_version`。
+## 4. 报价上传、解析与抽取
 
-任务修订号是整个工作流的并发边界。所有会改变业务事实的操作必须携带 `expected_task_revision`。请求使用旧 revision 时返回 409，不能覆盖当前版本。
+报价上传接口为 `POST /api/v1/tasks/{task_id}/quotes`。后端按数据流读取文件、限制大小、计算 SHA-256，并按系统 ID 写入不可覆盖的持久化位置。原始文件名只作为元数据，API 和日志不返回服务器磁盘路径。
 
-## 4. 上传与版本化供应商报价
+每份有效文档依次执行：
 
-用户通常上传 Supplier A、B、C 三份报价 PDF。每次上传执行：
+```text
+PDF 或注册 CSV
+  -> 解析文本与来源位置
+  -> LLM 字段理解
+  -> Pydantic 契约校验
+  -> EvidenceSource 原文定位
+  -> ExtractionBatch
+```
 
-1. 以数据流读取文件并检查文件类型和大小；
-2. 计算 SHA-256；
-3. 按系统 ID 写入不可覆盖的文件版本路径；
-4. 创建 `quote` 和 `document` 记录；
-5. 推进任务 revision；
-6. 使不再适用的旧 graph run、问题及当前结果失效。
+主要字段包括供应商、制造商、料号、封装、revision、新旧状态、替代限制、价格、币种、计价基础、MOQ、订购步长、运费、其他费用、交期和报价有效期。
 
-Week1 主演示的修订变化如下：
+每份文档有独立且持久化的模型调用预算，默认最多 8 次。完成的解析、抽取和审核 artifact 会在恢复或新图中复用，未变化的报价不会因为人工纠正其他报价而重新调用抽取模型。
 
-| 操作 | Task revision |
-| --- | ---: |
-| 创建任务 | 1 |
-| 上传 Supplier A | 2 |
-| 上传 Supplier B | 3 |
-| 上传 Supplier C | 4 |
+OCR 解析代码已经存在，但正式默认值仍为 `SUPPLIER_PDF_OCR_ENABLED=false`。关闭时扫描 PDF 返回 `pdf_page_requires_ocr`，不能伪装成正常的全字段缺失。OCR 开启后的证据仍必须通过现有审核和人工纠正门禁，不能凭置信度自动发布。
 
-上传完成后，客户端调用运行接口创建 `START` job。当前 Week1 实现使用一次性 worker：
+## 5. 字段审核与决策影响分析
+
+`review_quotes` 调用 B 模块生成 `ReviewEnvelope`，检查：
+
+- 字段格式和归一化结果；
+- 引用是否属于当前文件版本；
+- 原文是否支持字段含义；
+- 字段之间是否冲突；
+- 关键字段是否完整；
+- 是否可以进入确定性计算。
+
+模型成功返回 JSON 不代表报价已经审核通过。`REJECTED`、`REVIEW_REQUIRED` 和 `MODEL_FAILED` 不能直接传入 C 的比较模块。
+
+审核之后执行 `analyze_decision_impact`。规则版本为 `supplier-comparison/1.1.0`。它只在严格条件下证明某个未知费用不会改变当前推荐，例如：
+
+- 排序规则是最低确认总成本；
+- 所有相关报价使用同一币种和价格基础；
+- 未知项仅为允许分析的非负费用；
+- 没有未知折扣、非费用字段冲突或身份／证据问题；
+- 该报价的成本下界已经高于最佳可行报价总成本。
+
+满足条件的报价记为 `NON_BLOCKING`，但未知金额仍保持未知，不会被写成零。不能证明无影响的报价记为 `REQUIRES_INVESTIGATION` 或 `UNDETERMINED`，继续阻止发布。影响报告作为不可变 artifact 保存，并随结果 API 返回。
+
+详细规则见 [决策影响交付指引](guide/guide_DECISION_IMPACT.md)。
+
+## 6. 受控调查 Agent
+
+`investigate_quotes` 和 `investigate_policies` 只有在 worker 启用 `SUPPLIER_AGENT_ENABLED=true` 时才使用真实模型。默认关闭时，确定性审核、运费两步确认、批量纠正和制度门禁仍然有效。
+
+报价调查可使用的主要工具包括：
+
+| 工具 | 用途 |
+| --- | --- |
+| `get_task_context` | 读取当前需求、版本和制度绑定 |
+| `analyze_decision_impact` | 读取确定性影响报告 |
+| `get_comparison_result` | 读取当前比较草稿 |
+| `get_cost_breakdown` | 读取程序计算的成本明细 |
+| `locate_quote_source` | 定位当前报价字段证据和受限原文预览 |
+| `get_confirmed_quote_records` | 读取当前仍有效的人工纠正记录 |
+| `request_clarification` | 生成待人工核对卡片 |
+| `analyze_selection_gap` | 分析成本、交期和阻塞差距 |
+| `draft_clarification` | 生成尚未发送的供应商沟通草稿 |
+| `simulate_requirement_change` | 在用户明确授权的参数范围内进行只读假设试算 |
+
+制度调查只允许读取当前检索状态、任务上下文、请求人工处理，以及在符合条件时重试原来的冻结查询。模型不能修改 query、control code、任务 ID 或制度版本。
+
+默认预算为每个调查阶段最多 8 次模型调用、10 次工具调用和 90 秒。调用预算、开始时间、观察、来源和停止原因都持久化；重放不会将预算归零。模型返回 STOP、达到预算或超时都不会自动释放业务门禁。
+
+调查记录可通过 `GET /api/v1/tasks/{task_id}/investigations` 查询。响应只包含计划摘要、工具调用、公开观察和停止原因，不暴露模型内部思维链。
+
+详细说明见 [调查 Agent 指南](guide/guide_INVESTIGATION_AGENT.md) 和 [Agent 联调指南](guide/guide_AGENT_VALIDATION.md)。
+
+## 7. 人工问题、纠正与恢复
+
+### 7.1 单一报价缺少运费
+
+当唯一阻塞问题是一个报价的 `shipping_fee_status` 缺失时，系统使用两次已有的类型化中断：
+
+1. `CONFIRM_MISSING`：用户确认原报价确实未提供运费，后端创建 `ReviewEvent`；
+2. `SHIPPING_AMOUNT`：用户提交 `{amount, currency}`，后端创建运费状态和金额两个 `CorrectionEvent`。
+
+第一次确认后会冻结比较草稿。V1 演示中：A 为 INFEASIBLE／S$12,800，B 为 PENDING／已知小计 S$6,800，C 为 FEASIBLE／S$7,100。由于 B 仍可能成为最优报价，系统继续询问运费。输入 S$200 后，B 总成本为 S$7,000。
+
+### 7.2 通用批量字段审核
+
+当 Agent 调查后仍有多个字段或非运费问题需要人工处理，系统创建 `BATCH_FIELD_REVIEW`，并在 `answer_schema.cards` 中集中返回核对卡片。
+
+该 issue 不能通过通用 issue answer 接口解决。前端必须调用：
+
+```text
+POST /api/v1/tasks/{task_id}/fields/corrections
+```
+
+请求包含 task revision、每项纠正的 quote、field、可选字段版本、值、单位和理由。后端在一个事务中验证全部纠正；任意一项失败则整批不写入。成功后 revision 只推进一次，旧图失效，创建新图和 START job，并重新审核与计算。
+
+### 7.3 主动单字段纠正
+
+用户也可以通过：
+
+```text
+POST /api/v1/tasks/{task_id}/quotes/{quote_id}/fields/{field_name}/corrections
+```
+
+主动纠正当前字段。该操作同样创建新 revision 和 graph run。历史 artifact、旧结果和旧调查记录继续保留，但标记为不再属于当前输入。
+
+所有写操作使用 `Idempotency-Key`。相同 key 和相同请求返回原响应；同一 key 携带不同请求、旧 revision、已解决 issue 或失效字段版本返回 409。
+
+## 8. 确定性比较、差距分析与假设试算
+
+C 模块使用 `Decimal` 计算采购数量、成本、交期和硬约束。实际采购数量为：
+
+```text
+Q = ceil(max(需求数量, MOQ) / 订购步长) * 订购步长
+```
+
+总成本为货款加已确认运费和其他费用。未知费用保持未知，不能按零处理。只有审核通过或经决策影响规则证明不影响当前选择的输入才能进入对应的比较路径。
+
+只读分析接口包括：
+
+- `GET /api/v1/tasks/{task_id}/selection-gaps`：返回阻塞项、已知成本、追平差额、预算超额和交期差距；
+- `POST /api/v1/tasks/{task_id}/requirement-simulations`：只有请求显式设置 `confirm_hypothetical=true` 时，才能模拟预算或截止日期变化。
+
+假设试算不会修改正式采购需求，也不会触发制度批准。供应商沟通草稿只返回文本，不会自动发送。
+
+## 9. 制度知识库导入
+
+制度知识库支持 Markdown manifest 导入，以及通过后端上传原生文本 PDF 或 UTF-8 TXT。文件上传流程为：
+
+```text
+上传并提取
+  -> REVIEW_REQUIRED
+  -> 人工全量替换／确认条款及 control code
+  -> READY_TO_PUBLISH
+  -> 生成全部 embedding
+  -> 原子发布制度与索引
+  -> PUBLISHED
+```
+
+相关接口包括：
+
+- `GET /api/v1/policy-sets`：列出可以绑定任务的已发布制度和索引版本；
+- `GET /api/v1/policy-imports`：列出当前操作者的导入记录；
+- `POST /api/v1/policy-imports`：上传 PDF 或 TXT；
+- `GET /api/v1/policy-imports/{policy_import_id}`：读取审核详情；
+- `PUT /api/v1/policy-imports/{policy_import_id}/clauses`：全量提交审核后的条款；
+- `POST /api/v1/policy-imports/{policy_import_id}/publish`：显式发布。
+
+扫描或空白制度 PDF 返回 `policy_pdf_requires_ocr`。上传不会自动推断可信的 control code；发布前必须人工审核。发布后的正文和索引不可原地覆盖，同版本不同内容哈希会被拒绝。
+
+## 10. 当前 RAG 发布门禁
+
+只有比较结果存在可发布推荐并且任务绑定完整制度版本时，主图才调用 RAG。当前主图对以下三个固定控制码分别检索 Top-3：
+
+- `APPROVED_SUPPLIER`；
+- `ROHS_COMPLIANCE`；
+- `AMOUNT_APPROVAL`。
+
+每个控制码单独执行：
+
+```text
+SQL 版本／品类／地区／有效期过滤
+  -> BM25 Top-10
+  -> embedding API + pgvector 精确余弦 Top-10
+  -> RRF 融合
+  -> rerank API
+  -> Top-3 引用和哈希核验
+```
+
+三个检索结果都必须为 `OK`，并且 citation 的制度版本、control code、retrieval ID、原文和 SHA-256 与当前请求一致，才允许发布当前比较结果。
+
+| 检索状态 | 当前处理 |
+| --- | --- |
+| `OK` | 通过本次制度证据门禁 |
+| `NO_EVIDENCE` | 创建 `POLICY_EVIDENCE_REVIEW`，不自动重试 |
+| `CONFLICT` | 创建 `POLICY_EVIDENCE_REVIEW`，不自动重试 |
+| `ERROR` | 只有明确的临时 embedding、rerank 或 transport 错误可受控重试 |
+
+自动制度重试默认整个 graph 最多 2 次，硬上限 3 次。重试名额在外部请求前写入 artifact，跨进程恢复不会归零。回答制度问题后，主图会重新冻结当前 revision 的快照和比较结果，再重新执行制度检索。
+
+通过制度证据门禁只表示找到了当前版本的相关制度条款，不表示推荐供应商已经通过资质审核。独立的六控制码 `PolicyOrchestrator` 和中文引用解释服务已经存在，但尚未接入采购主图。详细边界见 [RAG 指南](guide/guide_RAG.md)、[检索编排指南](guide/guide_RAG_ORCHESTRATION.md) 和 [解释服务指南](guide/guide_RAG_EXPLANATION.md)。
+
+## 11. 结果发布与查询
+
+发布前后端再次检查：
+
+- task revision 仍等于 graph 的有效 revision；
+- graph run 没有被 supersede；
+- snapshot 和 comparison result 属于当前任务和图；
+- 当前问题已经解决；
+- 所需制度检索均通过门禁。
+
+结果查询接口为：
+
+- `GET /api/v1/tasks/{task_id}/results`；
+- `GET /api/v1/tasks/{task_id}/results/{result_id}`。
+
+响应在 `ComparisonResult` 旁返回 `decision_impact` 和 `policy_retrievals`。历史结果可查，但只有 `tasks.current_result_id` 指向的结果代表当前版本。
+
+供应商身份匹配、批准状态、RoHS 证书事实和确定性 `ComplianceMatrix` 尚未实现，因此当前结果应描述为“报价比较结果通过制度证据门禁”，不能描述为“供应商已合规”或“采购已获批准”。
+
+## 12. 持久化、恢复与安全
+
+PostgreSQL 是业务事实的权威来源。LangGraph checkpoint 只保存图执行位置、业务 ID 和 artifact ID，不保存完整 PDF 或大段模型输出。
+
+| 数据 | 保存位置 |
+| --- | --- |
+| 任务、需求、报价、文件和 revision | PostgreSQL 业务表 |
+| ExtractionBatch、ReviewEnvelope、事件、影响报告、调查、快照和结果 | 不可变 JSONB `workflow_artifacts` |
+| LangGraph 执行位置 | PostgreSQL checkpoint 表 |
+| 报价原文件 | `quote_files` 持久化卷 |
+| 制度上传原文件 | `policy_files` 持久化卷 |
+| 制度、条款、embedding 和检索轨迹 | PostgreSQL + pgvector |
+| 模型预算和文档执行状态 | `document_executions` 和运行 artifact |
+
+Compose 重启但不删除卷时，任务、问题、checkpoint、报价文件、制度文件和历史结果必须保留。API、日志、interrupt payload 和报告不得包含磁盘路径、Authorization、API Key、provider 原始响应或私有参考答案。
+
+## 13. 前端需要对接的后端视图
+
+前端可以围绕以下读取接口组织页面：
+
+- `GET /api/v1/tasks/{task_id}`：任务状态、revision、当前 job、issue、snapshot 和 result；
+- `GET /api/v1/tasks/{task_id}/review`：集中显示当前审核问题和纠正卡片；
+- `GET /api/v1/tasks/{task_id}/investigations`：显示 Agent 目标、公开工具调用和停止状态；
+- `GET /api/v1/tasks/{task_id}/quotes/{quote_id}/fields`：字段候选、审核状态和证据引用；
+- `GET /api/v1/tasks/{task_id}/issues`：当前及历史问题；
+- `GET /api/v1/tasks/{task_id}/selection-gaps`：选择差距分析；
+- `GET /api/v1/policy-sets`：创建任务时选择已发布制度绑定；
+- `GET /api/v1/policy-imports`：制度上传和审核列表。
+
+当前仓库没有完成 React 页面或自然语言聊天入口。前端不能在浏览器中自行计算权威金额，也不能把 Agent 输出直接写回数据库。
+
+## 14. 当前完成状态
+
+| 模块 | 当前状态 |
+| --- | --- |
+| FastAPI 任务、报价、运行、问题、纠正和结果接口 | 已实现 |
+| PostgreSQL 业务表、Alembic 和 LangGraph checkpoint | 已实现 |
+| PDF／注册 CSV 解析、LLM 提取和证据审核 | 已实现 |
+| 实验性报价 OCR | 代码已实现，默认关闭，不能无人值守放行 |
+| Decimal 成本、可行性与决策影响分析 | 已实现 |
+| 运费两次 interrupt 和跨进程恢复 | 已实现 |
+| 原子批量字段纠正和新图重算 | 已实现 |
+| 受控报价／制度调查 Agent | 已实现，默认关闭 |
+| selection gap、沟通草稿和授权假设试算 | 后端已实现 |
+| PDF／TXT 制度上传、人工条款审核和原子发布 | 已实现 |
+| BM25 + pgvector + embedding/rerank 制度检索 | 已实现并接入主图 |
+| 三个固定控制码的制度证据发布门禁 | 已实现 |
+| 六控制码 PolicyOrchestrator 和引用解释 | 独立模块已实现，尚未接入主图 |
+| 供应商主数据、批准状态和 RoHS 精确事实 | 未实现 |
+| 确定性 ComplianceMatrix | 未实现 |
+| React 操作界面 | 未实现 |
+| 正式登录、审批和 HTML 报告 | 未实现 |
+| 常驻 worker 自动调度 | 未实现；当前使用一次性 worker |
+| 自由聊天 Chatbot | 当前 MVP 范围外 |
+| Lightsail 完整部署验收 | 待执行 |
+
+## 15. 验证与部署注意事项
+
+普通测试使用固定模型和固定检索适配器，不访问外部 API。真实 PostgreSQL、Agent 模型、embedding/rerank 和 Lightsail 验收必须显式启用并分别记录，不能用固定输出测试替代。
+
+截至 2026-09-18，本地默认测试结果为：
+
+```text
+586 passed, 13 skipped
+```
+
+跳过项包含显式 PostgreSQL 恢复测试和付费 live Agent 测试。本次更新文档时 Docker Desktop Linux engine 未运行，因此没有重新确认 PostgreSQL 专项结果。
+
+当前 Compose 已传递报价模型和 RAG embedding/rerank 配置，但还没有向 worker 显式传递 `SUPPLIER_AGENT_ENABLED`、Agent 独立模型／预算和制度重试变量。因此在补齐 Compose 映射前，即使宿主机 `.env` 设置了这些变量，容器 worker 仍会使用 Agent 默认关闭值。直接从本地 `.env` 启动 Python worker 时不受这项 Compose 缺口影响。
+
+一次性 worker 命令为：
 
 ```powershell
 .\.venv\Scripts\python.exe -m supplier_comparison.worker run-job --job-id <job_id>
 ```
 
-Week2 将增加数据库轮询和租约，让单 worker 自动领取 START／RESUME job；上述命令继续保留为诊断入口。
-
-## 5. PDF 解析与 LLM 字段提取
-
-LangGraph 首先运行 `load_context`，锁定当前任务版本、需求、有效文档、本次运行时间及 graph run ID。随后对每份文档运行：
-
-```text
-原生文本 PDF
-  → pdfplumber 提取文本和位置
-  → LLM 理解报价字段
-  → Pydantic 结构校验
-  → EvidenceSource 原文定位
-  → ExtractionBatch
-```
-
-主要提取字段包括：
-
-- 供应商名称；
-- 制造商、料号、封装及 revision；
-- 新旧状态及是否允许替代；
-- 单价、币种和计价基础；
-- 包装数量、MOQ 和订购步长；
-- 运费及其他费用；
-- 交期、起算点和报价有效期。
-
-每份文档建立独立的模型调用预算。完成后的 `ParsedInput`、`ExtractionBatch`、模型版本和证据数据作为不可变 artifact 写入 PostgreSQL；恢复运行时复用已完成的 artifact，不重复提取。
-
-OCR 正式自动放行仍默认关闭。Week2 允许通过显式实验开关处理扫描页和混合页：OCR 结果进入同一字段提取与审核链路，但 OCR 来源的关键字段必须由用户在现有人工审核环节确认或纠正。关闭实验开关时，扫描 PDF 继续返回 `pdf_page_requires_ocr`，不能被解释成所有字段均未提供。
-
-实验性 OCR 保存文件版本、文件哈希、页码、来源 ID、OCR 原文、置信度、引擎和预处理版本。审核页面不嵌入截图或裁剪图片，只向有权限的用户提供原始 PDF 链接和准确页码；浏览器不得看到服务器磁盘路径。
-
-## 6. 证据与字段审核
-
-字段提取完成后，工作流调用 B 的审核模块生成 `ReviewEnvelope`，检查：
-
-- 字段格式是否合法；
-- 引用是否真实存在于对应文件版本；
-- 引用文本是否支持该字段含义；
-- 字段之间是否冲突；
-- 关键字段是否完整；
-- 报价是否可以进入确定性计算。
-
-只有 `downstream_ready=true` 的报价可以进入 C 的计算模块。模型成功返回 JSON 不代表报价已经审核通过。
-
-以下状态必须分开处理：
-
-| 状态 | 处理方式 |
-| --- | --- |
-| 字段完整且证据支持 | 进入确定性比较 |
-| 缺失或冲突且可由用户解决 | 创建结构化问题并中断 |
-| 关键字段来自实验性 OCR | 创建 `OCR_FIELD_CONFIRMATION`，确认或纠正后自动重新审核 |
-| 已知硬约束失败 | 标记报价不可行，不猜测其他未知字段 |
-| OCR 关闭时遇到扫描页 | 返回明确的 `pdf_page_requires_ocr` |
-| 模型调用失败或超预算 | 记录 MODEL_FAILED／ERROR，允许受控重试或人工处理 |
-
-## 7. 人工补问、暂停与恢复
-
-当前已经实现 Supplier B 运费缺失的两步补问。
-
-### 7.1 确认报价确实缺少运费
-
-系统发现 Supplier B 的 PDF 没有运费信息后：
-
-```text
-创建 CONFIRM_MISSING issue
-  → 保存问题、回答 schema 和操作者
-  → LangGraph interrupt
-  → worker 退出
-  → task 进入 NEEDS_INPUT
-```
-
-用户确认“PDF 确实未提供运费”后，后端：
-
-1. 检查 issue 是否仍属于当前 graph run；
-2. 检查 `expected_task_revision`；
-3. 保存结构化回答和服务端操作者；
-4. 创建 `ReviewEvent`；
-5. 将 revision 从 4 推进到 5；
-6. 创建 `RESUME` job；
-7. 从 PostgreSQL checkpoint 恢复原 graph run。
-
-恢复后系统重新审核并形成比较草稿：
-
-| Supplier | 状态 | 金额 |
-| --- | --- | ---: |
-| A | INFEASIBLE | S$12,800 |
-| B | PENDING | 已知小计 S$6,800 |
-| C | FEASIBLE | S$7,100 |
-
-因为 B 仍可能成为最优报价，所以此时不能发布最终推荐。
-
-### 7.2 提交运费金额
-
-系统创建第二个 `SHIPPING_AMOUNT` issue。用户提交：
-
-```json
-{
-  "amount": "200.00",
-  "currency": "SGD"
-}
-```
-
-后端创建 `shipping_fee_status=KNOWN_AMOUNT` 和 `shipping_fee_amount=200.00` 两个纠正事件，保存 `USER_INPUT` 来源，将 revision 推进到 6，并创建新的 RESUME job。工作流随后重新审核、冻结输入并重新计算。
-
-重复提交相同幂等键和相同请求时返回原响应；相同幂等键携带不同请求、回答已解决问题或提交旧 revision 时返回 409。
-
-### 7.3 确认 OCR 来源的关键字段
-
-实验性 OCR 不增加第二轮独立人工审查，而是在现有问题列表中增加 `OCR_FIELD_CONFIRMATION`。系统把同一报价中需要确认的 OCR 关键字段集中展示，避免用户重复打开文件。
-
-后端为每个关键字段建立一个 issue，绑定当前字段候选 artifact、内容哈希和 task revision；React 只负责按报价把这些 issue 集中展示。每个回答独立保存审计事件，只有当前文件版本的全部阻塞项解决后才创建 RESUME 作业。文件版本变化后，旧 issue 和确认事件失效；恢复执行时复用已持久化的 OCR artifact，不重复运行 OCR。
-
-每个审核项显示：
-
-- 字段名和当前提取值；
-- 原始文件名、`document_id`、文件版本和哈希；
-- 页码、`source_id`、OCR 原文和置信度；
-- 经过后端授权的“打开原 PDF”链接。
-
-页面不嵌入图片或裁剪区域。PDF 通过 `GET /api/v1/tasks/{task_id}/documents/{document_id}/content` 鉴权并流式返回；接口只接收系统 ID，不接收磁盘路径，也不在响应中暴露服务器文件位置。用户根据文件和页码在原 PDF 中核对后，只能选择：
-
-| 操作 | 后端记录 | 后续状态 |
-| --- | --- | --- |
-| 确认正确 | `ReviewEvent` | 自动重新审核该批字段 |
-| 修改字段 | `CorrectionEvent` | 保存新字段版本后自动重新审核 |
-| 原文无法辨认 | unresolved review finding | 保持 `REVIEW_REQUIRED` |
-
-对应的判别联合类型携带 `field_name`、`candidate_artifact_id`、`action=CONFIRM|CORRECT|UNREADABLE`，纠正时必须包含 `corrected_value`；写操作继续要求 `expected_task_revision` 和 `Idempotency-Key`。人工提交后执行系统自动复核，不要求用户再次审查同一字段。OCR 置信度无论多高都不能替代实验阶段的关键字段确认；非关键字段继续按现有 criticality 策略处理。只有所有适用关键字段已确认且 `ReviewEnvelope.downstream_ready=true`，报价才能进入 C。
-
-## 8. 确定性比较与推荐
-
-审核通过后，C 的规则模块负责计算；LLM 不计算权威金额，也不决定供应商排序。
-
-实际采购数量为：
-
-```text
-Q = ceil(max(需求数量, MOQ) / 订购步长) × 订购步长
-```
-
-总成本为：
-
-```text
-按计价基础换算后的货款
-  + 已确认运费
-  + 已确认其他费用
-```
-
-金额使用 `Decimal`，货款按项目约定舍入到 SGD 0.01 后再加入已确认费用。未知费用保持未知，不能按零处理。
-
-主演示的最终结果为：
-
-| Supplier | 可行性 | 总成本／原因 |
-| --- | --- | --- |
-| A | INFEASIBLE | S$12,800，超过预算或不满足硬约束 |
-| B | FEASIBLE | S$7,000 |
-| C | FEASIBLE | S$7,100 |
-
-因此 Supplier B 是初步价格与可行性排名第一的供应商。Week1 可以直接发布该推荐；Week2 接入合规门禁后，只有适用制度、B 的批准供应商状态和有效 RoHS 记录均获得有效证据，才能发布为最终推荐。
-
-系统冻结并保存：
-
-- 采购需求和报价版本；
-- 文件哈希；
-- 提取及审核 artifact ID；
-- 人工回答和纠正；
-- 规则与模型版本；
-- `policy_set_version`；
-- 评估时间和 task revision；
-- 比较结果和推荐。
-
-结果发布前，后端再次确认 graph run 仍属于当前任务版本。旧 worker 的迟到结果可以保留为历史 artifact，但不能写入 `tasks.current_result_id`。
-
-## 9. 采购合规与供应商资质核验
-
-Week2 将 RAG 用于检索适用采购制度，并用结构化供应商注册表核验批准状态和 RoHS。系统判断的是“该供应商是否具备进入当前采购建议和人工审批的合规依据”，不是是否可以自动下单。
-
-首版只覆盖两项供应商条件：
-
-- 供应商必须存在于当前版本的批准供应商注册表且状态有效；
-- Electronics／MCU 采购要求供应商具有评估时点有效的 RoHS 记录。
-
-ISO 和框架合同保留为未来扩展，不进入 Week2 主流程、数据制作和验收。
-
-```text
-初步价格与可行性结果
-  → 按 policy_set_version、商品类别、金额、地区和评估时间确定必需 control_code
-  → 在对应版本与范围内构造制度查询
-  → BM25 稀疏召回
-  → embedding API 生成查询向量，pgvector 精确余弦召回 Top-10
-  → 融合两路候选，由 rerank API 重排取 Top-3
-  → 核验引用并检查所有必需 control_code 都有条款支持
-  → 将报价供应商映射到 supplier_master
-  → 按 supplier_registry_version 精确查询批准状态与 RoHS
-  → 确定性规则生成每家可行供应商的合规状态
-  → 按原价格／交期顺序选择可发布候选
-  → LLM 仅根据已核验事实和条款生成引用解释
-```
-
-制度条款在导入时绑定冻结的候选机器可执行控制码；A／C 必须完成语义审阅后，合规模块才可把它们用于最终判定。当前 `2026.09.1` manifest 使用：
-
-- `QUOTE_COMPLETENESS`；
-- `TOTAL_COST`；
-- `APPROVED_SUPPLIER`；
-- `ROHS_COMPLIANCE`；
-- `AMOUNT_APPROVAL`；
-- `QUOTE_CHANGE_REVIEW`。
-
-品类、地区和有效期属于制度适用范围；具体阈值保存在条款的结构化参数中。当前虚构制度只有 `AMOUNT_APPROVAL` 定义金额阈值：total landed cost 达到 SGD 10,000（含）时需要经理审批。当前 `APPROVED_SUPPLIER` 和 `ROHS_COMPLIANCE` 不以 S$5,000 为启用条件。所有最终推荐仍按统一流程接受一次人工审批。审阅状态见 [`guide/POLICY_SEMANTIC_REVIEW.md`](guide/POLICY_SEMANTIC_REVIEW.md)。
-
-适用的 control_code 先由制度清单中的结构化范围确定，不能依赖 Top-k 检索结果决定。BM25、pgvector 向量召回和 Rerank 只负责找到相应原文与解释依据；任何必需控制码没有检索到支持条款时进入 `REVIEW_REQUIRED`，不能少执行一项检查后仍判定合规。平均 Recall 只用于评价检索效果；一次具体采购必须达到全部 required control_code 的逐项证据覆盖，才允许生成 `COMPLIANT`。LLM 和 RAG 不能临时发明控制码、阈值或规则。批准状态、证书编号和有效期由 PostgreSQL 精确查询，不能用相似度分数代替。
-
-报价上传时的 `supplier_id` 只是声明值。系统必须将其映射到 `supplier_master_id`；未匹配、多个候选或名称冲突时创建供应商身份问题。具名用户确认后保存映射事件和操作者，才能读取该供应商的注册记录。
-
-合规状态包括：
-
-| 状态 | 含义 | 对推荐的影响 |
-| --- | --- | --- |
-| `COMPLIANT` | 适用制度、批准状态和有效 RoHS 均有当前版本证据 | 允许成为最终推荐候选 |
-| `REVIEW_REQUIRED` | 制度检索失败、身份未确认、证据缺失／冲突或有效期不明确 | 创建结构化问题并暂停，不发布最终推荐 |
-| `NON_COMPLIANT` | 已有明确证据证明批准状态无效或 RoHS 已过期／不适用 | 排除该供应商并保留原因和证据 |
-
-工作流一次评估所有 `FEASIBLE` 供应商并保存合规矩阵，而不是在图中无限循环。最终选择规则为：
-
-1. 保留 C 生成的价格／交期排序，不让 RAG 修改分数；
-2. 价格顺序中的 `NON_COMPLIANT` 候选可以被跳过；
-3. 只要更高排名候选仍为 `REVIEW_REQUIRED`，就只能发布草稿；
-4. 所有更高候选均明确不合规时，选择第一个 `COMPLIANT` 候选；
-5. 全部候选明确不合规时返回 `NO_COMPLIANT_SUPPLIER`；
-6. 没有有效证据时不得默认合规。
-
-人工补充供应商资料会创建新记录版本并重新评估。人工确认检索或身份使用独立 `ComplianceReviewEvent`；它不等同于最终审批。Week2 不实现无证据的任意合规豁免。
-
-BM25、embedding、pgvector、rerank 和解释调用分别记录检索器／模型版本、次数、延迟、用量和错误。pgvector 向量记录绑定制度集合版本、条款 ID、内容哈希、embedding 模型、维度与预处理版本，并可从 PostgreSQL 权威条款完整重建。pgvector 或模型 API 不可用时可以保存 BM25 候选用于诊断，但检索结果必须为 `ERROR`，不能以稀疏结果继续判定合规。`NO_EVIDENCE`、`CONFLICT` 和 `ERROR` 必须分别保存并映射为 `REVIEW_REQUIRED`。报价参考答案、评测标签和生成器映射不得进入运行索引或提示词。
-
-## 10. 人工审批与报告
-
-审批是独立于 LangGraph 的 FastAPI 事务。审核人提交审批时，后端在同一事务中检查：
-
-- 当前认证账户具有审核人权限；
-- recommendation、snapshot 和 task revision 均为当前版本；
-- 不存在仍会影响推荐的阻塞问题；
-- 报价有效期及交付条件在当前时间仍成立；
-- 请求没有因重复提交而创建第二条审批。
-
-审批成功后生成绑定冻结内容的 HTML 报告。报告包括需求、比较范围、金额明细、可行性、来源、人工修改、制度引用、版本、评估时间和审批记录。
-
-待确认、未批准或无可行方案的结果可以导出明确标记的草稿。只有当前版本且已经有效审批的结果可以作为最终报告发布。报告生成结束后必须再次检查 revision 和审批有效性，防止生成期间发生报价更新。
-
-## 11. 报价更新与重新推荐
-
-Week2 主演示将在 Supplier B 已获批后上传 B v2：
-
-- 运费仍为 S$200；
-- 到货时间由 3 天变为 6 天。
-
-B v2 必须替换当前比较范围中的 B v1，不能作为第四家供应商加入。系统随后：
-
-1. 创建新的报价和文件版本；
-2. 推进 task revision；
-3. supersede 旧 graph run 和未完成 job；
-4. 使旧推荐和审批失效；
-5. 对 B v2 重新提取、审核和比较；
-6. 改荐 Supplier C，总成本 S$7,100；
-7. 解释相对原 B 推荐增加 S$100，以及为什么需要重新审批；
-8. 等待审核人批准新版本。
-
-历史 B v1、旧结果、旧审批和旧报告继续保留用于审计，但不能作为当前有效决策使用。新报价不能自动继承旧报价的人工补充和排除记录。
-
-## 12. 问答与 Chatbot 边界
-
-当前系统已有结构化问答，而不是通用 Chatbot：
-
-- 系统针对缺失或冲突字段提出固定问题；
-- 用户提交经过 Pydantic 校验的类型化回答；
-- 用户可以主动纠正提取字段；
-- RAG 检索适用制度；PostgreSQL 供应商注册表为初步推荐提供批准状态和 RoHS 依据。
-
-当前范围不包含任意自然语言聊天。若未来增加任务内 Chatbot，应让自然语言层调用受控的只读查询工具；任何字段修改、问题回答或审批都必须先生成结构化操作预览，再由用户确认并调用现有 application service。LLM 不能直接修改数据库或绕过 revision、身份和审批检查。
-
-## 13. 持久化、恢复与审计
-
-PostgreSQL 是任务、版本、问题、回答、结果和审批的权威记录；LangGraph checkpoint 只保存图执行位置及业务 ID。原始报价文件保存到独立持久化卷。
-
-| 数据 | 保存位置 |
-| --- | --- |
-| 任务、需求、报价和文件元数据 | PostgreSQL 业务表 |
-| ParsedInput、ExtractionBatch、ReviewEnvelope、事件、快照和结果 | 不可变 JSONB artifact |
-| 当前图执行位置 | LangGraph PostgreSQL checkpoint 表 |
-| 原始 PDF／CSV 和报告 | 持久化文件卷 |
-| 模型调用预算和文档执行状态 | document execution／运行调用账本 |
-| 制度条款原文和检索轨迹 | PostgreSQL 业务表／artifact |
-| 可重建条款向量和检索版本 | PostgreSQL／pgvector；与权威条款共用事务、备份和版本边界 |
-| 供应商主数据、批准记录和 RoHS | PostgreSQL 版本化关系表及来源引用 |
-
-Compose 重启但不删除卷时，任务、文件、问题、checkpoint 和历史结果必须保留。API、日志、interrupt 和报告不得包含磁盘路径、Authorization、API Key、provider 原始响应或私有参考答案。
-
-## 14. 分层验收与完整主演示
-
-### 14.1 测试执行类型
-
-| 类型 | 范围 | 网络依赖 | 判定方式 |
-| --- | --- | --- | --- |
-| 单元测试 | 计算、合规规则、版本和状态转换 | 无 | 固定输入得到确定结果 |
-| 集成测试 | FastAPI、PostgreSQL、LangGraph、文件和检索契约 | 无；使用固定模型／检索适配器 | 验证幂等、revision、恢复和副作用 |
-| Live 模型测试 | LLM、embedding、rerank 及启用的真实检索组件 | 有；显式运行 | 单独记录版本、用量、延迟和结果 |
-| Lightsail smoke test | Compose、持久化、资源和重启恢复 | 官方环境 | 记录实例、镜像、健康状态和恢复结果 |
-
-普通 `pytest` 不依赖网络或真实模型。Live 与 Lightsail 结果分别记录，不能用固定输出测试替代。
-
-### 14.2 完整主演示顺序
-
-主演示固定使用三份原生文本 PDF；实验性 OCR 是独立验收能力，不影响 MCU-DEMO-001 主路径的成功判定。
-
-| 步骤 | 操作 | 预期行为 |
-| --- | --- | --- |
-| 1 | 创建 MCU-DEMO-001 需求 | 创建 revision 1，绑定制度集合和供应商注册表版本 |
-| 2 | 上传 A、B、C 三份 PDF | revision 推进到 4，保存不可变文件版本 |
-| 3 | 启动比较 | 解析、提取、审核，创建 `CONFIRM_MISSING` 问题 |
-| 4 | 确认 B 未提供运费 | revision 5，恢复后生成草稿并创建金额问题 |
-| 5 | 输入 B 运费 S$200 | revision 6，重新审核和计算 |
-| 6 | 查看初步比较 | B 为 S$7,000 的价格与可行性第一名，但尚未通过合规门禁 |
-| 7 | 检索制度并查询 B 的结构化注册记录 | 核验批准供应商状态、金额门槛和有效 RoHS，显示可回到原文／原记录的引用 |
-| 8 | 发布推荐并由审核人批准 | B 为 `COMPLIANT` 后成为唯一最终推荐，生成当前版本 HTML 报告 |
-| 9 | 上传 B v2，交期改为 6 天 | 旧结果和审批失效，启动新运行 |
-| 10 | 查看重新推荐及合规依据 | 改荐 C／S$7,100，重新核验 C 的批准状态和资质，并解释增加 S$100 |
-| 11 | 审核人重新批准 | 新版本审批及报告生效，历史记录仍可查询 |
-
-### 14.3 由简单到复杂的验收案例
-
-| 层级 | 场景 | 工作流预期 |
-| ---: | --- | --- |
-| 1 | 独立场景 `TC-COMPARE-001` 的三份完整报价 | 无中断完成提取、审核和初步比较，数量与金额正确 |
-| 2 | V1 的 B 缺运费 | 两次 interrupt；确认缺失后保持 `PENDING`，输入 S$200 后才完成比较 |
-| 3 | 超预算、超期、错误料号或封装 | 保存全部明确失败原因，不让不可行报价进入推荐 |
-| 4 | V2／V3 现实别名、载体差异和证据歧义 | PDF／CSV 业务值一致；错误引用进入审核；关键静默错误为 0 |
-| 5 | V5／V6 多供应商和混合输入 | 正确选择登记或模型路径，控制调用预算，未知潜在最优报价阻止提前推荐 |
-| 6 | B v1 更新为 v2 | 旧运行、问题、人工补充、结果和审批失效，重新比较后改荐 C |
-| 7 | 批准供应商＋有效 RoHS | BM25、pgvector 和 rerank 路径检索到正确制度，全部 required control_code 均有当前版本且支持主张的引用，结构化记录核验通过后发布推荐 |
-| 8 | 无证据、资质过期、冲突或检索组件故障 | 进入 `REVIEW_REQUIRED`；BM25 候选只作故障诊断，不得默认合规 |
-| 9 | 重复请求、旧 revision、worker／数据库重启 | 幂等和版本保护生效，LangGraph 从 checkpoint 恢复且不重复副作用 |
-| 10 | V4 异常文件及 V7 实验性 OCR／对抗输入 | 非法文件在模型调用前失败；OCR 关键字段集中进入现有人工审核，通过文件＋版本＋页码核对且不嵌入图片；确认／纠正后自动复核；隐藏文本冲突不得放行 |
-
-每层使用独立场景 ID 或任务，保存输入哈希、task revision、graph run、模型／检索器版本和验收结果。不得只展示 V1 主路径，也不得用总体准确率掩盖关键静默错误、错误合规放行或恢复重复写入。
-
-合规层必须分别验证：第一名 `REVIEW_REQUIRED` 时不得越过它推荐第二名；第一名 `NON_COMPLIANT` 时可以选择下一名 `COMPLIANT`；全部候选明确不合规时返回 `NO_COMPLIANT_SUPPLIER`。还要覆盖供应商身份无匹配／多匹配、证书在评估时点过期，以及 policy／registry 版本变化对旧结果、审批和报告的失效处理。
-
-OCR 层拆分验证关闭、开启、部分确认、`UNREADABLE`、纠正、重复回答、旧 revision、文件版本替换、worker 恢复、PDF 越权访问和隐藏文本冲突。任一未解决关键字段、失效来源或冲突都必须保持 `downstream_ready=false`。
-
-## 15. 当前完成状态
-
-| 模块 | 状态 |
-| --- | --- |
-| FastAPI 任务、上传、问题、纠正和结果接口 | Week1 已实现 |
-| PostgreSQL 业务表和 Alembic migration | Week1 已实现 |
-| PDF 解析、LLM 提取与证据审核 | Week1 已实现 |
-| Decimal 成本与可行性计算 | Week1 已实现 |
-| LangGraph 两次 interrupt 和跨进程恢复 | Week1 已实现 |
-| 幂等、revision 和迟到结果保护 | Week1 已实现 |
-| 本地真实模型三份 PDF 端到端 | Week1 已通过一次受控验收 |
-| React 操作界面 | Week2 待实现 |
-| 通用多字段补问和人工排除 | Week2 待扩展 |
-| 实验性 OCR 辅助提取与关键字段确认 | Week2 待实现；正式无人值守放行不在本周范围 |
-| BM25＋pgvector＋Embedding／Rerank API 制度检索 | Week2 已实现本地子系统、真实模型 smoke、8 题开发集评测及 LangGraph 发布门禁；待供应商合规矩阵接入及 Lightsail 验收 |
-| 批准供应商＋RoHS 结构化合规门禁 | Week2 待实现 |
-| 报价 v2 替换和需求更新 | Week2 待实现 |
-| 具名身份、审批和 HTML 报告 | Week2 待实现 |
-| 常驻 worker 自动调度 | Week2 待实现 |
-| Lightsail／官方模型完整验收 | 待执行 |
-| 自由聊天 Chatbot | 当前 MVP 范围外 |
-
-当前本地真实模型验收不能代表 Lightsail 或主办方模型已经通过；固定输出测试不能替代真实模型提取与 RAG 引用验收。
+完整后端使用说明见 [成员 D 指南](guide/guide_D.md)。

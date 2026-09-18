@@ -1,5 +1,9 @@
 # Week2 制度检索子系统交接指南
 
+2026-09-17 更新：真实聊天模型制度解释已实现，最新入口见 [guide_RAG_EXPLANATION.md](guide_RAG_EXPLANATION.md)。下面早期交付中的“固定解释客户端”及“真实适配待实现”状态保留为历史记录。
+
+2026-09-16 更新：新制度 `2026.09.2`、导入验证与按控制码／要求级检索编排已交付，最新使用入口为 [guide_RAG_ORCHESTRATION.md](guide_RAG_ORCHESTRATION.md)。本文件的 `electronics-v1` 示例及待签字状态是前一轮交付背景，不会自动更新旧采购快照。
+
 > 状态：本地实现与真实 SiliconFlow 开发集验证完成（2026-09-16）；制度检索发布门禁已接入 LangGraph（2026-09-17）。Lightsail 验收为 `BLOCKED_EXTERNAL`：当前工作环境没有 AWS CLI、AWS 环境变量、AWS profile 或实例入口，不能把本地结果计作 AWS 验收。供应商注册表和完整合规矩阵仍由对应负责人完成。
 
 ## 1. 本轮交付

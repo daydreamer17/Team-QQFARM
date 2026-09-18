@@ -1,0 +1,192 @@
+{
+  "schema_version": "1.0.0",
+  "policy_set_id": "electronics-procurement",
+  "policy_set_version": "2026.09.2",
+  "documents": [
+    {
+      "policy_id": "POL-QUOTE-COST",
+      "document_id": "DOC-QUOTE-COST",
+      "document_version": "1.1.0",
+      "title": "Fictional Electronics Quote and Total Cost Policy",
+      "path": "quote_and_total_cost.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "QTE-001": {
+          "control_code": "QUOTE_COMPLETENESS",
+          "rule_parameters": {}
+        },
+        "QTE-002": {
+          "control_code": "QUOTE_COMPLETENESS",
+          "rule_parameters": {}
+        },
+        "QTE-003": {
+          "control_code": "QUOTE_COMPLETENESS",
+          "rule_parameters": {}
+        },
+        "QTE-004": {
+          "control_code": "QUOTE_COMPLETENESS",
+          "rule_parameters": {}
+        },
+        "TCO-001": {
+          "control_code": "TOTAL_COST",
+          "rule_parameters": {}
+        },
+        "TCO-002": {
+          "control_code": "TOTAL_COST",
+          "rule_parameters": {}
+        },
+        "TCO-003": {
+          "control_code": "TOTAL_COST",
+          "rule_parameters": {}
+        },
+        "TCO-004": {
+          "control_code": "TOTAL_COST",
+          "rule_parameters": {}
+        }
+      }
+    },
+    {
+      "policy_id": "POL-APPROVED-SUPPLIER",
+      "document_id": "DOC-APPROVED-SUPPLIER",
+      "document_version": "1.1.0",
+      "title": "Fictional Approved Supplier Policy",
+      "path": "approved_supplier.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "ASL-001": {
+          "control_code": "APPROVED_SUPPLIER",
+          "rule_parameters": {}
+        },
+        "ASL-002": {
+          "control_code": "APPROVED_SUPPLIER",
+          "rule_parameters": {}
+        },
+        "ASL-003": {
+          "control_code": "APPROVED_SUPPLIER",
+          "rule_parameters": {}
+        },
+        "ASL-004": {
+          "control_code": "APPROVED_SUPPLIER",
+          "rule_parameters": {}
+        }
+      }
+    },
+    {
+      "policy_id": "POL-ELECTRONICS-ROHS",
+      "document_id": "DOC-ELECTRONICS-ROHS",
+      "document_version": "1.1.0",
+      "title": "Fictional Electronics RoHS Evidence Policy",
+      "path": "electronics_rohs.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "ROHS-001": {
+          "control_code": "ROHS_COMPLIANCE",
+          "rule_parameters": {}
+        },
+        "ROHS-002": {
+          "control_code": "ROHS_COMPLIANCE",
+          "rule_parameters": {}
+        },
+        "ROHS-003": {
+          "control_code": "ROHS_COMPLIANCE",
+          "rule_parameters": {}
+        },
+        "ROHS-004": {
+          "control_code": "ROHS_COMPLIANCE",
+          "rule_parameters": {}
+        }
+      }
+    },
+    {
+      "policy_id": "POL-AMOUNT-APPROVAL",
+      "document_id": "DOC-AMOUNT-APPROVAL",
+      "document_version": "1.1.0",
+      "title": "Fictional Procurement Amount Approval Policy",
+      "path": "amount_approval.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "APR-001": {
+          "control_code": "AMOUNT_APPROVAL",
+          "rule_parameters": {
+            "currency": "SGD",
+            "threshold": "10000.00",
+            "operator": ">="
+          }
+        },
+        "APR-002": {
+          "control_code": "AMOUNT_APPROVAL",
+          "rule_parameters": {}
+        },
+        "APR-003": {
+          "control_code": "AMOUNT_APPROVAL",
+          "rule_parameters": {}
+        },
+        "APR-004": {
+          "control_code": "AMOUNT_APPROVAL",
+          "rule_parameters": {}
+        }
+      }
+    },
+    {
+      "policy_id": "POL-QUOTE-CHANGE",
+      "document_id": "DOC-QUOTE-CHANGE",
+      "document_version": "1.1.0",
+      "title": "Fictional Quote Change and Re-review Policy",
+      "path": "quote_change_review.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "CHG-001": {
+          "control_code": "QUOTE_CHANGE_REVIEW",
+          "rule_parameters": {}
+        },
+        "CHG-002": {
+          "control_code": "QUOTE_CHANGE_REVIEW",
+          "rule_parameters": {}
+        },
+        "CHG-003": {
+          "control_code": "QUOTE_CHANGE_REVIEW",
+          "rule_parameters": {}
+        },
+        "CHG-004": {
+          "control_code": "QUOTE_CHANGE_REVIEW",
+          "rule_parameters": {}
+        }
+      }
+    }
+  ]
+}

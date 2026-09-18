@@ -18,13 +18,14 @@ from .contracts import (
     SupplierEvaluation,
 )
 from .cost import calculate_cost
+from .decision_impact import ImpactStatus, SUPPORTED_IMPACT_RANKING, assess_quote_impact
 from .delivery import check_delivery
 from .field_access import FieldAccess
 from .quantity import calculate_quantity
 from .specification import check_specification
 
 
-SUPPORTED_RANKING = "LOWEST_CONFIRMED_TOTAL_COST"
+SUPPORTED_RANKING = SUPPORTED_IMPACT_RANKING
 
 
 def evaluate_supplier(
@@ -188,8 +189,8 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
     blocking_pending = tuple(
         result.quote_id
         for result in pending_results
-        if result.known_cost_subtotal is None
-        or result.known_cost_subtotal <= best_cost
+        if assess_quote_impact(request.requirement, result, best_cost).status
+        != ImpactStatus.NON_BLOCKING
     )
     if blocking_pending:
         return ComparisonResult(
