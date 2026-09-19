@@ -782,6 +782,7 @@ class BackendService:
                 ):
                     stale.status = "STALE"
                     stale.revision += 1
+                self._raise_if_duplicate_quote(session, task_id, file_sha)
                 active = session.scalar(
                     select(QuoteDraft).where(
                         QuoteDraft.task_id == task_id,
@@ -1276,6 +1277,12 @@ class BackendService:
                         "quote_draft_not_ready",
                         "Resolve every blocking field before formally submitting the quote.",
                     )
+                self._raise_if_duplicate_quote(
+                    session,
+                    task_id,
+                    draft.sha256,
+                    exclude_draft_id=draft.quote_draft_id,
+                )
                 self._supersede_current_graph(session, task)
                 extension = ".pdf" if draft.media_type == "application/pdf" else ".csv"
                 source_path = Path(draft.storage_path)
@@ -1331,6 +1338,13 @@ class BackendService:
                         change_type="QUOTE_DRAFT_SUBMITTED",
                         actor_id=self.actor_id,
                         request_sha256=request_sha,
+                        details={
+                            "quote_draft_id": draft.quote_draft_id,
+                            "quote_id": draft.proposed_quote_id,
+                            "supplier_id": draft.supplier_id,
+                            "original_filename": draft.original_filename,
+                            "document_sha256": draft.sha256,
+                        },
                     )
                 )
                 response = {
@@ -2340,17 +2354,7 @@ class BackendService:
                 )
             ).all()
             return [
-                {
-                    "result_id": artifact.artifact_id,
-                    "task_revision": artifact.task_revision,
-                    "graph_run_id": artifact.graph_run_id,
-                    "is_current": artifact.artifact_id == task.current_result_id,
-                    "result": dict(artifact.payload),
-                    "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
-                    "policy_retrievals": self._policy_retrieval_payloads(
-                        session, artifact.artifact_id
-                    ),
-                }
+                self._comparison_result_response(session, task, artifact)
                 for artifact in artifacts
             ]
 
@@ -2366,17 +2370,124 @@ class BackendService:
                 or artifact.artifact_type != "COMPARISON_RESULT"
             ):
                 raise NotFoundError("result_not_found", "Result was not found.")
-            return {
-                "result_id": artifact.artifact_id,
-                "task_revision": artifact.task_revision,
-                "graph_run_id": artifact.graph_run_id,
-                "is_current": artifact.artifact_id == task.current_result_id,
-                "result": dict(artifact.payload),
-                "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
-                "policy_retrievals": self._policy_retrieval_payloads(
-                    session, artifact.artifact_id
-                ),
+            return self._comparison_result_response(session, task, artifact)
+
+    def _comparison_result_response(
+        self,
+        session: Session,
+        task: Task,
+        artifact: WorkflowArtifact,
+    ) -> dict[str, Any]:
+        result = dict(artifact.payload)
+        retrievals = self._policy_retrieval_payloads(session, artifact.artifact_id)
+        return {
+            "result_id": artifact.artifact_id,
+            "task_revision": artifact.task_revision,
+            "graph_run_id": artifact.graph_run_id,
+            "is_current": artifact.artifact_id == task.current_result_id,
+            "result": result,
+            "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
+            "policy_retrievals": retrievals,
+            "policy_compliance": self._policy_compliance_payload(result, retrievals),
+        }
+
+    @staticmethod
+    def _policy_compliance_payload(
+        comparison: dict[str, Any],
+        retrievals: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        control_definitions = {
+            "APPROVED_SUPPLIER": (
+                "SUPPLIER_REGISTRY_EVIDENCE_MISSING",
+                "缺少当前供应商注册表记录，无法确认供应商准入状态。",
+            ),
+            "ROHS_COMPLIANCE": (
+                "ROHS_EVIDENCE_MISSING",
+                "缺少与供应商及料号匹配的有效 RoHS 证明。",
+            ),
+            "AMOUNT_APPROVAL": (
+                "AMOUNT_APPROVAL_NOT_EVALUATED",
+                "金额审批条款已找到，但尚未执行阈值判断或核对审批记录。",
+            ),
+        }
+        retrieval_by_control: dict[str, dict[str, Any]] = {}
+        for retrieval in retrievals:
+            codes = {
+                *retrieval.get("covered_control_codes", []),
+                *retrieval.get("missing_control_codes", []),
+                *(citation.get("control_code") for citation in retrieval.get("citations", [])),
             }
+            for code in codes:
+                if code in control_definitions:
+                    retrieval_by_control[code] = retrieval
+
+        assessments: list[dict[str, Any]] = []
+        for supplier in comparison.get("supplier_results", []):
+            quote_feasible = supplier.get("status") == "FEASIBLE"
+            checks: list[dict[str, Any]] = []
+            for control_code, (missing_fact_code, missing_fact_message) in control_definitions.items():
+                retrieval = retrieval_by_control.get(control_code)
+                citation_ids = [
+                    citation["citation_id"]
+                    for citation in (retrieval or {}).get("citations", [])
+                    if citation.get("control_code") == control_code
+                    and citation.get("citation_id")
+                ]
+                if not quote_feasible:
+                    status = "NOT_EVALUATED"
+                    reason_code = "QUOTE_NOT_FEASIBLE"
+                    message = "该报价未通过采购要求，不进入供应商制度核验。"
+                elif retrieval is None:
+                    status = "REVIEW_REQUIRED"
+                    reason_code = "POLICY_EVIDENCE_NOT_RETRIEVED"
+                    message = "当前结果没有该控制项的制度检索记录。"
+                elif retrieval.get("status") != "OK":
+                    status = "REVIEW_REQUIRED"
+                    reason_code = "POLICY_EVIDENCE_INCOMPLETE"
+                    message = "该控制项的制度依据缺失或存在冲突。"
+                else:
+                    status = "REVIEW_REQUIRED"
+                    reason_code = missing_fact_code
+                    message = missing_fact_message
+                checks.append({
+                    "control_code": control_code,
+                    "status": status,
+                    "reason_code": reason_code,
+                    "message": message,
+                    "citation_ids": citation_ids,
+                })
+            if not quote_feasible:
+                overall_status = "NOT_EVALUATED"
+            elif all(check["status"] == "PASS" for check in checks):
+                overall_status = "COMPLIANT"
+            elif any(check["status"] == "FAIL" for check in checks):
+                overall_status = "NON_COMPLIANT"
+            else:
+                overall_status = "REVIEW_REQUIRED"
+            assessments.append({
+                "quote_id": supplier.get("quote_id"),
+                "quote_version": supplier.get("quote_version"),
+                "supplier_name": supplier.get("supplier_name"),
+                "status": overall_status,
+                "checks": checks,
+            })
+
+        counts = {
+            status: sum(item["status"] == status for item in assessments)
+            for status in ("COMPLIANT", "NON_COMPLIANT", "REVIEW_REQUIRED", "NOT_EVALUATED")
+        }
+        if counts["COMPLIANT"]:
+            disposition = "COMPLIANT_SUPPLIERS_AVAILABLE"
+        elif assessments:
+            disposition = "NO_CONFIRMED_COMPLIANT_SUPPLIER"
+        else:
+            disposition = "NO_SUPPLIERS"
+        return {
+            "schema_version": "policy-compliance/1.0.0",
+            "disposition": disposition,
+            "counts": counts,
+            "assessments": assessments,
+        }
 
     @staticmethod
     def _decision_impact_payload(session: Session, result_id: str) -> dict[str, Any] | None:
@@ -3145,6 +3256,7 @@ class BackendService:
                         expected=expected_task_revision,
                         actual=task.current_revision,
                     )
+                self._raise_if_duplicate_quote(session, task_id, file_sha)
                 self._supersede_current_graph(session, task)
                 quote_id = new_id("quote")
                 document_id = new_id("doc")
@@ -3198,6 +3310,12 @@ class BackendService:
                         change_type="QUOTE_UPLOADED",
                         actor_id=self.actor_id,
                         request_sha256=request_sha,
+                        details={
+                            "quote_id": quote_id,
+                            "supplier_id": supplier_id,
+                            "original_filename": Path(original_filename).name,
+                            "document_sha256": file_sha,
+                        },
                     )
                 )
                 response = {
@@ -4019,6 +4137,43 @@ class BackendService:
                 "Task revision has changed.",
                 expected=expected,
                 actual=task.current_revision,
+            )
+
+    @staticmethod
+    def _raise_if_duplicate_quote(
+        session: Session,
+        task_id: str,
+        document_sha256: str,
+        *,
+        exclude_draft_id: str | None = None,
+    ) -> None:
+        document = session.scalar(
+            select(Document).where(
+                Document.task_id == task_id,
+                Document.sha256 == document_sha256,
+            )
+        )
+        if document is not None:
+            raise ConflictError(
+                "duplicate_quote_uploaded",
+                "该报价单已上传。",
+                document_id=document.document_id,
+            )
+        draft_filters = [
+            QuoteDraft.task_id == task_id,
+            QuoteDraft.sha256 == document_sha256,
+            QuoteDraft.status.in_(
+                ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+            ),
+        ]
+        if exclude_draft_id is not None:
+            draft_filters.append(QuoteDraft.quote_draft_id != exclude_draft_id)
+        draft = session.scalar(select(QuoteDraft).where(*draft_filters))
+        if draft is not None:
+            raise ConflictError(
+                "duplicate_quote_uploaded",
+                "该报价单已上传。",
+                quote_draft_id=draft.quote_draft_id,
             )
 
     @staticmethod

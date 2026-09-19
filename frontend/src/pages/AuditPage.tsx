@@ -51,11 +51,22 @@ function issueStatus(value: string) {
 
 function changeLabel(value: string) {
   const labels: Record<string, string> = {
-    CREATED: '创建采购任务', REQUIREMENT_UPDATED: '修改采购需求', QUOTE_ADDED: '新增报价',
-    QUOTE_UPDATED: '更新报价', FIELD_CORRECTED: '人工校正报价', ISSUE_ANSWERED: '完成人工确认',
-    RESULT_PUBLISHED: '生成比较结果',
+    CREATED: '创建采购任务', TASK_CREATED: '创建采购任务', REQUIREMENT_UPDATED: '修改采购需求',
+    QUOTE_ADDED: '新增报价', QUOTE_UPLOADED: '正式提交报价', QUOTE_DRAFT_SUBMITTED: '正式提交报价',
+    QUOTE_UPDATED: '更新报价', FIELD_CORRECTED: '人工校正报价', FIELDS_CORRECTED_BATCH: '批量校正报价',
+    ISSUE_ANSWERED: '完成人工确认', RESULT_PUBLISHED: '生成比较结果', TASK_ABANDONED: '废弃任务',
   }
+  if (value.startsWith('FIELD_CORRECTED:')) return '人工校正报价'
+  if (value.startsWith('ISSUE_ANSWERED:')) return '完成人工确认'
   return labels[value] ?? '更新任务内容'
+}
+
+function changeDetail(details: Record<string, unknown>) {
+  const supplier = typeof details.supplier_id === 'string' ? details.supplier_id : ''
+  const filename = typeof details.original_filename === 'string' ? details.original_filename : ''
+  if (supplier && filename) return `${supplier} · ${filename}`
+  if (filename) return filename
+  return '该版本保存了一次会改变任务权威输入的操作。'
 }
 
 function errorMessage(error: unknown) {
@@ -123,6 +134,8 @@ export function AuditPage() {
         </div>
         <span className="status-pill status-ready">当前第 {data.task_revision} 版</span>
       </section>
+
+      <section className="card audit-empty">任务创建时为第 1 版；正式提交报价、修改需求、人工校正或回答阻塞问题时版本加 1。上传和校对草稿、运行分析、生成结果本身不会增加任务版本。</section>
 
       <section className="audit-overview">
         <article><span>当前任务版本</span><strong>第 {data.task_revision} 版</strong><small>{taskStatusLabel(data.status)}</small></article>
@@ -221,7 +234,7 @@ export function AuditPage() {
 
       <section className="audit-section">
         <div className="section-heading"><div><p className="eyebrow">任务变更</p><h2>任务变更与文件访问</h2></div><span>{audit.data?.revisions.length ?? 0} 个版本</span></div>
-        <div className="audit-list">{audit.data?.revisions.map((revision) => <article className="card audit-record" key={revision.revision}><header><strong>第 {revision.revision} 版 · {changeLabel(revision.change_type)}</strong><span>{displayDate(revision.created_at)}</span></header><p>系统已保存该版本的变更内容，可用于追溯。</p></article>)}</div>
+        <div className="audit-list">{audit.data?.revisions.map((revision) => <article className="card audit-record" key={revision.revision}><header><strong>第 {revision.revision} 版 · {changeLabel(revision.change_type)}</strong><span>{displayDate(revision.created_at)}</span></header><p>{changeDetail(revision.details)}</p></article>)}</div>
         {(audit.data?.document_accesses.length ?? 0) > 0 && <details><summary>文件访问记录（{audit.data?.document_accesses.length}）</summary><div className="audit-list">{audit.data?.document_accesses.map((event) => <article className="card audit-record" key={event.access_event_id}><strong>访问报价文件</strong><span>{displayDate(event.created_at)}</span></article>)}</div></details>}
       </section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}

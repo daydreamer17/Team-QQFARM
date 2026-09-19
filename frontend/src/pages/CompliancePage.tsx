@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
-import type { PolicyCitation, PolicyRetrievalResult, SupplierComparisonResult } from '../api/types'
+import type { PolicyCitation, PolicyComplianceSupplierAssessment, PolicyRetrievalResult, SupplierComparisonResult } from '../api/types'
 import { IssuePanel } from '../components/IssuePanel'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { controlLabel, policyStatusLabel, quoteStatusLabel } from '../lib/presentation'
@@ -53,36 +53,29 @@ function RetrievalCard({ retrieval }: { retrieval: PolicyRetrievalResult }) {
   )
 }
 
-function policyConclusion(
-  supplier: SupplierComparisonResult,
-  retrievals: PolicyRetrievalResult[],
-  policyIssue: boolean,
-) {
-  if (supplier.status === 'INFEASIBLE') {
-    return { tone: 'failed', icon: '×', label: '未进入制度结论', detail: '该报价已不符合采购要求，当前结果没有继续给出供应商级制度结论。' }
-  }
-  if (policyIssue) {
-    return { tone: 'pending', icon: '!', label: '需要人工复核', detail: '制度依据存在缺失或冲突，需要完成复核后才能判断。' }
-  }
-  if (retrievals.length === 0) {
-    return { tone: 'unknown', icon: '—', label: '尚未检查', detail: '当前结果没有制度检索记录。' }
-  }
-  if (retrievals.every((item) => item.status === 'OK')) {
-    return { tone: 'pending', icon: '!', label: '待供应商级核验', detail: '制度条款已经找到，但后端尚未返回该供应商逐项通过或不通过的结论。' }
-  }
-  return { tone: 'pending', icon: '!', label: '依据不完整', detail: '有制度要求没有找到可靠依据，暂时不能判断。' }
+function policyConclusion(assessment: PolicyComplianceSupplierAssessment | undefined) {
+  if (assessment?.status === 'COMPLIANT') return { tone: 'passed', icon: '✓', label: '制度核验通过' }
+  if (assessment?.status === 'NON_COMPLIANT') return { tone: 'failed', icon: '×', label: '制度核验不通过' }
+  if (assessment?.status === 'REVIEW_REQUIRED') return { tone: 'pending', icon: '!', label: '缺少供应商证明' }
+  if (assessment?.status === 'NOT_EVALUATED') return { tone: 'unknown', icon: '—', label: '未进入制度核验' }
+  return { tone: 'unknown', icon: '—', label: '尚无核验结果' }
+}
+
+function checkStatusLabel(status: string) {
+  if (status === 'PASS') return '通过'
+  if (status === 'FAIL') return '不通过'
+  if (status === 'REVIEW_REQUIRED') return '缺少证据'
+  return '未核验'
 }
 
 function SupplierPolicyRow({
   supplier,
-  retrievals,
-  policyIssue,
+  assessment,
 }: {
   supplier: SupplierComparisonResult
-  retrievals: PolicyRetrievalResult[]
-  policyIssue: boolean
+  assessment: PolicyComplianceSupplierAssessment | undefined
 }) {
-  const conclusion = policyConclusion(supplier, retrievals, policyIssue)
+  const conclusion = policyConclusion(assessment)
   const quoteTone = supplier.status === 'FEASIBLE' ? 'passed' : supplier.status === 'INFEASIBLE' ? 'failed' : 'pending'
   return (
     <article className="supplier-policy-row">
@@ -93,7 +86,7 @@ function SupplierPolicyRow({
       </div>
       <div className={`supplier-policy-result result-${conclusion.tone}`}>
         <span className="supplier-policy-icon">{conclusion.icon}</span>
-        <div><small>制度结论</small><strong>{conclusion.label}</strong><p>{conclusion.detail}</p></div>
+        <div><small>制度结论</small><strong>{conclusion.label}</strong>{assessment?.status !== 'NOT_EVALUATED' && <ul className="policy-check-summary">{assessment?.checks.map((check) => <li key={check.control_code}><span>{controlLabel(check.control_code)}</span><b>{checkStatusLabel(check.status)}</b></li>)}</ul>}</div>
       </div>
     </article>
   )
@@ -112,6 +105,8 @@ export function CompliancePage() {
   const retrievals = latestResult?.policy_retrievals ?? []
   const suppliers = latestResult?.result.supplier_results ?? []
   const policyIssue = data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'
+  const compliance = latestResult?.policy_compliance
+  const assessmentByQuote = new Map(compliance?.assessments.map((item) => [item.quote_id, item]) ?? [])
   const okCount = retrievals.filter((retrieval) => retrieval.status === 'OK').length
   const allEvidenceReady = retrievals.length > 0 && okCount === retrievals.length
 
@@ -143,8 +138,8 @@ export function CompliancePage() {
           {suppliers.length > 0 && (
             <section className="supplier-policy-section">
               <div className="section-heading"><div><h2>逐供应商检查结果</h2><p>图标分别表示采购要求和制度核验所处状态。</p></div><span>{suppliers.length} 份报价</span></div>
-              <div className="supplier-policy-list">{suppliers.map((supplier) => <SupplierPolicyRow supplier={supplier} retrievals={retrievals} policyIssue={policyIssue} key={supplier.quote_id} />)}</div>
-              {allEvidenceReady && <div className="policy-capability-notice"><strong>为什么不是“制度通过”？</strong><p>当前后端只完成了制度条款检索，没有返回条款与每家供应商事实的逐项校验结果。页面因此如实标记为“待供应商级核验”。</p></div>}
+              {compliance && <div className={`policy-compliance-summary ${compliance.counts.COMPLIANT > 0 ? 'has-compliant' : ''}`}><strong>{compliance.counts.COMPLIANT > 0 ? `${compliance.counts.COMPLIANT} 家供应商已通过制度核验` : '暂无已核验合格供应商'}</strong><span>{compliance.counts.REVIEW_REQUIRED} 家缺少证明 · {compliance.counts.NON_COMPLIANT} 家不通过 · {compliance.counts.NOT_EVALUATED} 家未核验</span></div>}
+              <div className="supplier-policy-list">{suppliers.map((supplier) => <SupplierPolicyRow supplier={supplier} assessment={assessmentByQuote.get(supplier.quote_id)} key={supplier.quote_id} />)}</div>
             </section>
           )}
 

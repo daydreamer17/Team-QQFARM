@@ -115,6 +115,19 @@ def test_quote_upload_advances_revision_and_rejects_stale_revision(
         )
     assert idempotency_collision.value.code == "idempotency_key_reused"
 
+    with pytest.raises(ConflictError) as duplicate:
+        service.upload_quote(
+            task["task_id"],
+            expected_task_revision=2,
+            supplier_id="SUP-099",
+            original_filename="renamed-copy.pdf",
+            media_type="application/pdf",
+            content=b"quote data",
+            idempotency_key="upload-duplicate",
+        )
+    assert duplicate.value.code == "duplicate_quote_uploaded"
+    assert str(duplicate.value) == "该报价单已上传。"
+
     with pytest.raises(ConflictError) as raised:
         service.upload_quote(
             task["task_id"],
@@ -154,6 +167,52 @@ def test_artifact_keeps_unknown_schema_fields_and_is_content_addressed(
     assert stored.content_sha256 == (
         "a9bd17d0de20167bc433524178dfad8db0d4440801325cfcb29fa232172c3d9e"
     )
+
+
+def test_policy_compliance_reports_missing_supplier_facts_without_false_failure() -> None:
+    comparison = {
+        "supplier_results": [
+            {
+                "quote_id": "quote-ready",
+                "quote_version": 1,
+                "supplier_name": "Ready Supplier",
+                "status": "FEASIBLE",
+            },
+            {
+                "quote_id": "quote-infeasible",
+                "quote_version": 1,
+                "supplier_name": "Infeasible Supplier",
+                "status": "INFEASIBLE",
+            },
+        ]
+    }
+    retrievals = [
+        {
+            "status": "OK",
+            "covered_control_codes": [control_code],
+            "missing_control_codes": [],
+            "citations": [{"citation_id": f"cit-{index}", "control_code": control_code}],
+        }
+        for index, control_code in enumerate(
+            ("APPROVED_SUPPLIER", "ROHS_COMPLIANCE", "AMOUNT_APPROVAL"), start=1
+        )
+    ]
+
+    result = BackendService._policy_compliance_payload(comparison, retrievals)
+
+    assert result["disposition"] == "NO_CONFIRMED_COMPLIANT_SUPPLIER"
+    assert result["counts"] == {
+        "COMPLIANT": 0,
+        "NON_COMPLIANT": 0,
+        "REVIEW_REQUIRED": 1,
+        "NOT_EVALUATED": 1,
+    }
+    assert {check["status"] for check in result["assessments"][0]["checks"]} == {
+        "REVIEW_REQUIRED"
+    }
+    assert {check["status"] for check in result["assessments"][1]["checks"]} == {
+        "NOT_EVALUATED"
+    }
 
 
 def test_quote_upload_streams_in_bounded_chunks(service: BackendService) -> None:
