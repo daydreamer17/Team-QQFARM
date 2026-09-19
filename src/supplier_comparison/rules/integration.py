@@ -16,6 +16,7 @@ from supplier_comparison.extraction.review_contracts import (
 from .contracts import (
     ComparisonRequest,
     ComparisonResult,
+    DecisionPreferences,
     ProcurementRequirement,
     QuoteInput,
 )
@@ -156,6 +157,7 @@ def analyze_reviewed_decision_impact(
     task_revision: int,
     evaluated_at: datetime,
     policy_binding: dict[str, str | None] | None = None,
+    decision_preferences: DecisionPreferences | None = None,
 ) -> DecisionImpactResult:
     """Version-bound preliminary scope; unsafe review findings still reject."""
     for envelope in envelopes:
@@ -163,17 +165,32 @@ def analyze_reviewed_decision_impact(
             raise DownstreamNotReadyError(
                 "decision_impact_task_mismatch", "Review belongs to another task."
             )
+    preferences = decision_preferences or DecisionPreferences()
+    excluded_suppliers = set(preferences.excluded_supplier_ids)
+    selected_envelopes = tuple(
+        envelope for envelope in envelopes
+        if envelope.batch is None
+        or envelope.batch.parsed_input.context.supplier_id not in excluded_suppliers
+    )
     return analyze_decision_impact(DecisionImpactRequest(
         task_id=task_id, task_revision=task_revision,
         comparison=ComparisonRequest(
             requirement=requirement,
-            quotes=tuple(quote_input_for_decision_impact(envelope) for envelope in envelopes),
+            quotes=tuple(quote_input_for_decision_impact(envelope) for envelope in selected_envelopes),
             evaluated_at=evaluated_at,
         ),
         policy_binding=policy_binding or {},
         review_bindings={
             envelope.batch.parsed_input.context.quote_id:
                 envelope.batch.parsed_input.document_sha256 + ":" + envelope.review.review_run_id
-            for envelope in envelopes if envelope.batch is not None and envelope.review is not None
+            for envelope in selected_envelopes if envelope.batch is not None and envelope.review is not None
         },
+        supplier_bindings={
+            envelope.batch.parsed_input.context.quote_id:
+                envelope.batch.parsed_input.context.supplier_id
+            for envelope in selected_envelopes
+            if envelope.batch is not None
+            and envelope.batch.parsed_input.context.supplier_id is not None
+        },
+        decision_preferences=preferences,
     ))

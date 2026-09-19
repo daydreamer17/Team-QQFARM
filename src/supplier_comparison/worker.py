@@ -10,6 +10,7 @@ from pathlib import Path
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from .backend.checkpoints import checkpoint_connection_string
+from .backend.conversations import ConversationModelConfig, generate_conversation_turn
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
@@ -97,6 +98,8 @@ def run_job(job_id: str) -> dict:
                 "summary_processing_failed",
                 "Summary processing failed unexpectedly.",
             ) from exc
+    if job_type == "DECISION_CONVERSATION":
+        return _run_decision_conversation_job(service, job_id)
     if job_type == "DRAFT_REVIEW":
         return DraftReviewRunner(
             service,
@@ -124,6 +127,49 @@ def run_job(job_id: str) -> dict:
             policy_max_retries=settings.supplier_agent_policy_max_retries,
         )
         return runner.run_job(job_id)
+
+
+def _run_decision_conversation_job(
+    service: BackendService, job_id: str
+) -> dict:
+    context = service.conversation_job_context(job_id)
+    attempts = 0
+    try:
+        config = ConversationModelConfig.from_env()
+        if config is None:
+            raise ModelClientError(
+                "conversation model is not configured",
+                attempts=0,
+                error_code="conversation_model_unconfigured",
+            )
+        turn, attempts = generate_conversation_turn(context, config)
+        return service.complete_conversation_job(
+            job_id,
+            turn=turn,
+            attempts=attempts,
+            provider=config.provider,
+            model_id=config.model_id,
+        )
+    except ModelClientError as exc:
+        attempts += exc.attempts
+        service.fail_conversation_job(
+            job_id,
+            code=exc.error_code,
+            message=str(exc),
+            attempts=attempts,
+        )
+        raise
+    except Exception as exc:
+        service.fail_conversation_job(
+            job_id,
+            code="conversation_processing_failed",
+            message="Conversation processing failed unexpectedly.",
+            attempts=attempts,
+        )
+        raise BackendError(
+            "conversation_processing_failed",
+            "Conversation processing failed unexpectedly.",
+        ) from exc
 
 
 def run_loop(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from itertools import groupby
 
@@ -18,14 +18,19 @@ from .contracts import (
     SupplierEvaluation,
 )
 from .cost import calculate_cost
-from .decision_impact import ImpactStatus, SUPPORTED_IMPACT_RANKING, assess_quote_impact
+from .decision_impact import (
+    COST_RANKING,
+    DELIVERY_RANKING,
+    ImpactStatus,
+    assess_quote_impact,
+)
 from .delivery import check_delivery
 from .field_access import FieldAccess
 from .quantity import calculate_quantity
 from .specification import check_specification
 
 
-SUPPORTED_RANKING = SUPPORTED_IMPACT_RANKING
+SUPPORTED_RANKINGS = frozenset({COST_RANKING, DELIVERY_RANKING})
 
 
 def evaluate_supplier(
@@ -138,36 +143,23 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
     )
     pending_ids = tuple(result.quote_id for result in pending_results)
 
-    if request.requirement.ranking_preference != SUPPORTED_RANKING:
+    ranking_issue = _ranking_issue(request)
+    if ranking_issue is not None:
         return ComparisonResult(
             evaluated_at=request.evaluated_at,
             disposition=ComparisonDisposition.PENDING_INPUT,
             supplier_results=results,
             pending_quote_ids=pending_ids,
-            comparison_reasons=(
-                RuleIssue(
-                    code="RANKING_PREFERENCE_UNSUPPORTED",
-                    fields=("ranking_preference",),
-                    message="Requested ranking preference is not supported by the MVP.",
-                ),
-            ),
+            comparison_reasons=(ranking_issue,),
             final_recommendation_allowed=False,
         )
 
-    feasible = sorted(
-        (
-            result
-            for result in results
-            if result.status == FeasibilityStatus.FEASIBLE
-            and result.total_cost is not None
-        ),
-        key=lambda result: (result.total_cost, result.quote_id),
+    feasible = tuple(
+        result
+        for result in results
+        if result.status == FeasibilityStatus.FEASIBLE
+        and result.total_cost is not None
     )
-    ranked_groups = tuple(
-        tuple(result.quote_id for result in group)
-        for _, group in groupby(feasible, key=lambda result: result.total_cost)
-    )
-
     if not feasible:
         if pending_results:
             return ComparisonResult(
@@ -185,13 +177,22 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
             final_recommendation_allowed=False,
         )
 
-    best_cost = feasible[0].total_cost
-    blocking_pending = tuple(
-        result.quote_id
-        for result in pending_results
-        if assess_quote_impact(request.requirement, result, best_cost).status
-        != ImpactStatus.NON_BLOCKING
-    )
+    ranked_groups = _ranked_groups(request, feasible)
+    best_cost = min(result.total_cost for result in feasible)
+    if (
+        request.requirement.ranking_preference == COST_RANKING
+        and request.cost_tolerance_amount is None
+    ):
+        blocking_pending = tuple(
+            result.quote_id
+            for result in pending_results
+            if assess_quote_impact(request.requirement, result, best_cost).status
+            != ImpactStatus.NON_BLOCKING
+        )
+    else:
+        # No safe dominance proof is implemented for delivery-first or tolerance-pool
+        # ranking. Unknown inputs therefore remain blocking rather than being guessed.
+        blocking_pending = pending_ids
     if blocking_pending:
         return ComparisonResult(
             evaluated_at=request.evaluated_at,
@@ -204,23 +205,6 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
         )
 
     best_group = ranked_groups[0]
-    if len(best_group) > 1 and request.requirement.secondary_preference is not None:
-        return ComparisonResult(
-            evaluated_at=request.evaluated_at,
-            disposition=ComparisonDisposition.PENDING_INPUT,
-            supplier_results=results,
-            ranked_quote_ids=ranked_groups,
-            pending_quote_ids=pending_ids,
-            comparison_reasons=(
-                RuleIssue(
-                    code="SECONDARY_PREFERENCE_UNSUPPORTED",
-                    fields=("secondary_preference",),
-                    message="Configured tie-break preference is not supported by the MVP.",
-                ),
-            ),
-            final_recommendation_allowed=False,
-        )
-
     return ComparisonResult(
         evaluated_at=request.evaluated_at,
         disposition=ComparisonDisposition.RECOMMENDATION_AVAILABLE,
@@ -229,6 +213,65 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
         recommended_quote_ids=best_group,
         pending_quote_ids=pending_ids,
         final_recommendation_allowed=True,
+    )
+
+
+def _ranking_issue(request: ComparisonRequest) -> RuleIssue | None:
+    primary = request.requirement.ranking_preference
+    secondary = request.requirement.secondary_preference
+    if primary not in SUPPORTED_RANKINGS:
+        return RuleIssue(
+            code="RANKING_PREFERENCE_UNSUPPORTED",
+            fields=("ranking_preference",),
+            message="Requested primary ranking preference is not supported.",
+        )
+    if secondary is not None and (
+        secondary not in SUPPORTED_RANKINGS or secondary == primary
+    ):
+        return RuleIssue(
+            code="SECONDARY_PREFERENCE_UNSUPPORTED",
+            fields=("secondary_preference",),
+            message="Secondary ranking must be the other supported cost/delivery preference.",
+        )
+    if request.cost_tolerance_amount is not None and primary != COST_RANKING:
+        return RuleIssue(
+            code="COST_TOLERANCE_REQUIRES_COST_RANKING",
+            fields=("cost_tolerance_amount", "ranking_preference"),
+            message="Cost tolerance requires lowest confirmed total cost as the primary preference.",
+        )
+    return None
+
+
+def _ranked_groups(
+    request: ComparisonRequest,
+    feasible: tuple[SupplierEvaluation, ...],
+) -> tuple[tuple[str, ...], ...]:
+    """Rank feasible quotes without using quote IDs to break a business tie."""
+
+    primary = request.requirement.ranking_preference
+    secondary = request.requirement.secondary_preference
+    tolerance = request.cost_tolerance_amount
+    minimum_cost = min(result.total_cost for result in feasible)
+
+    def logical_key(result: SupplierEvaluation):
+        cost = result.total_cost
+        arrival = result.estimated_arrival_date or date.max
+        assert cost is not None
+        if tolerance is not None:
+            # Candidate pool: all totals at or below minimum + tolerance. Within
+            # the pool choose earliest arrival, then lowest cost. Outside the
+            # pool retain deterministic cost/delivery ordering for display.
+            if cost <= minimum_cost + tolerance:
+                return (0, arrival, cost)
+            return (1, cost, arrival)
+        if primary == COST_RANKING:
+            return (cost, arrival) if secondary == DELIVERY_RANKING else (cost,)
+        return (arrival, cost) if secondary == COST_RANKING else (arrival,)
+
+    ordered = sorted(feasible, key=lambda result: (*logical_key(result), result.quote_id))
+    return tuple(
+        tuple(result.quote_id for result in group)
+        for _, group in groupby(ordered, key=logical_key)
     )
 
 

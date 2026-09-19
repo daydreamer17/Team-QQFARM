@@ -29,6 +29,7 @@ EVALUATED_AT = datetime(2026, 9, 14, 1, 0, tzinfo=timezone.utc)
 def _requirement(
     *,
     ranking_preference: str = "LOWEST_CONFIRMED_TOTAL_COST",
+    secondary_preference: str | None = None,
     includes_shipping: bool = True,
 ) -> ProcurementRequirement:
     return ProcurementRequirement(
@@ -50,6 +51,7 @@ def _requirement(
         delivery_deadline=date(2026, 9, 19),
         delivery_location="SG-DEMO-01",
         ranking_preference=ranking_preference,
+        secondary_preference=secondary_preference,
     )
 
 
@@ -321,6 +323,98 @@ def test_equal_primary_cost_returns_a_tie() -> None:
 
     assert result.ranked_quote_ids == (("QUOTE-B", "QUOTE-C"),)
     assert result.recommended_quote_ids == ("QUOTE-B", "QUOTE-C")
+
+
+def test_cost_then_fastest_breaks_only_an_exact_cost_tie() -> None:
+    requirement = _requirement(secondary_preference="FASTEST_CONFIRMED_DELIVERY")
+    slow = _supplier_b(
+        shipping_status="KNOWN_AMOUNT", shipping_amount="300.00"
+    )
+    fast = _supplier_c()
+    slow = slow.model_copy(update={"candidates": tuple(
+        candidate.model_copy(update={"normalized_value": 4, "raw_value": "4"})
+        if candidate.field_name == "lead_time_days" else candidate
+        for candidate in slow.candidates
+    )})
+
+    result = compare_suppliers(_request(slow, fast, requirement=requirement))
+
+    assert result.ranked_quote_ids == (("QUOTE-C",), ("QUOTE-B",))
+    assert result.recommended_quote_ids == ("QUOTE-C",)
+
+
+def test_fastest_and_fastest_then_cost_are_deterministic() -> None:
+    cheap_slow = _supplier_b(
+        shipping_status="KNOWN_AMOUNT", shipping_amount="100.00", unit_price="6.00"
+    )
+    cheap_slow = cheap_slow.model_copy(update={"candidates": tuple(
+        candidate.model_copy(update={"normalized_value": 4, "raw_value": "4"})
+        if candidate.field_name == "lead_time_days" else candidate
+        for candidate in cheap_slow.candidates
+    )})
+    expensive_fast = _supplier_c()
+    fastest = compare_suppliers(_request(
+        cheap_slow,
+        expensive_fast,
+        requirement=_requirement(ranking_preference="FASTEST_CONFIRMED_DELIVERY"),
+    ))
+    assert fastest.recommended_quote_ids == ("QUOTE-C",)
+
+    same_arrival = cheap_slow.model_copy(update={"candidates": tuple(
+        candidate.model_copy(update={"normalized_value": 3, "raw_value": "3"})
+        if candidate.field_name == "lead_time_days" else candidate
+        for candidate in cheap_slow.candidates
+    )})
+    fastest_then_cost = compare_suppliers(_request(
+        same_arrival,
+        expensive_fast,
+        requirement=_requirement(
+            ranking_preference="FASTEST_CONFIRMED_DELIVERY",
+            secondary_preference="LOWEST_CONFIRMED_TOTAL_COST",
+        ),
+    ))
+    assert fastest_then_cost.recommended_quote_ids == ("QUOTE-B",)
+
+
+def test_cost_tolerance_pool_chooses_fastest_then_cost() -> None:
+    cheap_slow = _supplier_b(
+        shipping_status="KNOWN_AMOUNT", shipping_amount="100.00", unit_price="6.00"
+    )
+    cheap_slow = cheap_slow.model_copy(update={"candidates": tuple(
+        candidate.model_copy(update={"normalized_value": 4, "raw_value": "4"})
+        if candidate.field_name == "lead_time_days" else candidate
+        for candidate in cheap_slow.candidates
+    )})
+    expensive_fast = _supplier_c()
+    requirement = _requirement(secondary_preference="FASTEST_CONFIRMED_DELIVERY")
+
+    outside = compare_suppliers(ComparisonRequest(
+        requirement=requirement,
+        quotes=(cheap_slow, expensive_fast),
+        evaluated_at=EVALUATED_AT,
+        cost_tolerance_amount="50.00",
+    ))
+    inside = compare_suppliers(ComparisonRequest(
+        requirement=requirement,
+        quotes=(cheap_slow, expensive_fast),
+        evaluated_at=EVALUATED_AT,
+        cost_tolerance_amount="1000.00",
+    ))
+
+    assert outside.recommended_quote_ids == ("QUOTE-B",)
+    assert inside.recommended_quote_ids == ("QUOTE-C",)
+
+
+def test_delivery_first_keeps_unresolved_quote_blocking() -> None:
+    result = compare_suppliers(_request(
+        _supplier_b(),
+        _supplier_c(),
+        requirement=_requirement(ranking_preference="FASTEST_CONFIRMED_DELIVERY"),
+    ))
+
+    assert result.disposition == ComparisonDisposition.PENDING_INPUT
+    assert result.blocking_pending_quote_ids == ("QUOTE-B",)
+    assert not result.final_recommendation_allowed
 
 
 def test_nonblocking_pending_quote_does_not_hide_cheaper_confirmed_winner() -> None:

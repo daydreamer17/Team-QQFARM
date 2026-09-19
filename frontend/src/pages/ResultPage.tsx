@@ -8,6 +8,7 @@ import type {
   ResultReason,
   SupplierComparisonResult,
 } from '../api/types'
+import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspace'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 const statusLabels: Record<string, string> = {
@@ -383,6 +384,10 @@ export function ResultPage() {
           </div>
         </aside>
       </section>
+
+      {task && (
+        <DecisionScenarioWorkspace task={task} result={resultQuery.data} />
+      )}
 
       <p className="result-boundary">
         金额、数量、可行性和推荐均来自后端冻结结果；结果 ID {resultQuery.data.result_id}，基于 Task Rev {resultQuery.data.task_revision}。

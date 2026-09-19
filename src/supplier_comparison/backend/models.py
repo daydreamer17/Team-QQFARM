@@ -86,6 +86,160 @@ class RequirementRecord(Base):
     )
 
 
+class DecisionProfile(Base):
+    __tablename__ = "decision_profiles"
+
+    decision_profile_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_scenario_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_scenarios.decision_scenario_id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    __table_args__ = (UniqueConstraint("task_id", "profile_version"),)
+
+
+class DecisionScenario(Base):
+    __tablename__ = "decision_scenarios"
+
+    decision_scenario_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    base_task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_result_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="READY")
+    changes: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    baseline: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    simulated: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    delta: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    applied_task_revision: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class DecisionIntent(Base):
+    __tablename__ = "decision_intents"
+
+    decision_intent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    base_task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_result_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_text: Mapped[str] = mapped_column(Text, nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PROCESSING")
+    parsed_changes: Mapped[dict | None] = mapped_column(JSON_VALUE)
+    confirmation_text: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    decision_scenario_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_scenarios.decision_scenario_id", ondelete="SET NULL"),
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class DecisionConversation(Base):
+    __tablename__ = "decision_conversations"
+
+    conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    base_task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_result_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class DecisionMessage(Base):
+    __tablename__ = "decision_messages"
+
+    message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_conversations.conversation_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text)
+    reference_ids: Mapped[list | None] = mapped_column(JSON_VALUE)
+    proposed_changes: Mapped[dict | None] = mapped_column(JSON_VALUE)
+    decision_intent_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_intents.decision_intent_id", ondelete="SET NULL"),
+        index=True,
+    )
+    reply_to_message_id: Mapped[str | None] = mapped_column(String(64))
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    __table_args__ = (UniqueConstraint("conversation_id", "sequence"),)
+
+
+class DecisionConversationEvent(Base):
+    __tablename__ = "decision_conversation_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_conversations.conversation_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    __table_args__ = (UniqueConstraint("conversation_id", "sequence"),)
+
+
 class Quote(Base):
     __tablename__ = "quotes"
 
@@ -351,6 +505,16 @@ class Job(Base):
     )
     summary_id: Mapped[str | None] = mapped_column(
         ForeignKey("summary_reports.summary_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    conversation_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_conversations.conversation_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    conversation_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decision_messages.message_id", ondelete="CASCADE"),
         nullable=True,
         index=True,
     )

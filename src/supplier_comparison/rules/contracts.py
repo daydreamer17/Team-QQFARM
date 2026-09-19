@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from supplier_comparison.extraction.contracts import QuoteFieldCandidate
 
 
-RULE_VERSION = "supplier-comparison/1.1.0"
+RULE_VERSION = "supplier-comparison/1.2.0"
 
 
 class FrozenModel(BaseModel):
@@ -36,6 +36,40 @@ class ComparisonDisposition(StrEnum):
     PENDING_INPUT = "PENDING_INPUT"
     NO_FEASIBLE_QUOTES = "NO_FEASIBLE_QUOTES"
     EMPTY_SCOPE = "EMPTY_SCOPE"
+
+
+class RankingMode(StrEnum):
+    """User-selectable deterministic ranking modes for comparisons/simulations."""
+
+    LOWEST_CONFIRMED_TOTAL_COST = "LOWEST_CONFIRMED_TOTAL_COST"
+    FASTEST_CONFIRMED_DELIVERY = "FASTEST_CONFIRMED_DELIVERY"
+    LOWEST_COST_THEN_FASTEST_DELIVERY = "LOWEST_COST_THEN_FASTEST_DELIVERY"
+    FASTEST_DELIVERY_THEN_LOWEST_COST = "FASTEST_DELIVERY_THEN_LOWEST_COST"
+
+
+class DecisionPreferences(FrozenModel):
+    """Decision-only settings; separate from the buyer's hard requirement."""
+
+    ranking_mode: RankingMode | None = None
+    excluded_supplier_ids: tuple[str, ...] = ()
+    cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
+
+    @field_validator("cost_tolerance_amount", mode="before")
+    @classmethod
+    def reject_binary_float_tolerance(cls, value: Any) -> Any:
+        if isinstance(value, float):
+            raise ValueError("money must be supplied as a decimal string or Decimal")
+        return value
+
+    @field_validator("excluded_supplier_ids")
+    @classmethod
+    def supplier_ids_are_unique_and_nonempty(cls, value: tuple[str, ...]):
+        normalized = tuple(item.strip() for item in value)
+        if any(not item for item in normalized):
+            raise ValueError("excluded supplier IDs cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("excluded supplier IDs must be unique")
+        return normalized
 
 
 class ProcurementRequirement(FrozenModel):
@@ -78,6 +112,28 @@ class ProcurementRequirement(FrozenModel):
         return self
 
 
+def ranking_pair(mode: RankingMode) -> tuple[str, str | None]:
+    if mode == RankingMode.LOWEST_CONFIRMED_TOTAL_COST:
+        return "LOWEST_CONFIRMED_TOTAL_COST", None
+    if mode == RankingMode.FASTEST_CONFIRMED_DELIVERY:
+        return "FASTEST_CONFIRMED_DELIVERY", None
+    if mode == RankingMode.LOWEST_COST_THEN_FASTEST_DELIVERY:
+        return "LOWEST_CONFIRMED_TOTAL_COST", "FASTEST_CONFIRMED_DELIVERY"
+    return "FASTEST_CONFIRMED_DELIVERY", "LOWEST_CONFIRMED_TOTAL_COST"
+
+
+def ranking_mode_for(requirement: ProcurementRequirement) -> RankingMode | None:
+    pair = (requirement.ranking_preference, requirement.secondary_preference)
+    return {
+        ("LOWEST_CONFIRMED_TOTAL_COST", None): RankingMode.LOWEST_CONFIRMED_TOTAL_COST,
+        ("FASTEST_CONFIRMED_DELIVERY", None): RankingMode.FASTEST_CONFIRMED_DELIVERY,
+        ("LOWEST_CONFIRMED_TOTAL_COST", "FASTEST_CONFIRMED_DELIVERY"):
+            RankingMode.LOWEST_COST_THEN_FASTEST_DELIVERY,
+        ("FASTEST_CONFIRMED_DELIVERY", "LOWEST_CONFIRMED_TOTAL_COST"):
+            RankingMode.FASTEST_DELIVERY_THEN_LOWEST_COST,
+    }.get(pair)
+
+
 class QuoteInput(FrozenModel):
     """One normalized quote version at the B-to-C/D boundary."""
 
@@ -106,6 +162,14 @@ class ComparisonRequest(FrozenModel):
     requirement: ProcurementRequirement
     quotes: tuple[QuoteInput, ...]
     evaluated_at: datetime
+    cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
+
+    @field_validator("cost_tolerance_amount", mode="before")
+    @classmethod
+    def reject_binary_float_tolerance(cls, value: Any) -> Any:
+        if isinstance(value, float):
+            raise ValueError("money must be supplied as a decimal string or Decimal")
+        return value
 
     @model_validator(mode="after")
     def quote_versions_are_unique(self) -> "ComparisonRequest":

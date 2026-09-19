@@ -17,7 +17,16 @@ from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.settings import settings
 from supplier_comparison.backend.workflow import WorkflowRunner
 from supplier_comparison.backend.investigation import AgentConfig, InvestigationRunner, LiveInvestigationPlanner
-from supplier_comparison.backend.models import WorkflowArtifact
+from supplier_comparison.backend.models import (
+    DecisionConversation,
+    DecisionConversationEvent,
+    DecisionIntent,
+    DecisionMessage,
+    DecisionProfile,
+    DecisionScenario,
+    Job,
+    WorkflowArtifact,
+)
 
 from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
 from .test_workflow_policy_rag import (
@@ -80,6 +89,141 @@ def test_requirement_draft_job_respects_postgres_foreign_key_order(
             idempotency_key=f"requirement-discard-{uuid4().hex}",
         )
     finally:
+        engine.dispose()
+
+
+def test_decision_scenario_and_profile_jsonb_round_trip_on_postgres(tmp_path: Path) -> None:
+    database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    actor_id = f"postgres-scenario-{uuid4().hex}"
+    service = BackendService(sessions, tmp_path / "quotes", actor_id=actor_id)
+    task = service.create_task(
+        _requirement(), idempotency_key=f"create-{actor_id}", scenario_id="PG-SCENARIO"
+    )
+    scenario_id = f"scenario_{uuid4().hex}"
+    intent_id = f"dintent_{uuid4().hex}"
+    conversation_id = f"conversation_{uuid4().hex}"
+    try:
+        with sessions.begin() as session:
+            session.add(DecisionScenario(
+                decision_scenario_id=scenario_id,
+                task_id=task["task_id"],
+                actor_id=actor_id,
+                base_task_revision=1,
+                base_result_id="artifact_demo",
+                input_sha256="a" * 64,
+                status="APPLIED",
+                changes={"ranking_mode": "FASTEST_CONFIRMED_DELIVERY"},
+                baseline={"recommended_quote_ids": ["QUOTE-A"]},
+                simulated={"recommended_quote_ids": ["QUOTE-B"]},
+                delta={"recommendation_changed": True},
+                applied_task_revision=1,
+            ))
+            session.flush()
+            session.add(DecisionProfile(
+                decision_profile_id=f"dprofile_{uuid4().hex}",
+                task_id=task["task_id"],
+                task_revision=1,
+                profile_version=1,
+                payload={
+                    "ranking_mode": "FASTEST_CONFIRMED_DELIVERY",
+                    "excluded_supplier_ids": ["SUP-OLD"],
+                    "cost_tolerance_amount": None,
+                },
+                content_sha256="b" * 64,
+                source_scenario_id=scenario_id,
+            ))
+            session.add(DecisionIntent(
+                decision_intent_id=intent_id,
+                task_id=task["task_id"],
+                actor_id=actor_id,
+                base_task_revision=1,
+                base_result_id="artifact_demo",
+                source_text="改成到货最快优先",
+                source_sha256="c" * 64,
+                status="CONFIRMED",
+                parsed_changes={"ranking_mode": "FASTEST_CONFIRMED_DELIVERY"},
+                confirmation_text="请确认排序方式",
+                provider="fixed-test",
+                model_id="fixed-intent",
+                prompt_version="decision-intent/1.0.0",
+                attempts=1,
+                decision_scenario_id=scenario_id,
+            ))
+            session.add(DecisionConversation(
+                conversation_id=conversation_id,
+                task_id=task["task_id"],
+                actor_id=actor_id,
+                base_task_revision=1,
+                base_result_id="artifact_demo",
+                status="ACTIVE",
+                title="PostgreSQL conversation",
+            ))
+            session.flush()
+            message_id = f"dmessage_{uuid4().hex}"
+            session.add(DecisionMessage(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                task_id=task["task_id"],
+                sequence=1,
+                role="ASSISTANT",
+                status="SUCCEEDED",
+                content="已验证的叙述。",
+                reference_ids=["RESULT:artifact_demo"],
+                proposed_changes={"ranking_mode": "FASTEST_CONFIRMED_DELIVERY"},
+                decision_intent_id=intent_id,
+                attempts=1,
+            ))
+            session.flush()
+            session.add_all((
+                DecisionConversationEvent(
+                    event_id=f"cevent_{uuid4().hex}",
+                    conversation_id=conversation_id,
+                    sequence=1,
+                    event_type="assistant.completed",
+                    payload={"message_id": message_id, "chunks": ["已验证", "的叙述。"]},
+                ),
+                Job(
+                    job_id=f"job_{uuid4().hex}",
+                    task_id=task["task_id"],
+                    conversation_id=conversation_id,
+                    conversation_message_id=message_id,
+                    job_type="DECISION_CONVERSATION",
+                    status="SUCCEEDED",
+                    task_revision=1,
+                ),
+            ))
+        recovered = service.get_task(task["task_id"])
+        assert recovered["decision_profile"]["preferences"] == {
+            "ranking_mode": "FASTEST_CONFIRMED_DELIVERY",
+            "excluded_supplier_ids": ["SUP-OLD"],
+            "cost_tolerance_amount": None,
+        }
+        intent = service.list_decision_intents(task["task_id"])["items"][0]
+        assert intent["parsed_changes"] == {
+            "ranking_mode": "FASTEST_CONFIRMED_DELIVERY"
+        }
+        assert intent["decision_scenario_id"] == scenario_id
+        conversation = service.get_decision_conversation(
+            task["task_id"], conversation_id
+        )
+        assert conversation["messages"][0]["reference_ids"] == [
+            "RESULT:artifact_demo"
+        ]
+        assert service.decision_conversation_events(
+            task["task_id"], conversation_id
+        )[0]["payload"]["chunks"] == ["已验证", "的叙述。"]
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM tasks WHERE task_id = :task_id"),
+                {"task_id": task["task_id"]},
+            )
+            connection.execute(
+                text("DELETE FROM idempotency_records WHERE actor_id = :actor_id"),
+                {"actor_id": actor_id},
+            )
         engine.dispose()
 
 

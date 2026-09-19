@@ -5,8 +5,8 @@ import pytest
 from pydantic import ValidationError
 
 from supplier_comparison.rules import (
-    ComparisonRequest, DecisionImpactRequest, RequirementChanges, analyze_selection_gap,
-    draft_clarification, simulate_requirement_change,
+    ComparisonRequest, DecisionImpactRequest, DecisionPreferences, RequirementChanges, analyze_selection_gap,
+    RankingMode, draft_clarification, simulate_requirement_change,
 )
 from tests.rules.test_engine import EVALUATED_AT, _requirement, _supplier_a, _supplier_b, _supplier_c
 
@@ -95,3 +95,88 @@ def test_requirement_simulation_requires_authorization_and_never_changes_inputs(
         RequirementChanges(budget_amount=10000.0)
     with pytest.raises(ValidationError):
         RequirementChanges()
+
+
+def test_requirement_simulation_supports_ranking_tolerance_and_supplier_exclusion():
+    b = change(
+        _supplier_b(shipping_status='KNOWN_AMOUNT', shipping_amount='200.00'),
+        lead_time_days=4,
+    )
+    original = request(b, _supplier_c()).model_copy(update={
+        'supplier_bindings': {'QUOTE-B': 'SUP-B', 'QUOTE-C': 'SUP-C'},
+    })
+    fastest = simulate_requirement_change(
+        original,
+        RequirementChanges(ranking_mode=RankingMode.FASTEST_CONFIRMED_DELIVERY),
+        user_authorized=True,
+    )
+    assert fastest.comparison.recommended_quote_ids == ('QUOTE-C',)
+
+    tolerance = simulate_requirement_change(
+        original,
+        RequirementChanges(cost_tolerance_amount='100.00'),
+        user_authorized=True,
+    )
+    assert tolerance.comparison.recommended_quote_ids == ('QUOTE-C',)
+    assert tolerance.changes['cost_tolerance_amount'] == '100.00'
+
+    excluded = simulate_requirement_change(
+        original,
+        RequirementChanges(excluded_supplier_ids=('SUP-C',)),
+        user_authorized=True,
+    )
+    assert excluded.excluded_quote_ids == ('QUOTE-C',)
+    assert tuple(row.quote_id for row in excluded.comparison.supplier_results) == ('QUOTE-B',)
+    assert excluded.comparison.recommended_quote_ids == ('QUOTE-B',)
+    assert original.comparison.quotes == (b, _supplier_c())
+
+
+def test_requirement_simulation_rejects_unknown_supplier_and_invalid_preference_values():
+    original = request(_supplier_c()).model_copy(update={
+        'supplier_bindings': {'QUOTE-C': 'SUP-C'},
+    })
+    with pytest.raises(ValueError, match='current comparison'):
+        simulate_requirement_change(
+            original,
+            RequirementChanges(excluded_supplier_ids=('SUP-UNKNOWN',)),
+            user_authorized=True,
+        )
+    with pytest.raises(ValidationError):
+        RequirementChanges(excluded_supplier_ids=('SUP-C', 'SUP-C'))
+    with pytest.raises(ValidationError):
+        RequirementChanges(cost_tolerance_amount=15.0)
+    with pytest.raises(ValueError, match='cost-primary'):
+        simulate_requirement_change(
+            original,
+            RequirementChanges(
+                ranking_mode=RankingMode.FASTEST_CONFIRMED_DELIVERY,
+                cost_tolerance_amount='15.00',
+            ),
+            user_authorized=True,
+        )
+
+
+def test_requirement_simulation_can_explicitly_clear_persisted_preferences():
+    original = request(
+        _supplier_b(shipping_status='KNOWN_AMOUNT', shipping_amount='200.00'),
+        _supplier_c(),
+    ).model_copy(update={
+        'supplier_bindings': {'QUOTE-B': 'SUP-B', 'QUOTE-C': 'SUP-C'},
+        'decision_preferences': DecisionPreferences(
+            ranking_mode=RankingMode.LOWEST_COST_THEN_FASTEST_DELIVERY,
+            excluded_supplier_ids=('SUP-B',),
+            cost_tolerance_amount='25.00',
+        ),
+    })
+    cleared = simulate_requirement_change(
+        original,
+        RequirementChanges(excluded_supplier_ids=(), cost_tolerance_amount=None),
+        user_authorized=True,
+    )
+    assert cleared.decision_preferences.excluded_supplier_ids == ()
+    assert cleared.decision_preferences.cost_tolerance_amount is None
+    assert {row.quote_id for row in cleared.comparison.supplier_results} == {'QUOTE-B', 'QUOTE-C'}
+    assert cleared.changes == {
+        'excluded_supplier_ids': [],
+        'cost_tolerance_amount': None,
+    }

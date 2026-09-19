@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from supplier_comparison.rules import ProcurementRequirement
+from supplier_comparison.rules import (
+    DecisionPreferences,
+    ProcurementRequirement,
+    RankingMode,
+    RequirementChanges,
+    analyze_decision_impact,
+    ranking_mode_for,
+    ranking_pair,
+    simulate_requirement_change,
+)
 from supplier_comparison.extraction import (
     CorrectionAction,
     CorrectionEvent,
@@ -26,6 +37,12 @@ from supplier_comparison.extraction import (
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 
 from .models import (
+    DecisionConversation,
+    DecisionConversationEvent,
+    DecisionIntent,
+    DecisionMessage,
+    DecisionProfile,
+    DecisionScenario,
     Document,
     DocumentAccessEvent,
     DocumentExecution,
@@ -42,6 +59,9 @@ from .models import (
     TaskRevision,
     WorkflowArtifact,
 )
+from .conversations import CONVERSATION_PROMPT_VERSION, narrative_chunks
+from .decision_intents import DecisionIntentParser, confirmation_text
+from supplier_comparison.rag.clients import ModelClientError
 
 
 def new_id(prefix: str) -> str:
@@ -120,6 +140,41 @@ class BackendService:
     def _supersede_current_graph(session: Session, task: Task) -> GraphRun | None:
         """Invalidate execution state when an external input changes."""
 
+        for scenario in session.scalars(
+            select(DecisionScenario).where(
+                DecisionScenario.task_id == task.task_id,
+                DecisionScenario.status == "READY",
+            )
+        ):
+            scenario.status = "STALE"
+        for intent in session.scalars(
+            select(DecisionIntent).where(
+                DecisionIntent.task_id == task.task_id,
+                DecisionIntent.status.in_(("PROCESSING", "READY")),
+            )
+        ):
+            intent.status = "STALE"
+        for conversation in session.scalars(
+            select(DecisionConversation).where(
+                DecisionConversation.task_id == task.task_id,
+                DecisionConversation.status == "ACTIVE",
+            )
+        ):
+            conversation.status = "STALE"
+            for message in session.scalars(
+                select(DecisionMessage).where(
+                    DecisionMessage.conversation_id == conversation.conversation_id,
+                    DecisionMessage.status.in_(("PENDING", "RUNNING")),
+                )
+            ):
+                message.status = "STALE"
+            for conversation_job in session.scalars(
+                select(Job).where(
+                    Job.conversation_id == conversation.conversation_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )
+            ):
+                conversation_job.status = "SUPERSEDED"
         for report in session.scalars(
             select(SummaryReport).where(
                 SummaryReport.task_id == task.task_id,
@@ -160,6 +215,49 @@ class BackendService:
         task.current_snapshot_id = None
         task.current_result_id = None
         return graph
+
+    @staticmethod
+    def _latest_decision_profile(
+        session: Session,
+        task_id: str,
+        *,
+        max_revision: int | None = None,
+    ) -> DecisionProfile | None:
+        query = select(DecisionProfile).where(DecisionProfile.task_id == task_id)
+        if max_revision is not None:
+            query = query.where(DecisionProfile.task_revision <= max_revision)
+        return session.scalar(query.order_by(DecisionProfile.profile_version.desc()))
+
+    @classmethod
+    def _decision_preferences(
+        cls,
+        session: Session,
+        task: Task,
+        requirement: ProcurementRequirement,
+        *,
+        max_revision: int | None = None,
+    ) -> tuple[DecisionPreferences, DecisionProfile | None]:
+        profile = cls._latest_decision_profile(
+            session,
+            task.task_id,
+            max_revision=max_revision,
+        )
+        if profile is not None:
+            return DecisionPreferences.model_validate(profile.payload), profile
+        return DecisionPreferences(ranking_mode=ranking_mode_for(requirement)), None
+
+    @staticmethod
+    def _decision_profile_response(
+        preferences: DecisionPreferences,
+        profile: DecisionProfile | None,
+    ) -> dict[str, Any]:
+        return {
+            "decision_profile_id": profile.decision_profile_id if profile else None,
+            "task_revision": profile.task_revision if profile else None,
+            "profile_version": profile.profile_version if profile else 0,
+            "preferences": preferences.model_dump(mode="json"),
+            "source_scenario_id": profile.source_scenario_id if profile else None,
+        }
 
     def _existing_idempotent(
         self,
@@ -365,6 +463,9 @@ class BackendService:
                 "task_revision": 1,
                 "status": "DRAFT",
                 "policy_binding": self._policy_binding_response(task),
+                "decision_profile": self._decision_profile_response(
+                    DecisionPreferences(ranking_mode=ranking_mode_for(requirement)), None
+                ),
             }
             self._save_idempotent(
                 session,
@@ -385,6 +486,15 @@ class BackendService:
                 select(RequirementRecord)
                 .where(RequirementRecord.task_id == task_id)
                 .order_by(RequirementRecord.requirement_version.desc())
+            )
+            requirement_contract = (
+                ProcurementRequirement.model_validate(requirement.payload)
+                if requirement is not None else None
+            )
+            decision_preferences, decision_profile = (
+                self._decision_preferences(session, task, requirement_contract)
+                if requirement_contract is not None
+                else (DecisionPreferences(), None)
             )
             graph = (
                 session.get(GraphRun, task.current_graph_run_id)
@@ -585,6 +695,9 @@ class BackendService:
                 "summary_completed": summary_completed,
                 "progress": progress,
                 "policy_binding": self._policy_binding_response(task),
+                "decision_profile": self._decision_profile_response(
+                    decision_preferences, decision_profile
+                ),
                 "current_issue": self._issue_response(issue) if issue is not None else None,
                 "current_job": (
                     {
@@ -2081,6 +2194,20 @@ class BackendService:
                 .where(RequirementRecord.task_id == task.task_id)
                 .order_by(RequirementRecord.requirement_version.desc())
             )
+            requirement_contract = (
+                ProcurementRequirement.model_validate(requirement.payload)
+                if requirement is not None else None
+            )
+            decision_preferences, decision_profile = (
+                self._decision_preferences(
+                    session,
+                    task,
+                    requirement_contract,
+                    max_revision=graph.effective_revision,
+                )
+                if requirement_contract is not None
+                else (DecisionPreferences(), None)
+            )
             documents = session.execute(
                 select(Document, Quote)
                 .join(Quote, Quote.quote_id == Document.quote_id)
@@ -2100,6 +2227,9 @@ class BackendService:
                 "policy_category": task.policy_category,
                 "policy_region": task.policy_region,
                 "requirement": dict(requirement.payload) if requirement else None,
+                "decision_profile": self._decision_profile_response(
+                    decision_preferences, decision_profile
+                ),
                 "documents": [
                     {
                         "document_id": document.document_id,
@@ -2645,6 +2775,10 @@ class BackendService:
                 'policy_set_version', 'policy_index_version', 'policy_category', 'policy_region')},
             review_bindings={e.batch.parsed_input.context.quote_id:
                             e.batch.parsed_input.document_sha256 + ':' + e.review.review_run_id for e in envelopes},
+            supplier_bindings={row['quote_id']: row['supplier_id'] for row in review['quotes']},
+            decision_preferences=DecisionPreferences.model_validate(
+                task['decision_profile']['preferences']
+            ),
         )
         latest = self.get_task(task_id)
         if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != task['current_graph_run_id']:
@@ -2661,7 +2795,6 @@ class BackendService:
         return result.model_dump(mode='json') | {'clarification_drafts': [draft_clarification(gap) for gap in result.gaps]}
 
     def requirement_simulation(self, task_id: str, *, expected_task_revision: int, changes, user_authorized: bool):
-        from supplier_comparison.rules import simulate_requirement_change
         before = self.get_task(task_id)
         if before["status"] == "ABANDONED":
             raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
@@ -2675,6 +2808,1338 @@ class BackendService:
             raise ConflictError('selection_input_stale', 'Input changed during simulation.')
         return {'task_id': task_id, 'task_revision': expected_task_revision,
                 'result': result.model_dump(mode='json')}
+
+    @staticmethod
+    def _scenario_delta(baseline: dict[str, Any], simulated: dict[str, Any]) -> dict[str, Any]:
+        before = {row["quote_id"]: row for row in baseline.get("supplier_results", [])}
+        after = {row["quote_id"]: row for row in simulated.get("supplier_results", [])}
+        rows = []
+        for quote_id in sorted(set(before) | set(after)):
+            old = before.get(quote_id)
+            new = after.get(quote_id)
+            old_cost = old.get("total_cost") if old else None
+            new_cost = new.get("total_cost") if new else None
+            cost_delta = None
+            if old_cost is not None and new_cost is not None:
+                from decimal import Decimal
+                cost_delta = str(Decimal(new_cost) - Decimal(old_cost))
+            rows.append({
+                "quote_id": quote_id,
+                "baseline_status": old.get("status") if old else None,
+                "simulated_status": new.get("status") if new else None,
+                "baseline_total_cost": old_cost,
+                "simulated_total_cost": new_cost,
+                "total_cost_delta": cost_delta,
+                "baseline_arrival_date": old.get("estimated_arrival_date") if old else None,
+                "simulated_arrival_date": new.get("estimated_arrival_date") if new else None,
+                "excluded": old is not None and new is None,
+            })
+        baseline_ids = tuple(baseline.get("recommended_quote_ids", []))
+        simulated_ids = tuple(simulated.get("recommended_quote_ids", []))
+        return {
+            "recommendation_changed": baseline_ids != simulated_ids,
+            "baseline_disposition": baseline.get("disposition"),
+            "simulated_disposition": simulated.get("disposition"),
+            "baseline_recommended_quote_ids": list(baseline_ids),
+            "simulated_recommended_quote_ids": list(simulated_ids),
+            "added_recommended_quote_ids": sorted(set(simulated_ids) - set(baseline_ids)),
+            "removed_recommended_quote_ids": sorted(set(baseline_ids) - set(simulated_ids)),
+            "supplier_deltas": rows,
+        }
+
+    def create_decision_scenario(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        changes: RequirementChanges,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        task_view = self.get_task(task_id)
+        if task_view["status"] == "ABANDONED":
+            raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+        if task_view["task_revision"] != expected_task_revision:
+            raise ConflictError(
+                "task_revision_conflict", "Task revision has changed.",
+                expected=expected_task_revision, actual=task_view["task_revision"],
+            )
+        if not task_view["current_result_id"]:
+            raise ConflictError(
+                "scenario_result_required",
+                "A current frozen comparison result is required before creating a scenario.",
+            )
+        analysis_input = self.selection_analysis_input(
+            task_id, expected_task_revision=expected_task_revision
+        )
+        baseline = analyze_decision_impact(analysis_input).comparison.model_dump(mode="json")
+        frozen_baseline = self.get_result(
+            task_id, task_view["current_result_id"]
+        )["result"]
+        if baseline != frozen_baseline:
+            raise ConflictError(
+                "scenario_baseline_stale",
+                "The frozen result no longer matches the current deterministic rule version; rerun first.",
+            )
+        try:
+            trial = simulate_requirement_change(
+                analysis_input, changes, user_authorized=True
+            )
+        except ValueError as exc:
+            raise BackendError(
+                "simulation_change_invalid",
+                "Authorized changes must satisfy the requirement and decision contracts.",
+            ) from exc
+        hard_change = any(
+            field in changes.model_fields_set
+            and getattr(changes, field) != getattr(analysis_input.comparison.requirement, field)
+            for field in ("budget_amount", "delivery_deadline")
+        )
+        if not hard_change and trial.decision_preferences == analysis_input.decision_preferences:
+            raise BackendError(
+                "decision_scenario_no_effect",
+                "The proposed scenario does not change the current requirement or decision preferences.",
+            )
+        simulated = trial.model_dump(mode="json")
+        delta = self._scenario_delta(baseline, simulated["comparison"])
+        changes_payload = changes.model_dump(mode="json", exclude_unset=True)
+        request_payload = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "base_result_id": task_view["current_result_id"],
+            "changes": changes_payload,
+        }
+        request_sha = content_hash(request_payload)
+        operation = f"create_decision_scenario:{task_id}"
+        scenario_id = new_id("scenario")
+        input_sha = content_hash({
+            "analysis_input": analysis_input.model_dump(mode="json"),
+            "base_result_id": task_view["current_result_id"],
+            "changes": changes_payload,
+        })
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key, request_sha256=request_sha
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.current_result_id != task_view["current_result_id"]:
+                raise ConflictError("scenario_input_stale", "The current result changed during simulation.")
+            scenario = DecisionScenario(
+                decision_scenario_id=scenario_id,
+                task_id=task_id,
+                actor_id=self.actor_id,
+                base_task_revision=expected_task_revision,
+                base_result_id=task.current_result_id,
+                input_sha256=input_sha,
+                status="READY",
+                changes=changes_payload,
+                baseline=baseline,
+                simulated=simulated,
+                delta=delta,
+            )
+            session.add(scenario)
+            session.flush()
+            response = self._decision_scenario_response(task, scenario)
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=201, response=response,
+            )
+            return response
+
+    def list_decision_scenarios(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            scenarios = session.scalars(select(DecisionScenario).where(
+                DecisionScenario.task_id == task_id,
+                DecisionScenario.actor_id == self.actor_id,
+            ).order_by(DecisionScenario.created_at.desc(), DecisionScenario.decision_scenario_id.desc())).all()
+            return {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "items": [self._decision_scenario_response(task, item) for item in scenarios],
+            }
+
+    def get_decision_scenario(self, task_id: str, scenario_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            scenario = session.get(DecisionScenario, scenario_id)
+            if (
+                task is None or task.owner_id != self.actor_id or scenario is None
+                or scenario.task_id != task_id or scenario.actor_id != self.actor_id
+            ):
+                raise NotFoundError("decision_scenario_not_found", "Decision scenario was not found.")
+            return self._decision_scenario_response(task, scenario)
+
+    def apply_decision_scenario(
+        self,
+        task_id: str,
+        scenario_id: str,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "scenario_id": scenario_id,
+            "expected_task_revision": expected_task_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"apply_decision_scenario:{task_id}:{scenario_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key, request_sha256=request_sha
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            scenario = session.scalar(select(DecisionScenario).where(
+                DecisionScenario.decision_scenario_id == scenario_id
+            ).with_for_update())
+            if (
+                task is None or task.owner_id != self.actor_id or scenario is None
+                or scenario.task_id != task_id or scenario.actor_id != self.actor_id
+            ):
+                raise NotFoundError("decision_scenario_not_found", "Decision scenario was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            if (
+                scenario.status != "READY"
+                or scenario.base_task_revision != task.current_revision
+                or scenario.base_result_id != task.current_result_id
+            ):
+                if scenario.status == "READY":
+                    scenario.status = "STALE"
+                raise ConflictError("decision_scenario_stale", "Only a current READY scenario can be applied.")
+            current = session.scalar(select(RequirementRecord).where(
+                RequirementRecord.task_id == task_id
+            ).order_by(RequirementRecord.requirement_version.desc()))
+            if current is None:
+                raise ConflictError("requirement_missing", "The task has no procurement requirement.")
+            changes = RequirementChanges.model_validate(scenario.changes)
+            old_requirement = ProcurementRequirement.model_validate(current.payload)
+            requirement_values = old_requirement.model_dump(mode="python")
+            for field in ("budget_amount", "delivery_deadline"):
+                if field in changes.model_fields_set:
+                    requirement_values[field] = getattr(changes, field)
+            new_requirement = ProcurementRequirement.model_validate(requirement_values)
+            old_preferences, old_profile = self._decision_preferences(
+                session, task, old_requirement
+            )
+            new_preferences = DecisionPreferences.model_validate(
+                scenario.simulated["decision_preferences"]
+            )
+            requirement_changed = old_requirement != new_requirement
+            preferences_changed = old_preferences != new_preferences
+            if not requirement_changed and not preferences_changed:
+                raise ConflictError("decision_scenario_no_effect", "Scenario does not change current inputs.")
+
+            self._supersede_current_graph(session, task)
+            for draft in session.scalars(select(QuoteDraft).where(
+                QuoteDraft.task_id == task_id,
+                QuoteDraft.status.in_(("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")),
+            )):
+                draft.status = "STALE"
+                draft.revision += 1
+                for draft_job in session.scalars(select(Job).where(
+                    Job.quote_draft_id == draft.quote_draft_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )):
+                    draft_job.status = "SUPERSEDED"
+            next_revision = task.current_revision + 1
+            changed_requirement_fields = sorted(
+                name for name in set(current.payload) | set(new_requirement.model_dump(mode="json"))
+                if current.payload.get(name) != new_requirement.model_dump(mode="json").get(name)
+            )
+            changed_preference_fields = sorted(
+                name for name in set(old_preferences.model_dump(mode="json")) | set(new_preferences.model_dump(mode="json"))
+                if old_preferences.model_dump(mode="json").get(name) != new_preferences.model_dump(mode="json").get(name)
+            )
+            session.add(TaskRevision(
+                revision_id=new_id("rev"), task_id=task_id, revision=next_revision,
+                change_type="DECISION_SCENARIO_APPLIED", actor_id=self.actor_id,
+                request_sha256=request_sha, details={
+                    "decision_scenario_id": scenario_id,
+                    "changed_requirement_fields": changed_requirement_fields,
+                    "changed_decision_preference_fields": changed_preference_fields,
+                },
+            ))
+            if requirement_changed:
+                requirement_payload = new_requirement.model_dump(mode="json")
+                session.add(RequirementRecord(
+                    requirement_id=new_id("req"), task_id=task_id,
+                    task_revision=next_revision,
+                    requirement_version=current.requirement_version + 1,
+                    payload=requirement_payload,
+                    content_sha256=content_hash(requirement_payload),
+                    source_artifact_id=None,
+                ))
+            decision_profile_id = old_profile.decision_profile_id if old_profile else None
+            if preferences_changed:
+                profile_payload = new_preferences.model_dump(mode="json")
+                decision_profile_id = new_id("dprofile")
+                session.add(DecisionProfile(
+                    decision_profile_id=decision_profile_id,
+                    task_id=task_id,
+                    task_revision=next_revision,
+                    profile_version=(old_profile.profile_version + 1 if old_profile else 1),
+                    payload=profile_payload,
+                    content_sha256=content_hash(profile_payload),
+                    source_scenario_id=scenario_id,
+                ))
+            task.current_revision = next_revision
+            active_documents = session.scalars(select(Document).join(
+                Quote, Quote.quote_id == Document.quote_id
+            ).where(
+                Document.task_id == task_id,
+                Quote.active.is_(True),
+                Document.quote_version == Quote.current_version,
+            )).all()
+            graph_run_id = job_id = None
+            if active_documents:
+                graph_run_id, job_id = new_id("graph"), new_id("job")
+                session.add(GraphRun(
+                    graph_run_id=graph_run_id, task_id=task_id, thread_id=graph_run_id,
+                    started_revision=next_revision, effective_revision=next_revision,
+                    status="PENDING", provider=provider, model_id=model_id,
+                    environment=environment, prompt_version=prompt_version,
+                ))
+                session.flush()
+                session.add(Job(
+                    job_id=job_id, task_id=task_id, graph_run_id=graph_run_id,
+                    job_type="START", status="PENDING", task_revision=next_revision,
+                ))
+                task.current_graph_run_id = graph_run_id
+                task.status = "QUEUED"
+            else:
+                task.status = "DRAFT"
+            scenario.status = "APPLIED"
+            scenario.applied_task_revision = next_revision
+            response = {
+                "task_id": task_id,
+                "task_revision": next_revision,
+                "status": task.status,
+                "decision_scenario_id": scenario_id,
+                "decision_profile_id": decision_profile_id,
+                "changed_requirement_fields": changed_requirement_fields,
+                "changed_decision_preference_fields": changed_preference_fields,
+                "graph_run_id": graph_run_id,
+                "job_id": job_id,
+                "job_status": "PENDING" if job_id else None,
+            }
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=202, response=response,
+            )
+            return response
+
+    def _decision_scenario_response(
+        self, task: Task, scenario: DecisionScenario
+    ) -> dict[str, Any]:
+        stale = (
+            scenario.status == "STALE"
+            or (
+                scenario.status == "READY"
+                and (
+                    scenario.base_task_revision != task.current_revision
+                    or scenario.base_result_id != task.current_result_id
+                )
+            )
+        )
+        status = "STALE" if stale else scenario.status
+        return {
+            "decision_scenario_id": scenario.decision_scenario_id,
+            "task_id": scenario.task_id,
+            "base_task_revision": scenario.base_task_revision,
+            "base_result_id": scenario.base_result_id,
+            "input_sha256": scenario.input_sha256,
+            "status": status,
+            "is_current": status == "READY",
+            "changes": dict(scenario.changes),
+            "baseline": dict(scenario.baseline),
+            "simulated": dict(scenario.simulated),
+            "delta": dict(scenario.delta),
+            "applied_task_revision": scenario.applied_task_revision,
+            "created_at": self._aware_datetime(scenario.created_at).isoformat(),
+            "updated_at": self._aware_datetime(scenario.updated_at).isoformat(),
+        }
+
+    @staticmethod
+    def _replay_decision_intent_response(response: dict[str, Any]) -> dict[str, Any]:
+        error = response.get("_decision_intent_error")
+        if error is None:
+            return response
+        error_type = ConflictError if error.get("conflict") else BackendError
+        raise error_type(error["code"], error["message"])
+
+    def parse_decision_intent(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        message: str,
+        idempotency_key: str,
+        parser: DecisionIntentParser,
+        provider: str | None,
+        model_id: str | None,
+        prompt_version: str,
+    ) -> dict[str, Any]:
+        """Parse one utterance and persist a confirmable, non-authoritative patch."""
+
+        request_sha = content_hash({
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "message": message,
+            "prompt_version": prompt_version,
+            "model_id": model_id,
+        })
+        operation = f"parse_decision_intent:{task_id}"
+        with self.session_factory() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return self._replay_decision_intent_response(repeated)
+        task_view = self.get_task(task_id)
+        if task_view["status"] == "ABANDONED":
+            raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+        if task_view["task_revision"] != expected_task_revision:
+            raise ConflictError(
+                "task_revision_conflict",
+                "Task revision has changed.",
+                expected=expected_task_revision,
+                actual=task_view["task_revision"],
+            )
+        if not task_view["current_result_id"]:
+            raise ConflictError(
+                "decision_intent_result_required",
+                "A current frozen comparison result is required before interpreting an intent.",
+            )
+        analysis_input = self.selection_analysis_input(
+            task_id, expected_task_revision=expected_task_revision
+        )
+        context = {
+            "currency": analysis_input.comparison.requirement.currency,
+            "current_requirement": {
+                "budget_amount": str(analysis_input.comparison.requirement.budget_amount),
+                "delivery_deadline": analysis_input.comparison.requirement.delivery_deadline.isoformat(),
+            },
+            "current_decision_preferences": analysis_input.decision_preferences.model_dump(
+                mode="json"
+            ),
+            "available_supplier_ids": sorted(set(analysis_input.supplier_bindings.values())),
+            "allowed_ranking_modes": [mode.value for mode in RankingMode],
+        }
+        intent_id = new_id("dintent")
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return self._replay_decision_intent_response(repeated)
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.current_result_id != task_view["current_result_id"]:
+                raise ConflictError(
+                    "decision_intent_input_stale",
+                    "The current result changed before intent parsing began.",
+                )
+            session.add(
+                DecisionIntent(
+                    decision_intent_id=intent_id,
+                    task_id=task_id,
+                    actor_id=self.actor_id,
+                    base_task_revision=expected_task_revision,
+                    base_result_id=task.current_result_id,
+                    source_text=message,
+                    source_sha256=content_hash({"message": message}),
+                    status="PROCESSING",
+                    provider=provider,
+                    model_id=model_id,
+                    prompt_version=prompt_version,
+                )
+            )
+
+        attempts = 0
+        try:
+            parsed, attempts = parser(message, context)
+            changes = RequirementChanges.model_validate(parsed)
+            trial = simulate_requirement_change(
+                analysis_input, changes, user_authorized=True
+            )
+            hard_change = any(
+                field in changes.model_fields_set
+                and getattr(changes, field)
+                != getattr(analysis_input.comparison.requirement, field)
+                for field in ("budget_amount", "delivery_deadline")
+            )
+            if not hard_change and trial.decision_preferences == analysis_input.decision_preferences:
+                raise ValueError("intent has no effect")
+        except ModelClientError as exc:
+            attempts = exc.attempts
+            error_code = exc.error_code
+            error_message = "The decision intent model could not produce a valid structured change."
+        except (ValidationError, ValueError) as exc:
+            error_code = "decision_intent_model_output_invalid"
+            error_message = "The decision intent model could not produce a valid structured change."
+        else:
+            error_code = error_message = None
+
+        if error_code is not None:
+            replay = {
+                "_decision_intent_error": {
+                    "code": error_code,
+                    "message": error_message,
+                    "conflict": False,
+                }
+            }
+            with self.session_factory.begin() as session:
+                intent = session.get(DecisionIntent, intent_id)
+                if intent is not None:
+                    intent.status = "FAILED"
+                    intent.attempts = attempts
+                    intent.error_code = error_code
+                    intent.error_message = error_message
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=422,
+                    response=replay,
+                )
+            raise BackendError(error_code, error_message)
+
+        confirmation = confirmation_text(
+            changes, currency=analysis_input.comparison.requirement.currency
+        )
+        stale = False
+        response: dict[str, Any] | None = None
+        with self.session_factory.begin() as session:
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            intent = session.scalar(
+                select(DecisionIntent)
+                .where(DecisionIntent.decision_intent_id == intent_id)
+                .with_for_update()
+            )
+            if task is None or intent is None or task.owner_id != self.actor_id:
+                raise NotFoundError("decision_intent_not_found", "Decision intent was not found.")
+            intent.attempts = attempts
+            if (
+                task.current_revision != expected_task_revision
+                or task.current_result_id != task_view["current_result_id"]
+            ):
+                stale = True
+                intent.status = "STALE"
+                intent.error_code = "decision_intent_input_stale"
+                intent.error_message = "Task inputs changed while the intent was being parsed."
+                replay = {
+                    "_decision_intent_error": {
+                        "code": intent.error_code,
+                        "message": intent.error_message,
+                        "conflict": True,
+                    }
+                }
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=409,
+                    response=replay,
+                )
+            else:
+                intent.status = "READY"
+                intent.parsed_changes = changes.model_dump(mode="json", exclude_unset=True)
+                intent.confirmation_text = confirmation
+                session.flush()
+                response = self._decision_intent_response(task, intent)
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=201,
+                    response=response,
+                )
+        if stale:
+            raise ConflictError(
+                "decision_intent_input_stale",
+                "Task inputs changed while the intent was being parsed.",
+            )
+        assert response is not None
+        return response
+
+    def list_decision_intents(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            intents = session.scalars(
+                select(DecisionIntent)
+                .where(
+                    DecisionIntent.task_id == task_id,
+                    DecisionIntent.actor_id == self.actor_id,
+                )
+                .order_by(
+                    DecisionIntent.created_at.desc(),
+                    DecisionIntent.decision_intent_id.desc(),
+                )
+            ).all()
+            return {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "items": [self._decision_intent_response(task, item) for item in intents],
+            }
+
+    def get_decision_intent(self, task_id: str, intent_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            intent = session.get(DecisionIntent, intent_id)
+            if (
+                task is None
+                or task.owner_id != self.actor_id
+                or intent is None
+                or intent.task_id != task_id
+                or intent.actor_id != self.actor_id
+            ):
+                raise NotFoundError("decision_intent_not_found", "Decision intent was not found.")
+            return self._decision_intent_response(task, intent)
+
+    def confirm_decision_intent(
+        self,
+        task_id: str,
+        intent_id: str,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "decision_intent_id": intent_id,
+            "expected_task_revision": expected_task_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"confirm_decision_intent:{task_id}:{intent_id}"
+        with self.session_factory() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.get(Task, task_id)
+            intent = session.get(DecisionIntent, intent_id)
+            if (
+                task is None
+                or task.owner_id != self.actor_id
+                or intent is None
+                or intent.task_id != task_id
+                or intent.actor_id != self.actor_id
+            ):
+                raise NotFoundError("decision_intent_not_found", "Decision intent was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            if (
+                intent.status != "READY"
+                or intent.base_task_revision != task.current_revision
+                or intent.base_result_id != task.current_result_id
+            ):
+                raise ConflictError(
+                    "decision_intent_stale",
+                    "Only a current READY decision intent can be confirmed.",
+                )
+            changes = RequirementChanges.model_validate(intent.parsed_changes)
+
+        scenario = self.create_decision_scenario(
+            task_id,
+            expected_task_revision=expected_task_revision,
+            changes=changes,
+            idempotency_key=content_hash(
+                {"decision_intent_id": intent_id, "confirmation_key": idempotency_key}
+            ),
+        )
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            intent = session.scalar(
+                select(DecisionIntent)
+                .where(DecisionIntent.decision_intent_id == intent_id)
+                .with_for_update()
+            )
+            if task is None or intent is None or task.owner_id != self.actor_id:
+                raise NotFoundError("decision_intent_not_found", "Decision intent was not found.")
+            self._require_revision(task, expected_task_revision)
+            if intent.status != "READY":
+                raise ConflictError(
+                    "decision_intent_stale",
+                    "Only a current READY decision intent can be confirmed.",
+                )
+            intent.status = "CONFIRMED"
+            intent.decision_scenario_id = scenario["decision_scenario_id"]
+            response = {
+                "decision_intent_id": intent_id,
+                "status": "CONFIRMED",
+                "scenario": scenario,
+            }
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=201,
+                response=response,
+            )
+            return response
+
+    def _decision_intent_response(
+        self, task: Task, intent: DecisionIntent
+    ) -> dict[str, Any]:
+        stale = intent.status == "STALE" or (
+            intent.status in {"PROCESSING", "READY"}
+            and (
+                intent.base_task_revision != task.current_revision
+                or intent.base_result_id != task.current_result_id
+            )
+        )
+        status = "STALE" if stale else intent.status
+        return {
+            "decision_intent_id": intent.decision_intent_id,
+            "task_id": intent.task_id,
+            "base_task_revision": intent.base_task_revision,
+            "base_result_id": intent.base_result_id,
+            "source_text": intent.source_text,
+            "source_sha256": intent.source_sha256,
+            "status": status,
+            "is_current": status == "READY",
+            "parsed_changes": dict(intent.parsed_changes) if intent.parsed_changes else None,
+            "confirmation_text": intent.confirmation_text,
+            "provider": intent.provider,
+            "model_id": intent.model_id,
+            "prompt_version": intent.prompt_version,
+            "attempts": intent.attempts,
+            "error_code": intent.error_code,
+            "error_message": intent.error_message,
+            "decision_scenario_id": intent.decision_scenario_id,
+            "created_at": self._aware_datetime(intent.created_at).isoformat(),
+            "updated_at": self._aware_datetime(intent.updated_at).isoformat(),
+        }
+
+    @staticmethod
+    def _append_conversation_event(
+        session: Session,
+        conversation_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> DecisionConversationEvent:
+        latest = session.scalar(
+            select(DecisionConversationEvent)
+            .where(DecisionConversationEvent.conversation_id == conversation_id)
+            .order_by(DecisionConversationEvent.sequence.desc())
+        )
+        event = DecisionConversationEvent(
+            event_id=new_id("cevent"),
+            conversation_id=conversation_id,
+            sequence=(latest.sequence + 1 if latest else 1),
+            event_type=event_type,
+            payload=payload,
+        )
+        session.add(event)
+        session.flush()
+        return event
+
+    def create_decision_conversation(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        title: str | None,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "title": title,
+        }
+        request_sha = content_hash(request)
+        operation = f"create_decision_conversation:{task_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            if not task.current_result_id:
+                raise ConflictError(
+                    "conversation_result_required",
+                    "A current frozen comparison result is required before starting a conversation.",
+                )
+            conversation = DecisionConversation(
+                conversation_id=new_id("conversation"),
+                task_id=task_id,
+                actor_id=self.actor_id,
+                base_task_revision=task.current_revision,
+                base_result_id=task.current_result_id,
+                status="ACTIVE",
+                title=title or "决策分析对话",
+            )
+            session.add(conversation)
+            session.flush()
+            self._append_conversation_event(
+                session,
+                conversation.conversation_id,
+                "conversation.created",
+                {"conversation_id": conversation.conversation_id},
+            )
+            response = self._decision_conversation_response(session, task, conversation)
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=201, response=response,
+            )
+            return response
+
+    def list_decision_conversations(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            rows = session.scalars(
+                select(DecisionConversation)
+                .where(
+                    DecisionConversation.task_id == task_id,
+                    DecisionConversation.actor_id == self.actor_id,
+                )
+                .order_by(DecisionConversation.created_at.desc())
+            ).all()
+            return {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "items": [self._decision_conversation_response(session, task, row) for row in rows],
+            }
+
+    def get_decision_conversation(
+        self, task_id: str, conversation_id: str
+    ) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            conversation = session.get(DecisionConversation, conversation_id)
+            if (
+                task is None or task.owner_id != self.actor_id or conversation is None
+                or conversation.task_id != task_id or conversation.actor_id != self.actor_id
+            ):
+                raise NotFoundError("conversation_not_found", "Decision conversation was not found.")
+            return self._decision_conversation_response(session, task, conversation)
+
+    def send_decision_conversation_message(
+        self,
+        task_id: str,
+        conversation_id: str,
+        *,
+        expected_task_revision: int,
+        content: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "expected_task_revision": expected_task_revision,
+            "content": content,
+        }
+        request_sha = content_hash(request)
+        operation = f"send_decision_message:{conversation_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            conversation = session.scalar(
+                select(DecisionConversation)
+                .where(DecisionConversation.conversation_id == conversation_id)
+                .with_for_update()
+            )
+            if (
+                task is None or task.owner_id != self.actor_id or conversation is None
+                or conversation.task_id != task_id or conversation.actor_id != self.actor_id
+            ):
+                raise NotFoundError("conversation_not_found", "Decision conversation was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            if (
+                conversation.status != "ACTIVE"
+                or conversation.base_task_revision != task.current_revision
+                or conversation.base_result_id != task.current_result_id
+            ):
+                conversation.status = "STALE"
+                raise ConflictError("conversation_stale", "The conversation inputs are stale.")
+            active_job = session.scalar(
+                select(Job).where(
+                    Job.conversation_id == conversation_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )
+            )
+            if active_job is not None:
+                raise ConflictError(
+                    "conversation_turn_in_progress",
+                    "Wait for the current assistant turn before sending another message.",
+                )
+            latest = session.scalar(
+                select(DecisionMessage)
+                .where(DecisionMessage.conversation_id == conversation_id)
+                .order_by(DecisionMessage.sequence.desc())
+            )
+            message = DecisionMessage(
+                message_id=new_id("dmessage"),
+                conversation_id=conversation_id,
+                task_id=task_id,
+                sequence=(latest.sequence + 1 if latest else 1),
+                role="USER",
+                status="SUCCEEDED",
+                content=content,
+            )
+            job = Job(
+                job_id=new_id("job"),
+                task_id=task_id,
+                graph_run_id=None,
+                conversation_id=conversation_id,
+                conversation_message_id=message.message_id,
+                job_type="DECISION_CONVERSATION",
+                status="PENDING",
+                task_revision=task.current_revision,
+            )
+            session.add_all((message, job))
+            session.flush()
+            self._append_conversation_event(
+                session, conversation_id, "user.message",
+                {"message": self._decision_message_response(message)},
+            )
+            self._append_conversation_event(
+                session, conversation_id, "assistant.pending",
+                {"job_id": job.job_id, "reply_to_message_id": message.message_id},
+            )
+            response = {
+                "conversation_id": conversation_id,
+                "message": self._decision_message_response(message),
+                "job": self._job_response(job),
+            }
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=202, response=response,
+            )
+            return response
+
+    def conversation_job_context(self, job_id: str) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if (
+                job is None or job.job_type != "DECISION_CONVERSATION"
+                or not job.conversation_id or not job.conversation_message_id
+            ):
+                raise NotFoundError("conversation_job_not_found", "Conversation job was not found.")
+            task = session.get(Task, job.task_id)
+            conversation = session.scalar(
+                select(DecisionConversation)
+                .where(DecisionConversation.conversation_id == job.conversation_id)
+                .with_for_update()
+            )
+            user_message = session.get(DecisionMessage, job.conversation_message_id)
+            if task is None or conversation is None or user_message is None:
+                raise NotFoundError("conversation_job_context_missing", "Conversation job context is missing.")
+            if (
+                task.owner_id != self.actor_id or job.status != "PENDING"
+                or conversation.status != "ACTIVE"
+                or conversation.base_task_revision != task.current_revision
+                or conversation.base_result_id != task.current_result_id
+            ):
+                job.status = "SUPERSEDED"
+                conversation.status = "STALE"
+                raise ConflictError("conversation_stale", "Conversation inputs are stale.")
+            if job.attempts >= 3:
+                raise BackendError("job_attempt_budget_exceeded", "Job attempt budget was exceeded.")
+            result = session.get(WorkflowArtifact, task.current_result_id)
+            requirement = session.scalar(
+                select(RequirementRecord)
+                .where(RequirementRecord.task_id == task.task_id)
+                .order_by(RequirementRecord.requirement_version.desc())
+            )
+            if result is None or requirement is None:
+                raise ConflictError("conversation_context_missing", "Conversation facts are missing.")
+            preferences, _profile = self._decision_preferences(
+                session, task, ProcurementRequirement.model_validate(requirement.payload)
+            )
+            messages = list(session.scalars(
+                select(DecisionMessage)
+                .where(
+                    DecisionMessage.conversation_id == conversation.conversation_id,
+                    DecisionMessage.status == "SUCCEEDED",
+                )
+                .order_by(DecisionMessage.sequence.desc())
+                .limit(12)
+            ).all())
+            messages.reverse()
+            bounded_messages: list[DecisionMessage] = []
+            remaining_history_characters = 12_000
+            for row in reversed(messages):
+                size = len(row.content or "")
+                if size > remaining_history_characters:
+                    break
+                bounded_messages.append(row)
+                remaining_history_characters -= size
+            messages = list(reversed(bounded_messages))
+            comparison = dict(result.payload)
+            references = {f"RESULT:{result.artifact_id}": comparison}
+            supplier_ids: set[str] = set()
+            quotes = session.scalars(select(Quote).where(
+                Quote.task_id == task.task_id, Quote.active.is_(True)
+            )).all()
+            supplier_by_quote = {quote.quote_id: quote.supplier_id for quote in quotes}
+            for row in comparison.get("supplier_results", []):
+                quote_id = row.get("quote_id")
+                if quote_id:
+                    reference_id = f"QUOTE:{quote_id}"
+                    references[reference_id] = row
+                    if quote_id in supplier_by_quote:
+                        supplier_ids.add(supplier_by_quote[quote_id])
+            job.status = "RUNNING"
+            job.attempts += 1
+            job.started_at = datetime.now(timezone.utc)
+            self._append_conversation_event(
+                session, conversation.conversation_id, "assistant.started",
+                {"job_id": job.job_id, "reply_to_message_id": user_message.message_id},
+            )
+            return {
+                "job_id": job.job_id,
+                "task_id": task.task_id,
+                "task_revision": task.current_revision,
+                "result_id": task.current_result_id,
+                "conversation_id": conversation.conversation_id,
+                "user_message_id": user_message.message_id,
+                "current_requirement": dict(requirement.payload),
+                "current_decision_preferences": preferences.model_dump(mode="json"),
+                "frozen_references": references,
+                "allowed_reference_ids": sorted(references),
+                "available_supplier_ids": sorted(supplier_ids),
+                "recent_messages": [
+                    {
+                        "role": row.role,
+                        "content": row.content,
+                        "reference_ids": list(row.reference_ids or []),
+                    }
+                    for row in messages
+                    if row.content
+                ],
+            }
+
+    def complete_conversation_job(
+        self,
+        job_id: str,
+        *,
+        turn: dict[str, Any],
+        attempts: int,
+        provider: str,
+        model_id: str,
+        prompt_version: str = CONVERSATION_PROMPT_VERSION,
+    ) -> dict[str, Any]:
+        text = str(turn["assistant_text"])
+        reference_ids = list(turn.get("reference_ids", []))
+        if not text.strip() or not re.search(r"[\u4e00-\u9fff]", text):
+            raise BackendError(
+                "conversation_model_output_invalid",
+                "Conversation output must contain validated Chinese narration.",
+            )
+        if len(reference_ids) != len(set(reference_ids)):
+            raise BackendError(
+                "conversation_model_output_invalid",
+                "Conversation output contains duplicate references.",
+            )
+        raw_changes = turn.get("changes")
+        changes = RequirementChanges.model_validate(raw_changes) if raw_changes is not None else None
+        with self.session_factory() as session:
+            job_view = session.get(Job, job_id)
+            if job_view is None or not job_view.task_id:
+                raise NotFoundError("conversation_job_not_found", "Conversation job was not found.")
+            task_id = job_view.task_id
+            task_revision = job_view.task_revision
+        trial = analysis_input = None
+        if changes is not None:
+            analysis_input = self.selection_analysis_input(
+                task_id, expected_task_revision=task_revision
+            )
+            trial = simulate_requirement_change(
+                analysis_input, changes, user_authorized=True
+            )
+            hard_change = any(
+                field in changes.model_fields_set
+                and getattr(changes, field)
+                != getattr(analysis_input.comparison.requirement, field)
+                for field in ("budget_amount", "delivery_deadline")
+            )
+            if not hard_change and trial.decision_preferences == analysis_input.decision_preferences:
+                raise BackendError(
+                    "conversation_change_no_effect",
+                    "The proposed conversation change has no effect.",
+                )
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            conversation = session.scalar(
+                select(DecisionConversation)
+                .where(DecisionConversation.conversation_id == job.conversation_id)
+                .with_for_update()
+            ) if job and job.conversation_id else None
+            task = session.get(Task, job.task_id) if job and job.task_id else None
+            user_message = session.get(DecisionMessage, job.conversation_message_id) if job and job.conversation_message_id else None
+            if job is None or conversation is None or task is None or user_message is None:
+                raise NotFoundError("conversation_job_not_found", "Conversation job was not found.")
+            if (
+                job.status != "RUNNING" or conversation.status != "ACTIVE"
+                or task.current_revision != conversation.base_task_revision
+                or task.current_result_id != conversation.base_result_id
+            ):
+                job.status = "SUPERSEDED"
+                conversation.status = "STALE"
+                raise ConflictError("conversation_stale", "Conversation inputs changed during generation.")
+            result = session.get(WorkflowArtifact, task.current_result_id)
+            allowed_references = {f"RESULT:{task.current_result_id}"}
+            if result is not None:
+                allowed_references.update(
+                    f"QUOTE:{row['quote_id']}"
+                    for row in result.payload.get("supplier_results", [])
+                    if row.get("quote_id")
+                )
+            if set(reference_ids) - allowed_references:
+                raise BackendError(
+                    "conversation_model_output_invalid",
+                    "Conversation output contains references outside the frozen result.",
+                )
+            intent_id = None
+            confirmation = None
+            if changes is not None:
+                intent_id = new_id("dintent")
+                confirmation = confirmation_text(
+                    changes, currency=analysis_input.comparison.requirement.currency
+                )
+                session.add(DecisionIntent(
+                    decision_intent_id=intent_id,
+                    task_id=task.task_id,
+                    actor_id=self.actor_id,
+                    base_task_revision=task.current_revision,
+                    base_result_id=task.current_result_id,
+                    source_text=user_message.content or "",
+                    source_sha256=content_hash({"message": user_message.content or ""}),
+                    status="READY",
+                    parsed_changes=changes.model_dump(mode="json", exclude_unset=True),
+                    confirmation_text=confirmation,
+                    provider=provider,
+                    model_id=model_id,
+                    prompt_version=prompt_version,
+                    attempts=attempts,
+                ))
+            latest = session.scalar(
+                select(DecisionMessage)
+                .where(DecisionMessage.conversation_id == conversation.conversation_id)
+                .order_by(DecisionMessage.sequence.desc())
+            )
+            assistant = DecisionMessage(
+                message_id=new_id("dmessage"),
+                conversation_id=conversation.conversation_id,
+                task_id=task.task_id,
+                sequence=latest.sequence + 1,
+                role="ASSISTANT",
+                status="SUCCEEDED",
+                content=text,
+                reference_ids=reference_ids,
+                proposed_changes=(changes.model_dump(mode="json", exclude_unset=True) if changes else None),
+                decision_intent_id=intent_id,
+                reply_to_message_id=user_message.message_id,
+                provider=provider,
+                model_id=model_id,
+                prompt_version=prompt_version,
+                attempts=attempts,
+            )
+            session.add(assistant)
+            session.flush()
+            for chunk in narrative_chunks(text):
+                self._append_conversation_event(
+                    session, conversation.conversation_id, "assistant.delta",
+                    {"message_id": assistant.message_id, "delta": chunk},
+                )
+            response = self._decision_message_response(assistant)
+            if confirmation:
+                response["confirmation_text"] = confirmation
+            self._append_conversation_event(
+                session, conversation.conversation_id, "assistant.completed",
+                {"message": response},
+            )
+            job.status = "SUCCEEDED"
+            job.finished_at = datetime.now(timezone.utc)
+            return {
+                "conversation_id": conversation.conversation_id,
+                "message": response,
+                "job_id": job.job_id,
+                "job_status": job.status,
+            }
+
+    def fail_conversation_job(
+        self, job_id: str, *, code: str, message: str, attempts: int
+    ) -> None:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            conversation = session.scalar(
+                select(DecisionConversation)
+                .where(DecisionConversation.conversation_id == job.conversation_id)
+                .with_for_update()
+            ) if job and job.conversation_id else None
+            user_message = session.get(DecisionMessage, job.conversation_message_id) if job and job.conversation_message_id else None
+            if job is None or conversation is None or user_message is None:
+                return
+            latest = session.scalar(
+                select(DecisionMessage)
+                .where(DecisionMessage.conversation_id == conversation.conversation_id)
+                .order_by(DecisionMessage.sequence.desc())
+            )
+            failed = DecisionMessage(
+                message_id=new_id("dmessage"),
+                conversation_id=conversation.conversation_id,
+                task_id=conversation.task_id,
+                sequence=latest.sequence + 1,
+                role="ASSISTANT",
+                status="FAILED",
+                reply_to_message_id=user_message.message_id,
+                attempts=attempts,
+                error_code=code,
+                error_message=message[:1000],
+            )
+            session.add(failed)
+            job.status = "FAILED"
+            job.error_code = code
+            job.error_message = message[:1000]
+            job.finished_at = datetime.now(timezone.utc)
+            session.flush()
+            self._append_conversation_event(
+                session, conversation.conversation_id, "assistant.failed",
+                {"message": self._decision_message_response(failed)},
+            )
+
+    def decision_conversation_events(
+        self, task_id: str, conversation_id: str, *, after_sequence: int = 0
+    ) -> list[dict[str, Any]]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            conversation = session.get(DecisionConversation, conversation_id)
+            if (
+                task is None or task.owner_id != self.actor_id or conversation is None
+                or conversation.task_id != task_id or conversation.actor_id != self.actor_id
+            ):
+                raise NotFoundError("conversation_not_found", "Decision conversation was not found.")
+            events = session.scalars(
+                select(DecisionConversationEvent)
+                .where(
+                    DecisionConversationEvent.conversation_id == conversation_id,
+                    DecisionConversationEvent.sequence > after_sequence,
+                )
+                .order_by(DecisionConversationEvent.sequence)
+            ).all()
+            return [
+                {
+                    "sequence": event.sequence,
+                    "event_type": event.event_type,
+                    "payload": dict(event.payload),
+                    "created_at": self._aware_datetime(event.created_at).isoformat(),
+                }
+                for event in events
+            ]
+
+    def _decision_conversation_response(
+        self, session: Session, task: Task, conversation: DecisionConversation
+    ) -> dict[str, Any]:
+        stale = conversation.status == "STALE" or (
+            conversation.status == "ACTIVE"
+            and (
+                conversation.base_task_revision != task.current_revision
+                or conversation.base_result_id != task.current_result_id
+            )
+        )
+        messages = session.scalars(
+            select(DecisionMessage)
+            .where(DecisionMessage.conversation_id == conversation.conversation_id)
+            .order_by(DecisionMessage.sequence)
+        ).all()
+        return {
+            "conversation_id": conversation.conversation_id,
+            "task_id": conversation.task_id,
+            "base_task_revision": conversation.base_task_revision,
+            "base_result_id": conversation.base_result_id,
+            "status": "STALE" if stale else conversation.status,
+            "title": conversation.title,
+            "messages": [self._decision_message_response(row) for row in messages],
+            "created_at": self._aware_datetime(conversation.created_at).isoformat(),
+            "updated_at": self._aware_datetime(conversation.updated_at).isoformat(),
+        }
+
+    @staticmethod
+    def _decision_message_response(message: DecisionMessage) -> dict[str, Any]:
+        return {
+            "message_id": message.message_id,
+            "sequence": message.sequence,
+            "role": message.role,
+            "status": message.status,
+            "content": message.content,
+            "reference_ids": list(message.reference_ids or []),
+            "proposed_changes": dict(message.proposed_changes) if message.proposed_changes else None,
+            "decision_intent_id": message.decision_intent_id,
+            "reply_to_message_id": message.reply_to_message_id,
+            "provider": message.provider,
+            "model_id": message.model_id,
+            "prompt_version": message.prompt_version,
+            "attempts": message.attempts,
+            "error_code": message.error_code,
+            "error_message": message.error_message,
+            "created_at": BackendService._aware_datetime(message.created_at).isoformat(),
+        }
 
     def reserve_policy_retry(self, task_id: str, *, graph_run_id: str, task_revision: int,
                              max_attempts: int, payload: dict) -> bool:
@@ -3879,6 +5344,17 @@ class BackendService:
         requirement = session.scalar(select(RequirementRecord).where(
             RequirementRecord.task_id == task.task_id
         ).order_by(RequirementRecord.requirement_version.desc()))
+        requirement_contract = (
+            ProcurementRequirement.model_validate(requirement.payload)
+            if requirement is not None else None
+        )
+        decision_preferences, decision_profile = (
+            self._decision_preferences(
+                session, task, requirement_contract, max_revision=result.task_revision
+            )
+            if requirement_contract is not None
+            else (DecisionPreferences(), None)
+        )
         comparison = dict(result.payload)
         references: dict[str, Any] = {
             f"RESULT:{result.artifact_id}": {
@@ -3931,6 +5407,9 @@ class BackendService:
             "task_revision": task.current_revision,
             "result_id": result.artifact_id,
             "requirement": dict(requirement.payload) if requirement else {},
+            "decision_profile": self._decision_profile_response(
+                decision_preferences, decision_profile
+            ),
             "disposition": comparison.get("disposition"),
             "final_recommendation_allowed": comparison.get("final_recommendation_allowed", False),
             "recommended_quote_ids": comparison.get("recommended_quote_ids", []),
@@ -4055,6 +5534,8 @@ class BackendService:
             "job_id": job.job_id,
             "task_id": job.task_id,
             "graph_run_id": job.graph_run_id,
+            "conversation_id": job.conversation_id,
+            "conversation_message_id": job.conversation_message_id,
             "issue_id": job.issue_id,
             "job_type": job.job_type,
             "status": job.status,

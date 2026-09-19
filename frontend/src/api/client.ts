@@ -1,7 +1,15 @@
 import type {
   ApiErrorEnvelope,
   ComparisonResultResponse,
+  ConfirmDecisionIntentResponse,
   CreateTaskRequest,
+  DecisionChanges,
+  DecisionConversation,
+  DecisionConversationListResponse,
+  DecisionIntentListResponse,
+  DecisionScenario,
+  DecisionScenarioApplyResponse,
+  DecisionScenarioListResponse,
   FieldCorrectionInput,
   HealthResponse,
   IssueAnswer,
@@ -24,6 +32,7 @@ import type {
   RequirementSimulationResponse,
   ReviewOverviewResponse,
   SelectionGapResponse,
+  SendDecisionMessageResponse,
   StartRunResponse,
   TaskDetail,
   TaskAuditResponse,
@@ -129,6 +138,14 @@ export function createIdempotencyKey() {
 
 export function documentContentUrl(taskId: string, documentId: string, disposition: 'inline' | 'attachment' = 'inline') {
   return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/documents/${encodeURIComponent(documentId)}/content?disposition=${disposition}`
+}
+
+export function decisionConversationEventsUrl(
+  taskId: string,
+  conversationId: string,
+  after = 0,
+) {
+  return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations/${encodeURIComponent(conversationId)}/events?after=${after}&follow=true&timeout_seconds=25`
 }
 
 export const api = {
@@ -411,6 +428,97 @@ export const api = {
           confirm_hypothetical: true,
           changes,
         }),
+      },
+    ),
+  listDecisionScenarios: (taskId: string) =>
+    request<DecisionScenarioListResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-scenarios`,
+    ),
+  createDecisionScenario: (
+    taskId: string,
+    expectedTaskRevision: number,
+    changes: DecisionChanges,
+    idempotencyKey: string,
+  ) =>
+    request<DecisionScenario>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-scenarios`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+          confirm_hypothetical: true,
+          changes,
+        }),
+      },
+    ),
+  applyDecisionScenario: (
+    taskId: string,
+    scenarioId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<DecisionScenarioApplyResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-scenarios/${encodeURIComponent(scenarioId)}/apply`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+      },
+    ),
+  confirmDecisionIntent: (
+    taskId: string,
+    intentId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<ConfirmDecisionIntentResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-intents/${encodeURIComponent(intentId)}/confirm`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision, confirm: true }),
+      },
+    ),
+  listDecisionIntents: (taskId: string) =>
+    request<DecisionIntentListResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-intents`,
+    ),
+  listDecisionConversations: (taskId: string) =>
+    request<DecisionConversationListResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations`,
+    ),
+  getDecisionConversation: (taskId: string, conversationId: string) =>
+    request<DecisionConversation>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations/${encodeURIComponent(conversationId)}`,
+    ),
+  createDecisionConversation: (
+    taskId: string,
+    expectedTaskRevision: number,
+    title: string | null,
+    idempotencyKey: string,
+  ) =>
+    request<DecisionConversation>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision, title }),
+      },
+    ),
+  sendDecisionMessage: (
+    taskId: string,
+    conversationId: string,
+    expectedTaskRevision: number,
+    message: string,
+    idempotencyKey: string,
+  ) =>
+    request<SendDecisionMessageResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision, message }),
       },
     ),
   correctQuoteFields: (

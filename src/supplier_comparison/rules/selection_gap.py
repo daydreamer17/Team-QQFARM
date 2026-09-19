@@ -8,29 +8,59 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .contracts import ComparisonRequest, ComparisonResult, FeasibilityStatus, FrozenModel, RuleIssue
-from .decision_impact import DecisionImpactRequest, analyze_decision_impact
+from .contracts import (
+    ComparisonRequest,
+    ComparisonResult,
+    DecisionPreferences,
+    FeasibilityStatus,
+    FrozenModel,
+    RankingMode,
+    RuleIssue,
+    ranking_mode_for,
+    ranking_pair,
+)
+from .decision_impact import (
+    COST_RANKING,
+    DecisionImpactRequest,
+    analyze_decision_impact,
+    decision_comparison_request,
+)
 from .engine import compare_suppliers
 
 
-GAP_VERSION = "selection-gap/1.0.0"
+GAP_VERSION = "selection-gap/1.1.0"
 
 
 class RequirementChanges(FrozenModel):
     budget_amount: Decimal | None = Field(default=None, ge=0)
     delivery_deadline: date | None = None
+    ranking_mode: RankingMode | None = None
+    excluded_supplier_ids: tuple[str, ...] | None = None
+    cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
 
-    @field_validator("budget_amount", mode="before")
+    @field_validator("budget_amount", "cost_tolerance_amount", mode="before")
     @classmethod
     def no_float(cls, value: Any):
         if isinstance(value, float):
             raise ValueError("money must be a decimal string")
         return value
 
+    @field_validator("excluded_supplier_ids")
+    @classmethod
+    def supplier_ids_are_unique_and_nonempty(cls, value: tuple[str, ...] | None):
+        if value is None:
+            return None
+        normalized = tuple(item.strip() for item in value)
+        if any(not item for item in normalized):
+            raise ValueError("excluded supplier IDs cannot be empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("excluded supplier IDs must be unique")
+        return normalized
+
     @model_validator(mode="after")
     def nonempty(self):
-        if self.budget_amount is None and self.delivery_deadline is None:
-            raise ValueError("provide a budget or deadline change")
+        if not self.model_fields_set:
+            raise ValueError("provide a requirement or decision-preference change")
         return self
 
 
@@ -39,6 +69,8 @@ class HypotheticalComparison(FrozenModel):
     formal_recommendation_allowed: Literal[False] = False
     policy_assessment_performed: Literal[False] = False
     changes: dict[str, Any]
+    decision_preferences: DecisionPreferences
+    excluded_quote_ids: tuple[str, ...] = ()
     assumptions: tuple[str, ...]
     comparison: ComparisonResult
 
@@ -77,10 +109,11 @@ class SelectionGapResult(FrozenModel):
 
 def analyze_selection_gap(request: DecisionImpactRequest) -> SelectionGapResult:
     impact = analyze_decision_impact(request)
-    requirement = request.comparison.requirement
+    effective = decision_comparison_request(request)
+    requirement = effective.requirement
     gaps = []
     for evaluation in impact.comparison.supplier_results:
-        quote = next(q for q in request.comparison.quotes if q.quote_id == evaluation.quote_id)
+        quote = next(q for q in effective.quotes if q.quote_id == evaluation.quote_id)
         others = [r.total_cost for r in impact.comparison.supplier_results
                   if r.quote_id != evaluation.quote_id and r.status == FeasibilityStatus.FEASIBLE
                   and r.total_cost is not None]
@@ -100,12 +133,13 @@ def analyze_selection_gap(request: DecisionImpactRequest) -> SelectionGapResult:
             candidates = tuple(c.model_copy(update={"normalized_value": target_lead, "raw_value": str(target_lead)})
                                if c.field_name == "lead_time_days" else c for c in quote.candidates)
             improved = quote.model_copy(update={"candidates": candidates})
-            trial = request.comparison.model_copy(update={"quotes": tuple(
-                improved if q.quote_id == quote.quote_id else q for q in request.comparison.quotes
+            trial = effective.model_copy(update={"quotes": tuple(
+                improved if q.quote_id == quote.quote_id else q for q in effective.quotes
             )})
             result = compare_suppliers(trial)
             hypothesis = HypotheticalComparison(
                 changes={"quote_id": quote.quote_id, "lead_time_days": target_lead},
+                decision_preferences=request.decision_preferences,
                 assumptions=("Supplier has NOT confirmed this faster arrival.",
                              "Price, fees, MOQ, quantity, validity and competing quotes remain unchanged; no expedite fee.",
                              "Calendar-day ARRIVAL from ORDER_DATE; policy gates have not been assessed."),
@@ -137,17 +171,66 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
     if user_authorized is not True:
         raise ValueError("requirement simulation requires explicit user authorization")
     values = request.comparison.requirement.model_dump(mode="python")
-    supplied = changes.model_dump(mode="python", exclude_none=True)
-    values.update(supplied)
+    supplied = changes.model_dump(mode="python", exclude_unset=True)
+    for field in ("budget_amount", "delivery_deadline"):
+        if field in supplied:
+            values[field] = supplied[field]
     requirement = type(request.comparison.requirement).model_validate(values)
-    comparison = compare_suppliers(ComparisonRequest(
-        requirement=requirement, quotes=request.comparison.quotes, evaluated_at=request.comparison.evaluated_at,
+    base_preferences = request.decision_preferences
+    base_mode = base_preferences.ranking_mode or ranking_mode_for(requirement)
+    effective_preferences = DecisionPreferences(
+        ranking_mode=(changes.ranking_mode if "ranking_mode" in changes.model_fields_set else base_mode),
+        excluded_supplier_ids=(
+            changes.excluded_supplier_ids or ()
+            if "excluded_supplier_ids" in changes.model_fields_set
+            else base_preferences.excluded_supplier_ids
+        ),
+        cost_tolerance_amount=(
+            changes.cost_tolerance_amount
+            if "cost_tolerance_amount" in changes.model_fields_set
+            else base_preferences.cost_tolerance_amount
+        ),
+    )
+    if effective_preferences.ranking_mode is not None:
+        primary, _secondary = ranking_pair(effective_preferences.ranking_mode)
+        if effective_preferences.cost_tolerance_amount is not None and primary != COST_RANKING:
+            raise ValueError("cost tolerance requires cost-primary ranking")
+    requested_suppliers = set(effective_preferences.excluded_supplier_ids)
+    available_suppliers = set(request.supplier_bindings.values())
+    explicitly_requested = (
+        set(changes.excluded_supplier_ids or ())
+        if "excluded_supplier_ids" in changes.model_fields_set else set()
+    )
+    unknown_suppliers = explicitly_requested - available_suppliers
+    if unknown_suppliers:
+        raise ValueError("excluded supplier does not belong to the current comparison")
+    excluded_quote_ids = tuple(sorted(
+        quote_id for quote_id, supplier_id in request.supplier_bindings.items()
+        if supplier_id in requested_suppliers
     ))
+    simulated_request = request.model_copy(update={
+        "comparison": request.comparison.model_copy(update={"requirement": requirement}),
+        "decision_preferences": effective_preferences,
+    })
+    comparison = compare_suppliers(decision_comparison_request(simulated_request))
+    assumptions = [
+        "User-authorized hypothetical only; official requirement and decision preferences are unchanged.",
+        "All quote facts, quantity, prices, fees, validity and evaluation time remain unchanged.",
+        "No policy or approval assessment; confirmed inputs and formal changes are still required.",
+    ]
+    if effective_preferences.cost_tolerance_amount is not None:
+        assumptions.append(
+            f"Candidate pool is minimum confirmed total cost plus {effective_preferences.cost_tolerance_amount} "
+            f"{requirement.currency}; earliest confirmed arrival wins within the pool, then lowest cost."
+        )
+    if excluded_quote_ids:
+        assumptions.append("Excluded suppliers are omitted only from this hypothetical comparison.")
     return HypotheticalComparison(
-        changes=changes.model_dump(mode="json", exclude_none=True), comparison=comparison,
-        assumptions=("User-authorized hypothetical budget/deadline only; official requirement is unchanged.",
-                     "All quote facts, quantity, prices, fees, validity and evaluation time remain unchanged.",
-                     "No policy or approval assessment; confirmed inputs and formal changes are still required."),
+        changes=changes.model_dump(mode="json", exclude_unset=True),
+        decision_preferences=effective_preferences,
+        excluded_quote_ids=excluded_quote_ids,
+        comparison=comparison,
+        assumptions=tuple(assumptions),
     )
 
 

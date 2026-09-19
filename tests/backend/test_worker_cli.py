@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
+import pytest
 from supplier_comparison import worker
+from supplier_comparison.rag.clients import ModelClientError
 
 
 def test_worker_cli_sanitizes_unexpected_exception(monkeypatch, capsys) -> None:
@@ -45,3 +48,77 @@ def test_worker_loop_processes_pending_jobs_until_idle() -> None:
 
     assert executed == ["job_one", "job_two"]
     assert result == {"status": "IDLE", "processed_jobs": 2}
+
+
+def test_conversation_worker_completes_validated_turn(monkeypatch) -> None:
+    class FakeService:
+        def __init__(self):
+            self.completed = None
+
+        def conversation_job_context(self, job_id):
+            return {"job_id": job_id, "allowed_reference_ids": ["RESULT:1"]}
+
+        def complete_conversation_job(self, job_id, **kwargs):
+            self.completed = (job_id, kwargs)
+            return {"job_id": job_id, "job_status": "SUCCEEDED"}
+
+        def fail_conversation_job(self, *_args, **_kwargs):
+            raise AssertionError("success path must not fail the job")
+
+    service = FakeService()
+    config = SimpleNamespace(provider="fixed-test", model_id="fixed-conversation")
+    monkeypatch.setattr(worker.ConversationModelConfig, "from_env", lambda: config)
+    monkeypatch.setattr(
+        worker,
+        "generate_conversation_turn",
+        lambda context, actual: (
+            {
+                "assistant_text": "当前结果来自冻结事实。",
+                "reference_ids": ["RESULT:1"],
+                "changes": None,
+            },
+            1,
+        ),
+    )
+
+    result = worker._run_decision_conversation_job(service, "job-conversation")
+
+    assert result["job_status"] == "SUCCEEDED"
+    assert service.completed[1]["attempts"] == 1
+    assert service.completed[1]["provider"] == "fixed-test"
+
+
+def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> None:
+    class FakeService:
+        def __init__(self):
+            self.failed = None
+
+        def conversation_job_context(self, job_id):
+            return {"job_id": job_id}
+
+        def complete_conversation_job(self, *_args, **_kwargs):
+            raise AssertionError("failure path must not complete the job")
+
+        def fail_conversation_job(self, job_id, **kwargs):
+            self.failed = (job_id, kwargs)
+
+    service = FakeService()
+    config = SimpleNamespace(provider="fixed-test", model_id="fixed-conversation")
+    monkeypatch.setattr(worker.ConversationModelConfig, "from_env", lambda: config)
+
+    def fail(_context, _config):
+        raise ModelClientError(
+            "sanitized transport failure", attempts=2, error_code="model_transport_error"
+        )
+
+    monkeypatch.setattr(worker, "generate_conversation_turn", fail)
+    with pytest.raises(ModelClientError):
+        worker._run_decision_conversation_job(service, "job-conversation-failed")
+    assert service.failed == (
+        "job-conversation-failed",
+        {
+            "code": "model_transport_error",
+            "message": "sanitized transport failure",
+            "attempts": 2,
+        },
+    )

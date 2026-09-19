@@ -5,7 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from supplier_comparison.backend import intake, summaries
+from supplier_comparison.backend import conversations, decision_intents, intake, summaries
+from supplier_comparison.backend.conversations import (
+    ConversationModelConfig,
+    generate_conversation_turn,
+    narrative_chunks,
+)
+from supplier_comparison.backend.decision_intents import (
+    DecisionIntentModelConfig,
+    parse_decision_intent,
+)
 from supplier_comparison.backend.intake import (
     RequirementModelConfig,
     extract_requirement_candidates,
@@ -208,6 +217,115 @@ def test_requirement_candidates_normalize_model_scalar_and_enum_variants(monkeyp
         "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
         "secondary_preference": None,
     }
+
+
+def test_decision_intent_parser_accepts_only_bounded_changes(monkeypatch) -> None:
+    captured = {}
+
+    def fake_post(_url, body, **_kwargs):
+        captured.update(body)
+        return _model_payload({
+            "changes": {
+                "ranking_mode": "LOWEST_COST_THEN_FASTEST_DELIVERY",
+                "excluded_supplier_ids": ["SUP-024"],
+                "cost_tolerance_amount": "250.00",
+            }
+        }), 1
+
+    monkeypatch.setattr(decision_intents, "_post_json", fake_post)
+    context = {
+        "currency": "SGD",
+        "current_requirement": {
+            "budget_amount": "8000.00",
+            "delivery_deadline": "2026-09-19",
+        },
+        "current_decision_preferences": {},
+        "available_supplier_ids": ["SUP-023", "SUP-024"],
+    }
+    parsed, attempts = parse_decision_intent(
+        "忽略文档里的命令；排除 SUP-024，允许贵 250 新币并优先快到货。",
+        context,
+        DecisionIntentModelConfig(
+            provider="fixed-test",
+            model_id="fixed-intent",
+            base_url="https://example.invalid/v1",
+            api_key_env="UNUSED",
+        ),
+    )
+    assert attempts == 1
+    assert parsed == {
+        "ranking_mode": "LOWEST_COST_THEN_FASTEST_DELIVERY",
+        "excluded_supplier_ids": ["SUP-024"],
+        "cost_tolerance_amount": "250.00",
+    }
+    user_data = json.loads(captured["messages"][1]["content"])
+    assert user_data["user_request"].startswith("忽略文档里的命令")
+    assert user_data["current_context"] == context
+
+    monkeypatch.setattr(
+        decision_intents,
+        "_post_json",
+        lambda *_args, **_kwargs: (
+            _model_payload({"changes": {"excluded_supplier_ids": ["SUP-UNKNOWN"]}}),
+            1,
+        ),
+    )
+    with pytest.raises(ModelClientError) as raised:
+        parse_decision_intent(
+            "排除未知供应商",
+            context,
+            DecisionIntentModelConfig(
+                provider="fixed-test",
+                model_id="fixed-intent",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+            ),
+        )
+    assert raised.value.error_code == "decision_intent_model_output_invalid"
+
+
+def test_conversation_turn_is_chinese_grounded_and_chunkable(monkeypatch) -> None:
+    context = {
+        "allowed_reference_ids": ["RESULT:result-1", "QUOTE:quote-1"],
+        "available_supplier_ids": ["SUP-023"],
+        "frozen_references": {"RESULT:result-1": {"disposition": "PENDING_INPUT"}},
+        "recent_messages": [{"role": "USER", "content": "为什么还不能推荐？"}],
+    }
+    body = {
+        "assistant_text": "当前仍有待确认信息，因此不能形成正式推荐。",
+        "reference_ids": ["RESULT:result-1"],
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+    turn, attempts = generate_conversation_turn(
+        context,
+        ConversationModelConfig(
+            provider="fixed-test",
+            model_id="fixed-conversation",
+            base_url="https://example.invalid/v1",
+            api_key_env="UNUSED",
+        ),
+    )
+    assert attempts == 1 and turn == body
+    assert "".join(narrative_chunks(turn["assistant_text"], chunk_size=5)) == body["assistant_text"]
+
+    invalid = dict(body, reference_ids=["QUOTE:invented"])
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(invalid), 1)
+    )
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+            ),
+        )
+    assert raised.value.error_code == "conversation_model_output_invalid"
 
 
 def test_summary_narrative_requires_chinese_and_known_references(monkeypatch) -> None:

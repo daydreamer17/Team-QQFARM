@@ -7,20 +7,24 @@ import json
 from decimal import Decimal
 from enum import StrEnum
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .contracts import (
     ComparisonRequest,
     ComparisonResult,
+    DecisionPreferences,
     FeasibilityStatus,
     FrozenModel,
     ProcurementRequirement,
     SupplierEvaluation,
+    ranking_pair,
 )
 
 
-IMPACT_VERSION = "decision-impact/1.0.0"
-SUPPORTED_IMPACT_RANKING = "LOWEST_CONFIRMED_TOTAL_COST"
+IMPACT_VERSION = "decision-impact/1.1.0"
+COST_RANKING = "LOWEST_CONFIRMED_TOTAL_COST"
+DELIVERY_RANKING = "FASTEST_CONFIRMED_DELIVERY"
+SUPPORTED_IMPACT_RANKINGS = frozenset({COST_RANKING, DELIVERY_RANKING})
 FEE_FIELDS = frozenset(
     {"shipping_fee_status", "shipping_fee_amount", "other_fees_status", "other_fees_amount"}
 )
@@ -53,6 +57,15 @@ class DecisionImpactRequest(FrozenModel):
     comparison: ComparisonRequest
     policy_binding: dict[str, str | None] = Field(default_factory=dict)
     review_bindings: dict[str, str] = Field(default_factory=dict)
+    supplier_bindings: dict[str, str] = Field(default_factory=dict)
+    decision_preferences: DecisionPreferences = Field(default_factory=DecisionPreferences)
+
+    @model_validator(mode="after")
+    def bindings_reference_current_quotes(self) -> "DecisionImpactRequest":
+        quote_ids = {quote.quote_id for quote in self.comparison.quotes}
+        if not set(self.supplier_bindings).issubset(quote_ids):
+            raise ValueError("supplier bindings reference a quote outside the comparison")
+        return self
 
 
 class DecisionImpactResult(FrozenModel):
@@ -95,10 +108,16 @@ def assess_quote_impact(
             reason_code="CONFIRMED_INFEASIBLE",
             message="Confirmed failures already exclude this quote; missing facts remain unknown.",
         )
-    if requirement.ranking_preference != SUPPORTED_IMPACT_RANKING:
+    if requirement.ranking_preference not in SUPPORTED_IMPACT_RANKINGS:
         return QuoteDecisionImpact(
             **common, status=ImpactStatus.UNDETERMINED,
             reason_code="RANKING_UNSUPPORTED", message="No proof for this ranking preference.",
+        )
+    if requirement.ranking_preference == DELIVERY_RANKING:
+        return QuoteDecisionImpact(
+            **common, status=ImpactStatus.UNDETERMINED,
+            reason_code="DELIVERY_BOUND_NOT_PROVEN",
+            message="Unresolved quote facts may change delivery-first ranking.",
         )
     legal_missing_fees = bool(evaluation.pending_reasons) and all(
         issue.code in MISSING_FEE_CODES and issue.fields
@@ -144,14 +163,15 @@ def analyze_decision_impact(request: DecisionImpactRequest) -> DecisionImpactRes
     """Tool-ready pure interface; does not mutate facts or call an LLM."""
     from .engine import compare_suppliers
 
-    comparison = compare_suppliers(request.comparison)
+    effective = decision_comparison_request(request)
+    comparison = compare_suppliers(effective)
     confirmed_costs = [
         result.total_cost for result in comparison.supplier_results
         if result.status == FeasibilityStatus.FEASIBLE and result.total_cost is not None
     ]
     best = min(confirmed_costs) if confirmed_costs else None
     impacts = tuple(
-        assess_quote_impact(request.comparison.requirement, result, best)
+        assess_quote_impact(effective.requirement, result, best)
         for result in comparison.supplier_results
     )
     identity = request.model_dump(mode="json") | {"impact_version": IMPACT_VERSION,
@@ -170,4 +190,32 @@ def analyze_decision_impact(request: DecisionImpactRequest) -> DecisionImpactRes
             impact.quote_id for impact in impacts
             if impact.status == ImpactStatus.NON_BLOCKING and impact.unknown_fields
         ),
+    )
+
+
+def decision_comparison_request(
+    request: DecisionImpactRequest,
+    *,
+    preferences: DecisionPreferences | None = None,
+) -> ComparisonRequest:
+    """Apply system-bound decision preferences without mutating official inputs."""
+
+    selected = preferences or request.decision_preferences
+    requirement = request.comparison.requirement
+    if selected.ranking_mode is not None:
+        primary, secondary = ranking_pair(selected.ranking_mode)
+        requirement = requirement.model_copy(update={
+            "ranking_preference": primary,
+            "secondary_preference": secondary,
+        })
+    excluded = set(selected.excluded_supplier_ids)
+    quotes = tuple(
+        quote for quote in request.comparison.quotes
+        if request.supplier_bindings.get(quote.quote_id) not in excluded
+    )
+    return ComparisonRequest(
+        requirement=requirement,
+        quotes=quotes,
+        evaluated_at=request.comparison.evaluated_at,
+        cost_tolerance_amount=selected.cost_tolerance_amount,
     )

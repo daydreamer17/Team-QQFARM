@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
@@ -7,7 +9,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -30,6 +32,12 @@ from supplier_comparison.rag.uploads import (
 from supplier_comparison.rules import ProcurementRequirement, RequirementChanges
 
 from .database import create_session_factory, readiness_probe
+from .decision_intents import (
+    DECISION_INTENT_PROMPT_VERSION,
+    DecisionIntentModelConfig,
+    DecisionIntentParser,
+    parse_decision_intent,
+)
 from .intake import REQUIREMENT_PROMPT_VERSION, RequirementModelConfig
 from .service import BackendError, BackendService, ConflictError, NotFoundError
 from .settings import settings
@@ -114,6 +122,56 @@ class RequirementSimulationRequest(ApiModel):
         if value is not True:
             raise ValueError('explicit hypothetical authorization is required')
         return value
+
+
+class CreateDecisionScenarioRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    confirm_hypothetical: Literal[True]
+    changes: RequirementChanges
+
+    @field_validator("confirm_hypothetical", mode="before")
+    @classmethod
+    def explicit_authorization(cls, value):
+        if value is not True:
+            raise ValueError("explicit hypothetical authorization is required")
+        return value
+
+
+class ApplyDecisionScenarioRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+
+
+class ParseDecisionIntentRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    message: StrictStr = Field(min_length=3, max_length=4000)
+
+
+class ConfirmDecisionIntentRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    confirm: Literal[True]
+
+    @field_validator("confirm", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("explicit intent confirmation is required")
+        return value
+
+
+class CreateDecisionConversationRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    title: StrictStr | None = Field(default=None, min_length=1, max_length=255)
+
+
+class SendDecisionConversationMessageRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    message: StrictStr = Field(min_length=1, max_length=4000)
 
 
 class ConfirmMissingAnswer(ApiModel):
@@ -235,6 +293,9 @@ def create_app(
     readiness_check,
     policy_file_import_service: PolicyFileImportService | None = None,
     allow_legacy_direct_quote_upload: bool = True,
+    decision_intent_parser: DecisionIntentParser | None = None,
+    decision_intent_provider: str | None = None,
+    decision_intent_model_id: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Supplier Comparison API", version="0.1.0")
 
@@ -585,6 +646,188 @@ def create_app(
     def requirement_simulation(task_id: str, body: RequirementSimulationRequest):
         return service.requirement_simulation(task_id, expected_task_revision=body.expected_task_revision,
                                              changes=body.changes, user_authorized=body.confirm_hypothetical)
+
+    @app.post("/api/v1/tasks/{task_id}/decision-scenarios", status_code=201)
+    def create_decision_scenario(
+        task_id: str,
+        body: CreateDecisionScenarioRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.create_decision_scenario(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            changes=body.changes,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/decision-scenarios")
+    def list_decision_scenarios(task_id: str):
+        return service.list_decision_scenarios(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/decision-scenarios/{scenario_id}")
+    def get_decision_scenario(task_id: str, scenario_id: str):
+        return service.get_decision_scenario(task_id, scenario_id)
+
+    @app.post("/api/v1/tasks/{task_id}/decision-scenarios/{scenario_id}/apply", status_code=202)
+    def apply_decision_scenario(
+        task_id: str,
+        scenario_id: str,
+        body: ApplyDecisionScenarioRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.apply_decision_scenario(
+            task_id,
+            scenario_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/decision-intents", status_code=201)
+    def parse_task_decision_intent(
+        task_id: str,
+        body: ParseDecisionIntentRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        parser = decision_intent_parser
+        provider = decision_intent_provider
+        model_id = decision_intent_model_id
+        if parser is None:
+            config = DecisionIntentModelConfig.from_env()
+            if config is None:
+                raise BackendError(
+                    "decision_intent_model_unconfigured",
+                    "Decision intent model is not configured.",
+                )
+            parser = lambda message, context: parse_decision_intent(
+                message, context, config
+            )
+            provider = config.provider
+            model_id = config.model_id
+        else:
+            provider = provider or "fixed"
+            model_id = model_id or "fixed-output"
+        return service.parse_decision_intent(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            message=body.message,
+            idempotency_key=idempotency_key,
+            parser=parser,
+            provider=provider,
+            model_id=model_id,
+            prompt_version=DECISION_INTENT_PROMPT_VERSION,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/decision-intents")
+    def list_task_decision_intents(task_id: str):
+        return service.list_decision_intents(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/decision-intents/{intent_id}")
+    def get_task_decision_intent(task_id: str, intent_id: str):
+        return service.get_decision_intent(task_id, intent_id)
+
+    @app.post(
+        "/api/v1/tasks/{task_id}/decision-intents/{intent_id}/confirm",
+        status_code=201,
+    )
+    def confirm_task_decision_intent(
+        task_id: str,
+        intent_id: str,
+        body: ConfirmDecisionIntentRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.confirm_decision_intent(
+            task_id,
+            intent_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/decision-conversations", status_code=201)
+    def create_task_decision_conversation(
+        task_id: str,
+        body: CreateDecisionConversationRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.create_decision_conversation(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            title=body.title,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/decision-conversations")
+    def list_task_decision_conversations(task_id: str):
+        return service.list_decision_conversations(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/decision-conversations/{conversation_id}")
+    def get_task_decision_conversation(task_id: str, conversation_id: str):
+        return service.get_decision_conversation(task_id, conversation_id)
+
+    @app.post(
+        "/api/v1/tasks/{task_id}/decision-conversations/{conversation_id}/messages",
+        status_code=202,
+    )
+    def send_task_decision_conversation_message(
+        task_id: str,
+        conversation_id: str,
+        body: SendDecisionConversationMessageRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.send_decision_conversation_message(
+            task_id,
+            conversation_id,
+            expected_task_revision=body.expected_task_revision,
+            content=body.message,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get(
+        "/api/v1/tasks/{task_id}/decision-conversations/{conversation_id}/events"
+    )
+    def stream_task_decision_conversation_events(
+        task_id: str,
+        conversation_id: str,
+        after: int = Query(default=0, ge=0),
+        follow: bool = Query(default=True),
+        timeout_seconds: float = Query(default=25.0, ge=0.1, le=30.0),
+    ):
+        # Authorize before starting a streaming response so errors retain the API envelope.
+        service.get_decision_conversation(task_id, conversation_id)
+
+        def event_stream():
+            cursor = after
+            deadline = time.monotonic() + timeout_seconds
+            yield "retry: 1000\n\n"
+            while True:
+                events = service.decision_conversation_events(
+                    task_id, conversation_id, after_sequence=cursor
+                )
+                for event in events:
+                    cursor = event["sequence"]
+                    data = json.dumps(event["payload"], ensure_ascii=False, separators=(",", ":"))
+                    yield f"id: {cursor}\nevent: {event['event_type']}\ndata: {data}\n\n"
+                if not follow or time.monotonic() >= deadline:
+                    break
+                if any(
+                    event["event_type"] in {"assistant.completed", "assistant.failed"}
+                    for event in events
+                ):
+                    break
+                time.sleep(0.25)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, private",
+                "X-Accel-Buffering": "no",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/v1/tasks/{task_id}/fields/corrections", status_code=202)
     def correct_fields(

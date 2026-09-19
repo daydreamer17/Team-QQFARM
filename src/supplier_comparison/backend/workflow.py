@@ -45,6 +45,7 @@ from supplier_comparison.rag.contracts import (
 from supplier_comparison.rules import (
     ComparisonResult,
     DecisionImpactResult,
+    DecisionPreferences,
     ImpactStatus,
     ProcurementRequirement,
     analyze_reviewed_decision_impact,
@@ -570,6 +571,9 @@ class WorkflowRunner:
                 policy_binding={key: context[key] for key in (
                     "policy_set_version", "policy_index_version", "policy_category", "policy_region"
                 )},
+                decision_preferences=DecisionPreferences.model_validate(
+                    context["decision_profile"]["preferences"]
+                ),
             )
         except DownstreamNotReadyError as exc:
             raise BackendError(
@@ -591,9 +595,15 @@ class WorkflowRunner:
             artifact_type="DECISION_IMPACT_RESULT", schema_version=report.schema_version,
             payload=report.model_dump(mode="json"), graph_run_id=state["graph_run_id"],
         )
+        compared_quote_ids = {
+            row.quote_id for row in report.comparison.supplier_results
+        }
+        excluded_quote_ids = set(state["review_artifact_ids"]) - compared_quote_ids
         return {
             "decision_impact_artifact_id": artifact["artifact_id"],
-            "nonblocking_unknown_quote_ids": list(report.nonblocking_unknown_quote_ids),
+            "nonblocking_unknown_quote_ids": sorted(
+                set(report.nonblocking_unknown_quote_ids) | excluded_quote_ids
+            ),
             "blocking_unknown_quote_ids": list(report.blocking_quote_ids),
             "undetermined_quote_ids": [
                 impact.quote_id for impact in report.quote_impacts
@@ -995,6 +1005,7 @@ class WorkflowRunner:
             "task_revision": state["task_revision"],
             "graph_run_id": state["graph_run_id"],
             "requirement": context["requirement"],
+            "decision_profile": context["decision_profile"],
             "batch_artifact_ids": state["batch_artifact_ids"],
             "review_artifact_ids": state["review_artifact_ids"],
             "decision_impact_artifact_id": impact_artifact["artifact_id"],

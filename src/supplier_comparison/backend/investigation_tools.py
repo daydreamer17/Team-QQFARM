@@ -75,7 +75,9 @@ class ScopedInvestigationTools:
                         if name != "retrieve_policy" or (policy_retriever and all(self.policy_binding.values()) and len(self.policy_binding) == 4)}
         if self.authorized_requirement_changes is not None:
             self.schemas['simulate_requirement_change']['authorization'] = {
-                'changes': self.authorized_requirement_changes.model_dump(mode='json', exclude_none=True),
+                'changes': self.authorized_requirement_changes.model_dump(
+                    mode='json', exclude_none=True, exclude_defaults=True
+                ),
                 'arguments_are_server_injected': True, 'formal_requirement_unchanged': True,
             }
 
@@ -121,6 +123,8 @@ class ScopedInvestigationTools:
         rows = {r["quote_id"]: r for r in (self.impact or {}).get("comparison", {}).get("supplier_results", [])}
         cases = []
         for quote_id, quote in sorted(self.quotes.items()):
+            if self.impact is not None and quote_id not in rows:
+                continue  # Explicitly excluded by the current Decision Profile.
             problems = [p for p in self.review["problems"] if p["quote_id"] == quote_id and p["needs_resolution"]]
             impact = impacts.get(quote_id, {})
             fields = tuple(sorted(set(impact.get("unknown_fields", [])) | {p["field_name"] for p in problems}))
@@ -204,7 +208,9 @@ class ScopedInvestigationTools:
         if name == "get_task_context":
             return ToolResult(**common, status="OK", data={"requirement": self.task["requirement"],
                               "policy_binding": self.policy_binding, "allowed_tools": list(self.schemas),
-                              'authorized_requirement_changes': (self.authorized_requirement_changes.model_dump(mode='json', exclude_none=True)
+                              'authorized_requirement_changes': (self.authorized_requirement_changes.model_dump(
+                                  mode='json', exclude_none=True, exclude_defaults=True
+                              )
                                                                  if self.authorized_requirement_changes is not None else None)})
         if name == "analyze_decision_impact":
             return ToolResult(**common, status="OK" if self.impact else "NOT_FOUND", data={"report": self.impact})

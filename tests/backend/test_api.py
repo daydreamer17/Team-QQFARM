@@ -919,6 +919,22 @@ def test_selection_analysis_and_authorized_simulation_are_read_only(batch_review
     assert result['hypothetical'] and not result['formal_recommendation_allowed']
     assert not result['comparison']['final_recommendation_allowed']
     assert service.get_task(task['task_id']) == before
+    exclusion = http.post(url + '/requirement-simulations', json={
+        'expected_task_revision': 4, 'confirm_hypothetical': True,
+        'changes': {'excluded_supplier_ids': ['SUP-023']}})
+    assert exclusion.status_code == 200, exclusion.text
+    excluded_result = exclusion.json()['result']
+    assert excluded_result['changes']['excluded_supplier_ids'] == ['SUP-023']
+    assert len(excluded_result['excluded_quote_ids']) == 1
+    assert [row['quote_id'] for row in excluded_result['comparison']['supplier_results']] == [
+        next(q['quote_id'] for q in _review['quotes'] if q['supplier_id'] == 'SUP-024')
+    ]
+    unknown_supplier = http.post(url + '/requirement-simulations', json={
+        'expected_task_revision': 4, 'confirm_hypothetical': True,
+        'changes': {'excluded_supplier_ids': ['SUP-NOT-IN-TASK']}})
+    assert unknown_supplier.status_code == 422
+    assert unknown_supplier.json()['error']['code'] == 'simulation_change_invalid'
+    assert service.get_task(task['task_id']) == before
     invalid = http.post(url + '/requirement-simulations', json={
         'expected_task_revision': 4, 'confirm_hypothetical': True,
         'changes': {'delivery_deadline': '2026-09-13'}})
@@ -936,6 +952,431 @@ def test_simulation_cannot_fake_user_authorization(client, authorization):
         'changes': {'budget_amount': '9000'}})
     assert response.status_code == 422
     assert service.get_task(task['task_id'])['task_revision'] == 1
+
+
+def test_decision_scenario_persists_delta_becomes_stale_and_applies(batch_review, tmp_path):
+    http, service, task, runner, review, body = batch_review
+    updated = http.post(
+        f"/api/v1/tasks/{task['task_id']}/fields/corrections",
+        json=body,
+        headers={'Idempotency-Key': 'scenario-ready'},
+    ).json()
+    runner.run_job(updated['job_id'])
+    task_id = task['task_id']
+    url = f"/api/v1/tasks/{task_id}/decision-scenarios"
+    payload = {
+        'expected_task_revision': 4,
+        'confirm_hypothetical': True,
+        'changes': {'excluded_supplier_ids': ['SUP-023']},
+    }
+    first = http.post(url, json=payload, headers={'Idempotency-Key': 'scenario-1'})
+    assert first.status_code == 201, first.text
+    scenario = first.json()
+    assert scenario['status'] == 'READY' and scenario['is_current']
+    assert scenario['baseline']['recommended_quote_ids']
+    assert scenario['simulated']['comparison']['recommended_quote_ids']
+    assert scenario['delta']['recommendation_changed']
+    assert any(row['excluded'] for row in scenario['delta']['supplier_deltas'])
+    assert http.post(url, json=payload, headers={'Idempotency-Key': 'scenario-1'}).json() == scenario
+    outsider_service = BackendService(
+        service.session_factory, tmp_path / 'scenario-outsider', actor_id='scenario-outsider'
+    )
+    outsider = TestClient(create_app(outsider_service, readiness_check=lambda: True))
+    assert outsider.get(url + '/' + scenario['decision_scenario_id']).status_code == 404
+
+    second = http.post(url, json={
+        'expected_task_revision': 4,
+        'confirm_hypothetical': True,
+        'changes': {'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'},
+    }, headers={'Idempotency-Key': 'scenario-2'})
+    assert second.status_code == 201, second.text
+    assert len(http.get(url).json()['items']) == 2
+    assert http.get(url + '/' + scenario['decision_scenario_id']).json() == scenario
+
+    applied = http.post(
+        url + '/' + scenario['decision_scenario_id'] + '/apply',
+        json={'expected_task_revision': 4},
+        headers={'Idempotency-Key': 'apply-scenario-1'},
+    )
+    assert applied.status_code == 202, applied.text
+    application = applied.json()
+    assert application['task_revision'] == 5
+    assert application['changed_requirement_fields'] == []
+    assert application['changed_decision_preference_fields'] == ['excluded_supplier_ids']
+    assert application['job_status'] == 'PENDING'
+    repeated_apply = http.post(
+        url + '/' + scenario['decision_scenario_id'] + '/apply',
+        json={'expected_task_revision': 4},
+        headers={'Idempotency-Key': 'apply-scenario-1'},
+    )
+    assert repeated_apply.json() == application
+    current = service.get_task(task_id)
+    assert current['decision_profile']['preferences']['excluded_supplier_ids'] == ['SUP-023']
+    assert current['current_result_id'] is None
+    queued_context = service.workflow_context(application['graph_run_id'])
+    assert queued_context['decision_profile']['preferences']['excluded_supplier_ids'] == ['SUP-023']
+    assert http.get(url + '/' + scenario['decision_scenario_id']).json()['status'] == 'APPLIED'
+    assert http.get(url + '/' + second.json()['decision_scenario_id']).json()['status'] == 'STALE'
+    stale_apply = http.post(
+        url + '/' + second.json()['decision_scenario_id'] + '/apply',
+        json={'expected_task_revision': 5},
+        headers={'Idempotency-Key': 'apply-stale-scenario'},
+    )
+    assert stale_apply.status_code == 409
+    assert stale_apply.json()['error']['code'] == 'decision_scenario_stale'
+    audit = http.get(f"/api/v1/tasks/{task_id}/revisions").json()
+    assert audit['revisions'][-1]['change_type'] == 'DECISION_SCENARIO_APPLIED'
+
+
+def test_decision_scenario_requires_current_result_and_explicit_confirmation(client):
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key='scenario-no-result')
+    url = f"/api/v1/tasks/{task['task_id']}/decision-scenarios"
+    no_result = http.post(url, json={
+        'expected_task_revision': 1,
+        'confirm_hypothetical': True,
+        'changes': {'budget_amount': '9000.00'},
+    }, headers={'Idempotency-Key': 'scenario-no-result-create'})
+    assert no_result.status_code == 409
+    assert no_result.json()['error']['code'] == 'scenario_result_required'
+    unconfirmed = http.post(url, json={
+        'expected_task_revision': 1,
+        'confirm_hypothetical': False,
+        'changes': {'budget_amount': '9000.00'},
+    }, headers={'Idempotency-Key': 'scenario-unconfirmed'})
+    assert unconfirmed.status_code == 422
+
+
+def test_decision_scenario_apply_updates_hard_requirement_and_profile_atomically(batch_review):
+    http, service, task, runner, _review, body = batch_review
+    updated = http.post(
+        f"/api/v1/tasks/{task['task_id']}/fields/corrections",
+        json=body,
+        headers={'Idempotency-Key': 'scenario-combined-ready'},
+    ).json()
+    runner.run_job(updated['job_id'])
+    task_id = task['task_id']
+    created = http.post(
+        f"/api/v1/tasks/{task_id}/decision-scenarios",
+        json={
+            'expected_task_revision': 4,
+            'confirm_hypothetical': True,
+            'changes': {
+                'budget_amount': '7500.00',
+                'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY',
+            },
+        },
+        headers={'Idempotency-Key': 'scenario-combined'},
+    )
+    assert created.status_code == 201, created.text
+    applied = http.post(
+        f"/api/v1/tasks/{task_id}/decision-scenarios/{created.json()['decision_scenario_id']}/apply",
+        json={'expected_task_revision': 4},
+        headers={'Idempotency-Key': 'scenario-combined-apply'},
+    )
+    assert applied.status_code == 202, applied.text
+    assert applied.json()['task_revision'] == 5
+    assert applied.json()['changed_requirement_fields'] == ['budget_amount']
+    assert applied.json()['changed_decision_preference_fields'] == ['ranking_mode']
+    current = service.get_task(task_id)
+    assert current['requirement']['budget_amount'] == '7500.00'
+    assert current['decision_profile']['preferences']['ranking_mode'] == 'FASTEST_CONFIRMED_DELIVERY'
+    revisions = http.get(f"/api/v1/tasks/{task_id}/revisions").json()['revisions']
+    assert sum(item['revision'] == 5 for item in revisions) == 1
+
+
+def test_natural_language_intent_requires_confirmation_before_creating_scenario(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='intent-ready',
+    )
+    runner.run_job(updated['job_id'])
+    calls = []
+
+    def fixed_parser(message, context):
+        calls.append((message, context))
+        return {
+            'ranking_mode': 'LOWEST_COST_THEN_FASTEST_DELIVERY',
+            'excluded_supplier_ids': ['SUP-024'],
+            'cost_tolerance_amount': '300.00',
+        }, 1
+
+    http = TestClient(create_app(
+        service,
+        readiness_check=lambda: True,
+        decision_intent_parser=fixed_parser,
+        decision_intent_provider='fixed-test',
+        decision_intent_model_id='fixed-intent-v1',
+    ))
+    url = f"/api/v1/tasks/{task['task_id']}/decision-intents"
+    payload = {
+        'expected_task_revision': 4,
+        'message': '总价贵 300 新币以内都可以，优先更快的，但排除 SUP-024。',
+    }
+    parsed = http.post(url, json=payload, headers={'Idempotency-Key': 'parse-intent-1'})
+    assert parsed.status_code == 201, parsed.text
+    intent = parsed.json()
+    assert intent['status'] == 'READY' and intent['is_current']
+    assert intent['parsed_changes'] == {
+        'ranking_mode': 'LOWEST_COST_THEN_FASTEST_DELIVERY',
+        'excluded_supplier_ids': ['SUP-024'],
+        'cost_tolerance_amount': '300.00',
+    }
+    assert '不会直接修改正式需求' in intent['confirmation_text']
+    assert intent['attempts'] == 1
+    assert calls[0][1]['available_supplier_ids'] == ['SUP-023', 'SUP-024']
+    assert service.list_decision_scenarios(task['task_id'])['items'] == []
+    assert http.post(url, json=payload, headers={'Idempotency-Key': 'parse-intent-1'}).json() == intent
+    assert len(calls) == 1
+
+    rejected = http.post(
+        url + '/' + intent['decision_intent_id'] + '/confirm',
+        json={'expected_task_revision': 4, 'confirm': False},
+        headers={'Idempotency-Key': 'confirm-intent-rejected'},
+    )
+    assert rejected.status_code == 422
+    confirmed = http.post(
+        url + '/' + intent['decision_intent_id'] + '/confirm',
+        json={'expected_task_revision': 4, 'confirm': True},
+        headers={'Idempotency-Key': 'confirm-intent-1'},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    result = confirmed.json()
+    assert result['status'] == 'CONFIRMED'
+    assert result['scenario']['status'] == 'READY'
+    assert result['scenario']['changes'] == intent['parsed_changes']
+    assert http.post(
+        url + '/' + intent['decision_intent_id'] + '/confirm',
+        json={'expected_task_revision': 4, 'confirm': True},
+        headers={'Idempotency-Key': 'confirm-intent-1'},
+    ).json() == result
+    assert http.get(url + '/' + intent['decision_intent_id']).json()['status'] == 'CONFIRMED'
+
+
+def test_decision_intent_failure_is_audited_and_idempotently_replayed(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='intent-failure-ready',
+    )
+    runner.run_job(updated['job_id'])
+    calls = []
+
+    def invalid_parser(message, context):
+        calls.append((message, context))
+        return {'excluded_supplier_ids': ['SUP-NOT-IN-TASK']}, 2
+
+    http = TestClient(create_app(
+        service, readiness_check=lambda: True, decision_intent_parser=invalid_parser,
+    ))
+    url = f"/api/v1/tasks/{task['task_id']}/decision-intents"
+    payload = {'expected_task_revision': 4, 'message': '排除一个不存在的供应商'}
+    first = http.post(url, json=payload, headers={'Idempotency-Key': 'invalid-intent'})
+    assert first.status_code == 422
+    assert first.json()['error']['code'] == 'decision_intent_model_output_invalid'
+    repeated = http.post(url, json=payload, headers={'Idempotency-Key': 'invalid-intent'})
+    assert repeated.status_code == 422
+    assert repeated.json()['error']['code'] == 'decision_intent_model_output_invalid'
+    assert len(calls) == 1
+    audit = http.get(url).json()['items']
+    assert len(audit) == 1
+    assert audit[0]['status'] == 'FAILED' and audit[0]['attempts'] == 2
+    assert audit[0]['error_code'] == 'decision_intent_model_output_invalid'
+
+
+def test_ready_decision_intent_becomes_stale_when_task_inputs_change(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='intent-stale-ready',
+    )
+    runner.run_job(updated['job_id'])
+    http = TestClient(create_app(
+        service,
+        readiness_check=lambda: True,
+        decision_intent_parser=lambda _message, _context: (
+            {'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'}, 1
+        ),
+    ))
+    url = f"/api/v1/tasks/{task['task_id']}/decision-intents"
+    parsed = http.post(
+        url,
+        json={'expected_task_revision': 4, 'message': '改成到货最快优先'},
+        headers={'Idempotency-Key': 'parse-stale-intent'},
+    ).json()
+    requirement = service.get_task(task['task_id'])['requirement']
+    requirement['budget_amount'] = '8100.00'
+    changed = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        json={'expected_task_revision': 4, 'requirement': requirement},
+        headers={'Idempotency-Key': 'change-after-intent'},
+    )
+    assert changed.status_code == 202, changed.text
+    assert http.get(url + '/' + parsed['decision_intent_id']).json()['status'] == 'STALE'
+    confirmation = http.post(
+        url + '/' + parsed['decision_intent_id'] + '/confirm',
+        json={'expected_task_revision': 5, 'confirm': True},
+        headers={'Idempotency-Key': 'confirm-stale-intent'},
+    )
+    assert confirmation.status_code == 409
+    assert confirmation.json()['error']['code'] == 'decision_intent_stale'
+
+
+def test_async_multi_turn_conversation_streams_validated_events_and_proposes_intent(batch_review):
+    http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='conversation-ready',
+    )
+    runner.run_job(updated['job_id'])
+    base = f"/api/v1/tasks/{task['task_id']}/decision-conversations"
+    created = http.post(
+        base,
+        json={'expected_task_revision': 4, 'title': '成本与交期讨论'},
+        headers={'Idempotency-Key': 'create-conversation'},
+    )
+    assert created.status_code == 201, created.text
+    conversation = created.json()
+    conversation_id = conversation['conversation_id']
+    message_url = base + '/' + conversation_id + '/messages'
+    first = http.post(
+        message_url,
+        json={'expected_task_revision': 4, 'message': '现在为什么推荐这个报价？'},
+        headers={'Idempotency-Key': 'conversation-message-1'},
+    )
+    assert first.status_code == 202, first.text
+    job_id = first.json()['job']['job_id']
+    blocked = http.post(
+        message_url,
+        json={'expected_task_revision': 4, 'message': '再比较一下交期'},
+        headers={'Idempotency-Key': 'conversation-message-blocked'},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()['error']['code'] == 'conversation_turn_in_progress'
+    context = service.conversation_job_context(job_id)
+    assert context['recent_messages'][-1]['content'] == '现在为什么推荐这个报价？'
+    result_ref = 'RESULT:' + context['result_id']
+    completed = service.complete_conversation_job(
+        job_id,
+        turn={
+            'assistant_text': '当前推荐来自冻结的确定性比较结果；聊天不会改变该结论。',
+            'reference_ids': [result_ref],
+            'changes': None,
+        },
+        attempts=1,
+        provider='fixed-test',
+        model_id='fixed-conversation-v1',
+    )
+    assert completed['job_status'] == 'SUCCEEDED'
+    assert completed['message']['role'] == 'ASSISTANT'
+
+    second = http.post(
+        message_url,
+        json={'expected_task_revision': 4, 'message': '改成到货最快优先。'},
+        headers={'Idempotency-Key': 'conversation-message-2'},
+    )
+    second_context = service.conversation_job_context(second.json()['job']['job_id'])
+    assert [row['role'] for row in second_context['recent_messages']] == [
+        'USER', 'ASSISTANT', 'USER'
+    ]
+    proposed = service.complete_conversation_job(
+        second.json()['job']['job_id'],
+        turn={
+            'assistant_text': '可以生成“到货最快优先”的决策情景；请先确认该变更。',
+            'reference_ids': ['RESULT:' + second_context['result_id']],
+            'changes': {'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'},
+        },
+        attempts=1,
+        provider='fixed-test',
+        model_id='fixed-conversation-v1',
+    )
+    intent_id = proposed['message']['decision_intent_id']
+    assert intent_id
+    assert proposed['message']['proposed_changes'] == {
+        'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'
+    }
+    assert service.list_decision_scenarios(task['task_id'])['items'] == []
+    confirmed = http.post(
+        f"/api/v1/tasks/{task['task_id']}/decision-intents/{intent_id}/confirm",
+        json={'expected_task_revision': 4, 'confirm': True},
+        headers={'Idempotency-Key': 'confirm-conversation-intent'},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    assert confirmed.json()['scenario']['status'] == 'READY'
+
+    events = http.get(
+        base + '/' + conversation_id + '/events',
+        params={'after': 0, 'follow': 'false'},
+    )
+    assert events.status_code == 200
+    assert events.headers['content-type'].startswith('text/event-stream')
+    assert 'event: assistant.delta' in events.text
+    assert 'event: assistant.completed' in events.text
+    loaded = http.get(base + '/' + conversation_id).json()
+    assert [row['role'] for row in loaded['messages']] == [
+        'USER', 'ASSISTANT', 'USER', 'ASSISTANT'
+    ]
+    replay = service.decision_conversation_events(task['task_id'], conversation_id)
+    assert [event['sequence'] for event in replay] == list(range(1, len(replay) + 1))
+    assert service.decision_conversation_events(
+        task['task_id'], conversation_id, after_sequence=replay[-2]['sequence']
+    ) == replay[-1:]
+
+    third = http.post(
+        message_url,
+        json={'expected_task_revision': 4, 'message': '请继续解释风险。'},
+        headers={'Idempotency-Key': 'conversation-message-3'},
+    )
+    third_job = third.json()['job']['job_id']
+    service.conversation_job_context(third_job)
+    service.fail_conversation_job(
+        third_job,
+        code='model_transport_error',
+        message='sanitized model failure',
+        attempts=2,
+    )
+    failed = http.get(base + '/' + conversation_id).json()['messages'][-1]
+    assert failed['role'] == 'ASSISTANT' and failed['status'] == 'FAILED'
+    assert failed['attempts'] == 2 and failed['error_code'] == 'model_transport_error'
+
+
+def test_pending_conversation_is_superseded_when_task_changes(batch_review):
+    http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='conversation-stale-ready',
+    )
+    runner.run_job(updated['job_id'])
+    base = f"/api/v1/tasks/{task['task_id']}/decision-conversations"
+    conversation = http.post(
+        base,
+        json={'expected_task_revision': 4},
+        headers={'Idempotency-Key': 'conversation-stale-create'},
+    ).json()
+    sent = http.post(
+        base + '/' + conversation['conversation_id'] + '/messages',
+        json={'expected_task_revision': 4, 'message': '请解释当前结果'},
+        headers={'Idempotency-Key': 'conversation-stale-message'},
+    ).json()
+    requirement = service.get_task(task['task_id'])['requirement']
+    requirement['budget_amount'] = '8100.00'
+    changed = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        json={'expected_task_revision': 4, 'requirement': requirement},
+        headers={'Idempotency-Key': 'conversation-stale-update'},
+    )
+    assert changed.status_code == 202, changed.text
+    loaded = http.get(base + '/' + conversation['conversation_id']).json()
+    assert loaded['status'] == 'STALE'
+    with pytest.raises(BackendError) as stale:
+        service.conversation_job_context(sent['job']['job_id'])
+    assert stale.value.code == 'conversation_stale'
 
 
 def test_unresolved_gaps_remain_pending_and_unreviewed_or_foreign_inputs_are_rejected(batch_review, tmp_path):

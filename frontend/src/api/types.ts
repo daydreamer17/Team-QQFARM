@@ -238,10 +238,39 @@ export interface TaskDetail extends TaskSummary {
     summary_completed: boolean
   }
   policy_binding: PolicyBinding | null
+  decision_profile: DecisionProfile
   current_issue: CurrentIssue | null
   current_job: CurrentJob | null
   quotes: TaskQuote[]
   requirement: ProcurementRequirement
+}
+
+export type DecisionRankingMode =
+  | 'LOWEST_CONFIRMED_TOTAL_COST'
+  | 'FASTEST_CONFIRMED_DELIVERY'
+  | 'LOWEST_COST_THEN_FASTEST_DELIVERY'
+  | 'FASTEST_DELIVERY_THEN_LOWEST_COST'
+
+export interface DecisionPreferences {
+  ranking_mode: DecisionRankingMode | null
+  excluded_supplier_ids: string[]
+  cost_tolerance_amount: string | null
+}
+
+export interface DecisionProfile {
+  decision_profile_id: string | null
+  task_revision: number | null
+  profile_version: number
+  preferences: DecisionPreferences
+  source_scenario_id: string | null
+}
+
+export interface DecisionChanges {
+  budget_amount?: string
+  delivery_deadline?: string
+  ranking_mode?: DecisionRankingMode | null
+  excluded_supplier_ids?: string[]
+  cost_tolerance_amount?: string | null
 }
 
 export interface QuoteUploadResponse {
@@ -456,6 +485,164 @@ export interface ComparisonResultResponse {
   policy_retrievals: PolicyRetrievalResult[]
 }
 
+export interface HypotheticalComparison {
+  hypothetical: true
+  formal_recommendation_allowed: false
+  policy_assessment_performed: false
+  changes: DecisionChanges
+  decision_preferences: DecisionPreferences
+  excluded_quote_ids: string[]
+  assumptions: string[]
+  comparison: ComparisonPayload
+}
+
+export interface ScenarioSupplierDelta {
+  quote_id: string
+  baseline_status: string | null
+  simulated_status: string | null
+  baseline_total_cost: string | null
+  simulated_total_cost: string | null
+  total_cost_delta: string | null
+  baseline_arrival_date: string | null
+  simulated_arrival_date: string | null
+  excluded: boolean
+}
+
+export interface DecisionScenario {
+  decision_scenario_id: string
+  task_id: string
+  base_task_revision: number
+  base_result_id: string
+  input_sha256: string
+  status: 'READY' | 'APPLIED' | 'STALE' | string
+  is_current: boolean
+  changes: DecisionChanges
+  baseline: ComparisonPayload
+  simulated: HypotheticalComparison
+  delta: {
+    recommendation_changed: boolean
+    baseline_disposition: string
+    simulated_disposition: string
+    baseline_recommended_quote_ids: string[]
+    simulated_recommended_quote_ids: string[]
+    added_recommended_quote_ids: string[]
+    removed_recommended_quote_ids: string[]
+    supplier_deltas: ScenarioSupplierDelta[]
+  }
+  applied_task_revision: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DecisionScenarioListResponse {
+  task_id: string
+  task_revision: number
+  items: DecisionScenario[]
+}
+
+export interface DecisionScenarioApplyResponse {
+  task_id: string
+  task_revision: number
+  status: string
+  decision_scenario_id: string
+  decision_profile_id: string | null
+  changed_requirement_fields: string[]
+  changed_decision_preference_fields: string[]
+  graph_run_id: string | null
+  job_id: string | null
+  job_status: string | null
+}
+
+export interface DecisionMessage {
+  message_id: string
+  sequence: number
+  role: 'USER' | 'ASSISTANT'
+  status: 'SUCCEEDED' | 'FAILED' | 'STALE' | string
+  content: string | null
+  reference_ids: string[]
+  proposed_changes: DecisionChanges | null
+  decision_intent_id: string | null
+  reply_to_message_id: string | null
+  provider: string | null
+  model_id: string | null
+  prompt_version: string | null
+  attempts: number
+  error_code: string | null
+  error_message: string | null
+  created_at: string
+}
+
+export interface DecisionConversation {
+  conversation_id: string
+  task_id: string
+  base_task_revision: number
+  base_result_id: string
+  status: 'ACTIVE' | 'STALE' | 'CLOSED' | string
+  title: string
+  messages: DecisionMessage[]
+  created_at: string
+  updated_at: string
+}
+
+export interface DecisionConversationListResponse {
+  task_id: string
+  task_revision: number
+  items: DecisionConversation[]
+}
+
+export interface ConversationJob {
+  job_id: string
+  task_id: string
+  graph_run_id: string | null
+  conversation_id: string
+  conversation_message_id: string
+  issue_id: string | null
+  job_type: string
+  status: string
+  task_revision: number
+  attempts: number
+}
+
+export interface SendDecisionMessageResponse {
+  conversation_id: string
+  message: DecisionMessage
+  job: ConversationJob
+}
+
+export interface ConfirmDecisionIntentResponse {
+  decision_intent_id: string
+  status: 'CONFIRMED'
+  scenario: DecisionScenario
+}
+
+export interface DecisionIntent {
+  decision_intent_id: string
+  task_id: string
+  base_task_revision: number
+  base_result_id: string
+  source_text: string
+  source_sha256: string
+  status: 'PROCESSING' | 'READY' | 'CONFIRMED' | 'FAILED' | 'STALE' | string
+  is_current: boolean
+  parsed_changes: DecisionChanges | null
+  confirmation_text: string | null
+  provider: string | null
+  model_id: string | null
+  prompt_version: string | null
+  attempts: number
+  error_code: string | null
+  error_message: string | null
+  decision_scenario_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DecisionIntentListResponse {
+  task_id: string
+  task_revision: number
+  items: DecisionIntent[]
+}
+
 export interface QuoteDecisionImpact {
   quote_id: string
   quote_version: number
@@ -616,15 +803,6 @@ export interface SelectionGap {
   delivery_improvement: HypotheticalComparison | null
   would_be_quote_comparison_choice: boolean | null
   assumptions: string[]
-}
-
-export interface HypotheticalComparison {
-  hypothetical: true
-  formal_recommendation_allowed: false
-  policy_assessment_performed: false
-  changes: Record<string, unknown>
-  assumptions: string[]
-  comparison: ComparisonPayload
 }
 
 export interface ClarificationDraft {
