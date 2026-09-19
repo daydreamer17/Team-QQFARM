@@ -1,0 +1,202 @@
+{
+  "schema_version": "1.0.0",
+  "dataset_id": "full_flow_demo2",
+  "scenario_id": "MCU-V9-PERSONALIZED",
+  "is_synthetic": true,
+  "runtime_access": "FORBIDDEN",
+  "requirement": {
+    "manufacturer": "QQ Demo Components",
+    "manufacturer_part_number": "QW-MCU9-DEMO",
+    "package": "QFN-32",
+    "revision": "R1",
+    "condition": "NEW",
+    "allow_substitutes": false,
+    "base_unit": "piece",
+    "required_quantity": 1250,
+    "quantity_unit": "piece",
+    "budget_amount": "10000.00",
+    "currency": "SGD",
+    "includes_shipping": true,
+    "tax_mode": "NOT_APPLICABLE",
+    "other_fees_required": true,
+    "planned_order_date": "2026-09-20",
+    "delivery_deadline": "2026-10-02",
+    "delivery_location": "SG-DEMO-01",
+    "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
+    "secondary_preference": null
+  },
+  "fx_snapshot": {
+    "pair": "USD/SGD",
+    "rate": "1.61",
+    "rounding": "ROUND_HALF_UP",
+    "places": 2
+  },
+  "operator_answers": [
+    {
+      "supplier_id": "V9-SUP-C",
+      "issue_type": "CONFIRM_MISSING",
+      "answer": {
+        "answer_type": "CONFIRM_MISSING"
+      }
+    },
+    {
+      "supplier_id": "V9-SUP-C",
+      "issue_type": "SHIPPING_AMOUNT",
+      "answer": {
+        "answer_type": "SHIPPING_AMOUNT",
+        "amount": "50.00",
+        "currency": "SGD"
+      }
+    }
+  ],
+  "quote_facts_after_answers": {
+    "B": {
+      "supplier_id": "V9-SUP-B",
+      "supplier_name": "Synthetic Bridgeway Semiconductors Ltd.",
+      "currency": "SGD",
+      "unit_price": "7.10",
+      "shipping": "40.00",
+      "moq": 500,
+      "multiple": 100,
+      "ordered_quantity": 1300,
+      "lead_days": 4,
+      "payment_terms": "Net 30",
+      "arrival": "2026-09-24",
+      "native_total": "9270.00",
+      "sgd_total": "9270.00"
+    },
+    "C": {
+      "supplier_id": "V9-SUP-C",
+      "supplier_name": "Synthetic Cedar Economy Electronics Ltd.",
+      "currency": "SGD",
+      "unit_price": "6.10",
+      "shipping": null,
+      "confirmed_shipping": "50.00",
+      "moq": 1000,
+      "multiple": 500,
+      "ordered_quantity": 1500,
+      "lead_days": 10,
+      "payment_terms": "Net 30",
+      "arrival": "2026-09-30",
+      "known_subtotal": "9150.00",
+      "sgd_total_after_answer": "9200.00"
+    },
+    "D": {
+      "supplier_id": "V9-SUP-D",
+      "supplier_name": "Synthetic Delta Global Components Inc.",
+      "currency": "USD",
+      "unit_price": "4.39",
+      "shipping": "15.00",
+      "moq": 500,
+      "multiple": 100,
+      "ordered_quantity": 1300,
+      "lead_days": 5,
+      "payment_terms": "Net 45",
+      "arrival": "2026-09-25",
+      "native_total": "5722.00",
+      "sgd_total": "9212.42"
+    },
+    "E": {
+      "supplier_id": "V9-SUP-E",
+      "supplier_name": "Synthetic Evergreen Precision Parts Ltd.",
+      "currency": "SGD",
+      "unit_price": "7.32",
+      "shipping": "50.00",
+      "moq": 500,
+      "multiple": 50,
+      "ordered_quantity": 1250,
+      "lead_days": 7,
+      "payment_terms": "Net 30",
+      "arrival": "2026-09-27",
+      "native_total": "9200.00",
+      "sgd_total": "9200.00",
+      "superseded_price": "7.40"
+    },
+    "G": {
+      "supplier_id": "V9-SUP-G",
+      "supplier_name": "Synthetic Greenline Components Pte. Ltd.",
+      "currency": "SGD",
+      "unit_price": "7.40",
+      "shipping": "0.00",
+      "moq": 500,
+      "multiple": 50,
+      "ordered_quantity": 1250,
+      "lead_days": 3,
+      "payment_terms": "Net 60",
+      "arrival": "2026-09-23",
+      "native_total": "9250.00",
+      "sgd_total": "9250.00"
+    }
+  },
+  "intent_expectations": [
+    {
+      "intent_id": "cost_first",
+      "normalized": {
+        "primary_objective": "LOWEST_CONFIRMED_TOTAL_COST",
+        "secondary_objective": null,
+        "tie_policy": "KEEP_JOINT_RECOMMENDATION",
+        "unknown_value_policy": "BLOCK",
+        "allow_approved_fx": true
+      },
+      "recommended_supplier_ids": [
+        "V9-SUP-C",
+        "V9-SUP-E"
+      ],
+      "explanation": "C and E tie at SGD 9,200.00; the buyer prohibited an automatic delivery tie-break."
+    },
+    {
+      "intent_id": "cost_then_fastest",
+      "normalized": {
+        "primary_objective": "LOWEST_CONFIRMED_TOTAL_COST",
+        "secondary_objective": "FASTEST_CONFIRMED_DELIVERY",
+        "cost_tolerance": {
+          "amount": "0.00",
+          "currency": "SGD"
+        },
+        "unknown_value_policy": "BLOCK",
+        "allow_approved_fx": true
+      },
+      "recommended_supplier_ids": [
+        "V9-SUP-E"
+      ],
+      "explanation": "E breaks the C/E cost tie by arriving three days earlier."
+    },
+    {
+      "intent_id": "delivery_urgent",
+      "normalized": {
+        "primary_objective": "FASTEST_CONFIRMED_DELIVERY",
+        "secondary_objective": "LOWEST_CONFIRMED_TOTAL_COST",
+        "unknown_value_policy": "BLOCK_IF_DECISION_RELEVANT",
+        "allow_approved_fx": true
+      },
+      "recommended_supplier_ids": [
+        "V9-SUP-G"
+      ],
+      "explanation": "G is feasible and arrives first on 23 September 2026."
+    },
+    {
+      "intent_id": "balanced_tolerance",
+      "normalized": {
+        "primary_objective": "WITHIN_COST_TOLERANCE_THEN_FASTEST",
+        "cost_tolerance": {
+          "amount": "15.00",
+          "currency": "SGD"
+        },
+        "unknown_value_policy": "BLOCK",
+        "allow_approved_fx": true
+      },
+      "recommended_supplier_ids": [
+        "V9-SUP-D"
+      ],
+      "explanation": "D is SGD 12.42 above the minimum and arrives before C and E.",
+      "flip_threshold": "If the tolerance is below SGD 12.42, D exits and E becomes the fastest minimum-cost choice."
+    }
+  ],
+  "current_implementation_limits": [
+    "FASTEST_CONFIRMED_DELIVERY is not implemented by the current deterministic backend.",
+    "Secondary-preference tie-breaking is not implemented.",
+    "Cost-tolerance ranking is not implemented.",
+    "Approved FX snapshot conversion is not implemented in the comparison engine.",
+    "Natural-language buyer preference confirmation is not implemented."
+  ]
+}

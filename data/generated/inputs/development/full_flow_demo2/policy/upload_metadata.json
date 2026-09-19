@@ -1,0 +1,16 @@
+{
+  "policy_set_id": "full-flow-demo2-electronics",
+  "policy_set_version": "2026.09.2-demo",
+  "policy_id": "POL-DEMO2-DECISION-GATE",
+  "document_id": "DOC-DEMO2-DECISION-GATE",
+  "document_version": "1.0.0",
+  "title": "Fictional Electronics Preference and Evidence Policy",
+  "effective_from": "2026-01-01T00:00:00Z",
+  "effective_to": null,
+  "categories": [
+    "Electronics"
+  ],
+  "regions": [
+    "SG"
+  ]
+}

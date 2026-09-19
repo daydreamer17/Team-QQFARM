@@ -1,0 +1,11 @@
+{
+  "snapshot_id": "FX-DEMO2-USD-SGD-20260920",
+  "base_currency": "USD",
+  "quote_currency": "SGD",
+  "rate": "1.61",
+  "effective_at": "2026-09-20T00:00:00+08:00",
+  "rounding": "ROUND_HALF_UP",
+  "decimal_places": 2,
+  "source": "Synthetic approved treasury snapshot",
+  "is_synthetic": true
+}
