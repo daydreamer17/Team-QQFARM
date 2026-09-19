@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { TaskDetail } from '../api/types'
+import { taskStatusLabel } from '../lib/presentation'
 
 type WorkspaceSection = 'overview' | 'quotes' | 'review' | 'investigations' | 'decision' | 'gaps' | 'compliance' | 'summary' | 'audit'
 
@@ -31,6 +32,7 @@ export function TaskWorkspaceHeader({
   status,
   revision,
   progress,
+  reviewBlocked,
   active,
 }: TaskWorkspaceHeaderProps) {
   const completedStage = progress.summary_completed
@@ -42,20 +44,19 @@ export function TaskWorkspaceHeader({
         : progress.requirement_completed
           ? 1
           : 0
-  const stages = ['采购需求', '报价与审核', '决策比较', 'Summary']
+  const stages = ['采购需求', '报价与审核', '决策比较', '采购总结']
 
   return (
     <section className="workspace-header">
       <div className="workspace-task-head">
         <div>
-          <span className="workspace-task-label">{scenarioId ?? 'PROCUREMENT TASK'}</span>
+          <span className="workspace-task-label">采购任务{scenarioId ? ` · ${scenarioId}` : ''}</span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
-          <small className="workspace-task-id">{taskId}</small>
         </div>
         <div className="workspace-state-stack">
-          <span className="status-pill status-ready">{status}</span>
-          <span>Task Rev {revision}</span>
+          <span className="status-pill status-ready">{taskStatusLabel(status)}</span>
+          <span>当前第 {revision} 版</span>
         </div>
       </div>
       <div className="task-timeline-shell">
@@ -75,13 +76,13 @@ export function TaskWorkspaceHeader({
       <nav className="workspace-tabs" aria-label="任务工作台页面">
         <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>概览</Link>
         <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>报价与证据</Link>
-        <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>集中审核</Link>
-        <Link className={tabClass(active === 'investigations')} to={`/tasks/${taskId}/investigations`}>调查记录</Link>
-        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策比较</Link>
-        <Link className={tabClass(active === 'gaps')} to={`/tasks/${taskId}/gaps`}>入选差距</Link>
-        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>合规</Link>
-        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>Summary</Link>
-        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>版本 / 审计</Link>
+        {(reviewBlocked || active === 'review') && <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>待处理事项</Link>}
+        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策结果</Link>
+        {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>差距详情</Link>}
+        {active === 'investigations' && <Link className={tabClass(true)} to={`/tasks/${taskId}/investigations`}>调查详情</Link>}
+        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>制度检查</Link>
+        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>采购总结</Link>
+        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>版本记录</Link>
       </nav>
     </section>
   )

@@ -1200,11 +1200,42 @@ class BackendService:
             if batch_artifact is None:
                 raise ConflictError("draft_batch_missing", "Quote draft extraction batch is missing.")
             batch = ExtractionBatch.model_validate(batch_artifact.payload)
+            prior_event_artifacts = session.scalars(
+                select(WorkflowArtifact)
+                .where(
+                    WorkflowArtifact.task_id == task_id,
+                    WorkflowArtifact.task_revision == draft.base_task_revision,
+                    WorkflowArtifact.quote_id == draft.proposed_quote_id,
+                    WorkflowArtifact.document_id == draft.proposed_document_id,
+                    WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
+                )
+                .order_by(WorkflowArtifact.created_at, WorkflowArtifact.artifact_id)
+            ).all()
+            prior_events = tuple(
+                CorrectionEvent.model_validate(artifact.payload)
+                for artifact in prior_event_artifacts
+            )
             events: list[CorrectionEvent] = []
             reviewed_at = datetime.now(timezone.utc)
             for item in corrections:
                 field_name = str(item["field_name"])
                 candidate = next((c for c in batch.candidates if c.field_name == field_name), None)
+                definition = self.quote_dictionary.fields.get(field_name)
+                allowed_values = (
+                    definition.allowed_normalized_values
+                    if definition is not None
+                    else None
+                )
+                if (
+                    allowed_values is not None
+                    and item["normalized_value"] not in allowed_values
+                ):
+                    raise BackendError(
+                        "field_correction_value_invalid",
+                        "请选择该字段允许的标准值，不要输入 N/A、NO 等自由文本。",
+                        field_name=field_name,
+                        allowed_values=list(allowed_values),
+                    )
                 action = (
                     CorrectionAction.USER_INPUT
                     if candidate is not None and candidate.validation_status == ValidationStatus.MISSING
@@ -1273,7 +1304,7 @@ class BackendService:
                 CriticalityContext(required_revision=requirement.revision, base_unit=requirement.base_unit),
                 input_is_synthetic=draft.is_synthetic,
                 reviewed_at=reviewed_at,
-                corrections=tuple(events),
+                corrections=prior_events + tuple(events),
             )
             review_payload = reviewed.model_dump(mode="json")
             review_artifact = WorkflowArtifact(

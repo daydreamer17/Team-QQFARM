@@ -5,6 +5,7 @@ import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { CreateTaskRequest, PolicySetSummary, RequirementDraftResponse } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
+import { fieldLabel } from '../lib/presentation'
 
 interface FormState extends RequirementFormValues {
   scenario_id: string
@@ -278,23 +279,23 @@ export function NewTaskPage() {
     }
     if (bindPolicy) {
       if (policySets.isError) {
-        setLocalError('已发布 Policy 列表读取失败。请重试，或改选“不绑定 Policy”。')
+        setLocalError('已发布制度列表读取失败。请重试，或改选“不绑定制度”。')
         return null
       }
       if (!selectedPolicyKey) {
-        setLocalError('请选择一个已发布 Policy，或改选“不绑定 Policy”。')
+        setLocalError('请选择一套已发布制度，或改选“不绑定制度”。')
         return null
       }
       if (!selectedPolicy) {
-        setLocalError('已选 Policy 不再存在于服务端目录中，请重新选择。')
+        setLocalError('已选制度不再存在于服务端目录中，请重新选择。')
         return null
       }
       if (!policyCategory || !selectedPolicy.categories.includes(policyCategory)) {
-        setLocalError('请选择该 Policy 支持的具体分类。')
+        setLocalError('请选择该制度支持的具体分类。')
         return null
       }
       if (!policyRegion || !selectedPolicy.regions.includes(policyRegion)) {
-        setLocalError('请选择该 Policy 支持的具体地区。')
+        setLocalError('请选择该制度支持的具体地区。')
         return null
       }
     }
@@ -389,9 +390,9 @@ export function NewTaskPage() {
           )}
         </div>
         {requirementExtraction.isError && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
-        {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>{requirementDraft.error_code}</strong><p>{requirementDraft.error_message}</p></div>}
+        {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{requirementDraft.error_message}</p></div>}
         {extractionNotice && <div className="extraction-notice" role="status">✓ {extractionNotice}</div>}
-        {requirementDraft?.status === 'READY' && requirementDraft.candidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{requirementDraft.candidates.length}）</summary><div className="audit-list">{requirementDraft.candidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{candidate.field_name}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.source_id} · {source.quoted_text}</small>)}</article>)}</div></details>}
+        {requirementDraft?.status === 'READY' && requirementDraft.candidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{requirementDraft.candidates.length}）</summary><div className="audit-list">{requirementDraft.candidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{fieldLabel(candidate.field_name)}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.quoted_text}</small>)}</article>)}</div></details>}
       </section>
 
       <form className="requirement-form" noValidate onSubmit={handleSubmit}>
@@ -411,29 +412,29 @@ export function NewTaskPage() {
         />
 
         <fieldset className="form-section policy-binding-section">
-          <legend>Policy / 制度检查 <small>可选</small></legend>
+          <legend>制度检查 <small>可选</small></legend>
           <p className="policy-binding-intro">绑定后，系统会将这个已发布的策略与索引版本冻结到任务。创建后不能在任务内修改。</p>
           <div className="policy-mode-options">
-            <label className={!bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={!bindPolicy} onChange={() => setPolicyMode(false)} /><span><strong>不绑定 Policy</strong><small>默认选项，按现有采购流程创建任务</small></span></label>
-            <label className={bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={bindPolicy} onChange={() => setPolicyMode(true)} /><span><strong>绑定已发布 Policy</strong><small>在分析中执行制度证据检索</small></span></label>
+            <label className={!bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={!bindPolicy} onChange={() => setPolicyMode(false)} /><span><strong>不绑定制度</strong><small>默认选项，按现有采购流程创建任务</small></span></label>
+            <label className={bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={bindPolicy} onChange={() => setPolicyMode(true)} /><span><strong>绑定已发布制度</strong><small>在分析中检索相关制度依据</small></span></label>
           </div>
 
           {bindPolicy && (
             <div className="policy-binding-picker">
-              {policySets.isPending && <div className="policy-picker-state">正在读取已发布 Policy…</div>}
-              {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>Policy 目录读取失败。仍可改为不绑定并继续创建。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
-              {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>当前没有已发布 Policy。请先到规则资源库完成发布，或选择不绑定。</span><Link to="/resources">前往规则资源库</Link></div>}
+              {policySets.isPending && <div className="policy-picker-state">正在读取已发布制度…</div>}
+              {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>制度目录读取失败。仍可改为不绑定并继续创建。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
+              {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>当前没有已发布制度。请先到规则资源库完成发布，或选择不绑定。</span><Link to="/resources">前往规则资源库</Link></div>}
               {policySets.data && policySets.data.items.length > 0 && (
                 <>
-                  <label className="field policy-picker-wide"><span>已发布 Policy</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择策略及索引版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · {policy.policy_set_version} · {policy.policy_index_version}</option>)}</select></label>
-                  {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">已选 Policy 已从服务端目录消失，请重新选择后再提交。</div>}
+                  <label className="field policy-picker-wide"><span>已发布制度</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择制度及索引版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · {policy.policy_set_version} · {policy.policy_index_version}</option>)}</select></label>
+                  {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">已选制度已从服务端目录消失，请重新选择后再提交。</div>}
                   {selectedPolicy && (
                     <>
                       <div className="policy-binding-fields">
                         <label className="field"><span>适用分类</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体分类</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
                         <label className="field"><span>适用地区</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体地区</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
                       </div>
-                      <dl className="policy-picker-summary"><div><dt>索引版本</dt><dd>{selectedPolicy.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{selectedPolicy.document_count} / {selectedPolicy.clause_count}</dd></div><div><dt>Embedding</dt><dd>{selectedPolicy.embedding_model}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
+                      <dl className="policy-picker-summary"><div><dt>索引版本</dt><dd>{selectedPolicy.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{selectedPolicy.document_count} / {selectedPolicy.clause_count}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
                     </>
                   )}
                   {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">目录共有 {policySets.data.total} 个版本，当前显示最近的 {policySets.data.items.length} 个。</small>}
@@ -448,7 +449,6 @@ export function NewTaskPage() {
             <div>
               <strong>无法创建任务</strong>
               <p>{localError || errorMessage(createTask.error)}</p>
-              {createTask.error instanceof ApiClientError && createTask.error.requestId && <small>Request ID: {createTask.error.requestId}</small>}
             </div>
             {!localError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => createTask.mutate(lastSubmission)}>重试相同请求</button>}
           </div>

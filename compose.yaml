@@ -23,6 +23,28 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  checkpoint-setup:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "-m", "supplier_comparison.checkpoints", "setup"]
+    restart: "no"
+
   api:
     build:
       context: .
@@ -38,7 +60,15 @@ services:
       TEST_USER_ID: ${TEST_USER_ID:-local-test-user}
       SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-}
       SUPPLIER_MODEL_MODEL_ID: ${SUPPLIER_MODEL_MODEL_ID:-}
+      SUPPLIER_MODEL_BASE_URL: ${SUPPLIER_MODEL_BASE_URL:-}
       SUPPLIER_MODEL_ENVIRONMENT: ${SUPPLIER_MODEL_ENVIRONMENT:-LOCAL}
+      SUPPLIER_MODEL_API_KEY_ENV: ${SUPPLIER_MODEL_API_KEY_ENV:-QQFARM_SILICONFLOW_API_KEY}
+      SUPPLIER_DECISION_INTENT_MODEL_PROVIDER: ${SUPPLIER_DECISION_INTENT_MODEL_PROVIDER:-}
+      SUPPLIER_DECISION_INTENT_MODEL_MODEL_ID: ${SUPPLIER_DECISION_INTENT_MODEL_MODEL_ID:-}
+      SUPPLIER_DECISION_INTENT_MODEL_BASE_URL: ${SUPPLIER_DECISION_INTENT_MODEL_BASE_URL:-}
+      SUPPLIER_DECISION_INTENT_MODEL_API_KEY_ENV: ${SUPPLIER_DECISION_INTENT_MODEL_API_KEY_ENV:-QQFARM_SILICONFLOW_API_KEY}
+      SUPPLIER_DECISION_INTENT_MODEL_TIMEOUT_SECONDS: ${SUPPLIER_DECISION_INTENT_MODEL_TIMEOUT_SECONDS:-60}
+      SUPPLIER_DECISION_INTENT_MODEL_MAX_ATTEMPTS: ${SUPPLIER_DECISION_INTENT_MODEL_MAX_ATTEMPTS:-2}
       SUPPLIER_EMBEDDING_PROVIDER: ${SUPPLIER_EMBEDDING_PROVIDER:-siliconflow}
       SUPPLIER_EMBEDDING_MODEL_ID: ${SUPPLIER_EMBEDDING_MODEL_ID:-BAAI/bge-m3}
       SUPPLIER_EMBEDDING_BASE_URL: ${SUPPLIER_EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
@@ -62,6 +92,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      checkpoint-setup:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -93,6 +127,12 @@ services:
       SUPPLIER_MODEL_MAX_ATTEMPTS: ${SUPPLIER_MODEL_MAX_ATTEMPTS:-3}
       SUPPLIER_MODEL_ENABLE_THINKING: ${SUPPLIER_MODEL_ENABLE_THINKING:-false}
       SUPPLIER_MODEL_MAX_TOKENS: ${SUPPLIER_MODEL_MAX_TOKENS:-8192}
+      SUPPLIER_CONVERSATION_MODEL_PROVIDER: ${SUPPLIER_CONVERSATION_MODEL_PROVIDER:-}
+      SUPPLIER_CONVERSATION_MODEL_MODEL_ID: ${SUPPLIER_CONVERSATION_MODEL_MODEL_ID:-}
+      SUPPLIER_CONVERSATION_MODEL_BASE_URL: ${SUPPLIER_CONVERSATION_MODEL_BASE_URL:-}
+      SUPPLIER_CONVERSATION_MODEL_API_KEY_ENV: ${SUPPLIER_CONVERSATION_MODEL_API_KEY_ENV:-QQFARM_SILICONFLOW_API_KEY}
+      SUPPLIER_CONVERSATION_MODEL_TIMEOUT_SECONDS: ${SUPPLIER_CONVERSATION_MODEL_TIMEOUT_SECONDS:-60}
+      SUPPLIER_CONVERSATION_MODEL_MAX_ATTEMPTS: ${SUPPLIER_CONVERSATION_MODEL_MAX_ATTEMPTS:-2}
       SUPPLIER_EMBEDDING_PROVIDER: ${SUPPLIER_EMBEDDING_PROVIDER:-siliconflow}
       SUPPLIER_EMBEDDING_MODEL_ID: ${SUPPLIER_EMBEDDING_MODEL_ID:-BAAI/bge-m3}
       SUPPLIER_EMBEDDING_BASE_URL: ${SUPPLIER_EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
@@ -113,6 +153,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      checkpoint-setup:
+        condition: service_completed_successfully
     command: ["python", "-m", "supplier_comparison.worker", "run-loop", "--poll-interval", "1"]
     restart: unless-stopped
 

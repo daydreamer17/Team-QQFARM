@@ -24,6 +24,23 @@ REQUIRED_COLUMNS = {
 
 FIELD_ALLOWED_NORMALIZED_VALUES = {
     "price_basis_unit": ("piece",),
+    "tax_mode": (
+        "NOT_APPLICABLE",
+        "INCLUDED",
+        "EXCLUDED",
+    ),
+    "day_basis": (
+        "CALENDAR_DAYS",
+        "BUSINESS_DAYS",
+    ),
+    "delivery_semantics": (
+        "ARRIVAL",
+        "SHIPMENT",
+    ),
+    "start_event": (
+        "ORDER_DATE",
+        "PAYMENT_RECEIPT",
+    ),
     "shipping_fee_status": (
         "KNOWN_AMOUNT",
         "FREE",

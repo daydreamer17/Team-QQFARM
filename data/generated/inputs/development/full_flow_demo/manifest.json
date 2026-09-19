@@ -51,11 +51,6 @@
   },
   "files": [
     {
-      "path": "data/generated/inputs/development/full_flow_demo/README.md",
-      "size_bytes": 1426,
-      "sha256": "f745301f69e6caf33d6ec5202888e6b41e277fedce6c2fa869b26b44cbe0fb3f"
-    },
-    {
       "path": "data/generated/inputs/development/full_flow_demo/policy/electronics_procurement_full_flow.txt",
       "size_bytes": 2121,
       "sha256": "b63852e831dfadd4e16d08fb44273fd68565e92a3f3588fc03ca874ab899ee8f"
@@ -101,6 +96,11 @@
       "sha256": "456b4fffb12a4f20447ae81e5eceeafdcf567fa48dfd9400cff1789d63b15246"
     },
     {
+      "path": "data/generated/inputs/development/full_flow_demo/README.md",
+      "size_bytes": 2004,
+      "sha256": "f5f8a73aeea7eac781100922d91d77ab688c2e16e367e8065be54f9b75ac70aa"
+    },
+    {
       "path": "data/generated/inputs/development/full_flow_demo/requirement/confirmed_requirement.json",
       "size_bytes": 607,
       "sha256": "72fa42f8da8a9d426b0a02b33ea33dcd464af8a3ebbf3bc8ec7a0355f1ddb576"
@@ -114,6 +114,11 @@
       "path": "data/generated/inputs/development/full_flow_demo/requirement/procurement_requirement.txt",
       "size_bytes": 464,
       "sha256": "ca2c0980863dd4a2014993e0697bd36e1a2a51a15f1b1593e0a5ea33e7da152d"
+    },
+    {
+      "path": "data/generated/inputs/development/full_flow_demo/validation_inputs.json",
+      "size_bytes": 3497,
+      "sha256": "961a320ff0f7d62adf93c74d63835d845756fa40f89bb654da4978f9e84407b9"
     }
   ]
 }

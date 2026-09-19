@@ -26,6 +26,8 @@ def test_full_flow_demo_manifest_and_uploads_are_valid() -> None:
     assert manifest["is_synthetic"] is True
     assert manifest["runtime_safe"] is True
     assert len(manifest["quotes"]) == 3
+    assert manifest["scenario_id"] == "MCU-DEMO-001"
+    assert "推荐上传顺序" in (DATASET / "README.md").read_text(encoding="utf-8")
 
     for item in manifest["files"]:
         path = ROOT / item["path"]
@@ -49,6 +51,22 @@ def test_full_flow_demo_manifest_and_uploads_are_valid() -> None:
         with pdfplumber.open(pdf_path) as pdf:
             assert any((page.extract_text() or "").strip() for page in pdf.pages)
         assert identify_csv_contract(csv_path) is not None
+
+    validation = json.loads((DATASET / "validation_inputs.json").read_text(encoding="utf-8"))
+    assert validation["suite_id"] == "full-flow-feasibility"
+    assert validation["reference_answers_must_remain_runtime_inaccessible"] is True
+    referenced_paths: list[str] = []
+    for case in validation["supplemental_inputs"]:
+        referenced_paths.extend(case.get("paths", []))
+        referenced_paths.extend(case.get("requirements", []))
+        if case.get("manifest"):
+            referenced_paths.append(case["manifest"])
+        directory = case.get("directory")
+        for group in case.get("quote_groups", []):
+            referenced_paths.extend(f"{directory}/{name}" for name in group)
+    assert referenced_paths
+    assert not any("evaluation/reference" in path for path in referenced_paths)
+    assert all((ROOT / path).is_file() for path in referenced_paths)
 
 
 def test_full_flow_demo_policy_review_matches_uploaded_text() -> None:

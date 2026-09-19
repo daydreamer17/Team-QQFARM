@@ -190,7 +190,7 @@ export function OverviewPage() {
                 <tr>
                   <th>任务</th>
                   <th>物料</th>
-                  <th>Revision</th>
+                  <th>版本</th>
                   <th>当前状态</th>
                   <th>计划下单</th>
                   <th>最近更新</th>
@@ -202,10 +202,9 @@ export function OverviewPage() {
                   <tr key={task.task_id}>
                     <td>
                       <Link className="task-name-link" to={`/tasks/${task.task_id}`}>{taskTitle(task)}</Link>
-                      <small>{task.task_id}</small>
                     </td>
                     <td>{task.manufacturer_part_number ?? '—'}<small>{task.manufacturer ?? '—'}</small></td>
-                    <td>Rev {task.task_revision}</td>
+                    <td>第 {task.task_revision} 版</td>
                     <td><span className={`status-pill ${statusTone(task.status)}`}>{statusLabels[task.status] ?? task.status}</span></td>
                     <td>{displayDay(task.planned_order_date)}</td>
                     <td>{displayDate(task.updated_at)}</td>

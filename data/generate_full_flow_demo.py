@@ -7,6 +7,7 @@ runtime worker or Agent environment.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -154,6 +155,9 @@ def _runtime_readme() -> str:
 
 ## 推荐上传顺序
 
+0. 在仓库根目录执行 `docker compose up -d --build postgres api worker`。
+   Compose 会先把业务迁移升级到当前 Alembic head，并初始化 LangGraph checkpoint 表；
+   `docker compose ps -a` 中 `migrate` 和 `checkpoint-setup` 应显示退出码 0。
 1. 进入“规则资源库”，上传 `policy/electronics_procurement_full_flow.txt`。
    根据 `policy/upload_metadata.json` 填写 Policy 元数据，并使用
    `policy/reviewed_clauses.json` 核对所有自动拆分的条款和控制码，然后发布索引。
@@ -162,13 +166,82 @@ def _runtime_readme() -> str:
 3. 在新任务中绑定刚刚发布的 Policy，分类选择 `Electronics`，地区选择 `SG`。
    Policy 索引版本会在发布时生成，请直接选择页面显示的版本，不要手动填写固定值。
 4. 按 A、B、C 的顺序上传并正式提交三份报价。供应商编号记录在
-   `manifest.json` 中。推荐上传 PDF，也可以使用对应的 CSV 作为替代输入。
+   `manifest.json` 中。推荐上传 PDF；也可以在另一个新任务中使用对应 CSV 验证替代输入路径。
+   同一任务不要同时上传同一报价的 PDF 与 CSV，以免把一种业务报价重复计数。
 5. 正式提交全部报价后启动分析。流程暂停并要求人工输入时，使用
    `evaluation/reference/full_flow_demo/` 中仅供操作员查看的演示回答。
 
 不要把 `evaluation/reference/full_flow_demo/` 挂载到运行时 Worker 或 Agent。
 运行时必须只根据用户上传的文件解析字段、计算结果并形成推荐。
+
+`validation_inputs.json` 列出补充边界数据和需要执行的操作，但不包含参考答案。
+完整手工验收步骤见 `docs/FULL_FLOW_DEMO_VALIDATION.md`。
 """
+
+
+def _validation_inputs() -> dict[str, object]:
+    return {
+        "schema_version": "1.0.0",
+        "suite_id": "full-flow-feasibility",
+        "primary_dataset": "data/generated/inputs/development/full_flow_demo",
+        "reference_answers_must_remain_runtime_inaccessible": True,
+        "supplemental_inputs": [
+            {
+                "case_id": "QUOTE_FILE_BOUNDARIES",
+                "purpose": "Reject unreadable, encrypted, oversized, over-page-limit, and invalid-header quote inputs explicitly.",
+                "paths": [
+                    "data/generated/inputs/development/quote_V4/blank_quote_v4.pdf",
+                    "data/generated/inputs/development/quote_V4/corrupted_quote_v4.pdf",
+                    "data/generated/inputs/development/quote_V4/encrypted_quote_v4.pdf",
+                    "data/generated/inputs/development/quote_V4/over_page_limit_quote_v4.pdf",
+                    "data/generated/inputs/development/quote_V4/over_size_limit_quote_v4.pdf",
+                    "data/generated/inputs/development/quote_V4/invalid_header_quote_v4.csv",
+                ],
+            },
+            {
+                "case_id": "SEMANTIC_CONFLICT_AND_PROMPT_INJECTION",
+                "purpose": "Verify conflict review and that document instructions cannot alter system rules.",
+                "paths": [
+                    "data/generated/inputs/development/quote_V6/dev_04_internal_price_conflict.pdf",
+                    "data/generated/inputs/development/quote_V6/dev_05_prompt_injection.pdf",
+                ],
+            },
+            {
+                "case_id": "OCR_ROUTING",
+                "purpose": "Verify native/OCR routing, the default OCR-off failure, and controlled OCR review when explicitly enabled.",
+                "manifest": "data/generated/manifests/quote_V7_manifest.json",
+                "paths": [
+                    "data/generated/inputs/development/quote_V7/dev_01.pdf",
+                    "data/generated/inputs/development/quote_V7/dev_04.pdf",
+                    "data/generated/inputs/development/quote_V7/dev_05.pdf",
+                ],
+            },
+            {
+                "case_id": "DECISION_BOUNDARIES_AND_PREFERENCES",
+                "purpose": "Exercise five-quote groups, ties, late delivery, budget failure, package mismatch, and target preference behavior.",
+                "directory": "data/generated/inputs/development/quote_V9",
+                "requirements": [
+                    "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost.csv",
+                    "data/generated/inputs/development/quote_V9/procurement_requirement_v9_fastest.csv",
+                    "data/generated/inputs/development/quote_V9/procurement_requirement_v9_cost_then_fastest.csv",
+                ],
+                "quote_groups": [
+                    ["v9_supplier_a.csv", "v9_supplier_b.csv", "v9_supplier_c.csv", "v9_supplier_d.csv", "v9_supplier_e.csv"],
+                    ["v9_supplier_f.csv", "v9_supplier_g.csv", "v9_supplier_h.csv", "v9_supplier_i.csv", "v9_supplier_j.csv"],
+                ],
+                "note": "Some V9 files are target-regression fixtures. Read quote_V9/README.md before interpreting a failure as a regression.",
+            },
+        ],
+        "required_operations": [
+            "Run the primary PDF path and CSV alternative path in separate tasks.",
+            "Run one feasible quote and one infeasible quote as separate single-quote tasks.",
+            "Attempt to upload the same business quote as both PDF and CSV and record whether duplicate detection prevents double counting.",
+            "Stop and restart the worker while a job is pending; verify the persisted job resumes without creating a replacement job.",
+            "Submit a stale task revision from a second browser tab; verify an explicit conflict response and safe refresh.",
+            "Run with no Policy binding, a valid Policy binding, and an unavailable or wrong-scope Policy binding.",
+            "Run once with the bounded investigation Agent disabled and once explicitly enabled.",
+        ],
+    }
 
 
 def _reference_answers() -> dict[str, object]:
@@ -274,6 +347,7 @@ def generate() -> None:
     _write_json(policy_dir / "upload_metadata.json", POLICY_METADATA)
     _write_json(policy_dir / "reviewed_clauses.json", {"clauses": reviewed_clauses})
     _write_text(OUT / "README.md", _runtime_readme())
+    _write_json(OUT / "validation_inputs.json", _validation_inputs())
     _write_json(REFERENCE_OUT / "reference_answers.json", _reference_answers())
     _write_text(
         REFERENCE_OUT / "README.md",
@@ -323,5 +397,35 @@ def generate() -> None:
     print(f"Generated operator reference in {REFERENCE_OUT}")
 
 
+def refresh_runtime_manifest() -> None:
+    """Refresh runtime file metadata without reading or rewriting references."""
+
+    manifest_path = OUT / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runtime_files = sorted(
+        path for path in OUT.rglob("*") if path.is_file() and path != manifest_path
+    )
+    manifest["files"] = [
+        {
+            "path": path.relative_to(ROOT).as_posix(),
+            "size_bytes": path.stat().st_size,
+            "sha256": _sha256(path),
+        }
+        for path in runtime_files
+    ]
+    _write_json(manifest_path, manifest)
+    print(f"Refreshed {len(runtime_files)} runtime file records in {manifest_path}")
+
+
 if __name__ == "__main__":
-    generate()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--refresh-manifest",
+        action="store_true",
+        help="Refresh runtime hashes without touching operator reference answers.",
+    )
+    args = parser.parse_args()
+    if args.refresh_manifest:
+        refresh_runtime_manifest()
+    else:
+        generate()

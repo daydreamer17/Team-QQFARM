@@ -65,10 +65,12 @@ Compose 模式：
 
 ```powershell
 docker compose build api worker
-docker compose run --rm api python -m alembic upgrade head
-docker compose run --rm api python -m supplier_comparison.checkpoints setup
 docker compose up -d --wait api worker
 ```
+
+Compose 会通过一次性的 `migrate` 和 `checkpoint-setup` 服务先升级业务表并初始化
+LangGraph checkpoint 表，成功后才启动 API 和 Worker。使用 `docker compose ps -a`
+确认这两个服务均以退出码 0 完成。手工执行迁移命令只保留为诊断手段。
 
 Swagger 位于 `http://127.0.0.1:8000/docs`。健康检查：
 

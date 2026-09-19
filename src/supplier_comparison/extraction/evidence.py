@@ -120,7 +120,15 @@ def validate_candidates(
             )
         definition = dictionary.fields[candidate.field_name]
         allowed_values = definition.allowed_normalized_values
-        if allowed_values is not None and candidate.normalized_value not in allowed_values:
+        conflict_without_resolved_value = (
+            candidate.validation_status == ValidationStatus.CONFLICT
+            and candidate.normalized_value is None
+        )
+        if (
+            allowed_values is not None
+            and not conflict_without_resolved_value
+            and candidate.normalized_value not in allowed_values
+        ):
             raise EvidenceValidationError(
                 "candidate_enum_invalid",
                 f"candidate {candidate.field_name} is outside the allowed normalized values",

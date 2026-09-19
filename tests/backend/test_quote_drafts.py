@@ -12,7 +12,13 @@ from supplier_comparison.backend.models import Base
 from supplier_comparison.backend.service import BackendService, ConflictError
 from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
-from supplier_comparison.extraction.contracts import DocumentContext, ExtractionBatch
+from supplier_comparison.extraction.contracts import (
+    CandidateProducer,
+    DocumentContext,
+    ExtractionBatch,
+    QuoteFieldCandidate,
+    ValidationStatus,
+)
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.rules import ProcurementRequirement
@@ -90,6 +96,30 @@ class CanonicalProcessor:
             writer.writeheader()
             writer.writerow(row)
         return FixedCsvQuoteParser(self.dictionary).parse_row(generated, context, 2)
+
+
+class TwoBlockingFieldsProcessor(CanonicalProcessor):
+    """Create two independent blockers to exercise incremental draft corrections."""
+
+    def process(self, **kwargs) -> ExtractionBatch:
+        batch = super().process(**kwargs)
+        candidates = []
+        for candidate in batch.candidates:
+            if candidate.field_name != "tax_mode":
+                candidates.append(candidate)
+                continue
+            values = candidate.model_dump(mode="python")
+            values.update(
+                raw_value=None,
+                normalized_value=None,
+                unit=None,
+                validation_status=ValidationStatus.MISSING,
+                origin=None,
+                source_refs=(),
+                producer=CandidateProducer.DETERMINISTIC_PARSER,
+            )
+            candidates.append(QuoteFieldCandidate.model_validate(values))
+        return batch.model_copy(update={"candidates": tuple(candidates)})
 
 
 @pytest.fixture
@@ -222,6 +252,69 @@ def test_confirmed_unknown_shipping_can_enter_formal_workflow(
         idempotency_key="submit-missing-shipping",
     )
     assert submitted["status"] == "SUBMITTED"
+
+
+def test_incremental_draft_corrections_keep_prior_audit_events(
+    service: BackendService, tmp_path: Path
+) -> None:
+    task = service.create_task(
+        requirement(), idempotency_key="create-two-blockers", scenario_id="MCU-DEMO-001"
+    )
+    draft = service.upload_quote_draft_stream(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-023",
+        original_filename="supplier-b.csv",
+        media_type="text/csv",
+        stream=CANONICAL_QUOTES.open("rb"),
+        idempotency_key="draft-upload-two-blockers",
+        is_synthetic=True,
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/1.0.0",
+    )
+    reviewed = DraftReviewRunner(
+        service,
+        processor=TwoBlockingFieldsProcessor(tmp_path, supplier_id="SUP-023"),
+        dictionary_path=DICTIONARY_PATH,
+    ).run_job(draft["job"]["job_id"])
+    assert reviewed["status"] == "REVIEW_REQUIRED"
+
+    first = service.correct_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_draft_revision=1,
+        corrections=[{
+            "field_name": "shipping_fee_status",
+            "raw_value": "Not stated in the quotation",
+            "normalized_value": "UNKNOWN",
+            "unit": None,
+            "reason": "Supplier document does not state shipping.",
+        }],
+        idempotency_key="correct-shipping-first",
+    )
+    assert first["status"] == "REVIEW_REQUIRED"
+
+    second = service.correct_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_draft_revision=first["draft_revision"],
+        corrections=[{
+            "field_name": "tax_mode",
+            "raw_value": "Tax excluded",
+            "normalized_value": "EXCLUDED",
+            "unit": None,
+            "reason": "Supplier confirmed that tax is excluded.",
+        }],
+        idempotency_key="correct-tax-second",
+    )
+
+    assert second["status"] == "READY_TO_SUBMIT"
+    assert not any(
+        "CORRECTION_AUDIT_MISSING" in finding["codes"]
+        for finding in second["review_findings"]
+    )
 
 
 @pytest.mark.parametrize("quote_path", V9_QUOTES, ids=lambda path: path.stem)

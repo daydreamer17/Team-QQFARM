@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { IssueAnswer, PolicyRetrievalStatus, TaskDetail } from '../api/types'
+import type { IssueAnswer, TaskDetail } from '../api/types'
+import { controlLabel, fieldLabel, policyStatusLabel } from '../lib/presentation'
 
 interface IssuePanelProps {
   task: TaskDetail
@@ -10,6 +11,16 @@ interface IssuePanelProps {
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '问题回答未保存。'
+}
+
+function issueTypeLabel(issueType: string) {
+  const labels: Record<string, string> = {
+    POLICY_EVIDENCE_REVIEW: '制度证据需要重新检索',
+    CONFIRM_MISSING: '确认原报价未提供信息',
+    SHIPPING_AMOUNT: '补充已确认的运费',
+    BATCH_FIELD_REVIEW: '集中核对报价字段',
+  }
+  return labels[issueType] ?? '需要人工确认'
 }
 
 export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
@@ -57,21 +68,21 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
 
       <dl className="job-summary">
         <div><dt>供应商</dt><dd>{task.quotes.find((quote) => quote.quote_id === issue.quote_id)?.supplier_id ?? '—'}</dd></div>
-        <div><dt>字段</dt><dd>{issue.field_name ?? '—'}</dd></div>
-        <div><dt>问题类型</dt><dd>{issue.issue_type}</dd></div>
+        <div><dt>需要确认</dt><dd>{issue.field_name ? fieldLabel(issue.field_name) : '制度依据'}</dd></div>
+        <div><dt>处理事项</dt><dd>{issueTypeLabel(issue.issue_type)}</dd></div>
       </dl>
 
       {issue.issue_type === 'POLICY_EVIDENCE_REVIEW' && (
         <div className="issue-action policy-issue-action">
           <p>
-            仅在网络、模型服务或临时索引故障已经修复时重试。若制度内容或索引版本发生变化，必须使用新 Policy Binding 创建新任务。
+            仅在网络、模型服务或临时索引故障已经修复时重试。若制度内容或索引版本发生变化，需要新建任务并重新绑定制度版本。
           </p>
           <div className="policy-issue-statuses">
             {Object.entries(issue.answer_schema.retrieval_statuses ?? {}).map(([controlCode, status]) => (
               <div key={controlCode}>
-                <strong>{controlCode}</strong>
+                <strong>{controlLabel(controlCode)}</strong>
                 <span className={`policy-retrieval-status policy-status-${String(status).toLowerCase().replace('_', '-')}`}>
-                  {status as PolicyRetrievalStatus}
+                  {policyStatusLabel(String(status))}
                 </span>
               </div>
             ))}
@@ -82,9 +93,9 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
             disabled={answer.isPending}
             onClick={() => answer.mutate({ answer_type: 'RETRY_POLICY_RETRIEVAL' })}
           >
-            {answer.isPending ? '正在创建续跑 Job…' : '修复后重新检索'}
+            {answer.isPending ? '正在恢复分析…' : '修复后重新检索'}
           </button>
-          <small>当前任务仍固定使用原 Policy 版本与索引版本。</small>
+          <small>当前任务仍固定使用原制度版本与索引版本。</small>
         </div>
       )}
 
