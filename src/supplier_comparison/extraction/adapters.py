@@ -9,6 +9,7 @@ import os
 import random
 import re
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -19,6 +20,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Callable
 
+import certifi
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .contracts import (
@@ -38,6 +40,15 @@ from .model_payload import ModelExtractionPayload
 
 
 PROMPT_VERSION = "quote-extraction/2.2.0"
+
+
+def trusted_urlopen(request: urllib.request.Request, *, timeout: float):
+    """Open HTTPS with a bundled CA store on Python installs without system roots."""
+
+    context = ssl.create_default_context()
+    if context.cert_store_stats()["x509_ca"] == 0:
+        context.load_verify_locations(cafile=certifi.where())
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
 
 
 @dataclass(slots=True)
@@ -235,7 +246,7 @@ class OpenAICompatibleAdapter(ModelAdapter):
         self,
         config: OpenAICompatibleConfig,
         *,
-        opener: Callable[..., object] = urllib.request.urlopen,
+        opener: Callable[..., object] = trusted_urlopen,
         sleeper: Callable[[float], None] = time.sleep,
         randomizer: Callable[[], float] = random.random,
     ) -> None:

@@ -37,6 +37,7 @@ class Task(Base):
     current_graph_run_id: Mapped[str | None] = mapped_column(String(64))
     current_snapshot_id: Mapped[str | None] = mapped_column(String(64))
     current_result_id: Mapped[str | None] = mapped_column(String(64))
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     policy_set_version: Mapped[str | None] = mapped_column(String(128))
     policy_index_version: Mapped[str | None] = mapped_column(String(128))
     policy_category: Mapped[str | None] = mapped_column(String(128))
@@ -60,6 +61,7 @@ class TaskRevision(Base):
     change_type: Mapped[str] = mapped_column(String(64), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
     request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    details: Mapped[dict | None] = mapped_column(JSON_VALUE)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -78,6 +80,7 @@ class RequirementRecord(Base):
     requirement_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_artifact_id: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -116,6 +119,131 @@ class Document(Base):
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     is_synthetic: Mapped[bool] = mapped_column(nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+
+class QuoteDraft(Base):
+    __tablename__ = "quote_drafts"
+
+    quote_draft_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    base_task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="UPLOADED")
+    proposed_quote_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    proposed_document_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    supplier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    is_synthetic: Mapped[bool] = mapped_column(nullable=False, default=False)
+    parsed_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    batch_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    review_artifact_id: Mapped[str | None] = mapped_column(String(64))
+    calls_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    environment: Mapped[str | None] = mapped_column(String(32))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    dictionary_sha256: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class RequirementDraft(Base):
+    __tablename__ = "requirement_drafts"
+
+    requirement_draft_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="UPLOADED")
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    parsed_payload: Mapped[dict | None] = mapped_column(JSON_VALUE)
+    candidates: Mapped[dict | None] = mapped_column(JSON_VALUE)
+    calls_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    environment: Mapped[str | None] = mapped_column(String(32))
+    prompt_version: Mapped[str | None] = mapped_column(String(64))
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    submitted_task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="SET NULL"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+
+class SummaryReport(Base):
+    __tablename__ = "summary_reports"
+
+    summary_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
+    input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    facts: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    narrative: Mapped[dict | None] = mapped_column(JSON_VALUE)
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model_id: Mapped[str | None] = mapped_column(String(255))
+    environment: Mapped[str | None] = mapped_column(String(32))
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    calls_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    error_code: Mapped[str | None] = mapped_column(String(128))
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint("task_id", "input_sha256", "prompt_version", "model_id"),
+    )
+
+
+class DocumentAccessEvent(Base):
+    __tablename__ = "document_access_events"
+
+    access_event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("documents.document_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    request_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -203,12 +331,27 @@ class Job(Base):
     __tablename__ = "jobs"
 
     job_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    task_id: Mapped[str] = mapped_column(
-        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    task_id: Mapped[str | None] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=True, index=True
     )
-    graph_run_id: Mapped[str] = mapped_column(
+    graph_run_id: Mapped[str | None] = mapped_column(
         ForeignKey("graph_runs.graph_run_id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    quote_draft_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quote_drafts.quote_draft_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    requirement_draft_id: Mapped[str | None] = mapped_column(
+        ForeignKey("requirement_drafts.requirement_draft_id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    summary_id: Mapped[str | None] = mapped_column(
+        ForeignKey("summary_reports.summary_id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
     issue_id: Mapped[str | None] = mapped_column(String(64))

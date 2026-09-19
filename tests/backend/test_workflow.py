@@ -23,9 +23,14 @@ from supplier_comparison.backend.service import ConflictError
 from supplier_comparison.backend.service import BackendError, NotFoundError
 from supplier_comparison.backend.workflow import WorkflowRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
-from supplier_comparison.extraction.contracts import DocumentContext, ExtractionBatch
+from supplier_comparison.extraction.contracts import (
+    DocumentContext,
+    ExtractionBatch,
+    ValidationStatus,
+)
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.errors import UnsupportedInputError
 from supplier_comparison.rules import ProcurementRequirement
 
 
@@ -160,6 +165,15 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     ).run_job(confirmation["job_id"])
     assert second["status"] == "WAITING_INPUT"
     assert second["issue"]["issue_type"] == "SHIPPING_AMOUNT"
+    pending_fields = service.list_quote_fields(
+        task["task_id"], second["issue"]["quote_id"]
+    )
+    assert not any(
+        finding["field_name"] == "shipping_fee_status"
+        and finding["severity"] == "BLOCKING"
+        and not finding["resolved"]
+        for finding in pending_fields["review_findings"]
+    )
     draft = service.list_results(task["task_id"])[0]["result"]
     assert draft["disposition"] == "PENDING_INPUT"
     assert draft["evaluated_at"] == "2026-09-14T01:00:00Z"
@@ -217,6 +231,8 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         item for item in result["supplier_results"] if item["quote_id"] == supplier_b["quote_id"]
     )["total_cost"] == "7000.00"
     fields = service.list_quote_fields(task["task_id"], supplier_b["quote_id"])
+    assert fields["review_findings"]
+    assert all("codes" in finding for finding in fields["review_findings"])
     shipping_field = next(
         field for field in fields["fields"] if field["field_name"] == "shipping_fee_amount"
     )
@@ -257,7 +273,7 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     assert len(review_events) == 1
     assert review_events[0].task_revision == revision + 1
     assert review_events[0].payload["reviewer_id"] == "test-user"
-    assert len(correction_events) == 2
+    assert len(correction_events) == 3
     assert {event.payload["field_name"] for event in correction_events} == {
         "shipping_fee_status",
         "shipping_fee_amount",
@@ -282,30 +298,42 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         for item in result["supplier_results"]
         if item["supplier_name"] == "Sterling Components"
     )
-    correction = service.correct_field(
+    batch_corrections = [
+        {
+            "quote_id": supplier_c["quote_id"],
+            "field_name": "shipping_fee_amount",
+            "raw_value": "S$0.00",
+            "normalized_value": "0.00",
+            "unit": "SGD",
+            "reason": "Correct a confirmed extraction error.",
+        },
+        {
+            "quote_id": supplier_c["quote_id"],
+            "field_name": "payment_terms",
+            "raw_value": "Net 30 days",
+            "normalized_value": "Net 30 days",
+            "unit": None,
+            "reason": "Confirm the extracted payment terms.",
+        },
+    ]
+    correction = service.correct_fields(
         task_id=task["task_id"],
-        quote_id=supplier_c["quote_id"],
-        field_name="shipping_fee_amount",
         expected_task_revision=revision + 2,
-        raw_value="S$0.00",
-        normalized_value="0.00",
-        unit="SGD",
-        reason="Correct a confirmed extraction error.",
+        corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
-    repeated_correction = service.correct_field(
+    repeated_correction = service.correct_fields(
         task_id=task["task_id"],
-        quote_id=supplier_c["quote_id"],
-        field_name="shipping_fee_amount",
         expected_task_revision=revision + 2,
-        raw_value="S$0.00",
-        normalized_value="0.00",
-        unit="SGD",
-        reason="Correct a confirmed extraction error.",
+        corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
     assert repeated_correction == correction
-    assert service.get_task(task["task_id"])["task_revision"] == revision + 3
+    assert correction["correction_count"] == 2
+    corrected_task = service.get_task(task["task_id"])
+    assert corrected_task["task_revision"] == revision + 3
+    assert corrected_task["current_job"]["has_corrections"] is True
+    assert corrected_task["current_job"]["correction_batch_incomplete"] is False
     assert correction["graph_run_id"] != started["graph_run_id"]
     with sessions() as session:
         correction_graph = session.get(GraphRun, correction["graph_run_id"])

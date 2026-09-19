@@ -10,6 +10,8 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..extraction.adapters import trusted_urlopen
+
 
 class ClientModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -143,7 +145,7 @@ class SiliconFlowEmbeddingClient:
         self,
         config: EmbeddingConfig,
         *,
-        opener: Callable[..., object] = urllib.request.urlopen,
+        opener: Callable[..., object] = trusted_urlopen,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         self.config = config
@@ -208,7 +210,7 @@ class SiliconFlowRerankClient:
         self,
         config: RerankConfig,
         *,
-        opener: Callable[..., object] = urllib.request.urlopen,
+        opener: Callable[..., object] = trusted_urlopen,
         sleeper: Callable[[float], None] = time.sleep,
     ) -> None:
         self.config = config

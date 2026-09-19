@@ -121,11 +121,31 @@ CURRENCY_AMOUNT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 OTHER_FEE_SOURCE_PATTERN = re.compile(
-    r"\b(?:other|additional|handling|service|surcharge)\s+"
-    r"(?:fee|fees|charge|charges)\b|\bfee\s+total\b|"
+    r"\b(?:other|additional|ancillary|extra|handling|service|surcharge|"
+    r"administration|admin)\s+(?:fee|fees|charge|charges)\b|"
+    r"\bextras?\s+(?:policy|total|status|amount|fee|fees|charge|charges)\b|"
+    r"\bfee\s+total\b|"
     r"\bhandling\s+and\s+admin(?:istration)?\b",
     re.IGNORECASE,
 )
+DECIMAL_TOKEN_PATTERN = re.compile(r'(?<![A-Za-z0-9])([0-9][0-9,]*(?:\.[0-9]+)?)(?![A-Za-z0-9])')
+
+
+def _supplier_name_contains_system_id(supplier_name: str, supplier_id: str) -> bool:
+    """Return true only for a meaningful, standalone system identifier.
+
+    Short UI labels such as A/B/C are supplier slots, not stable identifiers. Treating
+    them as arbitrary substrings made ordinary names such as "Meridian" fail review.
+    """
+
+    normalized_id = supplier_id.strip()
+    if len(normalized_id) < 3:
+        return False
+    return re.search(
+        rf"(?<![A-Za-z0-9]){re.escape(normalized_id)}(?![A-Za-z0-9])",
+        supplier_name,
+        re.IGNORECASE,
+    ) is not None
 
 
 def review_extraction_batch(
@@ -172,11 +192,10 @@ def review_extraction_batch(
         batch, review_events, by_name, source_by_id, assessment_by_name
     )
     findings.extend(event_findings)
-    findings.extend(
-        _review_correction_events(
-            batch, corrections, by_name, assessment_by_name
-        )
+    valid_correction_fields, correction_findings = _review_correction_events(
+        batch, corrections, by_name, assessment_by_name
     )
+    findings.extend(correction_findings)
 
     if not any(finding.decision == FieldReviewDecision.REJECTED for finding in findings):
         for candidate in batch.candidates:
@@ -189,6 +208,8 @@ def review_extraction_batch(
                     source_by_id,
                     semantic_context_by_id,
                     valid_review_events.get(candidate.field_name),
+                    candidate.field_name in valid_correction_fields,
+                    valid_review_events.get(FEE_STATUS_FIELDS.get(candidate.field_name, "")),
                 )
             )
         findings.extend(
@@ -593,8 +614,9 @@ def _review_correction_events(
     events: tuple[CorrectionEvent, ...],
     by_name: dict[str, QuoteFieldCandidate],
     assessments: dict[str, CriticalityAssessment],
-) -> list[FieldReviewFinding]:
+) -> tuple[set[str], list[FieldReviewFinding]]:
     findings: list[FieldReviewFinding] = []
+    valid_fields: set[str] = set()
     context = batch.parsed_input.context
     source_ids = {source.source_id for source in batch.parsed_input.sources}
     latest_by_field: dict[str, CorrectionEvent] = {}
@@ -605,6 +627,8 @@ def _review_correction_events(
         valid = (
             candidate is not None
             and event.after == CandidateValueSnapshot.from_candidate(candidate)
+            and candidate.validation_status == ValidationStatus.VERIFIED
+            and candidate.origin == Origin(event.action.value)
             and event.task_revision == context.task_revision
             and event.quote_id == context.quote_id
             and event.quote_version == context.quote_version
@@ -614,6 +638,7 @@ def _review_correction_events(
             and all(source_id in source_ids for source_id in event.basis_source_ids)
         )
         if valid:
+            valid_fields.add(field_name)
             continue
         findings.append(
             _finding(
@@ -649,7 +674,7 @@ def _review_correction_events(
                     candidate=candidate,
                 )
             )
-    return findings
+    return valid_fields, findings
 
 
 def _review_candidate(
@@ -659,6 +684,8 @@ def _review_candidate(
     source_by_id: dict[str, object],
     semantic_context_by_id: dict[str, str],
     review_event: ReviewEvent | None,
+    has_valid_correction: bool = False,
+    related_missing_event: ReviewEvent | None = None,
 ) -> list[FieldReviewFinding]:
     findings: list[FieldReviewFinding] = []
     is_critical = assessment.is_critical
@@ -771,21 +798,42 @@ def _review_candidate(
         candidate.field_name in FEE_STATUS_FIELDS
         and candidate.normalized_value == "UNKNOWN"
     ):
-        findings.append(
-            _candidate_problem(
+        if (
+            related_missing_event is not None
+            and related_missing_event.action == HumanReviewAction.CONFIRM_MISSING
+        ):
+            findings.append(
+                _candidate_finding(
+                    candidate,
+                    assessment,
+                    decision=FieldReviewDecision.WARNING,
+                    severity=ReviewSeverity.WARNING,
+                    reason=ReviewReason.MISSING_REQUIRED_INFO,
+                    code="HUMAN_CONFIRMED_FEE_UNKNOWN",
+                    message=(
+                        "Human review confirmed that the document provides no usable "
+                        "fee amount; calculation remains pending user input."
+                    ),
+                    accepted=False,
+                    resolved=True,
+                    resolution_event_id=related_missing_event.review_event_id,
+                )
+            )
+        else:
+            findings.append(_candidate_problem(
                 candidate,
                 assessment,
                 code="FEE_STATUS_UNKNOWN",
                 message="Unknown fee status requires human confirmation before calculation.",
                 reason=ReviewReason.MISSING_REQUIRED_INFO,
-            )
-        )
+            ))
     findings.extend(
         _review_sources(
             candidate,
             assessment,
             source_by_id,
             semantic_context_by_id,
+            has_valid_correction=has_valid_correction,
         )
     )
 
@@ -888,6 +936,8 @@ def _review_sources(
     assessment: CriticalityAssessment,
     source_by_id: dict[str, EvidenceSource],
     semantic_context_by_id: dict[str, str],
+    *,
+    has_valid_correction: bool = False,
 ) -> list[FieldReviewFinding]:
     findings: list[FieldReviewFinding] = []
     cited_sources = []
@@ -974,7 +1024,8 @@ def _review_sources(
         and _valid_decimal(candidate.normalized_value)
         and cited_sources
         and not any(
-            candidate.normalized_value in source.raw_text for source in cited_sources
+            _source_contains_decimal(source.raw_text, candidate.normalized_value)
+            for source in cited_sources
         )
     ):
         findings.append(
@@ -1000,7 +1051,12 @@ def _review_sources(
                 reason=ReviewReason.EVIDENCE_ERROR,
             )
         )
-    if assessment.is_critical:
+    # A matching CorrectionEvent is the auditable human verification of the
+    # current value. Keep the original OCR source attached for provenance, but
+    # do not make that source's old confidence score block the corrected value
+    # again. Type, unit, range, source identity, semantics, and cross-field
+    # checks still apply.
+    if assessment.is_critical and not has_valid_correction:
         unavailable_confidence = [
             source
             for source in cited_sources
@@ -1086,7 +1142,7 @@ def _review_cross_field(
     if (
         supplier_name_candidate is not None
         and isinstance(supplier_name, str)
-        and context_supplier_id.casefold() in supplier_name.casefold()
+        and _supplier_name_contains_system_id(supplier_name, context_supplier_id)
     ):
         findings.append(
             _candidate_problem(
@@ -1326,6 +1382,11 @@ def _critical_values_complete(
             continue
         candidate = by_name[assessment.field_name]
         if (
+            candidate.field_name in FEE_STATUS_FIELDS
+            and candidate.normalized_value == "UNKNOWN"
+        ):
+            return False
+        if (
             assessment.field_name in failing_fields
             or candidate.validation_status not in {ValidationStatus.EXTRACTED, ValidationStatus.VERIFIED}
             or candidate.normalized_value is None
@@ -1520,6 +1581,20 @@ def _valid_decimal(value: str) -> bool:
     except InvalidOperation:
         return False
     return amount.is_finite() and amount >= 0
+
+
+def _source_contains_decimal(source_text: str, normalized_value: str) -> bool:
+    try:
+        expected = Decimal(normalized_value)
+    except InvalidOperation:
+        return False
+    for token in DECIMAL_TOKEN_PATTERN.findall(source_text):
+        try:
+            if Decimal(token.replace(',', '')) == expected:
+                return True
+        except InvalidOperation:
+            continue
+    return False
 
 
 def _decimal_is_zero(value: str) -> bool:

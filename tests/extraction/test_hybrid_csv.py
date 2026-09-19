@@ -58,6 +58,26 @@ def test_clean_registered_csv_maps_all_fields_without_semantic_review(
     )
 
 
+def test_workflow_context_remains_authoritative_for_uploaded_canonical_csv(
+    quote_dictionary,
+) -> None:
+    context = _context('V6-DEV-01').model_copy(
+        update={
+            'task_id': 'TASK-FROM-API',
+            'quote_id': 'QUOTE-FROM-API',
+            'document_id': 'DOCUMENT-FROM-API',
+        }
+    )
+    result = RegisteredHybridCsvParser(quote_dictionary).parse_row(
+        _path('development', 'dev_01_registered_clean.csv'),
+        context,
+        validate_authority=False,
+    )
+
+    assert result.batch.parsed_input.context == context
+    assert len(result.batch.candidates) == 30
+
+
 def test_semantic_registered_csv_defers_only_detected_fields(quote_dictionary) -> None:
     result = RegisteredHybridCsvParser(quote_dictionary).parse_row(
         _path("development", "dev_02_registered_semantic.csv"),

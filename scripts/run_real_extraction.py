@@ -252,8 +252,8 @@ def main() -> int:
         parser.error(
             f"--supplier {args.supplier} is not available for --dataset-version {args.dataset_version}"
         )
-    if args.input_format == "csv" and args.dataset_version not in {"V2", "V3"}:
-        parser.error("--input-format csv currently requires --dataset-version V2 or V3")
+    if args.input_format == "csv" and args.dataset_version not in {"V1", "V2", "V3"}:
+        parser.error("--input-format csv currently requires --dataset-version V1, V2, or V3")
 
     if args.all_suppliers:
         if args.output_dir is None or args.output is not None:

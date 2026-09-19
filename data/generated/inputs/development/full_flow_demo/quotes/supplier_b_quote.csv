@@ -1,0 +1,2 @@
+response_no,supplier,part,case_style,revision,condition,each_price,currency,minimum_qty,delivery,valid_until,payment_terms
+QUOTE-MCU-DEMO-001-B,Schwarzwald Circuits,QW-MCU9-DEMO,QFN32,R1,Unused / new,6.80,S$,"1,000 pieces",3 calendar days ARO,2026/09/20,Net thirty

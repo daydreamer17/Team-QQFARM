@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from supplier_comparison.extraction.contracts import (
     SourceKind,
 )
 from supplier_comparison.extraction.criticality import CriticalityContext
+from supplier_comparison.extraction.corrections import apply_candidate_correction
 from supplier_comparison.extraction.errors import ContractError, InputLimitError, UnreadableInputError
 from supplier_comparison.extraction.pdf_ocr import (
     OCR_CONFLICT_REASON_PREFIX,
@@ -28,7 +30,7 @@ from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.pdf_quality import PdfQualityConfig
 from supplier_comparison.extraction.review import review_extraction_batch
 from supplier_comparison.extraction.service import extract_quote_candidates
-from supplier_comparison.extraction.review_contracts import ReviewStatus
+from supplier_comparison.extraction.review_contracts import CorrectionAction, ReviewStatus
 from supplier_comparison.ocr.engine import (
     OcrEngineError,
     OcrPageResult,
@@ -352,6 +354,67 @@ def test_critical_ocr_confidence_blocks_without_erasing_extracted_value(
         for finding in envelope.review.findings
     )
     assert envelope.downstream_ready is False
+
+
+def test_audited_human_correction_resolves_old_ocr_confidence_blocker(
+    tmp_path: Path,
+    quote_dictionary,
+) -> None:
+    path = tmp_path / 'scan.pdf'
+    _write_structural_pdf(path, ('image',))
+    parsed = _parser(FakeOcrEngine(confidence=0.82)).parse(path, context_for('a'))
+    price_source = next(source for source in parsed.sources if '6.42' in source.raw_text)
+    batch = _batch(
+        parsed,
+        quote_dictionary,
+        _missing_payload(
+            quote_dictionary,
+            extracted={
+                'unit_price': {
+                    'field_name': 'unit_price',
+                    'raw_value': 'SGD 6.42 per piece',
+                    'normalized_value': '6.42',
+                    'unit': 'SGD',
+                    'validation_status': 'EXTRACTED',
+                    'source_refs': [
+                        {
+                            'source_id': price_source.source_id,
+                            'quoted_text': price_source.raw_text,
+                        }
+                    ],
+                }
+            },
+        ),
+    )
+    corrected, event = apply_candidate_correction(
+        batch,
+        field_name='unit_price',
+        action=CorrectionAction.USER_CORRECTION,
+        raw_value='SGD 6.42 per piece (human verified)',
+        normalized_value='6.42',
+        unit='SGD',
+        reason_code='HUMAN_VERIFIED_OCR',
+        reason='Human checked the value against the original quote.',
+        reviewer_id='reviewer-1',
+        reviewed_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
+    )
+
+    envelope = review_extraction_batch(
+        corrected,
+        quote_dictionary,
+        CriticalityContext(required_revision=None, base_unit='piece'),
+        input_is_synthetic=True,
+        corrections=(event,),
+    )
+
+    price_codes = {
+        code
+        for finding in envelope.review.findings
+        if finding.field_name == 'unit_price'
+        for code in finding.codes
+    }
+    assert 'OCR_CRITICAL_CONFIDENCE_LOW' not in price_codes
+    assert 'FIELD_ACCEPTED' in price_codes
 
 
 def test_high_confidence_confusable_ocr_part_number_requires_review(

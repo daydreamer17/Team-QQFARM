@@ -1,6 +1,6 @@
 # 本地运行环境
 
-本页说明如何在 Windows PowerShell 中启动 Supplier Comparison 的 PostgreSQL、FastAPI 和一次性 worker。数据库与固定输出测试不需要模型 API Key。
+本页说明如何在 Windows PowerShell 中启动 Supplier Comparison 的 PostgreSQL、FastAPI 和后台 worker。数据库与固定输出测试不需要模型 API Key。
 
 完整 MCU 两次中断演示见 [成员 D 交接](guide/guide_D.md)。
 
@@ -67,7 +67,7 @@ Compose 模式：
 docker compose build api worker
 docker compose run --rm api python -m alembic upgrade head
 docker compose run --rm api python -m supplier_comparison.checkpoints setup
-docker compose up -d --wait api
+docker compose up -d --wait api worker
 ```
 
 Swagger 位于 `http://127.0.0.1:8000/docs`。健康检查：
@@ -77,21 +77,22 @@ Invoke-RestMethod http://127.0.0.1:8000/health/live
 Invoke-RestMethod http://127.0.0.1:8000/health/ready
 ```
 
-## 5. 执行一次性 worker
+## 5. 后台 worker
 
-API 创建 run 或回答 issue 后会返回 `job_id`。每个 job 由一个短生命周期进程执行：
-
-```powershell
-.\.venv\Scripts\python.exe -m supplier_comparison.worker run-job --job-id <job_id>
-```
-
-Compose 方式：
+Compose 中的 worker 自动轮询并领取 `PENDING` job。用户在页面启动分析或回答问题后，不需要复制 `job_id` 或执行终端命令：
 
 ```powershell
-docker compose --profile worker run --rm worker python -m supplier_comparison.worker run-job --job-id <job_id>
+docker compose up -d worker
 ```
 
-worker 在成功结束或写入 interrupt 后退出。本周没有常驻轮询器，不能只启动 `api` 后等待 job 自动执行。
+本机开发也可以启动同样的常驻 worker：
+
+```powershell
+.\.venv\Scripts\python.exe -m dotenv -f .env run -- `
+  .\.venv\Scripts\python.exe -m supplier_comparison.worker run-loop --poll-interval 1
+```
+
+`run-job --job-id <job_id>` 仍保留为运维诊断入口，不属于终端用户操作流程。
 
 ## 6. 运行测试
 
@@ -117,7 +118,7 @@ Remove-Item Env:RUN_POSTGRES_TESTS
 
 ```powershell
 docker compose down
-docker compose up -d --wait api
+docker compose up -d --wait api worker
 ```
 
 不要执行 `docker compose down -v`；`-v` 会删除数据库和报价文件卷。卷用途：
@@ -131,6 +132,6 @@ docker compose up -d --wait api
 
 - 支持 PDF 和注册 CSV；主演示使用 V1 原生文本 PDF。
 - OCR 默认关闭，扫描 PDF 应明确返回 `pdf_page_requires_ocr`。
-- 没有 React、正式认证、RAG、审批、报告、后台 worker 调度或任意节点崩溃自动恢复。
+- React 前端和单后台 worker 已可本地运行；版本化 AI Summary 已接入，正式认证、审批、HTML 报告和任意节点崩溃自动恢复尚未完成。
 - 本地身份由 `TEST_USER_ID` 固定提供；仅用于开发与演示。
 - 主办方 Lightsail／Claude 接口尚未验收时，只能声明本地后端通过。
