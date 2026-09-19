@@ -23,6 +23,28 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  migrate:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    restart: "no"
+
+  checkpoint-setup:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:-supplier_dev_password}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["python", "-m", "supplier_comparison.checkpoints", "setup"]
+    restart: "no"
+
   api:
     build:
       context: .
@@ -62,6 +84,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      checkpoint-setup:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -113,6 +139,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      checkpoint-setup:
+        condition: service_completed_successfully
     command: ["python", "-m", "supplier_comparison.worker", "run-loop", "--poll-interval", "1"]
     restart: unless-stopped
 

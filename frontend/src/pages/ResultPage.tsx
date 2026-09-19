@@ -9,12 +9,18 @@ import type {
   SupplierComparisonResult,
 } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
-
-const statusLabels: Record<string, string> = {
-  FEASIBLE: '符合要求',
-  INFEASIBLE: '不符合要求',
-  PENDING: '等待确认',
-}
+import {
+  controlLabel,
+  dispositionLabel,
+  fieldLabel,
+  impactStatusLabel,
+  originLabel,
+  policyStatusLabel,
+  quoteStatusLabel,
+  reasonText,
+  taskStatusLabel,
+  validationStatusLabel,
+} from '../lib/presentation'
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '结果读取失败。'
@@ -49,9 +55,9 @@ function evidenceCount(fields: QuoteFieldsResponse | undefined) {
 
 function supplierConclusion(supplier: SupplierComparisonResult, recommended: boolean) {
   if (recommended) return '初步推荐'
-  if (supplier.failed_reasons.length > 0) return supplier.failed_reasons[0].message
-  if (supplier.pending_reasons.length > 0) return supplier.pending_reasons[0].message
-  return supplier.status === 'FEASIBLE' ? '可进入比较' : statusLabels[supplier.status] ?? supplier.status
+  if (supplier.failed_reasons.length > 0) return reasonText(supplier.failed_reasons[0])
+  if (supplier.pending_reasons.length > 0) return reasonText(supplier.pending_reasons[0])
+  return supplier.status === 'FEASIBLE' ? '可进入比较' : quoteStatusLabel(supplier.status)
 }
 
 function Reasons({ title, reasons }: { title: string; reasons: ResultReason[] }) {
@@ -62,9 +68,8 @@ function Reasons({ title, reasons }: { title: string; reasons: ResultReason[] })
       <ul>
         {reasons.map((reason, index) => (
           <li key={reason.code + index}>
-            <strong>{reason.code}</strong>
-            <span>{reason.message}</span>
-            {reason.fields.length > 0 && <small>{reason.fields.join('、')}</small>}
+            <span>{reasonText(reason)}</span>
+            {reason.fields.length > 0 && <small>相关信息：{reason.fields.map(fieldLabel).join('、')}</small>}
           </li>
         ))}
       </ul>
@@ -91,15 +96,15 @@ function EvidenceDrawer({
       <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} 字段证据`}>
         <header>
           <div>
-            <p className="eyebrow">QUOTE EVIDENCE</p>
+            <p className="eyebrow">报价证据</p>
             <h2>{supplier.supplier_name}</h2>
-            <span>{supplier.quote_id} · Version {supplier.quote_version}</span>
+            <span>第 {supplier.quote_version} 版报价</span>
           </div>
           <button className="drawer-close" type="button" onClick={onClose} aria-label="关闭">×</button>
         </header>
 
         <div className="drawer-summary">
-          <div><span>可行性</span><strong>{statusLabels[supplier.status] ?? supplier.status}</strong></div>
+          <div><span>可行性</span><strong>{quoteStatusLabel(supplier.status)}</strong></div>
           <div><span>确认总成本</span><strong>{valueText(supplier.total_cost)}</strong></div>
           <div><span>预计到货</span><strong>{valueText(supplier.estimated_arrival_date)}</strong></div>
         </div>
@@ -122,21 +127,21 @@ function EvidenceDrawer({
             {fields.fields.map((field) => (
               <article className="drawer-field" key={field.field_name}>
                 <div className="drawer-field-heading">
-                  <code>{field.field_name}</code>
+                  <strong>{fieldLabel(field.field_name)}</strong>
                   <span className={'field-status field-status-' + field.validation_status.toLowerCase()}>
-                    {field.validation_status}
+                    {validationStatusLabel(field.validation_status)}
                   </span>
                 </div>
                 <dl>
                   <div><dt>原始表达</dt><dd>{valueText(field.raw_value)}</dd></div>
                   <div><dt>标准化值</dt><dd>{valueText(field.normalized_value)} {valueText(field.unit) === '—' ? '' : field.unit}</dd></div>
-                  <div><dt>来源类型</dt><dd>{valueText(field.origin)}</dd></div>
+                  <div><dt>来源类型</dt><dd>{originLabel(field.origin)}</dd></div>
                 </dl>
                 {field.evidence.length > 0 ? (
                   <div className="drawer-evidence-list">
                     {field.evidence.map((evidence, index) => (
                       <blockquote key={(evidence.source_id ?? 'source') + index}>
-                        <span>{evidenceLocation(evidence)} · {evidence.source_id ?? '无来源 ID'}</span>
+                        <span>{evidenceLocation(evidence)}</span>
                         <p>{evidence.quoted_text ?? '无引用片段'}</p>
                       </blockquote>
                     ))}
@@ -178,7 +183,7 @@ export function ResultPage() {
   if (resultQuery.isError) {
     return (
       <section className="card error-panel" role="alert">
-        <p className="eyebrow">RESULT ERROR</p>
+        <p className="eyebrow">结果读取失败</p>
         <h1>无法读取结果</h1>
         <p>{errorMessage(resultQuery.error)}</p>
         <Link className="button button-secondary" to={'/tasks/' + taskId}>返回任务</Link>
@@ -201,9 +206,9 @@ export function ResultPage() {
   const selectedFieldsQuery = selectedSupplierIndex === null ? null : fieldQueries[selectedSupplierIndex]
   const currency = task?.requirement.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
-  let policyState = '未绑定 Policy'
-  if (taskQuery.isPending) policyState = '正在读取 Policy 绑定'
-  else if (taskQuery.isError) policyState = 'Policy 绑定读取失败'
+  let policyState = '未绑定制度'
+  if (taskQuery.isPending) policyState = '正在读取制度绑定'
+  else if (taskQuery.isError) policyState = '制度绑定读取失败'
   else if (task?.policy_binding && policyRetrievals.length === 0) policyState = '未执行制度检索'
   else if (task?.policy_binding && successfulPolicyRetrievals === policyRetrievals.length) {
     policyState = `${successfulPolicyRetrievals} / ${policyRetrievals.length} 找到证据`
@@ -242,7 +247,7 @@ export function ResultPage() {
 
       <section className="decision-section-lead">
         <div>
-          <p className="eyebrow">DECISION COMPARISON</p>
+          <p className="eyebrow">决策结果</p>
           <h2>决策比较</h2>
           <p>确定性计算产出比较与初步推荐；前端不重新计算金额或硬约束。</p>
         </div>
@@ -252,7 +257,7 @@ export function ResultPage() {
       </section>
 
       <section className="decision-state-ribbon" aria-label="分层状态">
-        <article><span>任务</span><strong>{task?.status ?? '已生成结果'}</strong></article>
+        <article><span>任务</span><strong>{task ? taskStatusLabel(task.status) : '已生成结果'}</strong></article>
         <article><span>字段证据</span><strong>{loadedEvidenceCount} / {suppliers.length} 已读取</strong></article>
         <article><span>可行性</span><strong>{feasibleCount} 可行 · {pendingCount} 待确认</strong></article>
         <article><span>制度证据</span><strong>{policyState}</strong></article>
@@ -270,17 +275,17 @@ export function ResultPage() {
 
       <section className="result-policy-summary decision-impact-summary">
         <div>
-          <p className="eyebrow">DECISION IMPACT</p>
+          <p className="eyebrow">待确认项影响</p>
           <h2>未知项对当前选择的影响</h2>
-          <p>{decisionImpact ? decisionImpact.scope : '该历史结果没有保存决策影响证明。'}</p>
+          <p>{decisionImpact ? '说明尚未确认的信息会不会改变当前推荐。' : '该历史结果没有保存待确认项影响说明。'}</p>
         </div>
         {decisionImpact && (
           <div className="impact-list">
             {decisionImpact.quote_impacts.map((impact) => (
               <article key={impact.quote_id}>
-                <div><strong>{impact.quote_id}</strong><span className={`status-pill impact-${impact.status.toLowerCase().replaceAll('_', '-')}`}>{impact.status}</span></div>
-                <p>{impact.message}</p>
-                {impact.unknown_fields.length > 0 && <small>未知字段：{impact.unknown_fields.join('、')}</small>}
+                <div><strong>{suppliers.find((supplier) => supplier.quote_id === impact.quote_id)?.supplier_name ?? '未命名供应商'}</strong><span className={`status-pill impact-${impact.status.toLowerCase().replaceAll('_', '-')}`}>{impactStatusLabel(impact.status)}</span></div>
+                <p>{reasonText({ code: impact.reason_code, message: impact.message })}</p>
+                {impact.unknown_fields.length > 0 && <small>待确认信息：{impact.unknown_fields.map(fieldLabel).join('、')}</small>}
                 {impact.cost_lower_bound !== null && <small>成本下界：{currency ?? ''} {impact.cost_lower_bound}</small>}
               </article>
             ))}
@@ -291,7 +296,7 @@ export function ResultPage() {
 
       <section className="result-policy-summary">
         <div>
-          <p className="eyebrow">POLICY EVIDENCE</p>
+          <p className="eyebrow">制度依据</p>
           <h2>制度证据摘要</h2>
           <p>{policyState}。制度检索结果仅证明找到或未找到可引用条款，不代表最终合规审批。</p>
         </div>
@@ -300,7 +305,7 @@ export function ResultPage() {
             const codes = [...new Set([...retrieval.covered_control_codes, ...retrieval.missing_control_codes])]
             return (
               <span className={`policy-retrieval-status policy-status-${retrieval.status.toLowerCase().replace('_', '-')}`} key={retrieval.retrieval_id}>
-                {codes.join('、') || '控制项'} · {retrieval.status}
+                {codes.map(controlLabel).join('、') || '制度要求'} · {policyStatusLabel(retrieval.status)}
               </span>
             )
           }) : <span className="status-pill status-muted">无制度检索记录</span>}
@@ -331,9 +336,9 @@ export function ResultPage() {
                       <button className="supplier-link" type="button" onClick={() => setSelectedSupplierIndex(index)}>
                         {supplier.supplier_name}
                       </button>
-                      <small>{supplier.quote_id} · v{supplier.quote_version}</small>
+                      <small>第 {supplier.quote_version} 版报价</small>
                     </td>
-                    <td><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{statusLabels[supplier.status] ?? supplier.status}</span></td>
+                    <td><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>
                     <td className="comparison-cost">{supplier.total_cost === null ? '—' : `${currency ?? ''} ${supplier.total_cost}`.trim()}</td>
                     <td>{valueText(supplier.estimated_arrival_date)}</td>
                     <td>
@@ -352,7 +357,7 @@ export function ResultPage() {
         <aside className="recommendation-panel">
           <span className="recommendation-kicker">当前排序场景</span>
           <h2>{recommendedNames.length > 0 ? `初步推荐 ${recommendedNames.join('、')}` : '暂无可发布推荐'}</h2>
-          <p className="recommendation-disposition">{payload.disposition}</p>
+          <p className="recommendation-disposition">{dispositionLabel(payload.disposition)}</p>
           {payload.comparison_reasons.length > 0 ? (
             <ul>
               {payload.comparison_reasons.map((reason, index) => (
@@ -363,7 +368,6 @@ export function ResultPage() {
             <p className="recommendation-empty">后端未返回额外比较说明。</p>
           )}
           <div className="recommendation-meta">
-            <span>{payload.rule_version}</span>
             <span>{displayDate(payload.evaluated_at)}</span>
           </div>
           <div className="gate-warning">
@@ -385,7 +389,7 @@ export function ResultPage() {
       </section>
 
       <p className="result-boundary">
-        金额、数量、可行性和推荐均来自后端冻结结果；结果 ID {resultQuery.data.result_id}，基于 Task Rev {resultQuery.data.task_revision}。
+        金额、数量、可行性和推荐均来自已保存的确定性计算结果，当前展示采购任务第 {resultQuery.data.task_revision} 版。
       </p>
 
       {selectedSupplier && selectedFieldsQuery && (

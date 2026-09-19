@@ -75,7 +75,7 @@ export function AppShell() {
                     'history-task' + (isActive ? ' history-task-active' : '')
                   }
                   key={task.task_id}
-                  title={task.task_id}
+                  title={task.scenario_id ?? task.manufacturer_part_number ?? '采购任务'}
                   to={'/tasks/' + task.task_id}
                 >
                   <span className="history-task-index">

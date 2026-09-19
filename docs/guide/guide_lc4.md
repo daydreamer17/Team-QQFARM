@@ -122,7 +122,7 @@ V9 参考预期：
 - 合成 Policy TXT、元数据和已审核条款。
 - 文件 manifest 与 SHA-256 哈希。
 
-统一场景为 `FULL-FLOW-DEMO-001`：
+统一场景为 `MCU-DEMO-001`：
 
 | 字段 | 值 |
 | --- | --- |

@@ -9,6 +9,7 @@ import type {
   TaskDetail,
   TaskQuote,
 } from '../api/types'
+import { fieldLabel } from '../lib/presentation'
 
 interface ReviewPanelProps {
   task: TaskDetail
@@ -405,10 +406,9 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                   return (
                     <li className={isEditing ? 'review-finding review-finding-editing' : 'review-finding'} key={finding.field_name}>
                       <div className="review-finding-title">
-                        <strong>{fieldLabels[finding.field_name] ?? finding.field_name}</strong>
-                        <code>{finding.field_name}</code>
+                        <strong>{fieldLabels[finding.field_name] ?? fieldLabel(finding.field_name)}</strong>
                         <span className={'review-severity review-severity-' + severity.toLowerCase()}>
-                          {severity}
+                          {severity === 'BLOCKING' ? '必须处理' : severity === 'WARNING' ? '建议核对' : '提示'}
                         </span>
                         {staged && <span className="review-staged">已暂存</span>}
                       </div>

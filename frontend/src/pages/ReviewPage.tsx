@@ -4,6 +4,7 @@ import { useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { FieldCorrectionInput } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { fieldLabel } from '../lib/presentation'
 
 interface DraftValue {
   rawValue: string
@@ -178,7 +179,7 @@ export function ReviewPage() {
           const editable = Boolean(target)
           return (
             <article className="card review-problem-card" key={problem.finding_id}>
-              <header><div><strong>{problem.original_filename ?? problem.quote_id}</strong><code>{problem.field_name} · v{problem.field_version ?? '—'}</code></div><span className={`status-pill ${problem.needs_resolution ? 'status-pending' : 'status-muted'}`}>{problem.needs_resolution ? '必须解决' : '保留记录'}</span></header>
+              <header><div><strong>{problem.original_filename ?? '报价文件'}</strong><span>{fieldLabel(problem.field_name)}</span></div><span className={`status-pill ${problem.needs_resolution ? 'status-pending' : 'status-muted'}`}>{problem.needs_resolution ? '必须解决' : '保留记录'}</span></header>
               <p>{problem.message}</p>
               <small>{problem.codes.join('、')}</small>
               {editable && draft && (
@@ -195,7 +196,7 @@ export function ReviewPage() {
         {clarificationOnly.map((target) => {
           const key = problemKey(target)
           const draft = drafts[key] ?? initialDraft(target)
-          return <article className="card review-problem-card" key={`clarification:${key}`}><header><div><strong>{target.original_filename ?? target.quote_id}</strong><code>{target.field_name} · v{target.field_version}</code></div><span className="status-pill status-pending">调查待确认</span></header><p>{target.message}</p><div className="review-correction-fields"><label className="field"><span>核对后的原始表达</span><input value={draft.rawValue} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, rawValue: event.target.value } }))} /></label><label className="field"><span>标准化值</span><input value={draft.normalizedValue} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, normalizedValue: event.target.value } }))} /></label><label className="field"><span>单位</span><input value={draft.unit} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, unit: event.target.value } }))} /></label><label className="field"><span>修正理由</span><input value={draft.reason} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, reason: event.target.value } }))} /></label></div></article>
+          return <article className="card review-problem-card" key={`clarification:${key}`}><header><div><strong>{target.original_filename ?? '报价文件'}</strong><span>{fieldLabel(target.field_name)}</span></div><span className="status-pill status-pending">调查待确认</span></header><p>{target.message}</p><div className="review-correction-fields"><label className="field"><span>核对后的原始表达</span><input value={draft.rawValue} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, rawValue: event.target.value } }))} /></label><label className="field"><span>标准化值</span><input value={draft.normalizedValue} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, normalizedValue: event.target.value } }))} /></label><label className="field"><span>单位</span><input value={draft.unit} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, unit: event.target.value } }))} /></label><label className="field"><span>修正理由</span><input value={draft.reason} onChange={(event) => setDrafts((current) => ({ ...current, [key]: { ...draft, reason: event.target.value } }))} /></label></div></article>
         })}
       </div>
 

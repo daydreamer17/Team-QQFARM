@@ -38,8 +38,8 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
     if (window.confirm('保存后会推进任务版本、使旧结果失效；有正式报价时将立即排队全量重算。确认保存吗？')) update.mutate()
   }
   return <form className="requirement-form" onSubmit={submit}>
-    <section className="page-heading"><div><p className="eyebrow">REQUIREMENT REVISION</p><h1>修改采购需求</h1><p>Task Revision {task.task_revision} · Policy Binding 保持只读。</p></div><Link className="button button-secondary" to={`/tasks/${task.task_id}`}>取消</Link></section>
-    {task.policy_binding && <div className="run-notice">Policy：{task.policy_binding.policy_set_version} / {task.policy_binding.policy_index_version} · {task.policy_binding.category} · {task.policy_binding.region}</div>}
+    <section className="page-heading"><div><p className="eyebrow">修改采购需求</p><h1>修改采购需求</h1><p>当前第 {task.task_revision} 版 · 已绑定的制度保持不变。</p></div><Link className="button button-secondary" to={`/tasks/${task.task_id}`}>取消</Link></section>
+    {task.policy_binding && <div className="run-notice">绑定制度：{task.policy_binding.policy_set_version} / {task.policy_binding.policy_index_version} · {task.policy_binding.category} · {task.policy_binding.region}</div>}
     <RequirementFields value={value} onChange={(field, next) => {
       if (field === 'ranking_preference' && value.secondary_preference === next) {
         setValue((current) => ({ ...current, ranking_preference: String(next), secondary_preference: '' }))

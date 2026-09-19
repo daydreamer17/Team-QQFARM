@@ -349,7 +349,7 @@ export function ResourcePage() {
               <tbody>{imports.data.items.map((item) => (
                 <tr key={item.policy_import_id}>
                   <td><strong>{item.title}</strong><span>{item.original_filename} · {formatBytes(item.size_bytes)}</span><small>{item.document_id} v{item.document_version}</small></td>
-                  <td><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><small>Rev {item.revision}</small></td>
+                  <td><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><small>第 {item.revision} 版</small></td>
                   <td><strong>{item.policy_set_id}</strong><span>{item.policy_set_version}</span>{item.policy_index_version && <small>{item.policy_index_version}</small>}</td>
                   <td><span>{item.categories.join(' / ') || '—'}</span><small>{item.regions.join(' / ') || '—'}</small></td>
                   <td>{item.clause_count}</td>
@@ -367,19 +367,18 @@ export function ResourcePage() {
 
       <section className="card policy-directory">
         <div className="section-heading">
-          <div><p className="eyebrow">PUBLISHED POLICIES</p><h2>已发布 Policy</h2></div>
+          <div><p className="eyebrow">已发布制度</p><h2>可绑定的制度版本</h2></div>
           {policySets.data && <span>{policySets.data.total} 个可绑定版本</span>}
         </div>
         <p className="policy-directory-description">这里只展示后端确认已发布且可冻结到采购任务的策略集与索引版本。</p>
-        {policySets.isPending && <div className="policy-directory-state">正在读取已发布 Policy…</div>}
-        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>已发布 Policy 读取失败。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
-        {policySets.data && policySets.data.items.length === 0 && <div className="policy-directory-state">暂无已发布 Policy。完成制度审核与发布后会显示在这里。</div>}
+        {policySets.isPending && <div className="policy-directory-state">正在读取已发布制度…</div>}
+        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>已发布制度读取失败。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
+        {policySets.data && policySets.data.items.length === 0 && <div className="policy-directory-state">暂无已发布制度。完成制度审核与发布后会显示在这里。</div>}
         {policySets.data && policySets.data.items.length > 0 && (
           <div className="published-policy-grid">{policySets.data.items.map((item) => (
             <article key={`${item.policy_set_id}:${item.policy_set_version}:${item.policy_index_version}`} className="published-policy-card">
               <header><div><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></div><span className="status-pill status-ready">已发布</span></header>
-              <dl><div><dt>索引版本</dt><dd>{item.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>分类</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>地区</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>Embedding</dt><dd>{item.embedding_model}</dd></div><div><dt>发布时间</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
-              <small>{item.provider} · {item.embedding_dimension} 维 · {item.preprocessing_version}</small>
+              <dl><div><dt>索引版本</dt><dd>{item.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>分类</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>地区</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>发布时间</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
             </article>
           ))}</div>
         )}
