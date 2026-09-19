@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, ApiClientError } from '../api/client'
+import { api, ApiClientError, documentContentUrl } from '../api/client'
 import type { IssueHistoryItem, ResultHistoryItem } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 
 function displayDate(value: string | null | undefined) {
   if (!value) return '—'
@@ -48,6 +50,7 @@ function errorMessage(error: unknown) {
 
 export function AuditPage() {
   const { taskId = '' } = useParams()
+  const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const task = useQuery({
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
@@ -68,6 +71,11 @@ export function AuditPage() {
     queryFn: () => api.listResults(taskId),
     enabled: Boolean(taskId),
   })
+  const audit = useQuery({
+    queryKey: ['tasks', taskId, 'audit-events'],
+    queryFn: () => api.getTaskAudit(taskId),
+    enabled: Boolean(taskId),
+  })
 
   if (task.isPending) return <section className="card loading-panel">正在读取任务审计信息…</section>
   if (task.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error)}</section>
@@ -86,6 +94,8 @@ export function AuditPage() {
         revision={data.task_revision}
         resultId={data.current_result_id}
         quoteCount={data.quotes.length}
+        summaryComplete={data.summary_completed}
+        progress={data.progress}
         reviewBlocked={Boolean(data.current_issue)}
         policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
         active="audit"
@@ -131,6 +141,7 @@ export function AuditPage() {
                     <span>{displayDate(version.created_at)}</span>
                     <small title={version.document_sha256}>{version.document_sha256.slice(0, 12)}… · {version.media_type}</small>
                     {version.is_current && <b>当前版本</b>}
+                    <button className="button button-secondary" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>预览 / 下载</button>
                   </div>
                 ))}
               </div>
@@ -194,6 +205,13 @@ export function AuditPage() {
           ))}
         </div>
       </section>
+
+      <section className="audit-section">
+        <div className="section-heading"><div><p className="eyebrow">TASK REVISIONS</p><h2>任务变更与文件访问</h2></div><span>{audit.data?.revisions.length ?? 0} 个版本</span></div>
+        <div className="audit-list">{audit.data?.revisions.map((revision) => <article className="card audit-record" key={revision.revision}><header><strong>Revision {revision.revision} · {revision.change_type}</strong><span>{displayDate(revision.created_at)}</span></header><pre>{JSON.stringify(revision.details, null, 2)}</pre></article>)}</div>
+        {(audit.data?.document_accesses.length ?? 0) > 0 && <details><summary>文件访问记录（{audit.data?.document_accesses.length}）</summary><div className="audit-list">{audit.data?.document_accesses.map((event) => <article className="card audit-record" key={event.access_event_id}><strong>{event.action} · {event.document_id}</strong><span>{event.actor_id} · {displayDate(event.created_at)}</span></article>)}</div></details>}
+      </section>
+      {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }

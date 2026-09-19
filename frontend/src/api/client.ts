@@ -6,6 +6,7 @@ import type {
   HealthResponse,
   IssueAnswer,
   IssueHistoryItem,
+  InvestigationCase,
   PolicyClauseInput,
   PolicyImportListQuery,
   PolicyImportListResponse,
@@ -19,10 +20,18 @@ import type {
   QuoteDraftResponse,
   QuoteHistoryResponse,
   QuoteUploadResponse,
+  RequirementDraftResponse,
+  RequirementSimulationResponse,
+  ReviewOverviewResponse,
+  SelectionGapResponse,
   StartRunResponse,
   TaskDetail,
+  TaskAuditResponse,
   TaskListResponse,
+  TaskMutationResponse,
   TaskSummary,
+  SummaryListResponse,
+  SummaryReportResponse,
   ResultHistoryItem,
 } from './types'
 
@@ -118,7 +127,12 @@ export function createIdempotencyKey() {
   return crypto.randomUUID()
 }
 
+export function documentContentUrl(taskId: string, documentId: string, disposition: 'inline' | 'attachment' = 'inline') {
+  return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/documents/${encodeURIComponent(documentId)}/content?disposition=${disposition}`
+}
+
 export const api = {
+  healthLive: () => request<HealthResponse>('/health/live'),
   healthReady: () => request<HealthResponse>('/health/ready'),
   createTask: (body: CreateTaskRequest, idempotencyKey: string) =>
     request<TaskSummary>('/api/v1/tasks', {
@@ -129,38 +143,45 @@ export const api = {
       },
       body: JSON.stringify(body),
     }),
+  uploadRequirementDraft: (file: File, idempotencyKey: string) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<RequirementDraftResponse>('/api/v1/requirement-drafts', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body,
+    })
+  },
+  getRequirementDraft: (draftId: string) =>
+    request<RequirementDraftResponse>(`/api/v1/requirement-drafts/${encodeURIComponent(draftId)}`),
+  discardRequirementDraft: (draftId: string, expectedDraftRevision: number, idempotencyKey: string) =>
+    request<RequirementDraftResponse>(`/api/v1/requirement-drafts/${encodeURIComponent(draftId)}/discard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_draft_revision: expectedDraftRevision }),
+    }),
   getTask: (taskId: string) =>
     request<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
   listQuotes: (taskId: string) =>
     request<QuoteHistoryResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes`,
     ),
-  listTasks: (limit = 8) =>
-    request<TaskListResponse>('/api/v1/tasks?limit=' + limit),
-  uploadQuote: (
-    taskId: string,
-    input: {
-      expectedTaskRevision: number
-      supplierId: string
-      isSynthetic: boolean
-      file: File
-    },
-    idempotencyKey: string,
-  ) => {
-    const body = new FormData()
-    body.append('expected_task_revision', String(input.expectedTaskRevision))
-    body.append('supplier_id', input.supplierId)
-    body.append('is_synthetic', String(input.isSynthetic))
-    body.append('file', input.file)
-    return request<QuoteUploadResponse>(
-      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes`,
-      {
-        method: 'POST',
-        headers: { 'Idempotency-Key': idempotencyKey },
-        body,
-      },
-    )
-  },
+  listTasks: (values: number | { limit?: number; offset?: number; query?: string; status?: string; sort?: string } = 8) =>
+    request<TaskListResponse>('/api/v1/tasks' + queryString(typeof values === 'number' ? { limit: values } : values)),
+  updateRequirement: (taskId: string, expectedTaskRevision: number, requirement: CreateTaskRequest['requirement'], idempotencyKey: string) =>
+    request<TaskMutationResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/requirement`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_task_revision: expectedTaskRevision, requirement }),
+    }),
+  abandonTask: (taskId: string, expectedTaskRevision: number, reason: string, idempotencyKey: string) =>
+    request<TaskMutationResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_task_revision: expectedTaskRevision, reason }),
+    }),
+  getTaskAudit: (taskId: string) =>
+    request<TaskAuditResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/revisions`),
   listQuoteDrafts: (taskId: string) =>
     request<QuoteDraftListResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
@@ -189,6 +210,10 @@ export const api = {
       },
     )
   },
+  getQuoteDraft: (taskId: string, draftId: string) =>
+    request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}`,
+    ),
   correctQuoteDraft: (
     taskId: string,
     draftId: string,
@@ -335,6 +360,22 @@ export const api = {
         '/results/' +
         encodeURIComponent(resultId),
     ),
+  listSummaries: (taskId: string) =>
+    request<SummaryListResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries`),
+  createSummary: (taskId: string, expectedTaskRevision: number, resultId: string, idempotencyKey: string) =>
+    request<SummaryReportResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_task_revision: expectedTaskRevision, result_id: resultId }),
+    }),
+  getSummary: (taskId: string, summaryId: string) =>
+    request<SummaryReportResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries/${encodeURIComponent(summaryId)}`),
+  retrySummary: (taskId: string, summaryId: string, expectedTaskRevision: number, idempotencyKey: string) =>
+    request<SummaryReportResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries/${encodeURIComponent(summaryId)}/retries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+    }),
   getQuoteFields: (taskId: string, quoteId: string) =>
     request<QuoteFieldsResponse>(
       '/api/v1/tasks/' +
@@ -343,6 +384,35 @@ export const api = {
       encodeURIComponent(quoteId) +
       '/fields',
     ),
+  getReview: (taskId: string) =>
+    request<ReviewOverviewResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/review`,
+    ),
+  listInvestigations: (taskId: string) =>
+    request<InvestigationCase[]>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/investigations`,
+    ),
+  getSelectionGaps: (taskId: string, expectedTaskRevision: number) =>
+    request<SelectionGapResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/selection-gaps?expected_task_revision=${expectedTaskRevision}`,
+    ),
+  simulateRequirement: (
+    taskId: string,
+    expectedTaskRevision: number,
+    changes: { budget_amount?: string; delivery_deadline?: string },
+  ) =>
+    request<RequirementSimulationResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/requirement-simulations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expected_task_revision: expectedTaskRevision,
+          confirm_hypothetical: true,
+          changes,
+        }),
+      },
+    ),
   correctQuoteFields: (
     taskId: string,
     expectedTaskRevision: number,
@@ -350,7 +420,7 @@ export const api = {
     idempotencyKey: string,
   ) =>
     request<StartRunResponse>(
-      '/api/v1/tasks/' + encodeURIComponent(taskId) + '/corrections',
+      '/api/v1/tasks/' + encodeURIComponent(taskId) + '/fields/corrections',
       {
         method: 'POST',
         headers: {
@@ -362,6 +432,7 @@ export const api = {
           corrections: corrections.map((item) => ({
             quote_id: item.quoteId,
             field_name: item.fieldName,
+            expected_field_version: item.expectedFieldVersion,
             raw_value: item.rawValue,
             normalized_value: item.normalizedValue,
             unit: item.unit,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -10,9 +11,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
-from supplier_comparison.backend.models import Base
+from supplier_comparison.backend.models import Base, Document, Task, WorkflowArtifact
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import BackendError
+from supplier_comparison.backend.service import content_hash
 from supplier_comparison.backend.workflow import WorkflowRunner
 from langgraph.checkpoint.memory import InMemorySaver
 from tests.backend.test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
@@ -83,6 +85,12 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert loaded.status_code == 200
     assert loaded.json()["scenario_id"] == "MCU-DEMO-001"
     assert loaded.json()["requirement"]["budget_amount"] == "8000.00"
+    assert loaded.json()["progress"] == {
+        "requirement_completed": True,
+        "quote_review_completed": False,
+        "decision_completed": False,
+        "summary_completed": False,
+    }
     assert loaded.json()["quotes"] == [
         {
             "quote_id": uploaded.json()["quote_id"],
@@ -142,7 +150,11 @@ def test_list_tasks_returns_safe_recent_summaries(
                 "created_at": response.json()["items"][0]["created_at"],
                 "updated_at": response.json()["items"][0]["updated_at"],
             }
-        ]
+        ],
+        "total": 1,
+        "limit": 10,
+        "offset": 0,
+        "status_counts": {"DRAFT": 1},
     }
 
 
@@ -306,6 +318,327 @@ def test_health_endpoints_separate_liveness_and_readiness(
     http, _service = client
     assert http.get("/health/live").json() == {"status": "alive"}
     assert http.get("/health/ready").json() == {"status": "ready"}
+
+
+def test_quote_draft_mutations_define_json_request_bodies(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+
+    schema_response = http.get("/openapi.json")
+
+    assert schema_response.status_code == 200
+    paths = schema_response.json()["paths"]
+    operations = (
+        (
+            "/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/corrections",
+            "put",
+            "QuoteDraftCorrectionRequest",
+        ),
+        (
+            "/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/submit",
+            "post",
+            "SubmitQuoteDraftRequest",
+        ),
+        (
+            "/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/discard",
+            "post",
+            "DiscardQuoteDraftRequest",
+        ),
+    )
+    for path, method, schema_name in operations:
+        body_schema = paths[path][method]["requestBody"]["content"][
+            "application/json"
+        ]["schema"]
+        assert body_schema == {"$ref": f"#/components/schemas/{schema_name}"}
+
+
+def test_requirement_draft_is_grounded_and_bound_to_created_task(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    uploaded = http.post(
+        "/api/v1/requirement-drafts",
+        headers={"Idempotency-Key": "requirement-upload-1"},
+        files={"file": ("requirement.txt", b"Manufacturer: QQ Demo Components\nPart: QW-MCU9-DEMO\nQuantity: 1000 pieces", "text/plain")},
+    )
+    assert uploaded.status_code == 202
+    draft = uploaded.json()
+    context = service.requirement_draft_job_context(draft["job"]["job_id"])
+    source = {
+        "source_id": "requirement:line:1", "kind": "TEXT_LINE",
+        "page_number": None, "line_number": 1, "raw_text": "Manufacturer: QQ Demo Components",
+    }
+    service.complete_requirement_draft_job(
+        context["job_id"],
+        parsed={"schema_version": "requirement-parsed/1.0.0", "sources": [source]},
+        candidates={"schema_version": "requirement-candidates/1.0.0", "candidates": [{
+            "field_name": "manufacturer", "raw_value": "QQ Demo Components",
+            "normalized_value": "QQ Demo Components", "validation_status": "EXTRACTED",
+            "origin": "DOCUMENT", "source_refs": [{"source_id": source["source_id"], "quoted_text": source["raw_text"]}],
+        }]},
+        calls_used=1,
+    )
+    ready = http.get(f"/api/v1/requirement-drafts/{draft['requirement_draft_id']}").json()
+    assert ready["status"] == "READY"
+    created = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-from-requirement-draft"},
+        json={
+            "requirement": REQUIREMENT,
+            "requirement_draft_id": ready["requirement_draft_id"],
+            "expected_requirement_draft_revision": ready["draft_revision"],
+        },
+    )
+    assert created.status_code == 201
+    used = http.get(f"/api/v1/requirement-drafts/{ready['requirement_draft_id']}").json()
+    assert used["status"] == "USED"
+    assert used["submitted_task_id"] == created.json()["task_id"]
+
+
+def test_requirement_update_and_soft_abandon_are_versioned(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    task = http.post(
+        "/api/v1/tasks", headers={"Idempotency-Key": "create-edit"}, json={"requirement": REQUIREMENT}
+    ).json()
+    changed = dict(REQUIREMENT, budget_amount="9000.00")
+    updated = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        headers={"Idempotency-Key": "edit-requirement"},
+        json={"expected_task_revision": 1, "requirement": changed},
+    )
+    assert updated.status_code == 202
+    assert updated.json()["task_revision"] == 2
+    assert updated.json()["status"] == "DRAFT"
+    assert http.get(f"/api/v1/tasks/{task['task_id']}").json()["requirement"]["budget_amount"] == "9000.00"
+
+    abandoned = http.post(
+        f"/api/v1/tasks/{task['task_id']}/abandon",
+        headers={"Idempotency-Key": "abandon-task"},
+        json={"expected_task_revision": 2, "reason": "采购需求已经取消"},
+    )
+    assert abandoned.status_code == 200
+    assert abandoned.json()["status"] == "ABANDONED"
+    blocked = http.post(
+        f"/api/v1/tasks/{task['task_id']}/runs",
+        headers={"Idempotency-Key": "run-abandoned"},
+        json={"expected_task_revision": 3},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "task_abandoned"
+    audit = http.get(f"/api/v1/tasks/{task['task_id']}/revisions").json()
+    assert [item["change_type"] for item in audit["revisions"]] == [
+        "TASK_CREATED", "REQUIREMENT_UPDATED", "TASK_ABANDONED"
+    ]
+    assert audit["revisions"][-1]["details"]["reason"] == "采购需求已经取消"
+
+
+def test_requirement_update_with_quote_queues_full_recalculation(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key="create-edit-with-quote")
+    quote = service.upload_quote(
+        task["task_id"], expected_task_revision=1, supplier_id="SUP-EDIT",
+        original_filename="quote.csv", media_type="text/csv", content=b"quote",
+        idempotency_key="upload-edit-quote",
+    )
+    changed = dict(REQUIREMENT, delivery_deadline="2026-09-20")
+    response = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        headers={"Idempotency-Key": "edit-with-quote"},
+        json={"expected_task_revision": quote["task_revision"], "requirement": changed},
+    )
+    assert response.status_code == 202
+    assert response.json()["status"] == "QUEUED"
+    assert response.json()["graph_run_id"]
+    assert response.json()["job_id"]
+    loaded = http.get(f"/api/v1/tasks/{task['task_id']}").json()
+    assert loaded["current_job"]["job_type"] == "START"
+
+
+def test_task_directory_filters_and_paginates_on_server(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    for key, scenario in (("directory-a", "ALPHA-001"), ("directory-b", "BETA-002")):
+        created = http.post(
+            "/api/v1/tasks", headers={"Idempotency-Key": key},
+            json={"requirement": REQUIREMENT, "scenario_id": scenario},
+        )
+        assert created.status_code == 201
+    response = http.get("/api/v1/tasks", params={
+        "query": "alpha", "status": "DRAFT", "sort": "created_desc", "limit": 1, "offset": 0,
+    })
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["scenario_id"] == "ALPHA-001"
+    assert response.json()["status_counts"] == {"DRAFT": 2}
+
+
+def test_document_content_stream_is_scoped_and_audited(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key="create-file")
+    quote = service.upload_quote(
+        task["task_id"], expected_task_revision=1, supplier_id="SUP-FILE",
+        original_filename="quote.csv", media_type="text/csv", content=b"supplier,price\nSUP-FILE,10\n",
+        idempotency_key="upload-file",
+    )
+    response = http.get(
+        f"/api/v1/tasks/{task['task_id']}/documents/{quote['document_id']}/content",
+        params={"disposition": "inline"},
+        headers={"X-Request-ID": "file-request-1"},
+    )
+    assert response.status_code == 200
+    assert response.content == b"supplier,price\nSUP-FILE,10\n"
+    assert response.headers["etag"] == f'"{quote["document_sha256"]}"'
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"].startswith("inline;")
+    download = http.get(
+        f"/api/v1/tasks/{task['task_id']}/documents/{quote['document_id']}/content",
+        params={"disposition": "attachment"},
+        headers={"X-Request-ID": "file-request-2"},
+    )
+    assert download.status_code == 200
+    assert download.headers["content-disposition"].startswith("attachment;")
+    accesses = http.get(f"/api/v1/tasks/{task['task_id']}/revisions").json()["document_accesses"]
+    assert {item["action"] for item in accesses[:2]} == {"PREVIEW", "DOWNLOAD"}
+    with service.session_factory.begin() as session:
+        session.get(Document, quote["document_id"]).storage_path = "/etc/hosts"
+    escaped = http.get(
+        f"/api/v1/tasks/{task['task_id']}/documents/{quote['document_id']}/content"
+    )
+    assert escaped.status_code == 404
+    assert escaped.json()["error"]["code"] == "document_content_not_found"
+
+
+def test_summary_is_bound_to_current_result_and_worker_output(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key="create-summary")
+    result_id = "artifact_result_summary"
+    payload = {
+        "disposition": "FINAL", "evaluated_at": "2026-09-18T00:00:00+00:00",
+        "rule_version": "rules/1", "supplier_results": [], "pending_quote_ids": [],
+        "comparison_reasons": [], "recommended_quote_ids": [],
+        "final_recommendation_allowed": False,
+    }
+    with service.session_factory.begin() as session:
+        row = session.get(Task, task["task_id"])
+        row.current_result_id = result_id
+        row.status = "COMPLETED"
+        session.add(WorkflowArtifact(
+            artifact_id=result_id, task_id=task["task_id"], task_revision=1,
+            artifact_type="COMPARISON_RESULT", payload=payload,
+            content_sha256=content_hash(payload), schema_version="comparison/1",
+        ))
+    created = http.post(
+        f"/api/v1/tasks/{task['task_id']}/summaries",
+        headers={"Idempotency-Key": "summary-create"},
+        json={"expected_task_revision": 1, "result_id": result_id},
+    )
+    assert created.status_code == 202
+    report = created.json()
+    context = service.summary_job_context(report["job"]["job_id"])
+    reference_id = next(iter(context["facts"]["references"]))
+    completed = service.complete_summary_job(
+        report["job"]["job_id"],
+        narrative={
+            "title": "采购摘要", "overview": "当前结果不允许正式推荐。",
+            "sections": [{"heading": "结论", "text": "没有可发布的正式推荐。", "reference_ids": [reference_id]}],
+            "disclaimer": "本摘要不是采购审批。",
+        },
+        calls_used=1,
+    )
+    assert completed["status"] == "SUCCEEDED"
+    task_after_summary = http.get(f"/api/v1/tasks/{task['task_id']}").json()
+    assert task_after_summary["summary_completed"] is True
+    assert task_after_summary["progress"]["decision_completed"] is True
+    assert task_after_summary["progress"]["summary_completed"] is True
+    loaded = http.get(f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}")
+    assert loaded.status_code == 200
+    assert loaded.json()["narrative"]["title"] == "采购摘要"
+    replacement = service.create_summary(
+        task["task_id"],
+        expected_task_revision=1,
+        result_id=result_id,
+        idempotency_key="summary-create-new-prompt",
+        provider="fixed",
+        model_id="fixed-model",
+        environment="TEST",
+        prompt_version="summary/2",
+    )
+    assert replacement["summary_id"] != report["summary_id"]
+    superseded = http.get(
+        f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}"
+    ).json()
+    assert superseded["status"] == "STALE"
+    assert superseded["is_current"] is False
+    changed = _requirement().model_copy(update={"budget_amount": Decimal("8100.00")})
+    service.update_requirement(
+        task["task_id"], changed, expected_task_revision=1,
+        idempotency_key="summary-stale-after-requirement-change",
+    )
+    stale = http.get(f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}").json()
+    assert stale["status"] == "STALE"
+    assert stale["is_current"] is False
+    assert stale["narrative"]["title"] == "采购摘要"
+    assert http.get(f"/api/v1/tasks/{task['task_id']}").json()["summary_completed"] is False
+
+
+def test_summary_failure_retries_share_a_bounded_call_budget(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key="create-summary-retry")
+    result_id = "artifact_result_summary_retry"
+    payload = {
+        "disposition": "DRAFT", "supplier_results": [], "pending_quote_ids": [],
+        "comparison_reasons": [], "recommended_quote_ids": [],
+        "final_recommendation_allowed": False,
+    }
+    with service.session_factory.begin() as session:
+        row = session.get(Task, task["task_id"])
+        row.current_result_id = result_id
+        row.status = "COMPLETED"
+        session.add(WorkflowArtifact(
+            artifact_id=result_id, task_id=task["task_id"], task_revision=1,
+            artifact_type="COMPARISON_RESULT", payload=payload,
+            content_sha256=content_hash(payload), schema_version="comparison/1",
+        ))
+    created = http.post(
+        f"/api/v1/tasks/{task['task_id']}/summaries",
+        headers={"Idempotency-Key": "summary-retry-create"},
+        json={"expected_task_revision": 1, "result_id": result_id},
+    ).json()
+    service.summary_job_context(created["job"]["job_id"])
+    service.fail_summary_job(
+        created["job"]["job_id"], code="model_transport_error",
+        message="safe failure", calls_used=2,
+    )
+    retry = http.post(
+        f"/api/v1/tasks/{task['task_id']}/summaries/{created['summary_id']}/retries",
+        headers={"Idempotency-Key": "summary-retry-1"},
+        json={"expected_task_revision": 1},
+    )
+    assert retry.status_code == 202
+    service.summary_job_context(retry.json()["job"]["job_id"])
+    service.fail_summary_job(
+        retry.json()["job"]["job_id"], code="model_transport_error",
+        message="safe failure", calls_used=4,
+    )
+    exhausted = http.post(
+        f"/api/v1/tasks/{task['task_id']}/summaries/{created['summary_id']}/retries",
+        headers={"Idempotency-Key": "summary-retry-2"},
+        json={"expected_task_revision": 1},
+    )
+    assert exhausted.status_code == 409
+    assert exhausted.json()["error"]["code"] == "summary_not_retryable"
 
 
 def test_upload_rejects_content_larger_than_parser_limit(

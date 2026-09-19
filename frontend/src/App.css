@@ -1759,6 +1759,114 @@
   }
 }
 
+.review-problem-grid,
+.investigation-list,
+.selection-gap-grid,
+.impact-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.review-problem-grid,
+.selection-gap-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.review-problem-card,
+.investigation-card,
+.selection-gap-card {
+  display: grid;
+  align-content: start;
+  gap: 0.9rem;
+}
+
+.review-problem-card > header,
+.investigation-card > header,
+.selection-gap-card > header,
+.impact-list article > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.review-problem-card header > div,
+.investigation-card header > div,
+.selection-gap-card header > div {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.review-problem-card p,
+.investigation-card p,
+.selection-gap-card p,
+.impact-list p {
+  margin: 0;
+}
+
+.review-correction-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.investigation-observations {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.investigation-observations > div,
+.impact-list article {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft, #f7f8f5);
+}
+
+.investigation-observations span,
+.impact-list small {
+  color: var(--muted);
+}
+
+.investigation-card pre,
+.selection-gap-card pre {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.simulation-form,
+.simulation-result {
+  display: grid;
+  gap: 1rem;
+}
+
+.simulation-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.simulation-form > div,
+.simulation-form > button,
+.simulation-form > .form-error {
+  grid-column: 1 / -1;
+}
+
+.decision-impact-summary {
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .review-correction-fields,
+  .simulation-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 .issue-panel {
   display: grid;
   gap: 1rem;

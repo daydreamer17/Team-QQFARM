@@ -1,0 +1,92 @@
+{
+  "clauses": [
+    {
+      "clause_id": "ASL-001",
+      "title": "Registry evidence",
+      "text": "Approved supplier status must be supported by the current supplier registry record at the evaluation time.",
+      "control_code": "APPROVED_SUPPLIER",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ASL-002",
+      "title": "Exact identity matching",
+      "text": "Supplier approval must be checked using the confirmed supplier identifier. Policy-text similarity must not be used to infer or repair supplier identity.",
+      "control_code": "APPROVED_SUPPLIER",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ASL-003",
+      "title": "Inactive supplier",
+      "text": "A supplier whose registry status is inactive is not eligible for an approved-supplier recommendation.",
+      "control_code": "APPROVED_SUPPLIER",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ASL-004",
+      "title": "Expired or missing approval",
+      "text": "An expired approval period or missing registry record requires procurement review and must not be treated as approved.",
+      "control_code": "APPROVED_SUPPLIER",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ROHS-001",
+      "title": "Electronics evidence requirement",
+      "text": "Electronics purchases require current RoHS evidence for each compared part before a supplier can be marked compliant.",
+      "control_code": "ROHS_COMPLIANCE",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ROHS-002",
+      "title": "Accepted evidence",
+      "text": "Accepted evidence is a signed supplier declaration or a recognized certificate that states the applicable RoHS scope and issue date.",
+      "control_code": "ROHS_COMPLIANCE",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ROHS-003",
+      "title": "Evidence identity",
+      "text": "The supplier identifier and part identifier on RoHS evidence must match the confirmed supplier and requested part records.",
+      "control_code": "ROHS_COMPLIANCE",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "ROHS-004",
+      "title": "Missing or expired evidence",
+      "text": "Missing, expired, or mismatched RoHS evidence requires review. Retrieval similarity alone cannot establish RoHS compliance.",
+      "control_code": "ROHS_COMPLIANCE",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "APR-001",
+      "title": "Approval threshold",
+      "text": "A proposed award with total landed cost of SGD 10,000 or more requires manager approval before publication.",
+      "control_code": "AMOUNT_APPROVAL",
+      "rule_parameters": {
+        "currency": "SGD",
+        "threshold": "10000.00",
+        "operator": ">="
+      }
+    },
+    {
+      "clause_id": "APR-002",
+      "title": "Threshold basis",
+      "text": "The approval threshold is evaluated against total landed cost after required charges and approved currency conversion have been applied.",
+      "control_code": "AMOUNT_APPROVAL",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "APR-003",
+      "title": "Approval evidence",
+      "text": "The approving manager, approval timestamp, approved amount, and related task revision must be recorded as evidence.",
+      "control_code": "AMOUNT_APPROVAL",
+      "rule_parameters": {}
+    },
+    {
+      "clause_id": "APR-004",
+      "title": "Foreign currency evaluation",
+      "text": "A foreign-currency award must use the approved exchange-rate snapshot effective at the evaluation timestamp when testing the SGD approval threshold.",
+      "control_code": "AMOUNT_APPROVAL",
+      "rule_parameters": {}
+    }
+  ]
+}

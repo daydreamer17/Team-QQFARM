@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -17,6 +17,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from supplier_comparison.rag.clients import EmbeddingConfig, SiliconFlowEmbeddingClient
@@ -29,8 +30,10 @@ from supplier_comparison.rag.uploads import (
 from supplier_comparison.rules import ProcurementRequirement, RequirementChanges
 
 from .database import create_session_factory, readiness_probe
+from .intake import REQUIREMENT_PROMPT_VERSION, RequirementModelConfig
 from .service import BackendError, BackendService, ConflictError, NotFoundError
 from .settings import settings
+from .summaries import SUMMARY_PROMPT_VERSION, SummaryModelConfig
 
 
 IdempotencyKey = Annotated[
@@ -53,6 +56,42 @@ class CreateTaskRequest(ApiModel):
     requirement: ProcurementRequirement
     scenario_id: str | None = Field(default=None, max_length=128)
     policy_binding: PolicyBindingRequest | None = None
+    requirement_draft_id: str | None = Field(default=None, min_length=1, max_length=64)
+    expected_requirement_draft_revision: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def requirement_draft_pair(self):
+        if (self.requirement_draft_id is None) != (self.expected_requirement_draft_revision is None):
+            raise ValueError("requirement draft ID and revision must be supplied together")
+        return self
+
+
+class UpdateRequirementRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    requirement: ProcurementRequirement
+
+
+class AbandonTaskRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class DiscardRequirementDraftRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_draft_revision: int = Field(ge=1)
+
+
+class CreateSummaryRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    result_id: str = Field(min_length=1, max_length=64)
+
+
+class RetrySummaryRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
 
 
 class StartRunRequest(ApiModel):
@@ -111,6 +150,32 @@ class FieldCorrectionRequest(ApiModel):
     normalized_value: StrictStr | StrictInt | StrictBool
     unit: str | None = None
     reason: str = Field(min_length=3, max_length=1000)
+
+
+class QuoteDraftCorrectionItem(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    field_name: str = Field(min_length=1, max_length=128)
+    raw_value: str = Field(min_length=1)
+    normalized_value: StrictStr | StrictInt | StrictBool
+    unit: str | None = None
+    reason: str = Field(min_length=3, max_length=1000)
+
+
+class QuoteDraftCorrectionRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_draft_revision: int = Field(ge=1)
+    corrections: list[QuoteDraftCorrectionItem] = Field(min_length=1, max_length=100)
+
+
+class SubmitQuoteDraftRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    expected_draft_revision: int = Field(ge=1)
+
+
+class DiscardQuoteDraftRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_draft_revision: int = Field(ge=1)
 
 
 class BatchFieldCorrection(ApiModel):
@@ -243,15 +308,122 @@ def create_app(
             ),
             policy_category=(body.policy_binding.category if body.policy_binding else None),
             policy_region=(body.policy_binding.region if body.policy_binding else None),
+            requirement_draft_id=body.requirement_draft_id,
+            expected_requirement_draft_revision=body.expected_requirement_draft_revision,
+        )
+
+    @app.post("/api/v1/requirement-drafts", status_code=202)
+    def upload_requirement_draft(
+        idempotency_key: IdempotencyKey,
+        file: UploadFile = File(...),
+    ):
+        suffix = Path(file.filename or "").suffix.lower()
+        media_type = {".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown"}.get(suffix)
+        if media_type is None:
+            raise BackendError(
+                "unsupported_requirement_media_type",
+                "Only PDF, TXT, and Markdown requirement files are supported.",
+            )
+        model_config = RequirementModelConfig.from_env()
+        return service.upload_requirement_draft_stream(
+            original_filename=file.filename or f"requirement{suffix}",
+            media_type=media_type,
+            stream=file.file,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=model_config.model_id if model_config else None,
+            environment=settings.supplier_model_environment,
+            prompt_version=REQUIREMENT_PROMPT_VERSION,
+        )
+
+    @app.get("/api/v1/requirement-drafts/{draft_id}")
+    def get_requirement_draft(draft_id: str):
+        return service.get_requirement_draft(draft_id)
+
+    @app.post("/api/v1/requirement-drafts/{draft_id}/discard")
+    def discard_requirement_draft(
+        draft_id: str,
+        body: DiscardRequirementDraftRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.discard_requirement_draft(
+            draft_id,
+            expected_revision=body.expected_draft_revision,
+            idempotency_key=idempotency_key,
         )
 
     @app.get("/api/v1/tasks")
-    def list_tasks(limit: Annotated[int, Query(ge=1, le=50)] = 20):
-        return service.list_tasks(limit=limit)
+    def list_tasks(
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        query: Annotated[str | None, Query(max_length=200)] = None,
+        status: Annotated[str | None, Query(max_length=32)] = None,
+        sort: Literal["updated_desc", "planned_asc", "planned_desc", "created_desc"] = "updated_desc",
+    ):
+        return service.list_tasks(limit=limit, offset=offset, query=query, status=status, sort=sort)
 
     @app.get("/api/v1/tasks/{task_id}")
     def get_task(task_id: str):
         return service.get_task(task_id)
+
+    @app.put("/api/v1/tasks/{task_id}/requirement", status_code=202)
+    def update_requirement(
+        task_id: str,
+        body: UpdateRequirementRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.update_requirement(
+            task_id,
+            body.requirement,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/abandon")
+    def abandon_task(
+        task_id: str,
+        body: AbandonTaskRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.abandon_task(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            reason=body.reason,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/revisions")
+    def task_revisions(task_id: str):
+        return service.task_audit(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/documents/{document_id}/content")
+    def document_content(
+        task_id: str,
+        document_id: str,
+        request: Request,
+        disposition: Literal["inline", "attachment"] = "inline",
+    ):
+        item = service.document_content(
+            task_id,
+            document_id,
+            action="DOWNLOAD" if disposition == "attachment" else "PREVIEW",
+            request_id=_request_id(request),
+        )
+        return FileResponse(
+            item["path"],
+            media_type=item["media_type"],
+            filename=item["filename"],
+            content_disposition_type=disposition,
+            headers={
+                "ETag": f'"{item["sha256"]}"',
+                "Cache-Control": "private, no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/v1/tasks/{task_id}/quotes", status_code=201, deprecated=True)
     def upload_quote(
@@ -490,6 +662,46 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/results/{result_id}")
     def get_result(task_id: str, result_id: str):
         return service.get_result(task_id, result_id)
+
+    @app.post("/api/v1/tasks/{task_id}/summaries", status_code=202)
+    def create_summary(
+        task_id: str,
+        body: CreateSummaryRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        model_config = SummaryModelConfig.from_env()
+        return service.create_summary(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            result_id=body.result_id,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=model_config.model_id if model_config else None,
+            environment=settings.supplier_model_environment,
+            prompt_version=SUMMARY_PROMPT_VERSION,
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/summaries")
+    def list_summaries(task_id: str):
+        return service.list_summaries(task_id)
+
+    @app.get("/api/v1/tasks/{task_id}/summaries/{summary_id}")
+    def get_summary(task_id: str, summary_id: str):
+        return service.get_summary(task_id, summary_id)
+
+    @app.post("/api/v1/tasks/{task_id}/summaries/{summary_id}/retries", status_code=202)
+    def retry_summary(
+        task_id: str,
+        summary_id: str,
+        body: RetrySummaryRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.retry_summary(
+            task_id,
+            summary_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+        )
 
     if policy_file_import_service is not None:
 

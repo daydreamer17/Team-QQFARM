@@ -1,0 +1,16 @@
+Purchase Requirement: MCU-DEMO-001
+
+Manufacturer: QQ Demo Components
+Manufacturer part number: QW-MCU9-DEMO
+Package: QFN-32
+Revision: R1
+Condition: NEW
+Substitutes allowed: No
+Required quantity: 1,000 pieces
+Budget: SGD 8,000.00 including shipping
+Tax mode: Not applicable
+Other fees must be included: Yes
+Planned order date: 14 September 2026
+Required delivery date: 19 September 2026
+Delivery location: SG-DEMO-01
+Ranking preference: Lowest confirmed total cost

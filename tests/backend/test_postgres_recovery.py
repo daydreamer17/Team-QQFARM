@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -43,6 +44,41 @@ def test_pgvector_extension_is_enabled() -> None:
                 text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             )
         assert extension_version is not None
+    finally:
+        engine.dispose()
+
+
+def test_requirement_draft_job_respects_postgres_foreign_key_order(
+    tmp_path: Path,
+) -> None:
+    database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = BackendService(
+        sessions,
+        tmp_path / "quotes",
+        actor_id=f"postgres-requirement-{uuid4().hex}",
+    )
+    try:
+        uploaded = service.upload_requirement_draft_stream(
+            original_filename="requirement.txt",
+            media_type="text/plain",
+            stream=BytesIO(
+                b"Manufacturer: QQ Demo Components\n"
+                b"Part: QW-MCU9-DEMO\n"
+                b"Required quantity: 1000 pieces\n"
+            ),
+            idempotency_key=f"requirement-upload-{uuid4().hex}",
+        )
+        assert uploaded["status"] == "PROCESSING"
+        assert service.requirement_draft_job_context(
+            uploaded["job"]["job_id"]
+        )["draft_id"] == uploaded["requirement_draft_id"]
+        service.discard_requirement_draft(
+            uploaded["requirement_draft_id"],
+            expected_revision=uploaded["draft_revision"],
+            idempotency_key=f"requirement-discard-{uuid4().hex}",
+        )
     finally:
         engine.dispose()
 

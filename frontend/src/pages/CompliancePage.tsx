@@ -132,6 +132,8 @@ export function CompliancePage() {
         revision={data.task_revision}
         resultId={data.current_result_id}
         quoteCount={data.quotes.length}
+        summaryComplete={data.summary_completed}
+        progress={data.progress}
         reviewBlocked={Boolean(data.current_issue)}
         policyReviewBlocked={policyIssue}
         active="compliance"

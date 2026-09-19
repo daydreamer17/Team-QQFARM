@@ -132,6 +132,6 @@ docker compose up -d --wait api worker
 
 - 支持 PDF 和注册 CSV；主演示使用 V1 原生文本 PDF。
 - OCR 默认关闭，扫描 PDF 应明确返回 `pdf_page_requires_ocr`。
-- React 前端和单后台 worker 已可本地运行；正式认证、审批、报告和任意节点崩溃自动恢复尚未完成。
+- React 前端和单后台 worker 已可本地运行；版本化 AI Summary 已接入，正式认证、审批、HTML 报告和任意节点崩溃自动恢复尚未完成。
 - 本地身份由 `TEST_USER_ID` 固定提供；仅用于开发与演示。
 - 主办方 Lightsail／Claude 接口尚未验收时，只能声明本地后端通过。

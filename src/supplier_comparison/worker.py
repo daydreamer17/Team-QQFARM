@@ -5,6 +5,7 @@ import json
 import sys
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -12,12 +13,15 @@ from .backend.checkpoints import checkpoint_connection_string
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
-from .backend.workflow import DefaultQuoteProcessor, WorkflowRunner
+from .backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
 from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
+from .backend.intake import RequirementModelConfig, extract_requirement_candidates, parse_requirement_document
+from .backend.summaries import SummaryModelConfig, generate_summary_narrative
 from .extraction.dictionary import QuoteDictionary
 from .extraction.errors import ExtractionError
 from .rag.clients import (
     EmbeddingConfig,
+    ModelClientError,
     RerankConfig,
     SiliconFlowEmbeddingClient,
     SiliconFlowRerankClient,
@@ -36,7 +40,64 @@ def run_job(job_id: str) -> dict:
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
-    if service.job_type(job_id) == "DRAFT_REVIEW":
+    job_type = service.job_type(job_id)
+    if job_type == "REQUIREMENT_DRAFT_PARSE":
+        context = service.requirement_draft_job_context(job_id)
+        calls_used = 0
+        try:
+            parsed = parse_requirement_document(Path(context["storage_path"]), context["media_type"])
+            config = RequirementModelConfig.from_env()
+            if config is None:
+                raise ModelClientError("requirement model is not configured", attempts=0, error_code="requirement_model_unconfigured")
+            candidates, calls_used = extract_requirement_candidates(parsed, config)
+            return service.complete_requirement_draft_job(
+                job_id, parsed=parsed, candidates=candidates, calls_used=calls_used
+            )
+        except ModelClientError as exc:
+            calls_used += exc.attempts
+            service.fail_requirement_draft_job(job_id, code=exc.error_code, message=str(exc), calls_used=calls_used)
+            raise
+        except ValueError as exc:
+            code = str(exc) if str(exc).startswith("requirement_") else "requirement_parse_failed"
+            service.fail_requirement_draft_job(job_id, code=code, message="Requirement document could not be parsed.")
+            raise BackendError(code, "Requirement document could not be parsed.") from exc
+        except Exception as exc:
+            service.fail_requirement_draft_job(
+                job_id,
+                code="requirement_processing_failed",
+                message="Requirement processing failed unexpectedly.",
+                calls_used=calls_used,
+            )
+            raise BackendError(
+                "requirement_processing_failed",
+                "Requirement processing failed unexpectedly.",
+            ) from exc
+    if job_type == "SUMMARY_GENERATION":
+        context = service.summary_job_context(job_id)
+        calls_used = context["calls_used"]
+        try:
+            config = SummaryModelConfig.from_env()
+            if config is None:
+                raise ModelClientError("summary model is not configured", attempts=0, error_code="summary_model_unconfigured")
+            narrative, attempts = generate_summary_narrative(context["facts"], config)
+            calls_used += attempts
+            return service.complete_summary_job(job_id, narrative=narrative, calls_used=calls_used)
+        except ModelClientError as exc:
+            calls_used += exc.attempts
+            service.fail_summary_job(job_id, code=exc.error_code, message=str(exc), calls_used=calls_used)
+            raise
+        except Exception as exc:
+            service.fail_summary_job(
+                job_id,
+                code="summary_processing_failed",
+                message="Summary processing failed unexpectedly.",
+                calls_used=calls_used,
+            )
+            raise BackendError(
+                "summary_processing_failed",
+                "Summary processing failed unexpectedly.",
+            ) from exc
+    if job_type == "DRAFT_REVIEW":
         return DraftReviewRunner(
             service,
             processor=processor,

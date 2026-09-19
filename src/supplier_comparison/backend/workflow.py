@@ -669,7 +669,13 @@ class WorkflowRunner:
             )
             assert envelope.batch is not None
             status = next(c for c in envelope.batch.candidates if c.field_name == "shipping_fee_status")
-            if status.validation_status != ValidationStatus.MISSING:
+            confirmed_unknown = (
+                status.validation_status == ValidationStatus.VERIFIED
+                and status.normalized_value == "UNKNOWN"
+                and status.origin is not None
+                and status.origin.value in {"USER_INPUT", "USER_CORRECTION"}
+            )
+            if status.validation_status != ValidationStatus.MISSING and not confirmed_unknown:
                 raise BackendError("review_required", "Unknown fee status needs a typed correction.")
             return "needs_shipping_confirmation"
         raise BackendError(

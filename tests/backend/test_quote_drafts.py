@@ -59,8 +59,9 @@ def v9_requirement() -> ProcurementRequirement:
 
 
 class CanonicalProcessor:
-    def __init__(self, work_dir: Path) -> None:
+    def __init__(self, work_dir: Path, supplier_id: str = "SUP-022") -> None:
         self.work_dir = work_dir
+        self.supplier_id = supplier_id
         self.dictionary = QuoteDictionary.load(DICTIONARY_PATH)
 
     def process(
@@ -75,7 +76,7 @@ class CanonicalProcessor:
         with CANONICAL_QUOTES.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
             fieldnames = list(reader.fieldnames or ())
-            row = next(item for item in reader if item["supplier_id"] == "SUP-022")
+            row = next(item for item in reader if item["supplier_id"] == self.supplier_id)
         row.update(
             scenario_id=context.scenario_id or "",
             quote_id=context.quote_id,
@@ -164,6 +165,63 @@ def test_draft_review_and_submit_is_a_single_authoritative_revision(
     assert submitted["task_revision"] == 2
     assert submitted["status"] == "SUBMITTED"
     assert len(service.list_quotes(task["task_id"])["items"]) == 1
+
+
+def test_confirmed_unknown_shipping_can_enter_formal_workflow(
+    service: BackendService, tmp_path: Path
+) -> None:
+    task = service.create_task(
+        requirement(), idempotency_key="create-missing-shipping", scenario_id="MCU-DEMO-001"
+    )
+    draft = service.upload_quote_draft_stream(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-023",
+        original_filename="supplier-b.csv",
+        media_type="text/csv",
+        stream=CANONICAL_QUOTES.open("rb"),
+        idempotency_key="draft-upload-missing-shipping",
+        is_synthetic=True,
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/1.0.0",
+    )
+    reviewed = DraftReviewRunner(
+        service,
+        processor=CanonicalProcessor(tmp_path, supplier_id="SUP-023"),
+        dictionary_path=DICTIONARY_PATH,
+    ).run_job(draft["job"]["job_id"])
+    assert reviewed["status"] == "REVIEW_REQUIRED"
+
+    corrected = service.correct_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_draft_revision=1,
+        corrections=[
+            {
+                "field_name": "shipping_fee_status",
+                "raw_value": "Not stated in the quotation",
+                "normalized_value": "UNKNOWN",
+                "unit": None,
+                "reason": "The quotation does not state a shipping charge.",
+            }
+        ],
+        idempotency_key="confirm-missing-shipping",
+    )
+    assert corrected["status"] == "READY_TO_SUBMIT"
+    assert next(
+        field for field in corrected["fields"] if field["field_name"] == "shipping_fee_amount"
+    )["normalized_value"] is None
+
+    submitted = service.submit_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_task_revision=1,
+        expected_draft_revision=corrected["draft_revision"],
+        idempotency_key="submit-missing-shipping",
+    )
+    assert submitted["status"] == "SUBMITTED"
 
 
 @pytest.mark.parametrize("quote_path", V9_QUOTES, ids=lambda path: path.stem)

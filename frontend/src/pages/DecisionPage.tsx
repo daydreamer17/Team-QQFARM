@@ -42,6 +42,8 @@ export function DecisionPage() {
         revision={data.task_revision}
         resultId={data.current_result_id}
         quoteCount={data.quotes.length}
+        summaryComplete={data.summary_completed}
+        progress={data.progress}
         reviewBlocked={quoteBlocked}
         policyReviewBlocked={policyBlocked}
         active="decision"

@@ -35,6 +35,7 @@ docker compose up -d --wait postgres
 ```bash
 cd /Users/lc/Desktop/hackson/Team-QQFARM
 docker compose up -d --wait postgres
+.venv/bin/python -m dotenv -f .env run -- .venv/bin/python -m alembic upgrade head
 ```
 
 再打开三个终端。

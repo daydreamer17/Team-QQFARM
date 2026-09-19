@@ -1,0 +1,16 @@
+{
+  "policy_set_id": "full-flow-demo-electronics",
+  "policy_set_version": "2026.09.1-demo",
+  "policy_id": "POL-FULL-FLOW-RELEASE-GATE",
+  "document_id": "DOC-FULL-FLOW-RELEASE-GATE",
+  "document_version": "1.0.0",
+  "title": "Fictional Full Flow Electronics Release Gate Policy",
+  "effective_from": "2026-01-01T00:00:00Z",
+  "effective_to": null,
+  "categories": [
+    "Electronics"
+  ],
+  "regions": [
+    "SG"
+  ]
+}

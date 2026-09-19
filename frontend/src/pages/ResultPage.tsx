@@ -187,6 +187,7 @@ export function ResultPage() {
   }
 
   const payload = resultQuery.data.result
+  const decisionImpact = resultQuery.data.decision_impact
   const policyRetrievals = resultQuery.data.policy_retrievals
   const recommended = new Set(payload.recommended_quote_ids)
   const recommendedNames = suppliers
@@ -220,8 +221,10 @@ export function ResultPage() {
           subtitle={`${task.requirement.required_quantity} ${task.requirement.quantity_unit} · ${task.requirement.currency} · 最晚交付 ${task.requirement.delivery_deadline}`}
           status={task.status}
           revision={task.task_revision}
-          resultId={resultQuery.data.result_id}
+          resultId={task.current_result_id}
           quoteCount={task.quotes.length}
+          summaryComplete={task.summary_completed}
+          progress={task.progress}
           reviewBlocked={Boolean(task.current_issue)}
           policyReviewBlocked={task.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
           active="decision"
@@ -264,6 +267,27 @@ export function ResultPage() {
           <span>✓ 截止 {task.requirement.delivery_deadline}</span>
         </section>
       )}
+
+      <section className="result-policy-summary decision-impact-summary">
+        <div>
+          <p className="eyebrow">DECISION IMPACT</p>
+          <h2>未知项对当前选择的影响</h2>
+          <p>{decisionImpact ? decisionImpact.scope : '该历史结果没有保存决策影响证明。'}</p>
+        </div>
+        {decisionImpact && (
+          <div className="impact-list">
+            {decisionImpact.quote_impacts.map((impact) => (
+              <article key={impact.quote_id}>
+                <div><strong>{impact.quote_id}</strong><span className={`status-pill impact-${impact.status.toLowerCase().replaceAll('_', '-')}`}>{impact.status}</span></div>
+                <p>{impact.message}</p>
+                {impact.unknown_fields.length > 0 && <small>未知字段：{impact.unknown_fields.join('、')}</small>}
+                {impact.cost_lower_bound !== null && <small>成本下界：{currency ?? ''} {impact.cost_lower_bound}</small>}
+              </article>
+            ))}
+          </div>
+        )}
+        {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/gaps`}>查看入选差距</Link>}
+      </section>
 
       <section className="result-policy-summary">
         <div>

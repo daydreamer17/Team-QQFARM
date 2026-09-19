@@ -2,30 +2,12 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { CreateTaskRequest, PolicySetSummary } from '../api/types'
+import type { CreateTaskRequest, PolicySetSummary, RequirementDraftResponse } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
+import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
 
-interface FormState {
+interface FormState extends RequirementFormValues {
   scenario_id: string
-  manufacturer: string
-  manufacturer_part_number: string
-  package: string
-  revision: string
-  condition: string
-  allow_substitutes: boolean
-  base_unit: string
-  required_quantity: string
-  quantity_unit: string
-  budget_amount: string
-  currency: string
-  includes_shipping: boolean
-  tax_mode: string
-  other_fees_required: boolean
-  planned_order_date: string
-  delivery_deadline: string
-  delivery_location: string
-  ranking_preference: string
-  secondary_preference: string
 }
 
 type FieldErrors = Partial<Record<keyof FormState, string>>
@@ -71,12 +53,6 @@ const emptyForm: FormState = {
   delivery_deadline: '',
   delivery_location: '',
 }
-
-const prototypeExtractedFields: (keyof FormState)[] = [
-  'scenario_id', 'manufacturer', 'manufacturer_part_number', 'package', 'revision',
-  'condition', 'base_unit', 'required_quantity', 'quantity_unit', 'budget_amount',
-  'currency', 'planned_order_date', 'delivery_deadline', 'delivery_location', 'ranking_preference',
-]
 
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) return error.message
@@ -151,10 +127,10 @@ export function NewTaskPage() {
   const [localError, setLocalError] = useState('')
   const [lastSubmission, setLastSubmission] = useState<Submission | null>(null)
   const [requirementFile, setRequirementFile] = useState<File | null>(null)
+  const [requirementDraft, setRequirementDraft] = useState<RequirementDraftResponse | null>(null)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
-  const [isExtracting, setIsExtracting] = useState(false)
   const [extractionNotice, setExtractionNotice] = useState('')
-  const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof FormState>>(new Set())
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof RequirementFormValues>>(new Set())
   const [bindPolicy, setBindPolicy] = useState(false)
   const [selectedPolicyKey, setSelectedPolicyKey] = useState('')
   const [policyCategory, setPolicyCategory] = useState('')
@@ -179,7 +155,43 @@ export function NewTaskPage() {
     },
   })
 
-  function update<K extends keyof FormState>(field: K, value: FormState[K]) {
+  const requirementExtraction = useMutation({
+    mutationFn: async (file: File) => {
+      let draft = await api.uploadRequirementDraft(file, createIdempotencyKey())
+      while (draft.status === 'PROCESSING') {
+        await new Promise((resolve) => window.setTimeout(resolve, 1_000))
+        draft = await api.getRequirementDraft(draft.requirement_draft_id)
+      }
+      return draft
+    },
+    onSuccess: (draft) => {
+      setRequirementDraft(draft)
+      if (draft.status !== 'READY') return
+      const nextFields = new Set<keyof RequirementFormValues>()
+      setForm((current) => {
+        const next = { ...current }
+        for (const candidate of draft.candidates) {
+          if (candidate.field_name === 'scenario_id' || !(candidate.field_name in next)) continue
+          const field = candidate.field_name as keyof RequirementFormValues
+          const original = next[field]
+          const value = candidate.normalized_value
+          if (typeof original === 'boolean' && typeof value === 'boolean') {
+            ;(next[field] as boolean) = value
+          } else if (typeof original === 'string' && value !== null && value !== undefined) {
+            ;(next[field] as string) = String(value)
+          }
+          nextFields.add(field)
+        }
+        return next
+      })
+      setAutoFilledFields(nextFields)
+      setFieldErrors({})
+      setLocalError('')
+      setExtractionNotice(`真实解析完成：已提取 ${draft.candidates.length} 个带来源字段，请复核后创建任务。`)
+    },
+  })
+
+  function update(field: keyof FormState, value: FormState[keyof FormState]) {
     setForm((current) => ({ ...current, [field]: value }))
     setFieldErrors((current) => {
       const next = { ...current }
@@ -188,7 +200,7 @@ export function NewTaskPage() {
     })
     setAutoFilledFields((current) => {
       const next = new Set(current)
-      next.delete(field)
+      if (field !== 'scenario_id') next.delete(field)
       return next
     })
     setLocalError('')
@@ -226,27 +238,18 @@ export function NewTaskPage() {
     createTask.reset()
   }
 
-  function fieldClass(field: keyof FormState, extra = '') {
-    return ['field', extra, fieldErrors[field] ? 'field-invalid' : '', autoFilledFields.has(field) ? 'field-autofilled' : '']
-      .filter(Boolean)
-      .join(' ')
-  }
-
-  function fieldError(field: keyof FormState) {
-    return fieldErrors[field] ? <small className="field-error-text">{fieldErrors[field]}</small> : null
-  }
-
   function handleRequirementFile(file: File | null) {
     setExtractionNotice('')
     setLocalError('')
     if (!file) {
       setRequirementFile(null)
+      setRequirementDraft(null)
       return
     }
     const extension = file.name.split('.').pop()?.toLowerCase()
-    if (!['pdf', 'md', 'txt', 'docx'].includes(extension ?? '')) {
+    if (!['pdf', 'md', 'txt'].includes(extension ?? '')) {
       setRequirementFile(null)
-      setLocalError('采购需求附件仅支持 PDF、Markdown、TXT 或 DOCX。')
+      setLocalError('采购需求附件仅支持 PDF、Markdown 或 TXT。')
       if (fileInput.current) fileInput.current.value = ''
       return
     }
@@ -257,20 +260,13 @@ export function NewTaskPage() {
       return
     }
     setRequirementFile(file)
+    setRequirementDraft(null)
   }
 
-  function runPrototypeExtraction() {
-    if (!requirementFile || isExtracting) return
-    setIsExtracting(true)
+  function runRequirementExtraction() {
+    if (!requirementFile || requirementExtraction.isPending) return
     setExtractionNotice('')
-    window.setTimeout(() => {
-      setForm(initialForm)
-      setAutoFilledFields(new Set(prototypeExtractedFields))
-      setFieldErrors({})
-      setLocalError('')
-      setExtractionNotice('原型模拟完成：已识别并填入 15 个字段。蓝色标记字段需要用户复核后再提交。')
-      setIsExtracting(false)
-    }, 650)
+    requirementExtraction.mutate(requirementFile)
   }
 
   function buildSubmission(): Submission | null {
@@ -313,6 +309,10 @@ export function NewTaskPage() {
             category: policyCategory,
             region: policyRegion,
           },
+        } : {}),
+        ...(requirementDraft?.status === 'READY' ? {
+          requirement_draft_id: requirementDraft.requirement_draft_id,
+          expected_requirement_draft_revision: requirementDraft.draft_revision,
         } : {}),
         requirement: {
           manufacturer: form.manufacturer.trim(),
@@ -366,15 +366,15 @@ export function NewTaskPage() {
             <h2>上传采购需求文件 <small>可选</small></h2>
             <p>LLM 解析后将建议值填入下方字段；所有结果仍需人工复核，并通过确定性校验后才能创建任务。</p>
           </div>
-          <span className="prototype-badge">解析按钮为原型模拟</span>
+          <span className="prototype-badge">后端解析并保留来源</span>
         </div>
 
         <div className="requirement-source-actions">
           <label className="source-file-picker">
             <span aria-hidden="true">↑</span>
             <strong>{requirementFile ? '更换需求文件' : '选择需求文件'}</strong>
-            <small>PDF / MD / TXT / DOCX · 最大 10 MiB</small>
-            <input ref={fileInput} type="file" accept=".pdf,.md,.txt,.docx,application/pdf,text/markdown,text/plain" onChange={(event) => handleRequirementFile(event.target.files?.[0] ?? null)} />
+            <small>PDF / MD / TXT · 最大 10 MiB</small>
+            <input ref={fileInput} type="file" accept=".pdf,.md,.txt,application/pdf,text/markdown,text/plain" onChange={(event) => handleRequirementFile(event.target.files?.[0] ?? null)} />
           </label>
 
           {requirementFile ? (
@@ -382,13 +382,16 @@ export function NewTaskPage() {
               <span className="source-file-icon">DOC</span>
               <div><strong>{requirementFile.name}</strong><small>{formatBytes(requirementFile.size)} · 等待解析</small></div>
               <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>预览</button>
-              <button className="button button-submit" type="button" onClick={runPrototypeExtraction} disabled={isExtracting}>{isExtracting ? '正在解析…' : '✨ 解析并自动填入'}</button>
+              <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '✨ 解析并自动填入'}</button>
             </div>
           ) : (
             <div className="manual-entry-note"><strong>不上传也可以继续</strong><span>直接填写下方字段，提交时执行同一套前后端校验。</span></div>
           )}
         </div>
+        {requirementExtraction.isError && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
+        {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>{requirementDraft.error_code}</strong><p>{requirementDraft.error_message}</p></div>}
         {extractionNotice && <div className="extraction-notice" role="status">✓ {extractionNotice}</div>}
+        {requirementDraft?.status === 'READY' && requirementDraft.candidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{requirementDraft.candidates.length}）</summary><div className="audit-list">{requirementDraft.candidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{candidate.field_name}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.source_id} · {source.quoted_text}</small>)}</article>)}</div></details>}
       </section>
 
       <form className="requirement-form" noValidate onSubmit={handleSubmit}>
@@ -397,43 +400,15 @@ export function NewTaskPage() {
           <button className="button button-secondary" type="button" onClick={() => { setForm(emptyForm); setFieldErrors({}); setAutoFilledFields(new Set()); setExtractionNotice('') }}>清空并手动填写</button>
         </div>
 
-        <fieldset className="form-section">
-          <legend>任务与物料</legend>
-          <div className="form-grid">
-            <label className={fieldClass('scenario_id', 'field-wide')}><span>场景编号 <small>可选</small></span><input value={form.scenario_id} onChange={(event) => update('scenario_id', event.target.value)} />{fieldError('scenario_id')}</label>
-            <label className={fieldClass('manufacturer')}><span>制造商</span><input aria-invalid={Boolean(fieldErrors.manufacturer)} value={form.manufacturer} onChange={(event) => update('manufacturer', event.target.value)} />{fieldError('manufacturer')}</label>
-            <label className={fieldClass('manufacturer_part_number')}><span>制造商料号</span><input aria-invalid={Boolean(fieldErrors.manufacturer_part_number)} value={form.manufacturer_part_number} onChange={(event) => update('manufacturer_part_number', event.target.value)} />{fieldError('manufacturer_part_number')}</label>
-            <label className={fieldClass('package')}><span>封装</span><input aria-invalid={Boolean(fieldErrors.package)} value={form.package} onChange={(event) => update('package', event.target.value)} />{fieldError('package')}</label>
-            <label className={fieldClass('revision')}><span>版本</span><input aria-invalid={Boolean(fieldErrors.revision)} value={form.revision} onChange={(event) => update('revision', event.target.value)} />{fieldError('revision')}</label>
-            <label className={fieldClass('condition')}><span>物料状态</span><input aria-invalid={Boolean(fieldErrors.condition)} value={form.condition} onChange={(event) => update('condition', event.target.value)} />{fieldError('condition')}</label>
-            <label className="field checkbox-field"><input type="checkbox" checked={form.allow_substitutes} onChange={(event) => update('allow_substitutes', event.target.checked)} /><span>允许替代料</span></label>
-          </div>
-        </fieldset>
-
-        <fieldset className="form-section">
-          <legend>数量与预算</legend>
-          <div className="form-grid">
-            <label className={fieldClass('base_unit')}><span>基础单位</span><input aria-invalid={Boolean(fieldErrors.base_unit)} value={form.base_unit} onChange={(event) => update('base_unit', event.target.value)} />{fieldError('base_unit')}</label>
-            <label className={fieldClass('required_quantity')}><span>需求数量</span><input aria-invalid={Boolean(fieldErrors.required_quantity)} inputMode="numeric" type="number" value={form.required_quantity} onChange={(event) => update('required_quantity', event.target.value)} />{fieldError('required_quantity')}</label>
-            <label className={fieldClass('quantity_unit')}><span>数量单位</span><input aria-invalid={Boolean(fieldErrors.quantity_unit)} value={form.quantity_unit} onChange={(event) => update('quantity_unit', event.target.value)} />{fieldError('quantity_unit')}</label>
-            <label className={fieldClass('budget_amount')}><span>预算金额</span><input aria-invalid={Boolean(fieldErrors.budget_amount)} inputMode="decimal" value={form.budget_amount} onChange={(event) => update('budget_amount', event.target.value)} />{fieldError('budget_amount') ?? <small>非负十进制字符串，最多两位小数</small>}</label>
-            <label className={fieldClass('currency')}><span>币种</span><select value={form.currency} onChange={(event) => update('currency', event.target.value)}><option value="SGD">SGD</option><option value="USD">USD</option></select></label>
-            <label className={fieldClass('tax_mode')}><span>税费口径</span><select value={form.tax_mode} onChange={(event) => update('tax_mode', event.target.value)}><option value="EXCLUDED">不含税</option><option value="INCLUDED">已含税</option><option value="NOT_APPLICABLE">不适用</option></select></label>
-            <label className="field checkbox-field"><input type="checkbox" checked={form.includes_shipping} onChange={(event) => update('includes_shipping', event.target.checked)} /><span>预算包含运费</span></label>
-            <label className="field checkbox-field"><input type="checkbox" checked={form.other_fees_required} onChange={(event) => update('other_fees_required', event.target.checked)} /><span>要求计入其他费用</span></label>
-          </div>
-        </fieldset>
-
-        <fieldset className="form-section">
-          <legend>交付与排序</legend>
-          <div className="form-grid">
-            <label className={fieldClass('planned_order_date')}><span>计划下单日期 <small>可选</small></span><input type="date" value={form.planned_order_date} onChange={(event) => update('planned_order_date', event.target.value)} />{fieldError('planned_order_date')}</label>
-            <label className={fieldClass('delivery_deadline')}><span>交付截止日期</span><input aria-invalid={Boolean(fieldErrors.delivery_deadline)} type="date" value={form.delivery_deadline} onChange={(event) => update('delivery_deadline', event.target.value)} />{fieldError('delivery_deadline')}</label>
-            <label className={fieldClass('delivery_location', 'field-wide')}><span>交付地点</span><input aria-invalid={Boolean(fieldErrors.delivery_location)} value={form.delivery_location} onChange={(event) => update('delivery_location', event.target.value)} />{fieldError('delivery_location')}</label>
-            <label className={fieldClass('ranking_preference')}><span>主要排序偏好</span><select value={form.ranking_preference} onChange={(event) => updateRankingPreference(event.target.value)}><option value="LOWEST_CONFIRMED_TOTAL_COST">最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY">最快已确认交付</option></select>{fieldError('ranking_preference')}</label>
-            <label className={fieldClass('secondary_preference')}><span>次要偏好 <small>可选</small></span><select aria-invalid={Boolean(fieldErrors.secondary_preference)} value={form.secondary_preference} onChange={(event) => update('secondary_preference', event.target.value)}><option value="">无</option><option value="LOWEST_CONFIRMED_TOTAL_COST" disabled={form.ranking_preference === 'LOWEST_CONFIRMED_TOTAL_COST'}>最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY" disabled={form.ranking_preference === 'FASTEST_CONFIRMED_DELIVERY'}>最快已确认交付</option></select>{fieldError('secondary_preference')}</label>
-          </div>
-        </fieldset>
+        <RequirementFields
+          value={form}
+          onChange={(field, value) => field === 'ranking_preference'
+            ? updateRankingPreference(String(value))
+            : update(field, value)}
+          errors={fieldErrors}
+          highlightedFields={autoFilledFields}
+          materialPrefix={<label className={`field field-wide ${fieldErrors.scenario_id ? 'field-invalid' : ''}`}><span>场景编号 <small>可选</small></span><input value={form.scenario_id} onChange={(event) => update('scenario_id', event.target.value)} />{fieldErrors.scenario_id && <small className="field-error-text">{fieldErrors.scenario_id}</small>}</label>}
+        />
 
         <fieldset className="form-section policy-binding-section">
           <legend>Policy / 制度检查 <small>可选</small></legend>
@@ -480,7 +455,7 @@ export function NewTaskPage() {
         )}
 
         <div className="form-actions">
-          <p>只有前端规则和后端权威校验都通过后才会创建任务；附件目前不会随任务持久化。</p>
+          <p>只有前端规则和后端权威校验都通过后才会创建任务；已解析附件、哈希、候选字段和人工确认值会随任务留痕。</p>
           <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? '正在校验并创建…' : '校验并创建任务'}</button>
         </div>
       </form>

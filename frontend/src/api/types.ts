@@ -35,6 +35,8 @@ export interface CreateTaskRequest {
   requirement: ProcurementRequirement
   scenario_id: string | null
   policy_binding?: PolicyBinding | null
+  requirement_draft_id?: string
+  expected_requirement_draft_revision?: number
 }
 
 export interface TaskSummary {
@@ -56,6 +58,115 @@ export interface TaskListItem extends TaskSummary {
 
 export interface TaskListResponse {
   items: TaskListItem[]
+  total: number
+  limit: number
+  offset: number
+  status_counts: Record<string, number>
+}
+
+export interface RequirementCandidate {
+  field_name: keyof ProcurementRequirement | string
+  raw_value: string
+  normalized_value: unknown
+  validation_status: string
+  origin: string
+  source_refs: Array<{ source_id: string; quoted_text: string }>
+}
+
+export interface RequirementDraftResponse {
+  requirement_draft_id: string
+  draft_revision: number
+  status: 'PROCESSING' | 'READY' | 'FAILED' | 'USED' | 'DISCARDED' | string
+  original_filename: string
+  media_type: string
+  size_bytes: number
+  document_sha256: string
+  parsed: { sources: Record<string, unknown>[] } | null
+  candidates: RequirementCandidate[]
+  calls_used: number
+  max_calls: number
+  provider: string | null
+  model_id: string | null
+  environment: string | null
+  prompt_version: string | null
+  error_code: string | null
+  error_message: string | null
+  submitted_task_id: string | null
+  job: { job_id: string; job_type: string; job_status: string; attempts: number } | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskMutationResponse {
+  task_id: string
+  task_revision: number
+  status: string
+  changed_fields?: string[]
+  graph_run_id?: string | null
+  job_id?: string | null
+  job_status?: string | null
+  reason?: string
+}
+
+export interface TaskAuditResponse {
+  task_id: string
+  revisions: Array<{
+    revision: number
+    change_type: string
+    actor_id: string
+    details: Record<string, unknown>
+    created_at: string
+  }>
+  document_accesses: Array<{
+    access_event_id: string
+    document_id: string
+    action: string
+    actor_id: string
+    request_id: string | null
+    created_at: string
+  }>
+}
+
+export interface SummaryNarrative {
+  title: string
+  overview: string
+  sections: Array<{ heading: string; text: string; reference_ids: string[] }>
+  disclaimer: string
+}
+
+export interface SummaryReportResponse {
+  summary_id: string
+  task_id: string
+  task_revision: number
+  result_id: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'STALE' | string
+  is_current: boolean
+  input_sha256: string
+  facts: Record<string, unknown> & {
+    final_recommendation_allowed?: boolean
+    recommended_quote_ids?: string[]
+    pending_quote_ids?: string[]
+    references?: Record<string, unknown>
+    scope?: string
+  }
+  narrative: SummaryNarrative | null
+  provider: string | null
+  model_id: string | null
+  environment: string | null
+  prompt_version: string
+  calls_used: number
+  max_calls: number
+  error_code: string | null
+  error_message: string | null
+  job: { job_id: string; job_type: string; job_status: string; attempts: number } | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SummaryListResponse {
+  task_id: string
+  task_revision: number
+  items: SummaryReportResponse[]
 }
 
 export interface CurrentJob {
@@ -95,8 +206,23 @@ export interface CurrentIssue {
     amount?: string
     changed_policy_requires?: string
     retrieval_statuses?: Record<string, PolicyRetrievalStatus>
+    submit_to?: string
+    expected_task_revision?: number
+    cards?: BatchReviewCard[]
   }
   created_revision: number
+}
+
+export interface BatchReviewCard {
+  quote_id: string
+  field_name: string
+  expected_field_version: number | null
+  document_id: string | null
+  original_filename: string | null
+  source_refs: Record<string, unknown>[]
+  current_value: unknown
+  question: string
+  resolution: 'FIELD_CORRECTION' | 'REEXTRACT_OR_SYSTEM_REPAIR' | string
 }
 
 export interface TaskDetail extends TaskSummary {
@@ -104,6 +230,13 @@ export interface TaskDetail extends TaskSummary {
   current_graph_run_id: string | null
   current_snapshot_id: string | null
   current_result_id: string | null
+  summary_completed: boolean
+  progress: {
+    requirement_completed: boolean
+    quote_review_completed: boolean
+    decision_completed: boolean
+    summary_completed: boolean
+  }
   policy_binding: PolicyBinding | null
   current_issue: CurrentIssue | null
   current_job: CurrentJob | null
@@ -227,6 +360,7 @@ export type IssueAnswer =
 export interface FieldCorrectionInput {
   quoteId: string
   fieldName: string
+  expectedFieldVersion: number
   rawValue: string
   normalizedValue: string | number | boolean
   unit: string | null
@@ -246,7 +380,7 @@ export interface FieldEvidence {
 
 export interface QuoteField {
   field_name: string
-  field_version: string
+  field_version: number
   raw_value: string | null
   normalized_value: unknown
   unit: string | null
@@ -318,7 +452,202 @@ export interface ComparisonResultResponse {
   graph_run_id: string
   is_current: boolean
   result: ComparisonPayload
+  decision_impact: DecisionImpactResult | null
   policy_retrievals: PolicyRetrievalResult[]
+}
+
+export interface QuoteDecisionImpact {
+  quote_id: string
+  quote_version: number
+  status: 'NO_ISSUE' | 'REQUIRES_INVESTIGATION' | 'NON_BLOCKING' | 'UNDETERMINED' | string
+  reason_code: string
+  message: string
+  unknown_fields: string[]
+  cost_lower_bound: string | null
+  best_confirmed_cost: string | null
+  additional_cost_to_tie: string | null
+  assumptions: string[]
+}
+
+export interface DecisionImpactResult {
+  schema_version: string
+  task_id: string
+  task_revision: number
+  input_sha256: string
+  comparison: ComparisonPayload
+  quote_impacts: QuoteDecisionImpact[]
+  blocking_quote_ids: string[]
+  nonblocking_unknown_quote_ids: string[]
+  scope: string
+}
+
+export interface ReviewEvidenceSource {
+  source_id: string | null
+  kind: string | null
+  raw_text: string | null
+  page_number: number | null
+  row_number: number | null
+  column_name: string | null
+}
+
+export interface ReviewCandidateField {
+  field_id: string
+  quote_id: string
+  quote_version: number
+  field_version: number
+  field_name: string
+  raw_value: string | null
+  normalized_value: unknown
+  unit: string | null
+  validation_status: string
+  origin: string | null
+  source_refs: Array<{ source_id: string; quoted_text: string }>
+  producer: string
+  adapter_version: string | null
+  prompt_version: string | null
+}
+
+export interface ReviewQuoteReport {
+  quote_id: string
+  supplier_id: string
+  quote_version: number
+  document_id: string | null
+  original_filename: string | null
+  batch_artifact_id: string | null
+  review_artifact_id: string | null
+  review_status: string | null
+  review_pending: boolean
+  fields: ReviewCandidateField[]
+  evidence_sources: ReviewEvidenceSource[]
+}
+
+export interface ReviewProblem extends ReviewFinding {
+  quote_id: string
+  quote_version: number
+  field_version: number | null
+  raw_value: string | null
+  normalized_value: unknown
+  unit: string | null
+  document_id: string | null
+  original_filename: string | null
+  needs_resolution: boolean
+  resolution: 'FIELD_CORRECTION' | 'REEXTRACT_OR_SYSTEM_REPAIR' | string
+}
+
+export interface ReviewOverviewResponse {
+  task_id: string
+  task_revision: number
+  graph_run_id: string | null
+  task_status: string
+  review_pending: boolean
+  quotes: ReviewQuoteReport[]
+  problems: ReviewProblem[]
+  blocking_problem_count: number
+  problem_count: number
+}
+
+export interface InvestigationToolResult {
+  tool_name: string
+  task_id: string
+  task_revision: number
+  quote_id: string | null
+  input_sha256: string
+  status: string
+  data: Record<string, unknown>
+  sources: Record<string, unknown>[]
+  error_code: string | null
+}
+
+export interface InvestigationObservation {
+  sequence: number
+  reason: string
+  arguments: Record<string, unknown>
+  result: InvestigationToolResult
+  latency_ms: number
+}
+
+export interface InvestigationCase {
+  schema_version: string
+  case_id: string
+  artifact_id: string
+  task_id: string
+  task_revision: number
+  graph_run_id: string
+  kind: 'QUOTE' | 'POLICY'
+  quote_id: string | null
+  quote_version: number | null
+  impact_input_sha256: string
+  policy_binding: Record<string, string | null>
+  goal: string
+  known_facts: Record<string, unknown>
+  unknown_fields: string[]
+  impact_status: string
+  plan: string[]
+  observations: InvestigationObservation[]
+  status: string
+  stored_status: string
+  stop_reason: string | null
+  model_calls: number
+  model_id: string | null
+  error_code: string | null
+  started_at: string
+  clarification: Record<string, unknown>[]
+  is_current: boolean
+}
+
+export interface SelectionGap {
+  quote_id: string
+  quote_version: number
+  status: string
+  failed_reasons: ResultReason[]
+  pending_reasons: ResultReason[]
+  comparison_reasons: ResultReason[]
+  actual_quantity: number | null
+  currency: string
+  known_cost_subtotal: string | null
+  confirmed_total_cost: string | null
+  best_other_confirmed_cost: string | null
+  cost_difference_vs_other: string | null
+  budget_excess: string | null
+  total_cost_reduction_to_tie_other: string | null
+  delivery_days_late: number | null
+  target_arrival_deadline: string
+  target_lead_time_days: number | null
+  delivery_improvement: HypotheticalComparison | null
+  would_be_quote_comparison_choice: boolean | null
+  assumptions: string[]
+}
+
+export interface HypotheticalComparison {
+  hypothetical: true
+  formal_recommendation_allowed: false
+  policy_assessment_performed: false
+  changes: Record<string, unknown>
+  assumptions: string[]
+  comparison: ComparisonPayload
+}
+
+export interface ClarificationDraft {
+  quote_id: string
+  draft_only: true
+  sent: false
+  text: string
+}
+
+export interface SelectionGapResponse {
+  schema_version: string
+  task_id: string
+  task_revision: number
+  input_sha256: string
+  gaps: SelectionGap[]
+  scope: string
+  clarification_drafts: ClarificationDraft[]
+}
+
+export interface RequirementSimulationResponse {
+  task_id: string
+  task_revision: number
+  result: HypotheticalComparison
 }
 
 export type PolicyRetrievalStatus = 'OK' | 'NO_EVIDENCE' | 'CONFLICT' | 'ERROR'

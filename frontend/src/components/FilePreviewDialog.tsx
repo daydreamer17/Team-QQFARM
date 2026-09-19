@@ -5,6 +5,8 @@ export interface PreviewFileSource {
   mediaType: string
   sizeBytes: number
   file?: File
+  remoteUrl?: string
+  downloadUrl?: string
   description?: string
 }
 
@@ -28,22 +30,28 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
   const [textContent, setTextContent] = useState('')
   const [textError, setTextError] = useState('')
   const objectUrl = useMemo(
-    () => source.file ? URL.createObjectURL(source.file) : null,
-    [source.file],
+    () => source.file ? URL.createObjectURL(source.file) : source.remoteUrl ?? null,
+    [source.file, source.remoteUrl],
   )
 
   useEffect(() => {
     return () => {
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      if (source.file && objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [objectUrl])
+  }, [objectUrl, source.file])
 
   useEffect(() => {
     let cancelled = false
-    if (!source.file || !isTextFile(source)) {
+    if ((!source.file && !source.remoteUrl) || !isTextFile(source)) {
       return
     }
-    source.file.text()
+    const read = source.file
+      ? source.file.text()
+      : fetch(source.remoteUrl!).then((response) => {
+        if (!response.ok) throw new Error('file response failed')
+        return response.text()
+      })
+    read
       .then((content) => {
         if (!cancelled) setTextContent(content)
       })
@@ -71,25 +79,26 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
         </header>
 
         <div className="file-preview-body">
-          {source.file && isPdf && objectUrl && (
+          {(source.file || source.remoteUrl) && isPdf && objectUrl && (
             <iframe title={`${source.name} PDF 预览`} src={objectUrl} />
           )}
-          {source.file && isTextFile(source) && (
+          {(source.file || source.remoteUrl) && isTextFile(source) && (
             <pre className="text-file-preview">{textError || textContent || '正在读取文本内容…'}</pre>
           )}
-          {source.file && !isPdf && !isTextFile(source) && (
+          {(source.file || source.remoteUrl) && !isPdf && !isTextFile(source) && (
             <div className="file-preview-placeholder">
               <strong>该格式暂不支持浏览器内预览</strong>
               <p>文件已经选中，仍可继续上传。DOCX 等格式需要后端转换为 PDF 或 HTML 后才能完整预览。</p>
             </div>
           )}
-          {!source.file && (
+          {!source.file && !source.remoteUrl && (
             <div className="file-preview-placeholder">
               <strong>文件内容流接口尚未接入</strong>
               <p>{source.description ?? '当前可以查看文件名、格式、版本和哈希；接入受控文件下载接口后即可在此展示原文。'}</p>
             </div>
           )}
         </div>
+        {source.downloadUrl && <footer className="inline-actions"><a className="button button-submit" href={source.downloadUrl}>下载原件</a></footer>}
       </section>
     </div>
   )

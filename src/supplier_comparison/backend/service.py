@@ -27,6 +27,7 @@ from supplier_comparison.extraction.dictionary import QuoteDictionary
 
 from .models import (
     Document,
+    DocumentAccessEvent,
     DocumentExecution,
     GraphRun,
     IdempotencyRecord,
@@ -34,7 +35,9 @@ from .models import (
     Job,
     Quote,
     QuoteDraft,
+    RequirementDraft,
     RequirementRecord,
+    SummaryReport,
     Task,
     TaskRevision,
     WorkflowArtifact,
@@ -51,6 +54,35 @@ def canonical_json(value: Any) -> str:
 
 def content_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _quote_draft_submission_ready(envelope: ReviewEnvelope) -> bool:
+    """Allow confirmed unknown fees into the formal workflow for its typed interrupt."""
+
+    if envelope.downstream_ready:
+        return True
+    if envelope.batch is None or envelope.review is None:
+        return False
+    blockers = tuple(
+        finding
+        for finding in envelope.review.findings
+        if finding.severity == ReviewSeverity.BLOCKING and not finding.resolved
+    )
+    if not blockers or any(
+        finding.field_name not in {"shipping_fee_status", "other_fees_status"}
+        or set(finding.codes) != {"FEE_STATUS_UNKNOWN"}
+        for finding in blockers
+    ):
+        return False
+    candidates = {candidate.field_name: candidate for candidate in envelope.batch.candidates}
+    return all(
+        (candidate := candidates.get(finding.field_name)) is not None
+        and candidate.validation_status == ValidationStatus.VERIFIED
+        and candidate.normalized_value == "UNKNOWN"
+        and candidate.origin is not None
+        and candidate.origin.value in {"USER_INPUT", "USER_CORRECTION"}
+        for finding in blockers
+    )
 
 
 class BackendError(RuntimeError):
@@ -88,6 +120,21 @@ class BackendService:
     def _supersede_current_graph(session: Session, task: Task) -> GraphRun | None:
         """Invalidate execution state when an external input changes."""
 
+        for report in session.scalars(
+            select(SummaryReport).where(
+                SummaryReport.task_id == task.task_id,
+                SummaryReport.status != "STALE",
+            )
+        ):
+            report.status = "STALE"
+        for summary_job in session.scalars(
+            select(Job).where(
+                Job.task_id == task.task_id,
+                Job.summary_id.is_not(None),
+                Job.status.in_(("PENDING", "RUNNING", "WAITING_INPUT")),
+            )
+        ):
+            summary_job.status = "SUPERSEDED"
         if task.current_graph_run_id is None:
             task.current_snapshot_id = None
             task.current_result_id = None
@@ -170,6 +217,8 @@ class BackendService:
         policy_index_version: str | None = None,
         policy_category: str | None = None,
         policy_region: str | None = None,
+        requirement_draft_id: str | None = None,
+        expected_requirement_draft_revision: int | None = None,
     ) -> dict[str, Any]:
         policy_binding = (
             policy_set_version,
@@ -200,6 +249,8 @@ class BackendService:
             "policy_index_version": policy_index_version,
             "policy_category": policy_category,
             "policy_region": policy_region,
+            "requirement_draft_id": requirement_draft_id,
+            "expected_requirement_draft_revision": expected_requirement_draft_revision,
         }
         request_sha = content_hash(request)
         with self.session_factory.begin() as session:
@@ -211,6 +262,28 @@ class BackendService:
             )
             if repeated is not None:
                 return repeated
+            requirement_draft = None
+            if requirement_draft_id is not None:
+                requirement_draft = session.scalar(
+                    select(RequirementDraft).where(
+                        RequirementDraft.requirement_draft_id == requirement_draft_id
+                    ).with_for_update()
+                )
+                if requirement_draft is None or requirement_draft.actor_id != self.actor_id:
+                    raise NotFoundError("requirement_draft_not_found", "Requirement draft was not found.")
+                if expected_requirement_draft_revision != requirement_draft.revision:
+                    raise ConflictError(
+                        "requirement_draft_revision_conflict",
+                        "Requirement draft revision has changed.",
+                        expected=expected_requirement_draft_revision,
+                        actual=requirement_draft.revision,
+                    )
+                if requirement_draft.status != "READY" or requirement_draft.submitted_task_id:
+                    raise ConflictError(
+                        "requirement_draft_not_ready",
+                        "Requirement draft is not ready to create a task.",
+                        status=requirement_draft.status,
+                    )
             task_id = new_id("task")
             task = Task(
                 task_id=task_id,
@@ -235,9 +308,47 @@ class BackendService:
                     change_type="TASK_CREATED",
                     actor_id=self.actor_id,
                     request_sha256=request_sha,
+                    details={"requirement_draft_id": requirement_draft_id},
                 )
             )
             requirement_payload = requirement.model_dump(mode="json")
+            source_artifact_id = None
+            if requirement_draft is not None:
+                source_artifact_id = new_id("artifact")
+                extracted = {
+                    row["field_name"]: row.get("normalized_value")
+                    for row in (requirement_draft.candidates or {}).get("candidates", [])
+                }
+                session.add(WorkflowArtifact(
+                    artifact_id=source_artifact_id,
+                    task_id=task_id,
+                    task_revision=1,
+                    artifact_type="REQUIREMENT_INTAKE",
+                    schema_version="requirement-intake/1.0.0",
+                    payload={
+                        "requirement_draft_id": requirement_draft.requirement_draft_id,
+                        "document_sha256": requirement_draft.sha256,
+                        "original_filename": requirement_draft.original_filename,
+                        "parsed": requirement_draft.parsed_payload,
+                        "candidates": requirement_draft.candidates,
+                        "confirmed_requirement": requirement_payload,
+                        "origins": {
+                            name: (
+                                "DOCUMENT" if name in extracted and extracted[name] == value
+                                else "USER_CORRECTION" if name in extracted
+                                else "USER_INPUT"
+                            )
+                            for name, value in requirement_payload.items()
+                        },
+                    },
+                    content_sha256=content_hash({
+                        "draft": requirement_draft.requirement_draft_id,
+                        "confirmed": requirement_payload,
+                    }),
+                ))
+                requirement_draft.status = "USED"
+                requirement_draft.submitted_task_id = task_id
+                requirement_draft.revision += 1
             session.add(
                 RequirementRecord(
                     requirement_id=new_id("req"),
@@ -246,6 +357,7 @@ class BackendService:
                     requirement_version=1,
                     payload=requirement_payload,
                     content_sha256=content_hash(requirement_payload),
+                    source_artifact_id=source_artifact_id,
                 )
             )
             response = {
@@ -409,6 +521,59 @@ class BackendService:
                 )
                 .order_by(Quote.created_at, Quote.quote_id)
             ).all()
+            summary_completed = bool(
+                task.current_result_id
+                and session.scalar(
+                    select(SummaryReport.summary_id).where(
+                        SummaryReport.task_id == task_id,
+                        SummaryReport.task_revision == task.current_revision,
+                        SummaryReport.result_id == task.current_result_id,
+                        SummaryReport.status == "SUCCEEDED",
+                    )
+                )
+            )
+            quote_review_completed = bool(task.current_result_id)
+            if documents and not quote_review_completed:
+                quote_review_completed = True
+                requirement_revision = requirement.task_revision if requirement is not None else task.current_revision
+                for document, quote in documents:
+                    review_artifact = None
+                    if graph is not None:
+                        execution = session.scalar(
+                            select(DocumentExecution).where(
+                                DocumentExecution.graph_run_id == graph.graph_run_id,
+                                DocumentExecution.document_id == document.document_id,
+                            )
+                        )
+                        if execution is not None and execution.review_artifact_id:
+                            review_artifact = session.get(
+                                WorkflowArtifact, execution.review_artifact_id
+                            )
+                    if review_artifact is not None:
+                        document_ready = (
+                            review_artifact.payload.get("review_status")
+                            == "READY_FOR_DOWNSTREAM"
+                        )
+                    else:
+                        submitted_draft = session.scalar(
+                            select(QuoteDraft).where(
+                                QuoteDraft.task_id == task_id,
+                                QuoteDraft.proposed_quote_id == quote.quote_id,
+                                QuoteDraft.proposed_document_id == document.document_id,
+                                QuoteDraft.status == "SUBMITTED",
+                                QuoteDraft.base_task_revision >= requirement_revision,
+                            )
+                        )
+                        document_ready = submitted_draft is not None
+                    if not document_ready:
+                        quote_review_completed = False
+                        break
+            progress = {
+                "requirement_completed": True,
+                "quote_review_completed": quote_review_completed,
+                "decision_completed": task.current_result_id is not None,
+                "summary_completed": summary_completed,
+            }
             return {
                 "task_id": task.task_id,
                 "scenario_id": task.scenario_id,
@@ -417,6 +582,8 @@ class BackendService:
                 "current_graph_run_id": task.current_graph_run_id,
                 "current_snapshot_id": task.current_snapshot_id,
                 "current_result_id": task.current_result_id,
+                "summary_completed": summary_completed,
+                "progress": progress,
                 "policy_binding": self._policy_binding_response(task),
                 "current_issue": self._issue_response(issue) if issue is not None else None,
                 "current_job": (
@@ -886,6 +1053,8 @@ class BackendService:
             task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
             if task is None:
                 raise NotFoundError("task_not_found", "Task was not found.")
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
             if task.current_revision != draft.base_task_revision:
                 draft.status = "STALE"
                 draft.revision += 1
@@ -1010,7 +1179,11 @@ class BackendService:
             draft.batch_artifact_id = corrected_artifact.artifact_id
             draft.review_artifact_id = review_artifact.artifact_id
             draft.revision += 1
-            draft.status = "READY_TO_SUBMIT" if reviewed.downstream_ready else "REVIEW_REQUIRED"
+            draft.status = (
+                "READY_TO_SUBMIT"
+                if _quote_draft_submission_ready(reviewed)
+                else "REVIEW_REQUIRED"
+            )
             session.flush()
             response = self._quote_draft_response(session, draft)
             self._save_idempotent(
@@ -1178,6 +1351,11 @@ class BackendService:
             if repeated is not None:
                 return repeated
             draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
             if draft.revision != expected_draft_revision:
                 raise ConflictError(
                     "quote_draft_revision_conflict",
@@ -1215,13 +1393,231 @@ class BackendService:
                 raise NotFoundError("job_not_found", "Job was not found.")
             return job.job_type
 
-    def list_tasks(self, *, limit: int = 20) -> dict[str, Any]:
+    def upload_requirement_draft_stream(
+        self,
+        *,
+        original_filename: str,
+        media_type: str,
+        stream: BinaryIO,
+        idempotency_key: str,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+        max_bytes: int = 10 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        from .intake import safe_filename_extension
+
+        try:
+            extension = safe_filename_extension(original_filename, media_type)
+        except ValueError as exc:
+            raise BackendError(
+                "unsupported_requirement_media_type",
+                "Only PDF, TXT, and Markdown requirement files are supported.",
+            ) from exc
+        staging = self.storage_root / ".staging"
+        staging.mkdir(parents=True, exist_ok=True)
+        staged = staging / f"{new_id('requirement_upload')}.tmp"
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with staged.open("xb") as handle:
+                while chunk := stream.read(64 * 1024):
+                    if not isinstance(chunk, (bytes, bytearray)):
+                        raise BackendError("upload_stream_invalid", "Requirement upload stream must produce bytes.")
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise BackendError("file_too_large", "Requirement file exceeds the 10 MiB limit.", max_file_size_bytes=max_bytes)
+                    digest.update(chunk)
+                    handle.write(chunk)
+            if size == 0:
+                raise BackendError("empty_file", "Requirement file is empty.")
+        except Exception:
+            if staged.exists():
+                staged.unlink()
+            raise
+        file_sha = digest.hexdigest()
+        request = {
+            "filename": Path(original_filename).name,
+            "media_type": media_type,
+            "sha256": file_sha,
+            "provider": provider,
+            "model_id": model_id,
+            "environment": environment,
+            "prompt_version": prompt_version,
+        }
+        request_sha = content_hash(request)
+        final_path = None
+        try:
+            with self.session_factory.begin() as session:
+                repeated = self._existing_idempotent(
+                    session, operation="upload_requirement_draft", key=idempotency_key, request_sha256=request_sha
+                )
+                if repeated is not None:
+                    return repeated
+                draft_id, job_id = new_id("reqdraft"), new_id("job")
+                final_path = self.storage_root / ".requirements" / draft_id / f"source{extension}"
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                staged.rename(final_path)
+                draft = RequirementDraft(
+                    requirement_draft_id=draft_id,
+                    actor_id=self.actor_id,
+                    revision=1,
+                    status="PROCESSING",
+                    original_filename=Path(original_filename).name,
+                    media_type=media_type,
+                    size_bytes=size,
+                    sha256=file_sha,
+                    storage_path=str(final_path),
+                    provider=provider,
+                    model_id=model_id,
+                    environment=environment,
+                    prompt_version=prompt_version,
+                )
+                session.add(draft)
+                # Persist the parent row before scheduling the job that references it.
+                # No ORM relationship links these pending objects, so PostgreSQL may
+                # otherwise emit the jobs INSERT before the requirement draft INSERT.
+                session.flush([draft])
+                session.add(Job(
+                    job_id=job_id,
+                    task_id=None,
+                    graph_run_id=None,
+                    requirement_draft_id=draft_id,
+                    job_type="REQUIREMENT_DRAFT_PARSE",
+                    status="PENDING",
+                    task_revision=1,
+                ))
+                session.flush()
+                response = self._requirement_draft_response(session, draft)
+                self._save_idempotent(
+                    session, operation="upload_requirement_draft", key=idempotency_key,
+                    request_sha256=request_sha, response_status=202, response=response,
+                )
+                return response
+        except Exception:
+            if final_path is not None and final_path.exists():
+                final_path.unlink()
+            raise
+        finally:
+            if staged.exists():
+                staged.unlink()
+
+    def get_requirement_draft(self, draft_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            draft = session.get(RequirementDraft, draft_id)
+            if draft is None or draft.actor_id != self.actor_id:
+                raise NotFoundError("requirement_draft_not_found", "Requirement draft was not found.")
+            return self._requirement_draft_response(session, draft)
+
+    def discard_requirement_draft(
+        self, draft_id: str, *, expected_revision: int, idempotency_key: str
+    ) -> dict[str, Any]:
+        request = {"draft_id": draft_id, "expected_revision": expected_revision}
+        request_sha = content_hash(request)
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=f"discard_requirement_draft:{draft_id}", key=idempotency_key, request_sha256=request_sha
+            )
+            if repeated is not None:
+                return repeated
+            draft = session.scalar(select(RequirementDraft).where(
+                RequirementDraft.requirement_draft_id == draft_id
+            ).with_for_update())
+            if draft is None or draft.actor_id != self.actor_id:
+                raise NotFoundError("requirement_draft_not_found", "Requirement draft was not found.")
+            if draft.revision != expected_revision:
+                raise ConflictError("requirement_draft_revision_conflict", "Requirement draft revision has changed.")
+            if draft.status == "USED":
+                raise ConflictError("requirement_draft_used", "A used requirement draft cannot be discarded.")
+            draft.status = "DISCARDED"
+            draft.revision += 1
+            for job in session.scalars(select(Job).where(
+                Job.requirement_draft_id == draft_id, Job.status.in_(("PENDING", "RUNNING"))
+            )):
+                job.status = "SUPERSEDED"
+            response = self._requirement_draft_response(session, draft)
+            self._save_idempotent(
+                session, operation=f"discard_requirement_draft:{draft_id}", key=idempotency_key,
+                request_sha256=request_sha, response_status=200, response=response,
+            )
+            return response
+
+    def requirement_draft_job_context(self, job_id: str) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or job.job_type != "REQUIREMENT_DRAFT_PARSE" or not job.requirement_draft_id:
+                raise NotFoundError("job_not_found", "Requirement draft job was not found.")
+            draft = session.scalar(select(RequirementDraft).where(
+                RequirementDraft.requirement_draft_id == job.requirement_draft_id
+            ).with_for_update())
+            if draft is None or draft.actor_id != self.actor_id:
+                raise NotFoundError("requirement_draft_not_found", "Requirement draft was not found.")
+            if job.status != "PENDING" or draft.status in {"DISCARDED", "USED"}:
+                raise ConflictError("job_not_pending", "Requirement draft job is not pending.")
+            job.status = "RUNNING"
+            job.attempts += 1
+            job.started_at = datetime.now(timezone.utc)
+            draft.status = "PROCESSING"
+            return {
+                "job_id": job_id,
+                "draft_id": draft.requirement_draft_id,
+                "storage_path": draft.storage_path,
+                "media_type": draft.media_type,
+            }
+
+    def complete_requirement_draft_job(
+        self, job_id: str, *, parsed: dict[str, Any], candidates: dict[str, Any], calls_used: int
+    ) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or not job.requirement_draft_id:
+                raise NotFoundError("job_not_found", "Requirement draft job was not found.")
+            draft = session.scalar(select(RequirementDraft).where(
+                RequirementDraft.requirement_draft_id == job.requirement_draft_id
+            ).with_for_update())
+            if draft is None:
+                raise NotFoundError("requirement_draft_not_found", "Requirement draft was not found.")
+            if job.status != "RUNNING" or draft.status == "DISCARDED":
+                job.status = "SUPERSEDED"
+                raise ConflictError("job_superseded", "Requirement draft job was superseded.")
+            draft.parsed_payload = parsed
+            draft.candidates = candidates
+            draft.calls_used = calls_used
+            draft.status = "READY"
+            draft.error_code = draft.error_message = None
+            draft.revision += 1
+            job.status = "SUCCEEDED"
+            job.finished_at = datetime.now(timezone.utc)
+            return self._requirement_draft_response(session, draft)
+
+    def fail_requirement_draft_job(self, job_id: str, *, code: str, message: str, calls_used: int = 0) -> None:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or not job.requirement_draft_id:
+                return
+            draft = session.get(RequirementDraft, job.requirement_draft_id)
+            job.status = "FAILED"
+            job.error_code, job.error_message = code, message[:1000]
+            job.finished_at = datetime.now(timezone.utc)
+            if draft is not None and draft.status != "DISCARDED":
+                draft.status = "FAILED"
+                draft.error_code, draft.error_message = code, message[:1000]
+                draft.calls_used = calls_used
+
+    def list_tasks(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        query: str | None = None,
+        status: str | None = None,
+        sort: str = "updated_desc",
+    ) -> dict[str, Any]:
         with self.session_factory() as session:
             tasks = session.scalars(
                 select(Task)
                 .where(Task.owner_id == self.actor_id)
-                .order_by(Task.updated_at.desc(), Task.task_id.desc())
-                .limit(limit)
             ).all()
             items = []
             for task in tasks:
@@ -1247,7 +1643,381 @@ class BackendService:
                         "updated_at": task.updated_at.isoformat(),
                     }
                 )
-            return {"items": items}
+            term = (query or "").strip().casefold()
+            if term:
+                items = [item for item in items if term in " ".join(str(item.get(key) or "") for key in (
+                    "task_id", "scenario_id", "manufacturer", "manufacturer_part_number"
+                )).casefold()]
+            if status:
+                items = [item for item in items if item["status"] == status]
+            status_counts: dict[str, int] = {}
+            for task in tasks:
+                status_counts[task.status] = status_counts.get(task.status, 0) + 1
+            if sort == "planned_asc":
+                items.sort(key=lambda item: (item["planned_order_date"] is None, item["planned_order_date"] or "", item["task_id"]))
+            elif sort == "planned_desc":
+                items.sort(key=lambda item: (item["planned_order_date"] is not None, item["planned_order_date"] or "", item["task_id"]), reverse=True)
+            elif sort == "created_desc":
+                items.sort(key=lambda item: (item["created_at"], item["task_id"]), reverse=True)
+            else:
+                items.sort(key=lambda item: (item["updated_at"], item["task_id"]), reverse=True)
+            total = len(items)
+            return {"items": items[offset:offset + limit], "total": total, "limit": limit, "offset": offset, "status_counts": status_counts}
+
+    def update_requirement(
+        self,
+        task_id: str,
+        requirement: ProcurementRequirement,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        payload = requirement.model_dump(mode="json")
+        request = {"task_id": task_id, "expected_task_revision": expected_task_revision, "requirement": payload}
+        request_sha = content_hash(request)
+        operation = f"update_requirement:{task_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha)
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            current = session.scalar(select(RequirementRecord).where(
+                RequirementRecord.task_id == task_id
+            ).order_by(RequirementRecord.requirement_version.desc()))
+            old_payload = dict(current.payload) if current else {}
+            if old_payload == payload:
+                raise BackendError("requirement_unchanged", "Requirement contains no changes.")
+            self._supersede_current_graph(session, task)
+            for draft in session.scalars(select(QuoteDraft).where(
+                QuoteDraft.task_id == task_id,
+                QuoteDraft.status.in_(("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")),
+            )):
+                draft.status = "STALE"
+                draft.revision += 1
+                for draft_job in session.scalars(select(Job).where(
+                    Job.quote_draft_id == draft.quote_draft_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )):
+                    draft_job.status = "SUPERSEDED"
+            next_revision = task.current_revision + 1
+            changed_fields = sorted(name for name in set(old_payload) | set(payload) if old_payload.get(name) != payload.get(name))
+            session.add(TaskRevision(
+                revision_id=new_id("rev"), task_id=task_id, revision=next_revision,
+                change_type="REQUIREMENT_UPDATED", actor_id=self.actor_id,
+                request_sha256=request_sha, details={"changed_fields": changed_fields},
+            ))
+            session.add(RequirementRecord(
+                requirement_id=new_id("req"), task_id=task_id, task_revision=next_revision,
+                requirement_version=(current.requirement_version + 1 if current else 1),
+                payload=payload, content_sha256=content_hash(payload), source_artifact_id=None,
+            ))
+            task.current_revision = next_revision
+            active_documents = session.scalars(select(Document).join(
+                Quote, Quote.quote_id == Document.quote_id
+            ).where(Document.task_id == task_id, Quote.active.is_(True), Document.quote_version == Quote.current_version)).all()
+            graph_run_id = job_id = None
+            if active_documents:
+                graph_run_id, job_id = new_id("graph"), new_id("job")
+                session.add(GraphRun(
+                    graph_run_id=graph_run_id, task_id=task_id, thread_id=graph_run_id,
+                    started_revision=next_revision, effective_revision=next_revision, status="PENDING",
+                    provider=provider, model_id=model_id, environment=environment, prompt_version=prompt_version,
+                ))
+                session.flush()
+                session.add(Job(
+                    job_id=job_id, task_id=task_id, graph_run_id=graph_run_id,
+                    job_type="START", status="PENDING", task_revision=next_revision,
+                ))
+                task.current_graph_run_id = graph_run_id
+                task.status = "QUEUED"
+            else:
+                task.status = "DRAFT"
+            response = {
+                "task_id": task_id,
+                "task_revision": next_revision,
+                "status": task.status,
+                "changed_fields": changed_fields,
+                "graph_run_id": graph_run_id,
+                "job_id": job_id,
+                "job_status": "PENDING" if job_id else None,
+            }
+            self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha, response_status=202, response=response)
+            return response
+
+    def abandon_task(
+        self, task_id: str, *, expected_task_revision: int, reason: str, idempotency_key: str
+    ) -> dict[str, Any]:
+        request = {"task_id": task_id, "expected_task_revision": expected_task_revision, "reason": reason.strip()}
+        request_sha = content_hash(request)
+        operation = f"abandon_task:{task_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha)
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Task has already been abandoned.")
+            if task.current_revision != expected_task_revision:
+                raise ConflictError("task_revision_conflict", "Task revision has changed.", expected=expected_task_revision, actual=task.current_revision)
+            self._supersede_current_graph(session, task)
+            for job in session.scalars(select(Job).where(
+                Job.task_id == task_id, Job.status.in_(("PENDING", "RUNNING", "WAITING_INPUT"))
+            )):
+                job.status = "SUPERSEDED"
+            for report in session.scalars(select(SummaryReport).where(
+                SummaryReport.task_id == task_id,
+                SummaryReport.status.in_(("PENDING", "RUNNING")),
+            )):
+                report.status = "STALE"
+            for draft in session.scalars(select(QuoteDraft).where(
+                QuoteDraft.task_id == task_id,
+                QuoteDraft.status.in_(("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")),
+            )):
+                draft.status = "STALE"
+                draft.revision += 1
+            next_revision = task.current_revision + 1
+            session.add(TaskRevision(
+                revision_id=new_id("rev"), task_id=task_id, revision=next_revision,
+                change_type="TASK_ABANDONED", actor_id=self.actor_id,
+                request_sha256=request_sha, details={"reason": reason.strip()},
+            ))
+            task.current_revision = next_revision
+            task.status = "ABANDONED"
+            task.abandoned_at = datetime.now(timezone.utc)
+            response = {"task_id": task_id, "task_revision": next_revision, "status": "ABANDONED", "reason": reason.strip()}
+            self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha, response_status=200, response=response)
+            return response
+
+    def task_audit(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            revisions = session.scalars(select(TaskRevision).where(
+                TaskRevision.task_id == task_id
+            ).order_by(TaskRevision.revision)).all()
+            accesses = session.scalars(select(DocumentAccessEvent).where(
+                DocumentAccessEvent.task_id == task_id
+            ).order_by(DocumentAccessEvent.created_at.desc())).all()
+            return {
+                "task_id": task_id,
+                "revisions": [{
+                    "revision": item.revision,
+                    "change_type": item.change_type,
+                    "actor_id": item.actor_id,
+                    "details": item.details or {},
+                    "created_at": self._aware_datetime(item.created_at).isoformat(),
+                } for item in revisions],
+                "document_accesses": [{
+                    "access_event_id": item.access_event_id,
+                    "document_id": item.document_id,
+                    "action": item.action,
+                    "actor_id": item.actor_id,
+                    "request_id": item.request_id,
+                    "created_at": self._aware_datetime(item.created_at).isoformat(),
+                } for item in accesses],
+            }
+
+    def document_content(
+        self, task_id: str, document_id: str, *, action: str, request_id: str | None
+    ) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            task = session.get(Task, task_id)
+            document = session.get(Document, document_id)
+            if task is None or task.owner_id != self.actor_id or document is None or document.task_id != task_id:
+                raise NotFoundError("document_not_found", "Document was not found.")
+            root = self.storage_root.resolve()
+            path = Path(document.storage_path).resolve()
+            if root not in path.parents or not path.is_file():
+                raise NotFoundError("document_content_not_found", "Document content was not found.")
+            session.add(DocumentAccessEvent(
+                access_event_id=new_id("access"), task_id=task_id, document_id=document_id,
+                actor_id=self.actor_id, action=action, request_id=request_id,
+            ))
+            return {
+                "path": path,
+                "filename": document.original_filename,
+                "media_type": document.media_type,
+                "sha256": document.sha256,
+            }
+
+    def create_summary(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        result_id: str,
+        idempotency_key: str,
+        provider: str | None,
+        model_id: str | None,
+        environment: str | None,
+        prompt_version: str,
+    ) -> dict[str, Any]:
+        request = {"task_id": task_id, "expected_task_revision": expected_task_revision, "result_id": result_id, "prompt_version": prompt_version, "model_id": model_id}
+        request_sha = content_hash(request)
+        operation = f"create_summary:{task_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha)
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.current_result_id != result_id:
+                raise ConflictError("summary_result_stale", "Summary requires the current result.")
+            result = session.get(WorkflowArtifact, result_id)
+            if result is None or result.task_id != task_id or result.artifact_type != "COMPARISON_RESULT":
+                raise NotFoundError("result_not_found", "Result was not found.")
+            facts = self._summary_facts(session, task, result)
+            input_sha = content_hash(facts)
+            existing = session.scalar(select(SummaryReport).where(
+                SummaryReport.task_id == task_id,
+                SummaryReport.input_sha256 == input_sha,
+                SummaryReport.prompt_version == prompt_version,
+                SummaryReport.model_id == model_id,
+            ))
+            if existing is not None:
+                response = self._summary_response(session, task, existing)
+                self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha, response_status=200, response=response)
+                return response
+            for previous in session.scalars(select(SummaryReport).where(
+                SummaryReport.task_id == task_id,
+                SummaryReport.task_revision == task.current_revision,
+                SummaryReport.result_id == result_id,
+                SummaryReport.status != "STALE",
+            )):
+                previous.status = "STALE"
+                for previous_job in session.scalars(select(Job).where(
+                    Job.summary_id == previous.summary_id,
+                    Job.status.in_(("PENDING", "RUNNING")),
+                )):
+                    previous_job.status = "SUPERSEDED"
+            summary_id, job_id = new_id("summary"), new_id("job")
+            report = SummaryReport(
+                summary_id=summary_id, task_id=task_id, task_revision=task.current_revision,
+                result_id=result_id, status="PENDING", input_sha256=input_sha, facts=facts,
+                provider=provider, model_id=model_id, environment=environment,
+                prompt_version=prompt_version, max_calls=4,
+            )
+            session.add(report)
+            session.flush()
+            session.add(Job(
+                job_id=job_id, task_id=task_id, graph_run_id=None, summary_id=summary_id,
+                job_type="SUMMARY_GENERATION", status="PENDING", task_revision=task.current_revision,
+            ))
+            session.flush()
+            response = self._summary_response(session, task, report)
+            self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha, response_status=202, response=response)
+            return response
+
+    def list_summaries(self, task_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            reports = session.scalars(select(SummaryReport).where(
+                SummaryReport.task_id == task_id
+            ).order_by(SummaryReport.created_at.desc())).all()
+            return {"task_id": task_id, "task_revision": task.current_revision, "items": [self._summary_response(session, task, item) for item in reports]}
+
+    def get_summary(self, task_id: str, summary_id: str) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            report = session.get(SummaryReport, summary_id)
+            if task is None or task.owner_id != self.actor_id or report is None or report.task_id != task_id:
+                raise NotFoundError("summary_not_found", "Summary was not found.")
+            return self._summary_response(session, task, report)
+
+    def retry_summary(
+        self, task_id: str, summary_id: str, *, expected_task_revision: int, idempotency_key: str
+    ) -> dict[str, Any]:
+        request = {"summary_id": summary_id, "expected_task_revision": expected_task_revision}
+        request_sha = content_hash(request)
+        operation = f"retry_summary:{summary_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha)
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            report = session.scalar(select(SummaryReport).where(SummaryReport.summary_id == summary_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id or report is None or report.task_id != task_id:
+                raise NotFoundError("summary_not_found", "Summary was not found.")
+            self._require_revision(task, expected_task_revision)
+            if report.task_revision != task.current_revision or report.result_id != task.current_result_id:
+                raise ConflictError("summary_stale", "A stale summary cannot be retried.")
+            if report.status != "FAILED" or report.calls_used >= report.max_calls:
+                raise ConflictError("summary_not_retryable", "Summary is not retryable.")
+            job_id = new_id("job")
+            report.status = "PENDING"
+            report.error_code = report.error_message = None
+            session.add(Job(
+                job_id=job_id, task_id=task_id, graph_run_id=None, summary_id=summary_id,
+                job_type="SUMMARY_GENERATION", status="PENDING", task_revision=task.current_revision,
+            ))
+            session.flush()
+            response = self._summary_response(session, task, report)
+            self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha, response_status=202, response=response)
+            return response
+
+    def summary_job_context(self, job_id: str) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            if job is None or job.job_type != "SUMMARY_GENERATION" or not job.summary_id:
+                raise NotFoundError("job_not_found", "Summary job was not found.")
+            report = session.scalar(select(SummaryReport).where(SummaryReport.summary_id == job.summary_id).with_for_update())
+            task = session.get(Task, report.task_id) if report else None
+            if report is None or task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("summary_not_found", "Summary was not found.")
+            if job.status != "PENDING" or report.task_revision != task.current_revision or report.result_id != task.current_result_id:
+                job.status = "SUPERSEDED"
+                report.status = "STALE"
+                raise ConflictError("summary_stale", "Summary inputs are stale.")
+            job.status = "RUNNING"
+            job.attempts += 1
+            job.started_at = datetime.now(timezone.utc)
+            report.status = "RUNNING"
+            return {"summary_id": report.summary_id, "facts": dict(report.facts), "calls_used": report.calls_used, "max_calls": report.max_calls}
+
+    def complete_summary_job(self, job_id: str, *, narrative: dict[str, Any], calls_used: int) -> dict[str, Any]:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            report = session.get(SummaryReport, job.summary_id) if job and job.summary_id else None
+            task = session.get(Task, report.task_id) if report else None
+            if job is None or report is None or task is None:
+                raise NotFoundError("summary_not_found", "Summary was not found.")
+            if task.current_revision != report.task_revision or task.current_result_id != report.result_id:
+                job.status, report.status = "SUPERSEDED", "STALE"
+                raise ConflictError("summary_stale", "Summary inputs changed during generation.")
+            report.narrative = narrative
+            report.calls_used = calls_used
+            report.status = "SUCCEEDED"
+            report.error_code = report.error_message = None
+            job.status = "SUCCEEDED"
+            job.finished_at = datetime.now(timezone.utc)
+            return self._summary_response(session, task, report)
+
+    def fail_summary_job(self, job_id: str, *, code: str, message: str, calls_used: int) -> None:
+        with self.session_factory.begin() as session:
+            job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
+            report = session.get(SummaryReport, job.summary_id) if job and job.summary_id else None
+            if job is None or report is None:
+                return
+            job.status = "FAILED"
+            job.error_code, job.error_message = code, message[:1000]
+            job.finished_at = datetime.now(timezone.utc)
+            report.status = "FAILED"
+            report.error_code, report.error_message = code, message[:1000]
+            report.calls_used = calls_used
 
     def list_issues(self, task_id: str) -> list[dict[str, Any]]:
         with self.session_factory() as session:
@@ -1893,6 +2663,8 @@ class BackendService:
     def requirement_simulation(self, task_id: str, *, expected_task_revision: int, changes, user_authorized: bool):
         from supplier_comparison.rules import simulate_requirement_change
         before = self.get_task(task_id)
+        if before["status"] == "ABANDONED":
+            raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
         request = self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision)
         try:
             result = simulate_requirement_change(request, changes, user_authorized=user_authorized)
@@ -3070,8 +3842,146 @@ class BackendService:
             ),
         }
 
+    def _requirement_draft_response(self, session: Session, draft: RequirementDraft) -> dict[str, Any]:
+        job = session.scalar(select(Job).where(
+            Job.requirement_draft_id == draft.requirement_draft_id
+        ).order_by(Job.created_at.desc(), Job.job_id.desc()))
+        return {
+            "requirement_draft_id": draft.requirement_draft_id,
+            "draft_revision": draft.revision,
+            "status": draft.status,
+            "original_filename": draft.original_filename,
+            "media_type": draft.media_type,
+            "size_bytes": draft.size_bytes,
+            "document_sha256": draft.sha256,
+            "parsed": draft.parsed_payload,
+            "candidates": (draft.candidates or {}).get("candidates", []),
+            "calls_used": draft.calls_used,
+            "max_calls": draft.max_calls,
+            "provider": draft.provider,
+            "model_id": draft.model_id,
+            "environment": draft.environment,
+            "prompt_version": draft.prompt_version,
+            "error_code": draft.error_code,
+            "error_message": draft.error_message,
+            "submitted_task_id": draft.submitted_task_id,
+            "job": ({
+                "job_id": job.job_id,
+                "job_type": job.job_type,
+                "job_status": job.status,
+                "attempts": job.attempts,
+            } if job else None),
+            "created_at": self._aware_datetime(draft.created_at).isoformat(),
+            "updated_at": self._aware_datetime(draft.updated_at).isoformat(),
+        }
+
+    def _summary_facts(self, session: Session, task: Task, result: WorkflowArtifact) -> dict[str, Any]:
+        requirement = session.scalar(select(RequirementRecord).where(
+            RequirementRecord.task_id == task.task_id
+        ).order_by(RequirementRecord.requirement_version.desc()))
+        comparison = dict(result.payload)
+        references: dict[str, Any] = {
+            f"RESULT:{result.artifact_id}": {
+                "type": "COMPARISON_RESULT",
+                "task_revision": result.task_revision,
+                "rule_version": comparison.get("rule_version"),
+                "evaluated_at": comparison.get("evaluated_at"),
+            }
+        }
+        for row in comparison.get("supplier_results", []):
+            references[f"QUOTE:{row.get('quote_id')}"] = {"type": "QUOTE_RESULT", **row}
+        documents = session.execute(select(Document, Quote).join(
+            Quote, Quote.quote_id == Document.quote_id
+        ).where(
+            Document.task_id == task.task_id,
+            Quote.active.is_(True),
+            Document.quote_version == Quote.current_version,
+        )).all()
+        for document, quote in documents:
+            references[f"DOCUMENT:{document.document_id}"] = {
+                "type": "QUOTE_DOCUMENT",
+                "quote_id": quote.quote_id,
+                "quote_version": document.quote_version,
+                "supplier_id": quote.supplier_id,
+                "original_filename": document.original_filename,
+                "document_sha256": document.sha256,
+            }
+            execution = session.scalar(select(DocumentExecution).where(
+                DocumentExecution.graph_run_id == result.graph_run_id,
+                DocumentExecution.document_id == document.document_id,
+            )) if result.graph_run_id else None
+            batch = session.get(WorkflowArtifact, execution.batch_artifact_id) if execution and execution.batch_artifact_id else None
+            for source in (batch.payload.get("parsed_input", {}).get("sources", []) if batch else []):
+                source_id = source.get("source_id")
+                if source_id:
+                    references[f"EVIDENCE:{source_id}"] = {
+                        "type": "QUOTE_EVIDENCE",
+                        "document_id": document.document_id,
+                        "quote_id": quote.quote_id,
+                        **{key: source.get(key) for key in ("source_id", "kind", "raw_text", "page_number", "row_number", "column_name")},
+                    }
+        for retrieval in self._policy_retrieval_payloads(session, result.artifact_id):
+            for citation in retrieval.get("citations", []):
+                citation_id = citation.get("citation_id")
+                if citation_id:
+                    references[f"POLICY:{citation_id}"] = {"type": "POLICY_CITATION", **citation}
+        return {
+            "schema_version": "summary-facts/1.0.0",
+            "task_id": task.task_id,
+            "task_revision": task.current_revision,
+            "result_id": result.artifact_id,
+            "requirement": dict(requirement.payload) if requirement else {},
+            "disposition": comparison.get("disposition"),
+            "final_recommendation_allowed": comparison.get("final_recommendation_allowed", False),
+            "recommended_quote_ids": comparison.get("recommended_quote_ids", []),
+            "pending_quote_ids": comparison.get("pending_quote_ids", []),
+            "comparison_reasons": comparison.get("comparison_reasons", []),
+            "policy_binding": self._policy_binding_response(task),
+            "references": references,
+            "scope": "Explanatory summary only; no approval, order, payment, or supplier contact.",
+        }
+
+    def _summary_response(self, session: Session, task: Task, report: SummaryReport) -> dict[str, Any]:
+        job = session.scalar(select(Job).where(Job.summary_id == report.summary_id).order_by(
+            Job.created_at.desc(), Job.job_id.desc()
+        ))
+        stale = (
+            report.status == "STALE"
+            or report.task_revision != task.current_revision
+            or report.result_id != task.current_result_id
+        )
+        return {
+            "summary_id": report.summary_id,
+            "task_id": report.task_id,
+            "task_revision": report.task_revision,
+            "result_id": report.result_id,
+            "status": "STALE" if stale else report.status,
+            "is_current": not stale,
+            "input_sha256": report.input_sha256,
+            "facts": dict(report.facts),
+            "narrative": dict(report.narrative) if report.narrative else None,
+            "provider": report.provider,
+            "model_id": report.model_id,
+            "environment": report.environment,
+            "prompt_version": report.prompt_version,
+            "calls_used": report.calls_used,
+            "max_calls": report.max_calls,
+            "error_code": report.error_code,
+            "error_message": report.error_message,
+            "job": ({
+                "job_id": job.job_id,
+                "job_type": job.job_type,
+                "job_status": job.status,
+                "attempts": job.attempts,
+            } if job else None),
+            "created_at": self._aware_datetime(report.created_at).isoformat(),
+            "updated_at": self._aware_datetime(report.updated_at).isoformat(),
+        }
+
     @staticmethod
     def _require_revision(task: Task, expected: int) -> None:
+        if task.status == "ABANDONED":
+            raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
         if task.current_revision != expected:
             raise ConflictError(
                 "task_revision_conflict",

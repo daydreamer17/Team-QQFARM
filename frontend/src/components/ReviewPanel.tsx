@@ -147,10 +147,10 @@ function blockingFindingSummary(
 function errorMessage(error: unknown, quotes: TaskQuote[] = []) {
   if (
     error instanceof ApiClientError &&
-    error.code === 'corrections_still_require_review'
+    error.code === 'field_correction_batch_invalid'
   ) {
     const summary = blockingFindingSummary(error.details, quotes)
-    return `提交失败：${summary || '修正内容仍未通过审核'}。没有创建新版本或 Job。`
+    return `提交失败：${summary || '字段版本或修正内容已经变化'}。请刷新后重新核对。`
   }
   return error instanceof ApiClientError ? error.message : '字段修正失败。'
 }
@@ -237,6 +237,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
         states.map<FieldCorrectionInput>((state) => ({
           quoteId: state.quote.quote_id,
           fieldName: state.field.field_name,
+          expectedFieldVersion: state.field.field_version,
           rawValue: state.rawValue.trim(),
           normalizedValue: preserveValueType(
             state.normalizedValue.trim(),

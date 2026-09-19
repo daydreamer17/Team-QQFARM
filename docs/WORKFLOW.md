@@ -321,7 +321,8 @@ Compose 重启但不删除卷时，任务、问题、checkpoint、报价文件�
 | 六控制码 PolicyOrchestrator 和引用解释 | 独立模块已实现，尚未接入主图 |
 | 供应商主数据、批准状态和 RoHS 精确事实 | 未实现 |
 | 确定性 ComplianceMatrix | 未实现 |
-| React 操作界面 | 未实现 |
+| React 操作界面 | 已实现任务中心、需求草稿/修改、报价审核、决策、Summary 与审计页面 |
+| 版本化 AI Summary | 已实现确定性事实骨架、受约束模型叙述与异步失败重试；不代表审批 |
 | 正式登录、审批和 HTML 报告 | 未实现 |
 | 常驻 worker 自动调度 | 未实现；当前使用一次性 worker |
 | 自由聊天 Chatbot | 当前 MVP 范围外 |

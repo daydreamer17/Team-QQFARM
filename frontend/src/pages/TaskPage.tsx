@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, ApiClientError } from '../api/client'
+import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 export function TaskPage() {
@@ -12,6 +13,16 @@ export function TaskPage() {
     refetchInterval: (query) => {
       const status = query.state.data?.status
       return status === 'QUEUED' || status === 'RUNNING' ? 2_000 : false
+    },
+  })
+  const [showAbandon, setShowAbandon] = useState(false)
+  const [abandonReason, setAbandonReason] = useState('')
+  const abandon = useMutation({
+    mutationFn: () => api.abandonTask(taskId, task.data!.task_revision, abandonReason.trim(), createIdempotencyKey()),
+    onSuccess: async () => {
+      setShowAbandon(false)
+      setAbandonReason('')
+      await task.refetch()
     },
   })
 
@@ -56,6 +67,8 @@ export function TaskPage() {
         revision={task.data.task_revision}
         resultId={task.data.current_result_id}
         quoteCount={task.data.quotes.length}
+        summaryComplete={task.data.summary_completed}
+        progress={task.data.progress}
         reviewBlocked={reviewBlocked}
         policyReviewBlocked={task.data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
         active="overview"
@@ -91,13 +104,11 @@ export function TaskPage() {
         </dl>
         <div className="requirement-actions">
           <div className="inline-actions">
-            <button className="button button-secondary" type="button" disabled title="后端接口待接入">
-              修改采购需求
-            </button>
-            <button className="button button-danger" type="button" disabled title="后端接口待接入">
-              废弃任务
-            </button>
+            {task.data.status !== 'ABANDONED' && <Link className="button button-secondary" to={`/tasks/${taskId}/edit`}>修改采购需求</Link>}
+            {task.data.status !== 'ABANDONED' && <button className="button button-danger" type="button" onClick={() => setShowAbandon(true)}>废弃任务</button>}
+            {task.data.status === 'ABANDONED' && <span className="status-pill status-muted">任务已软废弃，历史记录保持只读</span>}
           </div>
+          {showAbandon && <div className="card abandon-task-panel"><strong>确认废弃任务</strong><p>该操作不可恢复，但不会删除报价、原件、结果和审计记录。</p><label className="field"><span>废弃理由</span><textarea value={abandonReason} onChange={(event) => setAbandonReason(event.target.value)} minLength={3} maxLength={1000} /></label><div className="inline-actions"><button className="button button-secondary" type="button" onClick={() => setShowAbandon(false)}>取消</button><button className="button button-danger" type="button" disabled={abandonReason.trim().length < 3 || abandon.isPending} onClick={() => { if (window.confirm('确认将任务永久设为只读废弃状态吗？')) abandon.mutate() }}>{abandon.isPending ? '正在废弃…' : '确认废弃'}</button></div>{abandon.isError && <div className="form-error">{abandon.error instanceof ApiClientError ? abandon.error.message : '废弃任务失败。'}</div>}</div>}
         </div>
       </section>
     </div>
