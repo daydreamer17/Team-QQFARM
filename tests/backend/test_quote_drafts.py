@@ -174,7 +174,8 @@ def test_draft_review_and_submit_is_a_single_authoritative_revision(
             stream=CANONICAL_QUOTES.open("rb"),
             idempotency_key="draft-upload-2",
         )
-    assert duplicate.value.code == "active_quote_draft_exists"
+    assert duplicate.value.code == "duplicate_quote_uploaded"
+    assert str(duplicate.value) == "该报价单已上传。"
 
     reviewed = DraftReviewRunner(
         service,
@@ -195,6 +196,19 @@ def test_draft_review_and_submit_is_a_single_authoritative_revision(
     assert submitted["task_revision"] == 2
     assert submitted["status"] == "SUBMITTED"
     assert len(service.list_quotes(task["task_id"])["items"]) == 1
+
+    with pytest.raises(ConflictError) as submitted_duplicate:
+        service.upload_quote_draft_stream(
+            task["task_id"],
+            expected_task_revision=2,
+            supplier_id="SUP-099",
+            original_filename="renamed-copy.pdf",
+            media_type="application/pdf",
+            stream=CANONICAL_QUOTES.open("rb"),
+            idempotency_key="draft-upload-after-submit",
+        )
+    assert submitted_duplicate.value.code == "duplicate_quote_uploaded"
+    assert str(submitted_duplicate.value) == "该报价单已上传。"
 
 
 def test_confirmed_unknown_shipping_can_enter_formal_workflow(

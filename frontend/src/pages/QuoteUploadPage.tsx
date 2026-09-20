@@ -48,6 +48,7 @@ const correctionOptions: Record<string, CorrectionOption[]> = {
   delivery_semantics: [
     { value: 'ARRIVAL', label: '承诺到货（ARRIVAL）' },
     { value: 'SHIPMENT', label: '仅承诺发货（SHIPMENT）' },
+    { value: 'NOT_APPLICABLE', label: '不适用（NOT_APPLICABLE）' },
   ],
   start_event: [
     { value: 'ORDER_DATE', label: '从下单日计算（ORDER_DATE）' },
@@ -198,7 +199,7 @@ function DraftReview({ draft, taskRevision, onChanged }: { draft: QuoteDraftResp
                 <article className={`draft-field${blocked ? ' draft-field-blocked' : ''}`} key={field.field_name}>
                   <div className="draft-field-title"><strong>{fieldLabels[field.field_name] ?? '相关信息'}</strong></div>
                   <div className="draft-current-value"><span>当前值</span><strong>{displayValue(field.normalized_value)}{field.unit ? ` ${field.unit}` : ''}</strong><small>原文：{displayValue(field.raw_value)}</small></div>
-                  {blocked ? <><div className="draft-finding-reasons">{findings.map((finding) => <p key={finding.finding_id}>{findingDisplayMessage(finding)}</p>)}</div><label className="field"><span>核对后的值</span>{correctionOptions[field.field_name] ? <select required value={values[field.field_name] ?? ''} onChange={(event) => { setValues((current) => ({ ...current, [field.field_name]: event.target.value })); setLastCorrection(null); correction.reset() }}><option value="">请选择已确认的实际情况</option>{correctionOptions[field.field_name].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required value={values[field.field_name] ?? ''} onChange={(event) => { setValues((current) => ({ ...current, [field.field_name]: event.target.value })); setLastCorrection(null); correction.reset() }} />}{field.field_name === 'delivery_semantics' && <small>“NO”不是交付语义；请选择承诺的是到货还是发货。</small>}{field.field_name === 'tax_mode' && <small>“N/A”不是标准值；只有报价明确说明不适用税费时才选“不适用”。</small>}</label></> : <span className="draft-verified">已通过自动审核 · 只读</span>}
+                  {blocked ? <><div className="draft-finding-reasons">{findings.map((finding) => <p key={finding.finding_id}>{findingDisplayMessage(finding)}</p>)}</div><label className="field"><span>核对后的值</span>{correctionOptions[field.field_name] ? <select required value={values[field.field_name] ?? ''} onChange={(event) => { setValues((current) => ({ ...current, [field.field_name]: event.target.value })); setLastCorrection(null); correction.reset() }}><option value="">请选择已确认的实际情况</option>{correctionOptions[field.field_name].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <input required value={values[field.field_name] ?? ''} onChange={(event) => { setValues((current) => ({ ...current, [field.field_name]: event.target.value })); setLastCorrection(null); correction.reset() }} />}</label></> : <span className="draft-verified">已通过自动审核 · 只读</span>}
                 </article>
               )
             })}

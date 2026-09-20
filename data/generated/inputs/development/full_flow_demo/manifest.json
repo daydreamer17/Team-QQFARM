@@ -97,8 +97,8 @@
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo/README.md",
-      "size_bytes": 2004,
-      "sha256": "f5f8a73aeea7eac781100922d91d77ab688c2e16e367e8065be54f9b75ac70aa"
+      "size_bytes": 5360,
+      "sha256": "597137d3b8d79080ba134a6386074dfd69d5455da9d67757d56ef4518b5ba081"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo/requirement/confirmed_requirement.json",

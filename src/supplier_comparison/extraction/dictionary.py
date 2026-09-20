@@ -36,6 +36,7 @@ FIELD_ALLOWED_NORMALIZED_VALUES = {
     "delivery_semantics": (
         "ARRIVAL",
         "SHIPMENT",
+        "NOT_APPLICABLE",
     ),
     "start_event": (
         "ORDER_DATE",

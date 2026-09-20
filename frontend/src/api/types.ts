@@ -483,6 +483,33 @@ export interface ComparisonResultResponse {
   result: ComparisonPayload
   decision_impact: DecisionImpactResult | null
   policy_retrievals: PolicyRetrievalResult[]
+  policy_compliance: PolicyComplianceResult
+}
+
+export type PolicyComplianceStatus = 'COMPLIANT' | 'NON_COMPLIANT' | 'REVIEW_REQUIRED' | 'NOT_EVALUATED'
+export type PolicyComplianceCheckStatus = 'PASS' | 'FAIL' | 'REVIEW_REQUIRED' | 'NOT_EVALUATED'
+
+export interface PolicyComplianceCheck {
+  control_code: string
+  status: PolicyComplianceCheckStatus
+  reason_code: string
+  message: string
+  citation_ids: string[]
+}
+
+export interface PolicyComplianceSupplierAssessment {
+  quote_id: string
+  quote_version: number
+  supplier_name: string | null
+  status: PolicyComplianceStatus
+  checks: PolicyComplianceCheck[]
+}
+
+export interface PolicyComplianceResult {
+  schema_version: string
+  disposition: 'COMPLIANT_SUPPLIERS_AVAILABLE' | 'NO_CONFIRMED_COMPLIANT_SUPPLIER' | 'NO_SUPPLIERS'
+  counts: Record<PolicyComplianceStatus, number>
+  assessments: PolicyComplianceSupplierAssessment[]
 }
 
 export interface HypotheticalComparison {

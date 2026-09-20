@@ -175,6 +175,20 @@ def test_published_result_requires_all_policy_retrievals_to_succeed(tmp_path: Pa
     assert {
         item["citations"][0]["control_code"] for item in current["policy_retrievals"]
     } == REQUIRED_CONTROL_CODES
+    compliance = current["policy_compliance"]
+    assert compliance["disposition"] == "NO_CONFIRMED_COMPLIANT_SUPPLIER"
+    assert compliance["counts"] == {
+        "COMPLIANT": 0,
+        "NON_COMPLIANT": 0,
+        "REVIEW_REQUIRED": 1,
+        "NOT_EVALUATED": 0,
+    }
+    assert {check["control_code"] for check in compliance["assessments"][0]["checks"]} == (
+        REQUIRED_CONTROL_CODES
+    )
+    assert {check["status"] for check in compliance["assessments"][0]["checks"]} == {
+        "REVIEW_REQUIRED"
+    }
 
     state = runner.graph.get_state(
         {"configurable": {"thread_id": outcome["graph_run_id"]}}
@@ -249,6 +263,11 @@ def test_no_feasible_result_does_not_call_policy_retrieval(tmp_path: Path) -> No
     assert current["is_current"] is True
     assert current["result"]["disposition"] == "NO_FEASIBLE_QUOTES"
     assert current["policy_retrievals"] == []
+    assert current["policy_compliance"]["counts"]["NOT_EVALUATED"] == 1
+    assert {
+        check["status"]
+        for check in current["policy_compliance"]["assessments"][0]["checks"]
+    } == {"NOT_EVALUATED"}
 
 
 def test_nonblocking_quote_unknown_does_not_bypass_mandatory_policy_gate(tmp_path):
