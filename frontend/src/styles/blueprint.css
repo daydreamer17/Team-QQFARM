@@ -1355,6 +1355,44 @@ body {
   margin: 0;
 }
 
+.quote-review-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  overflow: hidden;
+  border: 1px solid #cbd9f8;
+  border-radius: 12px;
+  background: #f7f9ff;
+}
+
+.quote-review-overview > div {
+  display: grid;
+  gap: 3px;
+  padding: 14px 18px;
+  border-right: 1px solid #dbe4f7;
+}
+
+.quote-review-overview > div:nth-child(3) {
+  border-right: 0;
+}
+
+.quote-review-overview strong {
+  color: var(--blue);
+  font-size: 20px;
+}
+
+.quote-review-overview span,
+.quote-review-overview p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quote-review-overview p {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 11px 18px;
+  border-top: 1px solid #dbe4f7;
+}
+
 .review-schema-warning {
   padding: 14px 16px;
   border: 1px solid #e9c672;
@@ -1380,6 +1418,19 @@ body {
   gap: 6px;
   margin: 10px 0 0;
   padding-left: 18px;
+}
+
+.quote-review-error-summary p {
+  margin: 5px 0 0;
+}
+
+.quote-review-error-summary details {
+  margin-top: 10px;
+}
+
+.quote-review-error-summary summary {
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .quote-review-error-summary button {
@@ -1436,12 +1487,34 @@ body {
   font-size: 12px;
 }
 
+.quote-review-ready-fields {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.quote-review-ready-fields > summary {
+  padding: 16px 18px;
+  color: var(--blue-dark);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.quote-review-ready-fields[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.quote-review-ready-fields > .quote-review-groups {
+  padding: 18px;
+}
+
 .quote-review-field {
   display: grid;
   align-content: start;
   gap: 13px;
   min-width: 0;
-  min-height: 310px;
+  min-height: 0;
   padding: 17px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1486,26 +1559,21 @@ body {
   font-weight: 750;
 }
 
-.badge-required {
-  color: #9a3a2d;
-  background: #fff0ed;
-}
-
-.badge-optional {
-  color: #657087;
-  background: #eef1f6;
-}
-
 .badge-review-state {
-  color: #76520f;
-  background: var(--warning-soft);
+  color: #657087;
+  background: #f2f4f7;
 }
 
 .badge-review-state.state-confirmed,
 .badge-review-state.state-corrected,
 .badge-review-state.state-missing_confirmed {
-  color: #14704d;
-  background: var(--success-soft);
+  color: #657087;
+  background: #f2f4f7;
+}
+
+.badge-review-state.state-needs-attention {
+  color: #9a3a2d;
+  background: #fff0ed;
 }
 
 .quote-field-extraction {
@@ -1529,14 +1597,22 @@ body {
   font-size: 14px;
 }
 
-.quote-precheck-pass,
 .quote-field-no-evidence {
-  color: #16734f;
+  color: var(--muted);
   font-size: 12px;
 }
 
 .quote-field-no-evidence {
   color: var(--muted);
+}
+
+.quote-field-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.quote-field-note p {
+  margin: 0 0 5px;
 }
 
 .quote-review-input input,
@@ -1564,7 +1640,7 @@ body {
   cursor: pointer;
 }
 
-.quote-field-evidence > div {
+.quote-field-evidence {
   display: grid;
   gap: 7px;
   margin-top: 8px;
@@ -1595,7 +1671,7 @@ body {
   position: sticky;
   bottom: 12px;
   z-index: 3;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 16px 18px;
   border: 1px solid #b8c9ef;
   border-radius: 12px;
@@ -1723,6 +1799,20 @@ body {
 
   .quote-review-progress p {
     grid-column: 1;
+  }
+
+  .quote-review-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .quote-review-overview > div {
+    border-right: 0;
+    border-bottom: 1px solid #dbe4f7;
+  }
+
+  .quote-review-overview p {
+    grid-column: 1;
+    border-top: 0;
   }
 
   .quote-submit-gate {

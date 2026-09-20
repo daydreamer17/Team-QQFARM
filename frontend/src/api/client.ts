@@ -27,6 +27,7 @@ import type {
   QuoteDraftListResponse,
   QuoteDraftReviewActionInput,
   QuoteDraftResponse,
+  QuoteDeactivateResponse,
   QuoteFieldSchemaResponse,
   QuoteHistoryResponse,
   QuoteUploadResponse,
@@ -217,6 +218,7 @@ export const api = {
       expectedTaskRevision: number
       supplierId: string
       isSynthetic: boolean
+      replacementQuoteId?: string
       file: File
     },
     idempotencyKey: string,
@@ -225,6 +227,7 @@ export const api = {
     body.append('expected_task_revision', String(input.expectedTaskRevision))
     body.append('supplier_id', input.supplierId)
     body.append('is_synthetic', String(input.isSynthetic))
+    if (input.replacementQuoteId) body.append('replacement_quote_id', input.replacementQuoteId)
     body.append('file', input.file)
     return request<QuoteDraftResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
@@ -334,6 +337,40 @@ export const api = {
           'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({ expected_draft_revision: expectedDraftRevision }),
+      },
+    ),
+  deactivateQuote: (
+    taskId: string,
+    quoteId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<QuoteDeactivateResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes/${encodeURIComponent(quoteId)}/deactivate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+      },
+    ),
+  createQuoteRevision: (
+    taskId: string,
+    quoteId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes/${encodeURIComponent(quoteId)}/revisions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
       },
     ),
   startRun: (

@@ -134,6 +134,7 @@ export function makeQuoteDraft(
     draft_revision: 2,
     status: 'REVIEW_REQUIRED',
     proposed_quote_id: 'quote-1',
+    replacement_quote_id: null,
     proposed_document_id: 'document-1',
     supplier_id: 'supplier-redwood',
     original_filename: 'supplier-redwood.pdf',

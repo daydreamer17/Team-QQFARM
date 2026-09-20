@@ -284,6 +284,16 @@ class DiscardQuoteDraftRequest(ApiModel):
     expected_draft_revision: int = Field(ge=1)
 
 
+class DeactivateQuoteRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+
+
+class CreateQuoteRevisionRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+
+
 class BatchFieldCorrection(ApiModel):
     model_config = ConfigDict(extra="forbid")
     quote_id: str = Field(min_length=1, max_length=64)
@@ -571,6 +581,9 @@ def create_app(
         expected_task_revision: Annotated[int, Form(ge=1)],
         supplier_id: Annotated[str, Form(min_length=1, max_length=128)],
         is_synthetic: Annotated[bool, Form()] = False,
+        replacement_quote_id: Annotated[
+            str | None, Form(min_length=1, max_length=64)
+        ] = None,
         file: UploadFile = File(...),
     ):
         return service.upload_quote_draft_stream(
@@ -582,6 +595,7 @@ def create_app(
             stream=file.file,
             idempotency_key=idempotency_key,
             is_synthetic=is_synthetic,
+            replacement_quote_id=replacement_quote_id,
             provider=settings.supplier_model_provider,
             model_id=settings.supplier_model_model_id,
             environment=settings.supplier_model_environment,
@@ -678,6 +692,41 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/quotes")
     def list_quotes(task_id: str):
         return service.list_quotes(task_id)
+
+    @app.post("/api/v1/tasks/{task_id}/quotes/{quote_id}/deactivate")
+    def deactivate_quote(
+        task_id: str,
+        quote_id: str,
+        body: DeactivateQuoteRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.deactivate_quote(
+            task_id,
+            quote_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        "/api/v1/tasks/{task_id}/quotes/{quote_id}/revisions",
+        status_code=202,
+    )
+    def create_quote_revision(
+        task_id: str,
+        quote_id: str,
+        body: CreateQuoteRevisionRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.create_quote_revision_draft(
+            task_id,
+            quote_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
+        )
 
     @app.post("/api/v1/tasks/{task_id}/runs", status_code=202)
     def start_run(

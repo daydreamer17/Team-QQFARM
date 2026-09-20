@@ -91,7 +91,7 @@ class CanonicalProcessor:
         row.update(
             scenario_id=context.scenario_id or "",
             quote_id=context.quote_id,
-            quote_version="1",
+            quote_version=str(context.quote_version),
             document_id=context.document_id,
             supplier_id=context.supplier_id or "",
         )
@@ -304,6 +304,92 @@ def test_initial_draft_requires_full_human_review_before_formal_submit(
     assert submitted["status"] == "SUBMITTED"
     assert submitted["task_revision"] == 2
     assert len(service.list_quotes(task["task_id"])["items"]) == 1
+
+
+def test_replacement_creates_new_version_and_deactivation_preserves_history(
+    service: BackendService,
+    tmp_path: Path,
+) -> None:
+    task, draft, current = _processed_canonical_draft(
+        service, tmp_path, key="replace-version-one"
+    )
+    reviewed = _review_all_fields(
+        service,
+        task,
+        draft,
+        current,
+        key="review-version-one",
+    )
+    first = service.submit_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_task_revision=1,
+        expected_draft_revision=reviewed["draft_revision"],
+        idempotency_key="submit-version-one",
+    )
+
+    replacement = service.create_quote_revision_draft(
+        task["task_id"],
+        first["quote_id"],
+        expected_task_revision=2,
+        idempotency_key="open-version-two",
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/1.0.0",
+    )
+    assert replacement["replacement_quote_id"] == first["quote_id"]
+    DraftReviewRunner(
+        service,
+        processor=CanonicalProcessor(tmp_path),
+        dictionary_path=DICTIONARY_PATH,
+    ).run_job(replacement["job"]["job_id"])
+    replacement_current = service.get_quote_draft(
+        task["task_id"], replacement["quote_draft_id"]
+    )
+    replacement_reviewed = _review_all_fields(
+        service,
+        task,
+        replacement,
+        replacement_current,
+        key="review-version-two",
+    )
+    second = service.submit_quote_draft(
+        task["task_id"],
+        replacement["quote_draft_id"],
+        expected_task_revision=2,
+        expected_draft_revision=replacement_reviewed["draft_revision"],
+        idempotency_key="submit-version-two",
+    )
+
+    assert second["quote_id"] == first["quote_id"]
+    assert second["quote_version"] == 2
+    history = service.list_quotes(task["task_id"])
+    assert len(history["items"]) == 1
+    assert history["items"][0]["current_version"] == 2
+    assert [item["quote_version"] for item in history["items"][0]["versions"]] == [2, 1]
+    assert [item["is_current"] for item in history["items"][0]["versions"]] == [True, False]
+    assert service.get_task(task["task_id"])["progress"]["quote_review_completed"] is True
+
+    disabled = service.deactivate_quote(
+        task["task_id"],
+        first["quote_id"],
+        expected_task_revision=3,
+        idempotency_key="deactivate-replaced-quote",
+    )
+
+    assert disabled["active"] is False
+    assert disabled["task_revision"] == 4
+    assert service.get_task(task["task_id"])["quotes"] == []
+    disabled_history = service.list_quotes(task["task_id"])["items"][0]
+    assert disabled_history["active"] is False
+    assert len(disabled_history["versions"]) == 2
+    assert not any(item["is_current"] for item in disabled_history["versions"])
+    change_types = [
+        item["change_type"] for item in service.task_audit(task["task_id"])["revisions"]
+    ]
+    assert "QUOTE_REPLACEMENT_SUBMITTED" in change_types
+    assert "QUOTE_DEACTIVATED" in change_types
 
 
 def test_unknown_required_fee_blocks_review_and_rolls_back_all_actions(

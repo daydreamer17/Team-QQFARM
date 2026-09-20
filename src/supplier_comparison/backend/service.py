@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -706,7 +707,10 @@ class BackendService:
                         submitted_draft = session.scalar(
                             select(QuoteDraft).where(
                                 QuoteDraft.task_id == task_id,
-                                QuoteDraft.proposed_quote_id == quote.quote_id,
+                                (
+                                    (QuoteDraft.proposed_quote_id == quote.quote_id)
+                                    | (QuoteDraft.replacement_quote_id == quote.quote_id)
+                                ),
                                 QuoteDraft.proposed_document_id == document.document_id,
                                 QuoteDraft.status == "SUBMITTED",
                                 QuoteDraft.base_task_revision >= requirement_revision,
@@ -828,6 +832,252 @@ class BackendService:
                 ],
             }
 
+    def deactivate_quote(
+        self,
+        task_id: str,
+        quote_id: str,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Soft-disable a quote while preserving every document version."""
+
+        request = {
+            "task_id": task_id,
+            "quote_id": quote_id,
+            "expected_task_revision": expected_task_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"deactivate_quote:{quote_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            quote = session.scalar(
+                select(Quote)
+                .where(Quote.quote_id == quote_id, Quote.task_id == task_id)
+                .with_for_update()
+            )
+            if quote is None:
+                raise NotFoundError("quote_not_found", "Quote was not found.")
+            if not quote.active:
+                raise ConflictError(
+                    "quote_already_inactive", "Quote has already been disabled."
+                )
+            active_replacement = session.scalar(
+                select(QuoteDraft).where(
+                    QuoteDraft.task_id == task_id,
+                    QuoteDraft.replacement_quote_id == quote_id,
+                    QuoteDraft.status.in_(
+                        ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+                    ),
+                )
+            )
+            if active_replacement is not None:
+                raise ConflictError(
+                    "quote_replacement_in_progress",
+                    "Discard or submit the replacement draft before disabling this quote.",
+                    quote_draft_id=active_replacement.quote_draft_id,
+                )
+
+            self._supersede_current_graph(session, task)
+            quote.active = False
+            next_revision = task.current_revision + 1
+            task.current_revision = next_revision
+            task.status = "DRAFT"
+            session.add(
+                TaskRevision(
+                    revision_id=new_id("rev"),
+                    task_id=task_id,
+                    revision=next_revision,
+                    change_type="QUOTE_DEACTIVATED",
+                    actor_id=self.actor_id,
+                    request_sha256=request_sha,
+                    details={
+                        "quote_id": quote.quote_id,
+                        "supplier_id": quote.supplier_id,
+                        "quote_version": quote.current_version,
+                    },
+                )
+            )
+            response = {
+                "task_id": task_id,
+                "task_revision": next_revision,
+                "status": task.status,
+                "quote_id": quote.quote_id,
+                "supplier_id": quote.supplier_id,
+                "active": False,
+            }
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=200,
+                response=response,
+            )
+            return response
+
+    def create_quote_revision_draft(
+        self,
+        task_id: str,
+        quote_id: str,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Re-open the current immutable quote document as a new review draft."""
+
+        request = {
+            "task_id": task_id,
+            "quote_id": quote_id,
+            "expected_task_revision": expected_task_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"create_quote_revision_draft:{quote_id}"
+        copied_path: Path | None = None
+        try:
+            with self.session_factory.begin() as session:
+                repeated = self._existing_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                )
+                if repeated is not None:
+                    return repeated
+                task = session.scalar(
+                    select(Task).where(Task.task_id == task_id).with_for_update()
+                )
+                if task is None or task.owner_id != self.actor_id:
+                    raise NotFoundError("task_not_found", "Task was not found.")
+                self._require_revision(task, expected_task_revision)
+                quote = session.scalar(
+                    select(Quote)
+                    .where(Quote.quote_id == quote_id, Quote.task_id == task_id)
+                    .with_for_update()
+                )
+                if quote is None:
+                    raise NotFoundError("quote_not_found", "Quote was not found.")
+                if not quote.active:
+                    raise ConflictError(
+                        "quote_inactive", "A disabled quote cannot be updated."
+                    )
+                active = session.scalar(
+                    select(QuoteDraft).where(
+                        QuoteDraft.task_id == task_id,
+                        QuoteDraft.status.in_(
+                            ("UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT")
+                        ),
+                    )
+                )
+                if active is not None:
+                    raise ConflictError(
+                        "active_quote_draft_exists",
+                        "Discard or submit the active quote draft before editing another.",
+                        quote_draft_id=active.quote_draft_id,
+                    )
+                document = session.scalar(
+                    select(Document).where(
+                        Document.quote_id == quote_id,
+                        Document.quote_version == quote.current_version,
+                    )
+                )
+                if document is None:
+                    raise ConflictError(
+                        "quote_document_missing",
+                        "The current quote document is unavailable.",
+                    )
+                source_path = Path(document.storage_path)
+                if not source_path.exists():
+                    raise ConflictError(
+                        "quote_file_missing", "The current quote file is unavailable."
+                    )
+
+                draft_id = new_id("draft")
+                proposed_quote_id = new_id("quote")
+                proposed_document_id = new_id("doc")
+                job_id = new_id("job")
+                extension = ".pdf" if document.media_type == "application/pdf" else ".csv"
+                copied_path = (
+                    self.storage_root
+                    / ".drafts"
+                    / task_id
+                    / draft_id
+                    / f"source{extension}"
+                )
+                copied_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source_path, copied_path)
+                dictionary_sha = hashlib.sha256(
+                    self.quote_dictionary_path.read_bytes()
+                ).hexdigest()
+                draft = QuoteDraft(
+                    quote_draft_id=draft_id,
+                    task_id=task_id,
+                    actor_id=self.actor_id,
+                    base_task_revision=task.current_revision,
+                    revision=1,
+                    status="PROCESSING",
+                    proposed_quote_id=proposed_quote_id,
+                    replacement_quote_id=quote.quote_id,
+                    proposed_document_id=proposed_document_id,
+                    supplier_id=quote.supplier_id,
+                    original_filename=document.original_filename,
+                    media_type=document.media_type,
+                    size_bytes=document.size_bytes,
+                    sha256=document.sha256,
+                    storage_path=str(copied_path),
+                    is_synthetic=document.is_synthetic,
+                    provider=provider,
+                    model_id=model_id,
+                    environment=environment,
+                    prompt_version=prompt_version,
+                    dictionary_sha256=dictionary_sha,
+                )
+                session.add(draft)
+                session.flush([draft])
+                session.add(
+                    Job(
+                        job_id=job_id,
+                        task_id=task_id,
+                        graph_run_id=None,
+                        quote_draft_id=draft_id,
+                        job_type="DRAFT_REVIEW",
+                        status="PENDING",
+                        task_revision=task.current_revision,
+                    )
+                )
+                session.flush()
+                response = self._quote_draft_response(session, draft)
+                self._save_idempotent(
+                    session,
+                    operation=operation,
+                    key=idempotency_key,
+                    request_sha256=request_sha,
+                    response_status=202,
+                    response=response,
+                )
+                return response
+        except Exception:
+            if copied_path is not None and copied_path.exists():
+                copied_path.unlink()
+            raise
+
     def upload_quote_draft_stream(
         self,
         task_id: str,
@@ -839,6 +1089,7 @@ class BackendService:
         stream: BinaryIO,
         idempotency_key: str,
         is_synthetic: bool = False,
+        replacement_quote_id: str | None = None,
         provider: str | None = None,
         model_id: str | None = None,
         environment: str | None = None,
@@ -898,6 +1149,7 @@ class BackendService:
             "media_type": media_type,
             "content_sha256": file_sha,
             "is_synthetic": is_synthetic,
+            "replacement_quote_id": replacement_quote_id,
             "provider": provider,
             "model_id": model_id,
             "environment": environment,
@@ -922,6 +1174,30 @@ class BackendService:
                 if task is None or task.owner_id != self.actor_id:
                     raise NotFoundError("task_not_found", "Task was not found.")
                 self._require_revision(task, expected_task_revision)
+                replacement_quote = None
+                if replacement_quote_id is not None:
+                    replacement_quote = session.scalar(
+                        select(Quote)
+                        .where(
+                            Quote.quote_id == replacement_quote_id,
+                            Quote.task_id == task_id,
+                        )
+                        .with_for_update()
+                    )
+                    if replacement_quote is None:
+                        raise NotFoundError(
+                            "quote_not_found", "Quote was not found."
+                        )
+                    if not replacement_quote.active:
+                        raise ConflictError(
+                            "quote_inactive",
+                            "A disabled quote cannot be updated.",
+                        )
+                    if replacement_quote.supplier_id != supplier_id.strip():
+                        raise BackendError(
+                            "quote_supplier_mismatch",
+                            "The replacement must keep the original supplier ID.",
+                        )
                 for stale in session.scalars(
                     select(QuoteDraft).where(
                         QuoteDraft.task_id == task_id,
@@ -970,6 +1246,11 @@ class BackendService:
                     revision=1,
                     status="PROCESSING",
                     proposed_quote_id=quote_id,
+                    replacement_quote_id=(
+                        replacement_quote.quote_id
+                        if replacement_quote is not None
+                        else None
+                    ),
                     proposed_document_id=document_id,
                     supplier_id=supplier_id.strip(),
                     original_filename=Path(original_filename).name,
@@ -1092,13 +1373,24 @@ class BackendService:
             )
             if draft is None or task is None or requirement is None:
                 raise NotFoundError("draft_job_context_missing", "Quote draft job context is missing.")
+            quote_id = draft.proposed_quote_id
+            quote_version = 1
+            if draft.replacement_quote_id is not None:
+                replacement_quote = session.get(Quote, draft.replacement_quote_id)
+                if replacement_quote is None:
+                    raise NotFoundError(
+                        "quote_not_found", "Replacement quote was not found."
+                    )
+                quote_id = replacement_quote.quote_id
+                quote_version = replacement_quote.current_version + 1
             return {
                 "job_id": job.job_id,
                 "task_id": task.task_id,
                 "task_revision": draft.base_task_revision,
                 "scenario_id": task.scenario_id,
                 "quote_draft_id": draft.quote_draft_id,
-                "quote_id": draft.proposed_quote_id,
+                "quote_id": quote_id,
+                "quote_version": quote_version,
                 "document_id": draft.proposed_document_id,
                 "supplier_id": draft.supplier_id,
                 "media_type": draft.media_type,
@@ -1992,15 +2284,44 @@ class BackendService:
                     task_id,
                     draft.sha256,
                     exclude_draft_id=draft.quote_draft_id,
+                    allow_quote_id=draft.replacement_quote_id,
                 )
                 self._supersede_current_graph(session, task)
+                replacement_quote = None
+                quote_id = draft.proposed_quote_id
+                quote_version = 1
+                if draft.replacement_quote_id is not None:
+                    replacement_quote = session.scalar(
+                        select(Quote)
+                        .where(
+                            Quote.quote_id == draft.replacement_quote_id,
+                            Quote.task_id == task_id,
+                        )
+                        .with_for_update()
+                    )
+                    if replacement_quote is None:
+                        raise NotFoundError(
+                            "quote_not_found", "Quote was not found."
+                        )
+                    if not replacement_quote.active:
+                        raise ConflictError(
+                            "quote_inactive",
+                            "A disabled quote cannot be updated.",
+                        )
+                    if replacement_quote.supplier_id != draft.supplier_id:
+                        raise ConflictError(
+                            "quote_supplier_mismatch",
+                            "The replacement must keep the original supplier ID.",
+                        )
+                    quote_id = replacement_quote.quote_id
+                    quote_version = replacement_quote.current_version + 1
                 extension = ".pdf" if draft.media_type == "application/pdf" else ".csv"
                 source_path = Path(draft.storage_path)
                 final_path = (
                     self.storage_root
                     / task_id
-                    / draft.proposed_quote_id
-                    / "v1"
+                    / quote_id
+                    / f"v{quote_version}"
                     / draft.proposed_document_id
                     / f"source{extension}"
                 )
@@ -2010,21 +2331,24 @@ class BackendService:
                 if final_path.exists():
                     raise ConflictError("immutable_storage_conflict", "Quote storage location already exists.")
                 source_path.rename(final_path)
-                session.add(
-                    Quote(
-                        quote_id=draft.proposed_quote_id,
-                        task_id=task_id,
-                        supplier_id=draft.supplier_id,
-                        current_version=1,
+                if replacement_quote is None:
+                    session.add(
+                        Quote(
+                            quote_id=quote_id,
+                            task_id=task_id,
+                            supplier_id=draft.supplier_id,
+                            current_version=quote_version,
+                        )
                     )
-                )
-                session.flush()
+                    session.flush()
+                else:
+                    replacement_quote.current_version = quote_version
                 session.add(
                     Document(
                         document_id=draft.proposed_document_id,
                         task_id=task_id,
-                        quote_id=draft.proposed_quote_id,
-                        quote_version=1,
+                        quote_id=quote_id,
+                        quote_version=quote_version,
                         document_version=1,
                         original_filename=draft.original_filename,
                         media_type=draft.media_type,
@@ -2045,12 +2369,22 @@ class BackendService:
                         revision_id=new_id("rev"),
                         task_id=task_id,
                         revision=task.current_revision,
-                        change_type="QUOTE_DRAFT_SUBMITTED",
+                        change_type=(
+                            "QUOTE_REPLACEMENT_SUBMITTED"
+                            if replacement_quote is not None
+                            else "QUOTE_DRAFT_SUBMITTED"
+                        ),
                         actor_id=self.actor_id,
                         request_sha256=request_sha,
                         details={
                             "quote_draft_id": draft.quote_draft_id,
-                            "quote_id": draft.proposed_quote_id,
+                            "quote_id": quote_id,
+                            "quote_version": quote_version,
+                            "replaced_quote_version": (
+                                quote_version - 1
+                                if replacement_quote is not None
+                                else None
+                            ),
                             "supplier_id": draft.supplier_id,
                             "original_filename": draft.original_filename,
                             "document_sha256": draft.sha256,
@@ -2063,8 +2397,8 @@ class BackendService:
                     "quote_draft_id": draft.quote_draft_id,
                     "draft_revision": draft.revision,
                     "status": draft.status,
-                    "quote_id": draft.proposed_quote_id,
-                    "quote_version": 1,
+                    "quote_id": quote_id,
+                    "quote_version": quote_version,
                     "document_id": draft.proposed_document_id,
                     "document_version": 1,
                     "document_sha256": draft.sha256,
@@ -6287,6 +6621,7 @@ class BackendService:
             "draft_revision": draft.revision,
             "status": effective_status,
             "proposed_quote_id": draft.proposed_quote_id,
+            "replacement_quote_id": draft.replacement_quote_id,
             "proposed_document_id": draft.proposed_document_id,
             "supplier_id": draft.supplier_id,
             "original_filename": draft.original_filename,
@@ -6536,13 +6871,15 @@ class BackendService:
         document_sha256: str,
         *,
         exclude_draft_id: str | None = None,
+        allow_quote_id: str | None = None,
     ) -> None:
-        document = session.scalar(
-            select(Document).where(
-                Document.task_id == task_id,
-                Document.sha256 == document_sha256,
-            )
-        )
+        document_filters = [
+            Document.task_id == task_id,
+            Document.sha256 == document_sha256,
+        ]
+        if allow_quote_id is not None:
+            document_filters.append(Document.quote_id != allow_quote_id)
+        document = session.scalar(select(Document).where(*document_filters))
         if document is not None:
             raise ConflictError(
                 "duplicate_quote_uploaded",

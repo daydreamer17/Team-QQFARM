@@ -290,6 +290,9 @@ class QuoteDraft(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="UPLOADED")
     proposed_quote_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    replacement_quote_id: Mapped[str | None] = mapped_column(
+        ForeignKey("quotes.quote_id", ondelete="RESTRICT"), index=True
+    )
     proposed_document_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     supplier_id: Mapped[str] = mapped_column(String(128), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)

@@ -187,7 +187,7 @@ class DraftReviewRunner:
                 task_revision=context["task_revision"],
                 scenario_id=context["scenario_id"],
                 quote_id=context["quote_id"],
-                quote_version=1,
+                quote_version=context["quote_version"],
                 document_id=context["document_id"],
                 document_version=1,
                 supplier_id=context["supplier_id"],

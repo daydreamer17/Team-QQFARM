@@ -124,6 +124,55 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert "storage_path" not in str(history.json())
 
 
+def test_quote_replacement_upload_and_deactivation_endpoints(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    task = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-replacement-api"},
+        json={"requirement": REQUIREMENT, "scenario_id": "REPLACEMENT-API"},
+    ).json()
+    uploaded = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quotes",
+        headers={"Idempotency-Key": "upload-replacement-api-v1"},
+        data={
+            "expected_task_revision": "1",
+            "supplier_id": "SUP-022",
+            "is_synthetic": "true",
+        },
+        files={"file": ("supplier-v1.csv", b"version one", "text/csv")},
+    ).json()
+
+    replacement = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quotes/{uploaded['quote_id']}/revisions",
+        headers={"Idempotency-Key": "upload-replacement-api-v2"},
+        json={"expected_task_revision": 2},
+    )
+
+    assert replacement.status_code == 202
+    draft = replacement.json()
+    assert draft["replacement_quote_id"] == uploaded["quote_id"]
+    discarded = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quote-drafts/{draft['quote_draft_id']}/discard",
+        headers={"Idempotency-Key": "discard-replacement-api-v2"},
+        json={"expected_draft_revision": draft["draft_revision"]},
+    )
+    assert discarded.status_code == 200
+
+    deactivated = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quotes/{uploaded['quote_id']}/deactivate",
+        headers={"Idempotency-Key": "deactivate-replacement-api-v1"},
+        json={"expected_task_revision": 2},
+    )
+
+    assert deactivated.status_code == 200
+    assert deactivated.json()["active"] is False
+    history = http.get(f"/api/v1/tasks/{task['task_id']}/quotes").json()
+    assert history["items"][0]["active"] is False
+    assert len(history["items"][0]["versions"]) == 1
+
+
 def test_list_tasks_returns_safe_recent_summaries(
     client: tuple[TestClient, BackendService],
 ) -> None:

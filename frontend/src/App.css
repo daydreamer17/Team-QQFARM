@@ -570,21 +570,9 @@
   }
 }
 
-.upload-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.8fr);
-  gap: 18px;
-  align-items: start;
-}
-
 .upload-form {
   display: grid;
   gap: 20px;
-}
-
-.upload-form h2,
-.upload-guidance h2 {
-  margin-bottom: 7px;
 }
 
 .helper-text,
@@ -628,22 +616,6 @@
   justify-self: end;
 }
 
-.upload-guidance {
-  position: sticky;
-  top: 96px;
-  background: var(--surface-subtle);
-}
-
-.upload-guidance ol {
-  display: grid;
-  gap: 13px;
-  margin: 18px 0 0;
-  padding-left: 22px;
-  color: var(--muted);
-  font-size: 0.84rem;
-  line-height: 1.6;
-}
-
 .empty-upload-list {
   color: var(--muted);
   text-align: center;
@@ -658,6 +630,39 @@
   display: grid;
   grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.6fr);
   gap: 24px;
+}
+
+.uploaded-quote.submitted-quote {
+  grid-template-columns: 1fr;
+}
+
+.submitted-quote-heading,
+.submitted-quote-actions {
+  display: flex;
+  align-items: center;
+}
+
+.submitted-quote-heading {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.submitted-quote-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.submitted-quote-actions {
+  gap: 18px;
+}
+
+.submitted-quote-actions button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .uploaded-quote h3 {
@@ -742,16 +747,6 @@
   margin-top: 10px;
 }
 
-@media (max-width: 900px) {
-  .upload-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .upload-guidance {
-    position: static;
-  }
-}
-
 @media (max-width: 640px) {
   .selected-file,
   .uploaded-quote {
@@ -774,6 +769,11 @@
 
   .quote-version-row > div:last-child {
     justify-items: start;
+  }
+
+  .submitted-quote-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .upload-submit {

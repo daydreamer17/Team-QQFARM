@@ -370,6 +370,7 @@ export interface QuoteDraftResponse {
   draft_revision: number
   status: QuoteDraftStatus
   proposed_quote_id: string
+  replacement_quote_id: string | null
   proposed_document_id: string
   supplier_id: string
   original_filename: string
@@ -445,6 +446,15 @@ export interface QuoteHistoryResponse {
   task_id: string
   task_revision: number
   items: QuoteHistoryItem[]
+}
+
+export interface QuoteDeactivateResponse {
+  task_id: string
+  task_revision: number
+  status: string
+  quote_id: string
+  supplier_id: string
+  active: false
 }
 
 export interface StartRunResponse {

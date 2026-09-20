@@ -288,7 +288,7 @@ export function validateQuoteReview(
         'REQUIRED_VALUE_MISSING',
         [definition.field_name],
         definition.group_id,
-        `“${definition.label}”是本报价当前必须确认的字段，不能留空。`,
+        `系统未识别到“${definition.label}”，请补充。`,
       ))
       continue
     }

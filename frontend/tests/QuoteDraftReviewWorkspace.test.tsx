@@ -15,7 +15,7 @@ function renderWorkspace(element: ReactElement) {
 describe('QuoteDraftReviewWorkspace', () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  test('renders all 30 business fields as editable while formal submission stays gated', () => {
+  test('renders prefilled fields with one combined submit action', () => {
     const schema = makeQuoteFieldSchema()
     const draft = makeQuoteDraft()
 
@@ -33,21 +33,44 @@ describe('QuoteDraftReviewWorkspace', () => {
     expect(editors).toHaveLength(30)
     editors.forEach((editor) => expect(editor).toBeEnabled())
     expect(within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')).toHaveValue('QQ Demo Components')
-    expect(screen.getByRole('button', { name: '正式提交报价' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '确认并复核 30 个字段' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '正式提交报价' })).not.toBeInTheDocument()
+    expect(screen.getByText('已识别')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并提交报价' })).toBeEnabled()
   })
 
-  test('enables formal submit only after the backend marks full human review ready', () => {
+  test('does not mark a passed field red or show its technical pass message', () => {
     const schema = makeQuoteFieldSchema()
-    const draft = makeQuoteDraft({}, {
-      status: 'READY_TO_SUBMIT',
-      human_review_complete: true,
-      submission_ready: true,
-      calculation_ready: true,
-      submission_blocking_fields: [],
-      unconfirmed_fields: [],
-      review_progress: { total: 30, reviewed: 30, confirmed: 30, corrected: 0, missing_confirmed: 0 },
-    })
+    const draft = makeQuoteDraft()
+    draft.review_findings = [
+      {
+        finding_id: 'finding-pass',
+        field_name: 'payment_terms',
+        criticality: 'NON_CRITICAL',
+        applicable: false,
+        decision: 'PASS',
+        severity: 'INFO',
+        review_reason: null,
+        codes: ['FIELD_ACCEPTED'],
+        message: 'Candidate passed deterministic field review.',
+        source_ids: [],
+        accepted_for_calculation: false,
+        resolved: false,
+      },
+      {
+        finding_id: 'finding-missing-pass',
+        field_name: 'supplier_country',
+        criticality: 'NON_CRITICAL',
+        applicable: false,
+        decision: 'PASS',
+        severity: 'INFO',
+        review_reason: null,
+        codes: ['NON_BLOCKING_MISSING'],
+        message: 'Field is legitimately missing and is not currently critical.',
+        source_ids: [],
+        accepted_for_calculation: false,
+        resolved: false,
+      },
+    ]
 
     renderWorkspace(
       <QuoteDraftReviewWorkspace
@@ -59,7 +82,64 @@ describe('QuoteDraftReviewWorkspace', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: '正式提交报价' })).toBeEnabled()
+    expect(document.querySelector('#quote-field-payment_terms')).not.toHaveClass('has-error')
+    expect(screen.queryByText('Candidate passed deterministic field review.')).not.toBeInTheDocument()
+    expect(screen.queryByText('Field is legitimately missing and is not currently critical.')).not.toBeInTheDocument()
+    expect(screen.queryByText('金额币种随“报价币种”字段统一确认。')).not.toBeInTheDocument()
+    expect(screen.queryByText('已自动填写')).not.toBeInTheDocument()
+    expect(screen.queryByText('系统已填写，可直接确认，也可以修改。')).not.toBeInTheDocument()
+  })
+
+  test('marks an actual field conflict red', () => {
+    const schema = makeQuoteFieldSchema()
+    const draft = makeQuoteDraft()
+    const field = draft.fields.find((current) => current.field_name === 'manufacturer')!
+    field.validation_status = 'CONFLICT'
+
+    renderWorkspace(
+      <QuoteDraftReviewWorkspace
+        draft={draft}
+        schema={schema}
+        taskRevision={1}
+        onChanged={vi.fn()}
+        onPreview={vi.fn()}
+      />,
+    )
+
+    expect(document.querySelector('#quote-field-manufacturer')).toHaveClass('has-error')
+    expect(screen.getByText('字段冲突')).toBeInTheDocument()
+  })
+
+  test('submits an already reviewed draft without repeating the review call', async () => {
+    const user = userEvent.setup()
+    const schema = makeQuoteFieldSchema()
+    const draft = makeQuoteDraft({}, {
+      status: 'READY_TO_SUBMIT',
+      human_review_complete: true,
+      submission_ready: true,
+      calculation_ready: true,
+      submission_blocking_fields: [],
+      unconfirmed_fields: [],
+      review_progress: { total: 30, reviewed: 30, confirmed: 30, corrected: 0, missing_confirmed: 0 },
+    })
+
+    const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft')
+    const submitSpy = vi.spyOn(api, 'submitQuoteDraft').mockResolvedValue({} as never)
+
+    renderWorkspace(
+      <QuoteDraftReviewWorkspace
+        draft={draft}
+        schema={schema}
+        taskRevision={1}
+        onChanged={vi.fn()}
+        onPreview={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledOnce())
+    expect(reviewSpy).not.toHaveBeenCalled()
   })
 
   test('re-evaluates fee applicability and audits a changed status plus cleared amount', async () => {
@@ -77,10 +157,12 @@ describe('QuoteDraftReviewWorkspace', () => {
     amountField.required_for_submission = true
     const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft').mockResolvedValue({
       ...draft,
+      draft_revision: 3,
       status: 'READY_TO_SUBMIT',
       human_review_complete: true,
       submission_ready: true,
     })
+    const submitSpy = vi.spyOn(api, 'submitQuoteDraft').mockResolvedValue({} as never)
 
     renderWorkspace(
       <QuoteDraftReviewWorkspace
@@ -98,9 +180,11 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
     const amountInput = within(document.querySelector('#quote-field-shipping_fee_amount')!).getByRole('textbox')
     await user.clear(amountInput)
-    await user.click(screen.getByRole('button', { name: '确认并复核 30 个字段' }))
+    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
 
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
+    await waitFor(() => expect(submitSpy).toHaveBeenCalledOnce())
+    expect(submitSpy.mock.calls[0][3]).toBe(3)
     const actions = reviewSpy.mock.calls[0][4]
     expect(actions).toHaveLength(30)
     expect(actions.find((action) => action.fieldName === 'shipping_fee_status')).toMatchObject({
@@ -131,7 +215,7 @@ describe('QuoteDraftReviewWorkspace', () => {
 
     expect(within(document.querySelector('#quote-field-shipping_fee_status')!).getByRole('combobox')).toHaveValue('UNKNOWN')
     expect(within(document.querySelector('#quote-field-shipping_fee_amount')!).getByRole('textbox')).toHaveValue('')
-    await user.click(screen.getByRole('button', { name: '确认并复核 30 个字段' }))
+    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
 
     expect(reviewSpy).not.toHaveBeenCalled()
     expect(screen.getAllByText(/不能保持“未知”/).length).toBeGreaterThan(0)
@@ -161,7 +245,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     const manufacturerInput = within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')
     await user.clear(manufacturerInput)
     await user.type(manufacturerInput, '人工确认制造商')
-    await user.click(screen.getByRole('button', { name: '确认并复核 30 个字段' }))
+    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
 
     expect(await screen.findByText(/服务器当前版本：3/)).toBeInTheDocument()
     expect(manufacturerInput).toHaveValue('人工确认制造商')
@@ -197,9 +281,9 @@ describe('QuoteDraftReviewWorkspace', () => {
       if (editor instanceof HTMLSelectElement) await user.selectOptions(editor, '')
       else await user.clear(editor)
     }
-    await user.click(screen.getByRole('button', { name: '确认并复核 30 个字段' }))
+    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
 
     expect(reviewSpy).not.toHaveBeenCalled()
-    expect(screen.getAllByText(/本报价当前必须确认/).length).toBeGreaterThanOrEqual(4)
+    expect(screen.getAllByText(/系统未识别到/).length).toBeGreaterThanOrEqual(4)
   })
 })
