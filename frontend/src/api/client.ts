@@ -25,7 +25,9 @@ import type {
   QuoteFieldsResponse,
   QuoteDraftCorrectionInput,
   QuoteDraftListResponse,
+  QuoteDraftReviewActionInput,
   QuoteDraftResponse,
+  QuoteFieldSchemaResponse,
   QuoteHistoryResponse,
   QuoteUploadResponse,
   RequirementDraftResponse,
@@ -140,6 +142,10 @@ export function documentContentUrl(taskId: string, documentId: string, dispositi
   return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/documents/${encodeURIComponent(documentId)}/content?disposition=${disposition}`
 }
 
+export function quoteDraftContentUrl(taskId: string, draftId: string, disposition: 'inline' | 'attachment' = 'inline') {
+  return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}/content?disposition=${disposition}`
+}
+
 export function decisionConversationEventsUrl(
   taskId: string,
   conversationId: string,
@@ -199,6 +205,8 @@ export const api = {
     }),
   getTaskAudit: (taskId: string) =>
     request<TaskAuditResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/revisions`),
+  getQuoteFieldSchema: () =>
+    request<QuoteFieldSchemaResponse>('/api/v1/quote-field-schema'),
   listQuoteDrafts: (taskId: string) =>
     request<QuoteDraftListResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
@@ -254,6 +262,38 @@ export const api = {
             normalized_value: item.normalizedValue,
             unit: item.unit,
             reason: item.reason,
+          })),
+        }),
+      },
+    ),
+  reviewQuoteDraft: (
+    taskId: string,
+    draftId: string,
+    expectedDraftRevision: number,
+    schemaVersion: string,
+    actions: QuoteDraftReviewActionInput[],
+    idempotencyKey: string,
+  ) =>
+    request<QuoteDraftResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts/${encodeURIComponent(draftId)}/review`,
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          expected_draft_revision: expectedDraftRevision,
+          schema_version: schemaVersion,
+          actions: actions.map((item) => ({
+            action: item.action,
+            field_name: item.fieldName,
+            expected_field_id: item.expectedFieldId,
+            expected_field_version: item.expectedFieldVersion,
+            ...(item.rawValue === undefined ? {} : { raw_value: item.rawValue }),
+            ...(item.normalizedValue === undefined ? {} : { normalized_value: item.normalizedValue }),
+            ...(item.unit === undefined ? {} : { unit: item.unit }),
+            ...(item.reason === undefined ? {} : { reason: item.reason }),
           })),
         }),
       },

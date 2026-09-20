@@ -214,7 +214,7 @@ class QuoteDraftCorrectionItem(ApiModel):
     model_config = ConfigDict(extra="forbid")
     field_name: str = Field(min_length=1, max_length=128)
     raw_value: str = Field(min_length=1)
-    normalized_value: StrictStr | StrictInt | StrictBool
+    normalized_value: StrictStr | StrictInt | StrictBool | None
     unit: str | None = None
     reason: str = Field(min_length=3, max_length=1000)
 
@@ -223,6 +223,54 @@ class QuoteDraftCorrectionRequest(ApiModel):
     model_config = ConfigDict(extra="forbid")
     expected_draft_revision: int = Field(ge=1)
     corrections: list[QuoteDraftCorrectionItem] = Field(min_length=1, max_length=100)
+
+
+class QuoteDraftReviewActionRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal[
+        "CONFIRM_VALUE",
+        "SET_VALUE",
+        "CONFIRM_MISSING",
+        "MARK_MISSING",
+        "CONFIRM_CONFLICT",
+    ]
+    field_name: str = Field(min_length=1, max_length=128)
+    expected_field_id: str = Field(min_length=1, max_length=128)
+    expected_field_version: int = Field(ge=1)
+    raw_value: str | None = Field(default=None, max_length=10_000)
+    normalized_value: StrictStr | StrictInt | StrictBool | None = None
+    unit: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def action_payload_matches(self):
+        if self.action == "SET_VALUE":
+            if self.raw_value is None or not self.raw_value.strip():
+                raise ValueError("SET_VALUE requires a non-empty raw_value")
+            if self.normalized_value is None:
+                raise ValueError("SET_VALUE requires normalized_value")
+        elif self.action == "MARK_MISSING":
+            if self.reason is None or len(self.reason.strip()) < 3:
+                raise ValueError("MARK_MISSING requires a reason")
+            if self.raw_value is not None or self.normalized_value is not None or self.unit is not None:
+                raise ValueError("MARK_MISSING cannot carry a value")
+        elif self.raw_value is not None or self.normalized_value is not None or self.unit is not None:
+            raise ValueError(f"{self.action} cannot carry a replacement value")
+        return self
+
+
+class QuoteDraftReviewRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_draft_revision: int = Field(ge=1)
+    schema_version: str = Field(min_length=1, max_length=64)
+    actions: list[QuoteDraftReviewActionRequest] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def field_actions_are_unique(self):
+        names = [item.field_name for item in self.actions]
+        if len(names) != len(set(names)):
+            raise ValueError("review actions cannot repeat a field")
+        return self
 
 
 class SubmitQuoteDraftRequest(ApiModel):
@@ -351,6 +399,10 @@ def create_app(
             message="Database readiness check failed.",
             details={},
         )
+
+    @app.get("/api/v1/quote-field-schema")
+    def quote_field_schema():
+        return service.quote_field_schema()
 
     @app.post("/api/v1/tasks", status_code=201)
     def create_task(
@@ -543,6 +595,41 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}")
     def get_quote_draft(task_id: str, draft_id: str):
         return service.get_quote_draft(task_id, draft_id)
+
+    @app.get("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/content")
+    def quote_draft_content(
+        task_id: str,
+        draft_id: str,
+        disposition: Literal["inline", "attachment"] = "inline",
+    ):
+        item = service.quote_draft_content(task_id, draft_id)
+        return FileResponse(
+            item["path"],
+            media_type=item["media_type"],
+            filename=item["filename"],
+            content_disposition_type=disposition,
+            headers={
+                "ETag": f'"{item["sha256"]}"',
+                "Cache-Control": "private, no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @app.put("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/review")
+    def review_quote_draft(
+        task_id: str,
+        draft_id: str,
+        body: QuoteDraftReviewRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.review_quote_draft(
+            task_id,
+            draft_id,
+            expected_draft_revision=body.expected_draft_revision,
+            schema_version=body.schema_version,
+            actions=[item.model_dump(mode="json") for item in body.actions],
+            idempotency_key=idempotency_key,
+        )
 
     @app.put("/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/corrections")
     def correct_quote_draft(

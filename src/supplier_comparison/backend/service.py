@@ -28,13 +28,20 @@ from supplier_comparison.extraction import (
     CorrectionEvent,
     CriticalityContext,
     ExtractionBatch,
+    HumanReviewAction,
     ReviewEnvelope,
     ReviewSeverity,
     ValidationStatus,
     apply_candidate_correction,
+    create_review_event,
     review_extraction_batch,
 )
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.review_contracts import (
+    EffectiveCriticality,
+    REVIEW_POLICY_VERSION,
+    REVIEW_SCHEMA_VERSION,
+)
 
 from .models import (
     DecisionConversation,
@@ -61,6 +68,11 @@ from .models import (
 )
 from .conversations import CONVERSATION_PROMPT_VERSION, narrative_chunks
 from .decision_intents import DecisionIntentParser, confirmation_text
+from .quote_review_schema import (
+    GROUP_IDS,
+    QUOTE_REVIEW_SCHEMA_VERSION,
+    build_quote_field_schema,
+)
 from supplier_comparison.rag.clients import ModelClientError
 
 
@@ -76,33 +88,51 @@ def content_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
-def _quote_draft_submission_ready(envelope: ReviewEnvelope) -> bool:
-    """Allow confirmed unknown fees into the formal workflow for its typed interrupt."""
+QUOTE_REVIEW_ERROR_MESSAGES = {
+    "CANDIDATE_AUTHORITY_MISMATCH": "字段身份与当前报价不一致，请重新解析原文件。",
+    "CANDIDATE_FIELD_SET_INVALID": "候选字段集合不完整或重复，请重新解析原文件。",
+    "CORRECTION_AUDIT_MISSING": "人工修改缺少对应审计记录，请重新确认该字段。",
+    "CORRECTION_EVENT_INVALID": "人工修改记录与当前字段版本不一致，请刷新后重试。",
+    "CRITICAL_FIELD_MISSING": "必填字段在报价中缺失，请核对后填写真实值。",
+    "CRITICAL_FIELD_CONFLICT": "报价中该字段有多个冲突值，请核对后填写最终值。",
+    "CURRENT_UNIT_PRICE_MISMATCH": "当前单价与原件中标记为 CURRENT 的价格不一致。",
+    "DICTIONARY_VERSION_MISMATCH": "字段字典版本不一致，请重新解析报价。",
+    "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE": "原文只说明费用未提供，不能据此填写费用状态或金额。",
+    "FEE_STATUS_UNKNOWN": "费用仍为待确认状态，取得真实费用结论后才能提交。",
+    "FEE_STATUS_AMOUNT_CONFLICT": "费用状态与金额不一致。",
+    "HUMAN_ORIGIN_REQUIRES_VERIFIED": "人工填写或修改后的字段必须通过结构校验。",
+    "HUMAN_REVIEW_EVENT_INVALID": "人工确认记录与当前字段或文件版本不一致。",
+    "MONEY_VALUE_INVALID": "金额必须是大于或等于 0 的十进制字符串。",
+    "MONEY_UNIT_MISMATCH": "金额币种必须与报价币种一致。",
+    "NORMALIZED_ENUM_INVALID": "字段值不在允许的标准选项中。",
+    "NORMALIZED_PRICE_NOT_IN_EVIDENCE": "提取价格无法由当前报价证据支持，请核对原件。",
+    "NORMALIZED_TYPE_INVALID": "字段值的类型或范围不正确。",
+    "NORMALIZED_VALUE_REQUIRED": "该字段需要一个可用的标准值。",
+    "ISO_DATE_REQUIRED": "日期必须是有效的 YYYY-MM-DD。",
+    "PRICE_GROUP_INCOMPLETE": "单价、计价数量和计价单位必须同时填写。",
+    "PACKAGING_CONVERSION_INCOMPLETE": "MOQ 不按颗时，必须同时填写包装方式和每包数量。",
+    "MOQ_PACKAGING_UNIT_MISMATCH": "MOQ 单位与包装单位不一致。",
+    "LEAD_TIME_GROUP_INCOMPLETE": "交期天数、日历口径、交付语义和起算事件必须同时填写。",
+    "QUOTE_DATE_AFTER_VALID_UNTIL": "报价日期不能晚于有效截止日。",
+    "SOURCE_IDENTITY_MISMATCH": "证据不属于当前报价文件或版本，请重新解析。",
+    "SOURCE_QUOTE_MISMATCH": "证据引用了其他报价，请重新解析。",
+    "SOURCE_REF_UNKNOWN": "字段引用了当前文件中不存在的证据。",
+    "SOURCE_SEMANTIC_MISMATCH": "证据原文不能支持该字段含义，请人工核对。",
+    "START_EVENT_DOCUMENT_CONFLICT": "原件存在多个交期起算事件，请确认最终适用条件。",
+    "START_EVENT_UNSUPPORTED": "当前自动计算只支持明确从下单日开始的相对交期。",
+    "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID": "供应商名称混入了系统编号，请分开填写。",
+    "REQUIRED_FIELD_UNAVAILABLE": "必填字段缺少可用值，UNKNOWN、MISSING 或 CONFLICT 不能正式提交。",
+}
 
-    if envelope.downstream_ready:
-        return True
-    if envelope.batch is None or envelope.review is None:
-        return False
-    blockers = tuple(
-        finding
-        for finding in envelope.review.findings
-        if finding.severity == ReviewSeverity.BLOCKING and not finding.resolved
-    )
-    if not blockers or any(
-        finding.field_name not in {"shipping_fee_status", "other_fees_status"}
-        or set(finding.codes) != {"FEE_STATUS_UNKNOWN"}
-        for finding in blockers
-    ):
-        return False
-    candidates = {candidate.field_name: candidate for candidate in envelope.batch.candidates}
-    return all(
-        (candidate := candidates.get(finding.field_name)) is not None
-        and candidate.validation_status == ValidationStatus.VERIFIED
-        and candidate.normalized_value == "UNKNOWN"
-        and candidate.origin is not None
-        and candidate.origin.value in {"USER_INPUT", "USER_CORRECTION"}
-        for finding in blockers
-    )
+
+def _quote_draft_submission_ready(envelope: ReviewEnvelope) -> bool:
+    """Return the authoritative 1.1 submission gate result.
+
+    ``downstream_ready`` only describes deterministic extraction review.  It
+    must never bypass the separate all-field human-review admission gate.
+    """
+
+    return envelope.submission_ready
 
 
 class BackendError(RuntimeError):
@@ -135,6 +165,14 @@ class BackendService:
         self.actor_id = actor_id
         self.quote_dictionary_path = Path(quote_dictionary_path)
         self.quote_dictionary = QuoteDictionary.load(self.quote_dictionary_path)
+
+    def quote_field_schema(self) -> dict[str, Any]:
+        """Return the versioned, backend-owned quote review form contract."""
+
+        return build_quote_field_schema(
+            self.quote_dictionary,
+            self.quote_dictionary_path,
+        )
 
     @staticmethod
     def _supersede_current_graph(session: Session, task: Task) -> GraphRun | None:
@@ -1021,6 +1059,25 @@ class BackendService:
                 draft.revision += 1
             return self._quote_draft_response(session, draft)
 
+    def quote_draft_content(self, task_id: str, draft_id: str) -> dict[str, Any]:
+        """Return a scoped draft file without exposing its storage path in JSON."""
+
+        with self.session_factory() as session:
+            draft = self._owned_quote_draft(session, task_id, draft_id)
+            root = self.storage_root.resolve()
+            path = Path(draft.storage_path).resolve()
+            if root not in path.parents or not path.is_file():
+                raise NotFoundError(
+                    "quote_draft_content_not_found",
+                    "Quote draft content was not found.",
+                )
+            return {
+                "path": path,
+                "filename": draft.original_filename,
+                "media_type": draft.media_type,
+                "sha256": draft.sha256,
+            }
+
     def quote_draft_job_context(self, job_id: str) -> dict[str, Any]:
         with self.session_factory() as session:
             job = session.get(Job, job_id)
@@ -1114,7 +1171,17 @@ class BackendService:
             draft.parsed_artifact_id = parsed_artifact_id
             draft.batch_artifact_id = batch_artifact_id
             draft.review_artifact_id = review_artifact_id
-            draft.status = "READY_TO_SUBMIT" if downstream_ready else "REVIEW_REQUIRED"
+            review_artifact = session.get(WorkflowArtifact, review_artifact_id)
+            if review_artifact is None:
+                raise ConflictError(
+                    "quote_draft_review_missing",
+                    "Quote draft review artifact is missing.",
+                )
+            envelope = ReviewEnvelope.model_validate(review_artifact.payload)
+            # Successful extraction is only a deterministic pre-check.  A new
+            # draft always remains in review until all 30 business fields have
+            # a current, version-bound human disposition.
+            draft.status = "REVIEW_REQUIRED"
             draft.error_code = None
             draft.error_message = None
             job.status = "SUCCEEDED"
@@ -1139,6 +1206,412 @@ class BackendService:
                 draft.status = "FAILED"
                 draft.error_code = code
                 draft.error_message = message[:1000]
+
+    def review_quote_draft(
+        self,
+        task_id: str,
+        draft_id: str,
+        *,
+        expected_draft_revision: int,
+        schema_version: str,
+        actions: list[dict[str, Any]],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Atomically confirm or edit all 30 quote fields and re-run admission."""
+
+        request = {
+            "task_id": task_id,
+            "draft_id": draft_id,
+            "expected_draft_revision": expected_draft_revision,
+            "schema_version": schema_version,
+            "actions": actions,
+        }
+        request_sha = content_hash(request)
+        operation = f"review_quote_draft:{draft_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+
+            draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            if task is None:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            if task.current_revision != draft.base_task_revision:
+                draft.status = "STALE"
+                draft.revision += 1
+                raise ConflictError(
+                    "quote_draft_stale",
+                    "Task changed while the quote draft was open.",
+                )
+            if draft.revision != expected_draft_revision:
+                raise ConflictError(
+                    "quote_draft_revision_conflict",
+                    "Quote draft revision has changed.",
+                    expected=expected_draft_revision,
+                    actual=draft.revision,
+                )
+            if schema_version != QUOTE_REVIEW_SCHEMA_VERSION:
+                raise ConflictError(
+                    "quote_review_schema_conflict",
+                    "Quote review schema has changed; refresh before confirming fields.",
+                    expected=schema_version,
+                    actual=QUOTE_REVIEW_SCHEMA_VERSION,
+                )
+            if draft.status not in {"REVIEW_REQUIRED", "READY_TO_SUBMIT"}:
+                raise ConflictError(
+                    "quote_draft_not_reviewable",
+                    "Quote draft is not awaiting human review.",
+                    status=draft.status,
+                )
+            if not draft.batch_artifact_id or not draft.review_artifact_id:
+                raise ConflictError(
+                    "quote_draft_review_missing",
+                    "Quote draft review artifacts are missing.",
+                )
+            current_dictionary_sha = hashlib.sha256(
+                self.quote_dictionary_path.read_bytes()
+            ).hexdigest()
+            if draft.dictionary_sha256 != current_dictionary_sha:
+                raise ConflictError(
+                    "quote_draft_review_stale",
+                    "The quote field dictionary changed; reprocess this draft before review.",
+                    expected=draft.dictionary_sha256,
+                    actual=current_dictionary_sha,
+                )
+
+            batch_artifact = session.get(WorkflowArtifact, draft.batch_artifact_id)
+            review_artifact = session.get(WorkflowArtifact, draft.review_artifact_id)
+            if batch_artifact is None or review_artifact is None:
+                raise ConflictError(
+                    "quote_draft_review_missing",
+                    "Quote draft review artifacts are missing.",
+                )
+            batch = ExtractionBatch.model_validate(batch_artifact.payload)
+            prior_envelope = ReviewEnvelope.model_validate(review_artifact.payload)
+            candidates = {candidate.field_name: candidate for candidate in batch.candidates}
+            expected_fields = {
+                definition.field_name
+                for definition in self.quote_dictionary.extractable_fields
+            }
+            targets = [str(item.get("field_name", "")) for item in actions]
+            target_set = set(targets)
+            coverage_errors: list[dict[str, Any]] = []
+            if len(targets) != len(target_set):
+                coverage_errors.append(
+                    {
+                        "code": "DUPLICATE_FIELD_ACTION",
+                        "field_names": sorted(
+                            {name for name in target_set if targets.count(name) > 1}
+                        ),
+                        "group_id": None,
+                        "message": "同一字段不能重复提交审核动作。",
+                    }
+                )
+            missing_fields = sorted(expected_fields - target_set)
+            unexpected_fields = sorted(target_set - expected_fields)
+            if missing_fields:
+                coverage_errors.append(
+                    {
+                        "code": "FULL_FIELD_REVIEW_REQUIRED",
+                        "field_names": missing_fields,
+                        "group_id": None,
+                        "message": "正式提交前必须核对全部 30 个报价字段。",
+                    }
+                )
+            if unexpected_fields:
+                coverage_errors.append(
+                    {
+                        "code": "SYSTEM_FIELD_NOT_EDITABLE",
+                        "field_names": unexpected_fields,
+                        "group_id": None,
+                        "message": "请求包含不可编辑的系统字段。",
+                    }
+                )
+            if coverage_errors:
+                raise BackendError(
+                    "quote_draft_review_invalid",
+                    "Quote draft review is incomplete or invalid.",
+                    errors=coverage_errors,
+                )
+
+            version_errors: list[dict[str, Any]] = []
+            for item in actions:
+                field_name = str(item["field_name"])
+                candidate = candidates.get(field_name)
+                if (
+                    candidate is None
+                    or candidate.field_id != item.get("expected_field_id")
+                    or candidate.field_version != item.get("expected_field_version")
+                ):
+                    version_errors.append(
+                        {
+                            "code": "FIELD_VERSION_CONFLICT",
+                            "field_names": [field_name],
+                            "group_id": self._quote_field_group_id(field_name),
+                            "message": "字段已被更新，请刷新后重新核对。",
+                            "expected_field_id": item.get("expected_field_id"),
+                            "actual_field_id": candidate.field_id if candidate else None,
+                            "expected_field_version": item.get("expected_field_version"),
+                            "actual_field_version": candidate.field_version if candidate else None,
+                        }
+                    )
+            if version_errors:
+                raise ConflictError(
+                    "quote_draft_field_conflict",
+                    "One or more quote fields changed during review.",
+                    errors=version_errors,
+                )
+
+            reviewed_at = datetime.now(timezone.utc)
+            working_batch = batch
+            new_corrections: list[CorrectionEvent] = []
+            deferred_confirmations: list[dict[str, Any]] = []
+            action_errors: list[dict[str, Any]] = []
+            for item in actions:
+                field_name = str(item["field_name"])
+                action = str(item["action"])
+                candidate = next(
+                    item_candidate
+                    for item_candidate in working_batch.candidates
+                    if item_candidate.field_name == field_name
+                )
+                if action in {
+                    "CONFIRM_VALUE",
+                    "CONFIRM_MISSING",
+                    "CONFIRM_CONFLICT",
+                }:
+                    deferred_confirmations.append(item)
+                    continue
+                definition = self.quote_dictionary.fields[field_name]
+                allowed_values = definition.allowed_normalized_values
+                if (
+                    action == "SET_VALUE"
+                    and allowed_values is not None
+                    and item.get("normalized_value") not in allowed_values
+                ):
+                    action_errors.append(
+                        {
+                            "code": "NORMALIZED_ENUM_INVALID",
+                            "field_names": [field_name],
+                            "group_id": self._quote_field_group_id(field_name),
+                            "message": QUOTE_REVIEW_ERROR_MESSAGES["NORMALIZED_ENUM_INVALID"],
+                            "allowed_values": list(allowed_values),
+                        }
+                    )
+                    continue
+                try:
+                    if action == "SET_VALUE":
+                        correction_action = (
+                            CorrectionAction.USER_INPUT
+                            if candidate.validation_status == ValidationStatus.MISSING
+                            else CorrectionAction.USER_CORRECTION
+                        )
+                        working_batch, correction = apply_candidate_correction(
+                            working_batch,
+                            field_name=field_name,
+                            action=correction_action,
+                            raw_value=str(item["raw_value"]),
+                            normalized_value=item.get("normalized_value"),
+                            unit=item.get("unit"),
+                            reason_code="PRE_SUBMISSION_HUMAN_REVIEW",
+                            reason=(
+                                str(item.get("reason") or "用户在正式提交前核对并修改字段。")
+                            ),
+                            reviewer_id=self.actor_id,
+                            reviewed_at=reviewed_at,
+                            draft_revision=expected_draft_revision,
+                        )
+                    elif action == "MARK_MISSING":
+                        working_batch, correction = apply_candidate_correction(
+                            working_batch,
+                            field_name=field_name,
+                            action=CorrectionAction.MARK_MISSING,
+                            raw_value=None,
+                            normalized_value=None,
+                            unit=None,
+                            reason_code="PRE_SUBMISSION_MARKED_MISSING",
+                            reason=str(item.get("reason") or "用户确认模型误提取了该字段。"),
+                            reviewer_id=self.actor_id,
+                            reviewed_at=reviewed_at,
+                            draft_revision=expected_draft_revision,
+                        )
+                    else:
+                        raise ValueError("unsupported quote review action")
+                    new_corrections.append(correction)
+                except (ValueError, TypeError, KeyError) as exc:
+                    action_errors.append(
+                        {
+                            "code": "FIELD_REVIEW_ACTION_INVALID",
+                            "field_names": [field_name],
+                            "group_id": self._quote_field_group_id(field_name),
+                            "message": "当前字段操作与提取状态不匹配。",
+                        }
+                    )
+            if action_errors:
+                raise BackendError(
+                    "quote_draft_review_invalid",
+                    "Quote draft review contains invalid field actions.",
+                    errors=action_errors,
+                )
+
+            review_events = []
+            for item in deferred_confirmations:
+                field_name = str(item["field_name"])
+                try:
+                    review_events.append(
+                        create_review_event(
+                            working_batch,
+                            field_name=field_name,
+                            action=HumanReviewAction(str(item["action"])),
+                            reviewer_id=self.actor_id,
+                            reviewed_at=reviewed_at,
+                            draft_revision=expected_draft_revision,
+                            reason_code=(
+                                str(item["reason"])
+                                if item.get("reason")
+                                else None
+                            ),
+                        )
+                    )
+                except (ValueError, TypeError) as exc:
+                    action_errors.append(
+                        {
+                            "code": "FIELD_REVIEW_ACTION_INVALID",
+                            "field_names": [field_name],
+                            "group_id": self._quote_field_group_id(field_name),
+                            "message": "确认动作与当前字段状态不匹配。",
+                        }
+                    )
+            if action_errors:
+                raise BackendError(
+                    "quote_draft_review_invalid",
+                    "Quote draft review contains invalid field actions.",
+                    errors=action_errors,
+                )
+
+            requirement_record = session.scalar(
+                select(RequirementRecord)
+                .where(RequirementRecord.task_id == task_id)
+                .order_by(RequirementRecord.requirement_version.desc())
+            )
+            if requirement_record is None:
+                raise ConflictError(
+                    "requirement_missing",
+                    "The task has no procurement requirement.",
+                )
+            requirement = ProcurementRequirement.model_validate(requirement_record.payload)
+            corrections = tuple(prior_envelope.corrections) + tuple(new_corrections)
+            reviewed = review_extraction_batch(
+                working_batch,
+                self.quote_dictionary,
+                CriticalityContext(
+                    required_revision=requirement.revision,
+                    base_unit=requirement.base_unit,
+                ),
+                input_is_synthetic=draft.is_synthetic,
+                reviewed_at=reviewed_at,
+                review_events=tuple(review_events),
+                corrections=corrections,
+            )
+            if not reviewed.submission_ready:
+                raise BackendError(
+                    "quote_draft_review_failed",
+                    "Quote draft did not pass authoritative backend review.",
+                    errors=self._quote_review_errors(reviewed),
+                    unconfirmed_fields=list(reviewed.unconfirmed_fields),
+                    submission_blocking_fields=list(
+                        reviewed.submission_blocking_fields
+                    ),
+                )
+
+            parent_artifact_id = batch_artifact.artifact_id
+            if new_corrections:
+                batch_payload = working_batch.model_dump(mode="json")
+                next_batch_artifact = WorkflowArtifact(
+                    artifact_id=new_id("artifact"),
+                    task_id=task_id,
+                    task_revision=draft.base_task_revision,
+                    artifact_type="EXTRACTION_BATCH",
+                    schema_version=working_batch.schema_version,
+                    parent_artifact_id=parent_artifact_id,
+                    quote_id=draft.proposed_quote_id,
+                    document_id=draft.proposed_document_id,
+                    payload=batch_payload,
+                    content_sha256=content_hash(batch_payload),
+                )
+                session.add(next_batch_artifact)
+                parent_artifact_id = next_batch_artifact.artifact_id
+                draft.batch_artifact_id = next_batch_artifact.artifact_id
+            for event in new_corrections:
+                payload = event.model_dump(mode="json")
+                artifact = WorkflowArtifact(
+                    artifact_id=new_id("artifact"),
+                    task_id=task_id,
+                    task_revision=draft.base_task_revision,
+                    artifact_type="CORRECTION_EVENT",
+                    parent_artifact_id=parent_artifact_id,
+                    quote_id=draft.proposed_quote_id,
+                    document_id=draft.proposed_document_id,
+                    payload=payload,
+                    content_sha256=content_hash(payload),
+                )
+                session.add(artifact)
+                parent_artifact_id = artifact.artifact_id
+            for event in review_events:
+                payload = event.model_dump(mode="json")
+                artifact = WorkflowArtifact(
+                    artifact_id=new_id("artifact"),
+                    task_id=task_id,
+                    task_revision=draft.base_task_revision,
+                    artifact_type="REVIEW_EVENT",
+                    parent_artifact_id=parent_artifact_id,
+                    quote_id=draft.proposed_quote_id,
+                    document_id=draft.proposed_document_id,
+                    payload=payload,
+                    content_sha256=content_hash(payload),
+                )
+                session.add(artifact)
+                parent_artifact_id = artifact.artifact_id
+            review_payload = reviewed.model_dump(mode="json")
+            next_review_artifact = WorkflowArtifact(
+                artifact_id=new_id("artifact"),
+                task_id=task_id,
+                task_revision=draft.base_task_revision,
+                artifact_type="REVIEW_ENVELOPE",
+                schema_version=reviewed.schema_version,
+                parent_artifact_id=parent_artifact_id,
+                quote_id=draft.proposed_quote_id,
+                document_id=draft.proposed_document_id,
+                payload=review_payload,
+                content_sha256=content_hash(review_payload),
+            )
+            session.add(next_review_artifact)
+            draft.review_artifact_id = next_review_artifact.artifact_id
+            draft.status = "READY_TO_SUBMIT"
+            draft.revision += 1
+            draft.error_code = None
+            draft.error_message = None
+            session.flush()
+            response = self._quote_draft_response(session, draft)
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=200,
+                response=response,
+            )
+            return response
 
     def correct_quote_draft(
         self,
@@ -1180,22 +1653,27 @@ class BackendService:
                     expected=expected_draft_revision,
                     actual=draft.revision,
                 )
-            if draft.status != "REVIEW_REQUIRED" or not draft.batch_artifact_id or not draft.review_artifact_id:
+            if (
+                draft.status not in {"REVIEW_REQUIRED", "READY_TO_SUBMIT"}
+                or not draft.batch_artifact_id
+                or not draft.review_artifact_id
+            ):
                 raise ConflictError("quote_draft_not_reviewable", "Quote draft is not awaiting field corrections.")
-            envelope = ReviewEnvelope.model_validate(
-                session.get(WorkflowArtifact, draft.review_artifact_id).payload
-            )
-            blocking = {
-                finding.field_name
-                for finding in (envelope.review.findings if envelope.review else ())
-                if finding.severity == ReviewSeverity.BLOCKING and not finding.resolved
+            targets_list = [str(item.get("field_name", "")) for item in corrections]
+            targets = set(targets_list)
+            editable_fields = {
+                definition.field_name
+                for definition in self.quote_dictionary.extractable_fields
             }
-            targets = {str(item.get("field_name", "")) for item in corrections}
-            if not corrections or not targets.issubset(blocking):
+            if (
+                not corrections
+                or len(targets_list) != len(targets)
+                or not targets.issubset(editable_fields)
+            ):
                 raise BackendError(
                     "draft_correction_scope_invalid",
-                    "Only unresolved blocking fields can be corrected.",
-                    blocking_fields=sorted(blocking),
+                    "旧版修正接口只允许对不重复的报价业务字段执行 SET_VALUE。",
+                    editable_fields=sorted(editable_fields),
                 )
             batch_artifact = session.get(WorkflowArtifact, draft.batch_artifact_id)
             if batch_artifact is None:
@@ -1254,6 +1732,7 @@ class BackendService:
                         reason=str(item["reason"]),
                         reviewer_id=self.actor_id,
                         reviewed_at=reviewed_at,
+                        draft_revision=expected_draft_revision,
                     )
                 except (ValueError, TypeError) as exc:
                     raise BackendError(
@@ -1385,10 +1864,128 @@ class BackendService:
                         expected=expected_draft_revision,
                         actual=draft.revision,
                     )
-                if draft.status != "READY_TO_SUBMIT" or not draft.batch_artifact_id:
+                if (
+                    draft.status != "READY_TO_SUBMIT"
+                    or not draft.batch_artifact_id
+                    or not draft.review_artifact_id
+                ):
                     raise ConflictError(
                         "quote_draft_not_ready",
-                        "Resolve every blocking field before formally submitting the quote.",
+                        "请先完成全部字段人工确认并通过后端复核。",
+                    )
+
+                current_dictionary_sha = hashlib.sha256(
+                    self.quote_dictionary_path.read_bytes()
+                ).hexdigest()
+                if draft.dictionary_sha256 != current_dictionary_sha:
+                    raise ConflictError(
+                        "quote_draft_review_stale",
+                        "字段字典已更新，请重新处理并确认报价。",
+                        expected=draft.dictionary_sha256,
+                        actual=current_dictionary_sha,
+                    )
+                batch_artifact = session.get(
+                    WorkflowArtifact, draft.batch_artifact_id
+                )
+                review_artifact = session.get(
+                    WorkflowArtifact, draft.review_artifact_id
+                )
+                if batch_artifact is None or review_artifact is None:
+                    raise ConflictError(
+                        "quote_draft_review_missing",
+                        "Quote draft review artifacts are missing.",
+                    )
+                batch = ExtractionBatch.model_validate(batch_artifact.payload)
+                prior_review = ReviewEnvelope.model_validate(review_artifact.payload)
+                if (
+                    prior_review.schema_version != REVIEW_SCHEMA_VERSION
+                    or prior_review.review_policy_version != REVIEW_POLICY_VERSION
+                ):
+                    raise ConflictError(
+                        "quote_draft_review_stale",
+                        "审核规则已更新，请重新确认全部字段。",
+                        expected_review_policy=REVIEW_POLICY_VERSION,
+                        actual_review_policy=prior_review.review_policy_version,
+                    )
+                requirement_record = session.scalar(
+                    select(RequirementRecord)
+                    .where(RequirementRecord.task_id == task_id)
+                    .order_by(RequirementRecord.requirement_version.desc())
+                )
+                if requirement_record is None:
+                    raise ConflictError(
+                        "requirement_missing",
+                        "The task has no procurement requirement.",
+                    )
+                requirement = ProcurementRequirement.model_validate(
+                    requirement_record.payload
+                )
+                authoritative_review = review_extraction_batch(
+                    batch,
+                    self.quote_dictionary,
+                    CriticalityContext(
+                        required_revision=requirement.revision,
+                        base_unit=requirement.base_unit,
+                    ),
+                    input_is_synthetic=draft.is_synthetic,
+                    reviewed_at=datetime.now(timezone.utc),
+                    review_events=tuple(prior_review.review_events),
+                    corrections=tuple(prior_review.corrections),
+                )
+                if not _quote_draft_submission_ready(authoritative_review):
+                    raise ConflictError(
+                        "quote_draft_revalidation_required",
+                        "报价在正式提交前复核未通过，请重新确认有变化的字段。",
+                        errors=self._quote_review_errors(authoritative_review),
+                        unconfirmed_fields=list(
+                            authoritative_review.unconfirmed_fields
+                        ),
+                        submission_blocking_fields=list(
+                            authoritative_review.submission_blocking_fields
+                        ),
+                    )
+                reviewed_draft_revision = draft.revision - 1
+                revision_bound_fields = {
+                    event.field_name
+                    for event in prior_review.review_events
+                    if event.draft_revision == reviewed_draft_revision
+                    and any(
+                        candidate.field_name == event.field_name
+                        and candidate.field_id == event.candidate_field_id
+                        and candidate.field_version
+                        == event.candidate_field_version
+                        for candidate in batch.candidates
+                    )
+                }
+                revision_bound_fields.update(
+                    event.field_name
+                    for event in prior_review.corrections
+                    if event.draft_revision == reviewed_draft_revision
+                    and any(
+                        candidate.field_name == event.field_name
+                        and candidate.field_id == event.after.field_id
+                        and candidate.field_version == event.after.field_version
+                        for candidate in batch.candidates
+                    )
+                )
+                unbound_fields = sorted(
+                    {
+                        candidate.field_name for candidate in batch.candidates
+                    }
+                    - revision_bound_fields
+                )
+                if unbound_fields:
+                    raise ConflictError(
+                        "quote_draft_review_stale",
+                        "部分字段没有绑定当前草稿版本，请重新确认全部字段。",
+                        errors=[
+                            {
+                                "code": "DRAFT_REVISION_CONFIRMATION_MISSING",
+                                "field_names": unbound_fields,
+                                "group_id": None,
+                                "message": "字段确认记录不属于当前草稿版本。",
+                            }
+                        ],
                     )
                 self._raise_if_duplicate_quote(
                     session,
@@ -5347,6 +5944,87 @@ class BackendService:
             raise NotFoundError("quote_draft_not_found", "Quote draft was not found.")
         return draft
 
+    def _quote_field_group_id(self, field_name: str) -> str | None:
+        definition = self.quote_dictionary.fields.get(field_name)
+        if definition is None:
+            return None
+        return GROUP_IDS.get(definition.field_group, definition.field_group or None)
+
+    def _quote_review_errors(self, envelope: ReviewEnvelope) -> list[dict[str, Any]]:
+        errors: list[dict[str, Any]] = []
+        represented: set[str] = set()
+        if envelope.review is not None:
+            for finding in envelope.review.findings:
+                if finding.resolved or (
+                    finding.severity != ReviewSeverity.BLOCKING
+                    and finding.field_name not in envelope.submission_blocking_fields
+                ):
+                    continue
+                represented.add(finding.field_name)
+                code = finding.codes[0] if finding.codes else "FIELD_REVIEW_FAILED"
+                errors.append(
+                    {
+                        "code": code,
+                        "field_names": [finding.field_name],
+                        "group_id": self._quote_field_group_id(finding.field_name),
+                        "message": QUOTE_REVIEW_ERROR_MESSAGES.get(
+                            code,
+                            finding.message,
+                        ),
+                    }
+                )
+        for field_name in envelope.submission_blocking_fields:
+            if field_name in represented:
+                continue
+            candidate = (
+                next(
+                    (
+                        item
+                        for item in envelope.batch.candidates
+                        if item.field_name == field_name
+                    ),
+                    None,
+                )
+                if envelope.batch is not None
+                else None
+            )
+            if (
+                field_name in {"shipping_fee_status", "other_fees_status"}
+                and candidate is not None
+                and candidate.normalized_value == "UNKNOWN"
+            ):
+                code = "FEE_STATUS_UNKNOWN"
+            elif (
+                candidate is not None
+                and candidate.validation_status == ValidationStatus.MISSING
+            ):
+                code = "CRITICAL_FIELD_MISSING"
+            elif (
+                candidate is not None
+                and candidate.validation_status == ValidationStatus.CONFLICT
+            ):
+                code = "CRITICAL_FIELD_CONFLICT"
+            else:
+                code = "REQUIRED_FIELD_UNAVAILABLE"
+            errors.append(
+                {
+                    "code": code,
+                    "field_names": [field_name],
+                    "group_id": self._quote_field_group_id(field_name),
+                    "message": QUOTE_REVIEW_ERROR_MESSAGES[code],
+                }
+            )
+        if envelope.unconfirmed_fields:
+            errors.append(
+                {
+                    "code": "FULL_FIELD_REVIEW_REQUIRED",
+                    "field_names": list(envelope.unconfirmed_fields),
+                    "group_id": None,
+                    "message": "正式提交前必须核对全部 30 个报价字段。",
+                }
+            )
+        return errors
+
     def _quote_draft_response(self, session: Session, draft: QuoteDraft) -> dict[str, Any]:
         batch_artifact = (
             session.get(WorkflowArtifact, draft.batch_artifact_id)
@@ -5359,12 +6037,82 @@ class BackendService:
             else None
         )
         batch_payload = dict(batch_artifact.payload) if batch_artifact is not None else {}
+        batch = (
+            ExtractionBatch.model_validate(batch_payload)
+            if batch_artifact is not None
+            else None
+        )
         sources = {
             source.get("source_id"): source
             for source in batch_payload.get("parsed_input", {}).get("sources", [])
         }
+        review_payload = dict(review_artifact.payload) if review_artifact is not None else {}
+        envelope = (
+            ReviewEnvelope.model_validate(review_payload)
+            if review_artifact is not None
+            else None
+        )
+        review = envelope.review if envelope is not None else None
+        always_fields = set(review.always_critical_fields) if review is not None else set()
+        applicable_conditional_fields = (
+            set(review.applicable_conditional_fields) if review is not None else set()
+        )
+        not_applicable_conditional_fields = (
+            set(review.not_applicable_conditional_fields) if review is not None else set()
+        )
+        noncritical_fields = set(review.noncritical_fields) if review is not None else set()
+        findings_by_field: dict[str, list[Any]] = {}
+        if review is not None:
+            for finding in review.findings:
+                findings_by_field.setdefault(finding.field_name, []).append(finding)
+
+        current_review_events = {}
+        current_corrections = {}
+        reviewed_action_revision = draft.revision - (
+            2 if draft.status == "SUBMITTED" else 1
+        )
+        if envelope is not None and batch is not None:
+            candidates_by_name = {
+                candidate.field_name: candidate for candidate in batch.candidates
+            }
+            for event in envelope.review_events:
+                candidate = candidates_by_name.get(event.field_name)
+                if (
+                    candidate is not None
+                    and event.candidate_field_id == candidate.field_id
+                    and event.candidate_field_version == candidate.field_version
+                    and event.draft_revision == reviewed_action_revision
+                ):
+                    current_review_events[event.field_name] = event
+            for event in envelope.corrections:
+                candidate = candidates_by_name.get(event.field_name)
+                if (
+                    candidate is not None
+                    and event.after.field_id == candidate.field_id
+                    and event.after.field_version == candidate.field_version
+                    and event.draft_revision == reviewed_action_revision
+                ):
+                    current_corrections[event.field_name] = event
+
+        legacy_or_stale_review = bool(
+            envelope is not None
+            and (
+                envelope.schema_version != REVIEW_SCHEMA_VERSION
+                or envelope.review_policy_version != REVIEW_POLICY_VERSION
+            )
+        )
+        envelope_unconfirmed = (
+            set(envelope.unconfirmed_fields) if envelope is not None else set()
+        )
+        if legacy_or_stale_review and batch is not None:
+            envelope_unconfirmed = {
+                candidate.field_name for candidate in batch.candidates
+            }
+
         fields: list[dict[str, Any]] = []
+        reviewed_states: list[str] = []
         for candidate in batch_payload.get("candidates", []):
+            field_name = str(candidate.get("field_name", ""))
             evidence = []
             for citation in candidate.get("source_refs", []):
                 source = sources.get(citation.get("source_id"), {})
@@ -5380,10 +6128,75 @@ class BackendService:
                         "coordinate_space": source.get("coordinate_space"),
                     }
                 )
+            if field_name in always_fields:
+                criticality = EffectiveCriticality.ALWAYS.value
+                applicable = True
+            elif field_name in applicable_conditional_fields:
+                criticality = EffectiveCriticality.CONDITIONAL_APPLICABLE.value
+                applicable = True
+            elif field_name in not_applicable_conditional_fields:
+                criticality = EffectiveCriticality.CONDITIONAL_NOT_APPLICABLE.value
+                applicable = False
+            elif field_name in noncritical_fields:
+                criticality = EffectiveCriticality.NON_CRITICAL.value
+                applicable = False
+            else:
+                definition = self.quote_dictionary.fields.get(field_name)
+                criticality = {
+                    "关键": EffectiveCriticality.ALWAYS.value,
+                    "条件关键": EffectiveCriticality.CONDITIONAL_NOT_APPLICABLE.value,
+                    "可选": EffectiveCriticality.NON_CRITICAL.value,
+                }.get(
+                    definition.required_level if definition is not None else "",
+                    EffectiveCriticality.NON_CRITICAL.value,
+                )
+                applicable = criticality == EffectiveCriticality.ALWAYS.value
+
+            current_correction = current_corrections.get(field_name)
+            current_event = current_review_events.get(field_name)
+            if field_name in envelope_unconfirmed or legacy_or_stale_review:
+                review_state = "UNREVIEWED"
+            elif current_correction is not None:
+                review_state = (
+                    "MISSING_CONFIRMED"
+                    if current_correction.action == CorrectionAction.MARK_MISSING
+                    else "CORRECTED"
+                )
+            elif current_event is not None:
+                review_state = {
+                    HumanReviewAction.CONFIRM_VALUE: "CONFIRMED",
+                    HumanReviewAction.CONFIRM_MISSING: "MISSING_CONFIRMED",
+                    HumanReviewAction.CONFIRM_CONFLICT: "CONFLICT_CONFIRMED",
+                }[current_event.action]
+            else:
+                review_state = "UNREVIEWED"
+            reviewed_states.append(review_state)
+
+            candidate_findings = findings_by_field.get(field_name, [])
+            unresolved_blocking = any(
+                finding.severity == ReviewSeverity.BLOCKING and not finding.resolved
+                for finding in candidate_findings
+            )
+            accepted_for_calculation = bool(
+                any(finding.accepted_for_calculation for finding in candidate_findings)
+                and not unresolved_blocking
+            )
+            validation_status = candidate.get("validation_status")
+            if validation_status == ValidationStatus.MISSING.value:
+                allowed_actions = ["CONFIRM_MISSING", "SET_VALUE"]
+            elif validation_status == ValidationStatus.CONFLICT.value:
+                allowed_actions = [
+                    "SET_VALUE",
+                    "CONFIRM_CONFLICT",
+                    "MARK_MISSING",
+                ]
+            else:
+                allowed_actions = ["CONFIRM_VALUE", "SET_VALUE", "MARK_MISSING"]
             fields.append(
                 {
                     key: candidate.get(key)
                     for key in (
+                        "field_id",
                         "field_name",
                         "field_version",
                         "raw_value",
@@ -5393,10 +6206,24 @@ class BackendService:
                         "origin",
                     )
                 }
-                | {"evidence": evidence}
+                | {
+                    "criticality": criticality,
+                    "applicable": applicable,
+                    "required_for_submission": criticality
+                    in {
+                        EffectiveCriticality.ALWAYS.value,
+                        EffectiveCriticality.CONDITIONAL_APPLICABLE.value,
+                    },
+                    "review_state": review_state,
+                    "accepted_for_calculation": accepted_for_calculation,
+                    "allowed_actions": allowed_actions,
+                    "findings": [
+                        finding.model_dump(mode="json")
+                        for finding in candidate_findings
+                    ],
+                    "evidence": evidence,
+                }
             )
-        review_payload = dict(review_artifact.payload) if review_artifact is not None else {}
-        review = review_payload.get("review") or {}
         job = session.scalar(
             select(Job)
             .where(Job.quote_draft_id == draft.quote_draft_id)
@@ -5410,6 +6237,49 @@ class BackendService:
             and draft.status in {"UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "READY_TO_SUBMIT"}
         ):
             effective_status = "STALE"
+        if (
+            effective_status == "READY_TO_SUBMIT"
+            and (
+                envelope is None
+                or legacy_or_stale_review
+                or not envelope.submission_ready
+            )
+        ):
+            effective_status = "REVIEW_REQUIRED"
+
+        total_fields = len(fields)
+        reviewed_count = sum(state != "UNREVIEWED" for state in reviewed_states)
+        effective_unconfirmed = tuple(
+            sorted(
+                field["field_name"]
+                for field in fields
+                if field["review_state"] == "UNREVIEWED"
+            )
+        )
+        submission_ready = bool(
+            envelope is not None
+            and not legacy_or_stale_review
+            and envelope.submission_ready
+            and not effective_unconfirmed
+        )
+        if effective_status == "READY_TO_SUBMIT" and not submission_ready:
+            effective_status = "REVIEW_REQUIRED"
+        human_review_complete = bool(
+            envelope is not None
+            and not legacy_or_stale_review
+            and envelope.human_review_complete
+            and not effective_unconfirmed
+        )
+        calculation_ready = bool(
+            envelope is not None
+            and submission_ready
+            and envelope.calculation_ready
+        )
+        submission_blocking_fields = (
+            tuple(envelope.submission_blocking_fields)
+            if envelope is not None
+            else ()
+        )
         return {
             "quote_draft_id": draft.quote_draft_id,
             "task_id": draft.task_id,
@@ -5424,8 +6294,49 @@ class BackendService:
             "size_bytes": draft.size_bytes,
             "document_sha256": draft.sha256,
             "is_synthetic": draft.is_synthetic,
-            "review_status": review_payload.get("review_status"),
-            "review_findings": review.get("findings", []),
+            "schema_version": QUOTE_REVIEW_SCHEMA_VERSION,
+            "review_envelope_schema_version": (
+                envelope.schema_version if envelope is not None else None
+            ),
+            "review_policy_version": (
+                envelope.review_policy_version
+                if envelope is not None
+                else REVIEW_POLICY_VERSION
+            ),
+            "human_review_complete": human_review_complete,
+            "submission_ready": submission_ready,
+            "calculation_ready": calculation_ready,
+            "submission_blocking_fields": list(submission_blocking_fields),
+            "unconfirmed_fields": list(effective_unconfirmed),
+            "review_progress": {
+                "total": total_fields,
+                "reviewed": reviewed_count,
+                "confirmed": sum(
+                    state in {"CONFIRMED", "CONFLICT_CONFIRMED"}
+                    for state in reviewed_states
+                ),
+                "corrected": sum(
+                    state == "CORRECTED"
+                    for state in reviewed_states
+                ),
+                "missing_confirmed": sum(
+                    state == "MISSING_CONFIRMED"
+                    for state in reviewed_states
+                ),
+            },
+            "review_status": (
+                envelope.review_status.value if envelope is not None else None
+            ),
+            "review_findings": (
+                [finding.model_dump(mode="json") for finding in review.findings]
+                if review is not None
+                else []
+            ),
+            "review_errors": (
+                self._quote_review_errors(envelope)
+                if envelope is not None and not submission_ready
+                else []
+            ),
             "fields": fields,
             "calls_used": draft.calls_used,
             "max_calls": draft.max_calls,

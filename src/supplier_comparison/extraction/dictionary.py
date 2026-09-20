@@ -14,7 +14,9 @@ REQUIRED_COLUMNS = {
     "type",
     "meaning",
     "example",
+    "字段组",
     "必填级别",
+    "缺失处理",
     "统一表达规则",
     "校验与歧义边界",
     "证据要求",
@@ -23,6 +25,19 @@ REQUIRED_COLUMNS = {
 }
 
 FIELD_ALLOWED_NORMALIZED_VALUES = {
+    "condition": (
+        "NEW",
+        "REFURBISHED",
+        "USED",
+    ),
+    "packaging_type": (
+        "piece",
+        "tray",
+    ),
+    "moq_unit": (
+        "piece",
+        "tray",
+    ),
     "price_basis_unit": ("piece",),
     "tax_mode": (
         "NOT_APPLICABLE",
@@ -65,7 +80,9 @@ class QuoteFieldDefinition:
     value_type: str
     meaning: str
     example: str
+    field_group: str
     required_level: str
+    missing_handling: str
     normalization_rule: str
     validation_boundary: str
     evidence_requirement: str
@@ -117,7 +134,9 @@ class QuoteDictionary:
                         value_type=(row["type"] or "").strip(),
                         meaning=(row["meaning"] or "").strip(),
                         example=(row["example"] or "").strip(),
+                        field_group=(row["字段组"] or "").strip(),
                         required_level=(row["必填级别"] or "").strip(),
+                        missing_handling=(row["缺失处理"] or "").strip(),
                         normalization_rule=(row["统一表达规则"] or "").strip(),
                         validation_boundary=(row["校验与歧义边界"] or "").strip(),
                         evidence_requirement=(row["证据要求"] or "").strip(),

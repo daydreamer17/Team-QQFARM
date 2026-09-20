@@ -18,6 +18,7 @@ from supplier_comparison.extraction.criticality import (
     CriticalityContext,
 )
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
+from supplier_comparison.extraction.corrections import apply_candidate_correction
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.review import (
     model_failed_envelope,
@@ -25,6 +26,7 @@ from supplier_comparison.extraction.review import (
 )
 from supplier_comparison.extraction.human_review import create_review_event
 from supplier_comparison.extraction.review_contracts import (
+    CorrectionAction,
     HumanReviewAction,
     ReviewReason,
     ReviewStatus,
@@ -649,6 +651,8 @@ def test_tax_evidence_cannot_prove_other_fee_status(quote_dictionary) -> None:
         "Ancillary charges NOT APPLICABLE",
         "Extras policy AMOUNT",
         "Administration fee status AMOUNT",
+        "Freight is SGD 40.00; no other mandatory fees apply.",
+        "Other mandatory fees None",
     ],
 )
 def test_supported_other_fee_alias_can_prove_other_fee_status(
@@ -687,6 +691,186 @@ def test_supported_other_fee_alias_can_prove_other_fee_status(
         and "SOURCE_SEMANTIC_MISMATCH" in finding.codes
         for finding in envelope.review.findings
     )
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "Freight is SGD 40.00; no other mandatory fees apply.",
+        "Other mandatory fees None",
+    ],
+)
+def test_explicit_no_other_fees_requires_not_applicable_status(
+    quote_dictionary,
+    evidence: str,
+) -> None:
+    batch = _batch(quote_dictionary)
+    status = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    source_id = status.source_refs[0].source_id
+    sources = tuple(
+        source.model_copy(update={"raw_text": evidence})
+        if source.source_id == source_id
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={"parsed_input": batch.parsed_input.model_copy(update={"sources": sources})}
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_status",
+        raw_value=evidence,
+        normalized_value="KNOWN_AMOUNT",
+        source_refs=(SourceCitation(source_id=source_id, quoted_text=evidence),),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review_status == ReviewStatus.REVIEW_REQUIRED
+    assert envelope.review is not None
+    assert any(
+        finding.field_name == "other_fees_status"
+        and "OTHER_FEES_ABSENCE_STATUS_CONFLICT" in finding.codes
+        for finding in envelope.review.findings
+    )
+
+
+def test_explicit_no_other_fees_accepts_not_applicable_and_zero(
+    quote_dictionary,
+) -> None:
+    evidence = "Freight is SGD 40.00; no other mandatory fees apply."
+    batch = _batch(quote_dictionary)
+    status = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    amount = next(
+        item for item in batch.candidates if item.field_name == "other_fees_amount"
+    )
+    source_ids = {status.source_refs[0].source_id, amount.source_refs[0].source_id}
+    sources = tuple(
+        source.model_copy(update={"raw_text": evidence})
+        if source.source_id in source_ids
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={"parsed_input": batch.parsed_input.model_copy(update={"sources": sources})}
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_status",
+        raw_value=evidence,
+        normalized_value="NOT_APPLICABLE",
+        source_refs=(SourceCitation(source_id=status.source_refs[0].source_id, quoted_text=evidence),),
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_amount",
+        raw_value="0.00",
+        normalized_value="0.00",
+        source_refs=(SourceCitation(source_id=amount.source_refs[0].source_id, quoted_text=evidence),),
+    )
+
+    envelope = _review(batch, quote_dictionary)
+
+    assert envelope.review is not None
+    blocked_codes = {
+        code
+        for finding in envelope.review.findings
+        if finding.field_name in {"other_fees_status", "other_fees_amount"}
+        and finding.severity.value == "BLOCKING"
+        for code in finding.codes
+    }
+    assert not blocked_codes
+
+
+def test_human_correction_resolves_mandatory_other_fee_evidence_blocker(
+    quote_dictionary,
+) -> None:
+    evidence = "Freight is SGD 40.00; no other mandatory fees apply."
+    batch = _batch(quote_dictionary)
+    original_status = next(
+        item for item in batch.candidates if item.field_name == "other_fees_status"
+    )
+    original_amount = next(
+        item for item in batch.candidates if item.field_name == "other_fees_amount"
+    )
+    source_ids = {
+        original_status.source_refs[0].source_id,
+        original_amount.source_refs[0].source_id,
+    }
+    sources = tuple(
+        source.model_copy(update={"raw_text": evidence})
+        if source.source_id in source_ids
+        else source
+        for source in batch.parsed_input.sources
+    )
+    batch = batch.model_copy(
+        update={"parsed_input": batch.parsed_input.model_copy(update={"sources": sources})}
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_status",
+        raw_value="KNOWN_AMOUNT",
+        normalized_value="KNOWN_AMOUNT",
+        source_refs=(
+            SourceCitation(
+                source_id=original_status.source_refs[0].source_id,
+                quoted_text=evidence,
+            ),
+        ),
+    )
+    batch = _replace_candidate(
+        batch,
+        "other_fees_amount",
+        raw_value="0.00",
+        normalized_value="0.00",
+        source_refs=(
+            SourceCitation(
+                source_id=original_amount.source_refs[0].source_id,
+                quoted_text=evidence,
+            ),
+        ),
+    )
+
+    with_status, status_event = apply_candidate_correction(
+        batch,
+        field_name="other_fees_status",
+        action=CorrectionAction.USER_CORRECTION,
+        raw_value="No other mandatory fees apply",
+        normalized_value="NOT_APPLICABLE",
+        unit=None,
+        reason_code="QUOTE_DRAFT_FIELD_CORRECTION",
+        reason="Buyer confirmed the explicit no-other-fees statement.",
+        reviewer_id="test-user",
+        reviewed_at=NOW,
+    )
+    corrected, amount_event = apply_candidate_correction(
+        with_status,
+        field_name="other_fees_amount",
+        action=CorrectionAction.USER_CORRECTION,
+        raw_value="0.00",
+        normalized_value="0.00",
+        unit="SGD",
+        reason_code="QUOTE_DRAFT_FIELD_CORRECTION",
+        reason="No other mandatory fees means a zero other-fee amount.",
+        reviewer_id="test-user",
+        reviewed_at=NOW,
+    )
+
+    envelope = review_extraction_batch(
+        corrected,
+        quote_dictionary,
+        CRITICALITY_CONTEXT,
+        input_is_synthetic=True,
+        reviewed_at=NOW,
+        corrections=(status_event, amount_event),
+    )
+
+    assert envelope.review_status == ReviewStatus.READY_FOR_DOWNSTREAM
+    assert envelope.downstream_ready is True
 
 
 def test_other_fee_evidence_for_shipping_is_preserved_but_requires_review(

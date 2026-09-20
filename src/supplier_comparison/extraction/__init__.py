@@ -46,6 +46,19 @@ from .hybrid_csv import (
 from .readiness import require_downstream_ready
 from .pdf_layout import PdfLayoutConfig
 from .pdf_ocr import PdfOcrConfig
+from .quote_field_rules import (
+    FEE_AMOUNT_RULE_BY_STATUS,
+    FeeAmountRule,
+    FeePairValidation,
+    FeeStatus,
+    UnitPriceObservation,
+    UnitPriceSelection,
+    UnitPriceVersionStatus,
+    extract_document_unit_price_observations,
+    select_current_unit_price,
+    select_document_unit_price,
+    validate_fee_status_amount,
+)
 from .review import model_failed_envelope, review_extraction_batch
 from .review_contracts import (
     CorrectionAction,
@@ -59,7 +72,9 @@ from .review_contracts import (
     ReviewReason,
     ReviewSeverity,
     ReviewStatus,
+    SubmissionGate,
 )
+from .submission import evaluate_submission_gate
 
 __all__ = [
     "AdapterEnvironment",
@@ -88,6 +103,9 @@ __all__ = [
     "QuoteFieldCandidate",
     "SourceCitation",
     "SourceKind",
+    "UnitPriceObservation",
+    "UnitPriceSelection",
+    "UnitPriceVersionStatus",
     "ValidationStatus",
     "ALWAYS_CRITICAL_FIELDS",
     "CONDITIONAL_CRITICAL_FIELDS",
@@ -96,6 +114,10 @@ __all__ = [
     "CorrectionAction",
     "CorrectionEvent",
     "EffectiveCriticality",
+    "FEE_AMOUNT_RULE_BY_STATUS",
+    "FeeAmountRule",
+    "FeePairValidation",
+    "FeeStatus",
     "FieldReviewDecision",
     "FieldReviewFinding",
     "HumanReviewAction",
@@ -105,14 +127,20 @@ __all__ = [
     "ReviewReason",
     "ReviewSeverity",
     "ReviewStatus",
+    "SubmissionGate",
     "RegisteredHybridCsvParser",
     "apply_candidate_correction",
     "create_review_event",
     "detect_semantic_review_fields",
+    "extract_document_unit_price_observations",
     "merge_semantic_review",
     "model_failed_envelope",
     "require_downstream_ready",
     "resolve_criticalities",
     "review_extraction_batch",
+    "select_current_unit_price",
+    "select_document_unit_price",
+    "evaluate_submission_gate",
     "selected_dictionary",
+    "validate_fee_status_amount",
 ]

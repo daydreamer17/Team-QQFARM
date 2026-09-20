@@ -302,6 +302,67 @@ export interface QuoteDraftJob {
   started_at: string | null
 }
 
+export type QuoteReviewAction =
+  | 'CONFIRM_VALUE'
+  | 'SET_VALUE'
+  | 'CONFIRM_MISSING'
+  | 'MARK_MISSING'
+  | 'CONFIRM_CONFLICT'
+
+export interface QuoteFieldSchemaDefinition {
+  field_name: string
+  label: string
+  group_id: string
+  group_label: string
+  value_type: string
+  editor?: string
+  required_level: string
+  nullable?: boolean
+  allowed_values: string[] | null
+  minimum?: number | null
+  unit_kind?: string
+  missing_handling?: string
+  normalization_rule: string
+  validation_boundary: string
+  evidence_requirement: string
+}
+
+export interface QuoteFieldRelationGroup {
+  group_id: string
+  kind: string
+  field_names: string[]
+  message: string
+}
+
+export interface QuoteFieldSchemaResponse {
+  schema_version: string
+  dictionary_version: string
+  dictionary_sha256: string
+  review_policy_version: string
+  groups?: Array<{ group_id: string; label: string; field_names: string[] }>
+  fields: QuoteFieldSchemaDefinition[]
+  relation_groups: QuoteFieldRelationGroup[]
+}
+
+export interface QuoteDraftReviewProgress {
+  total: number
+  reviewed: number
+  confirmed: number
+  corrected: number
+  missing_confirmed: number
+}
+
+export interface QuoteDraftReviewActionInput {
+  action: QuoteReviewAction
+  fieldName: string
+  expectedFieldId: string
+  expectedFieldVersion: number
+  rawValue?: string
+  normalizedValue?: string | number | boolean | null
+  unit?: string | null
+  reason?: string
+}
+
 export interface QuoteDraftResponse {
   quote_draft_id: string
   task_id: string
@@ -317,6 +378,21 @@ export interface QuoteDraftResponse {
   document_sha256: string
   is_synthetic: boolean
   review_status: string | null
+  schema_version?: string | null
+  review_envelope_schema_version?: string | null
+  review_policy_version?: string | null
+  human_review_complete?: boolean
+  submission_ready?: boolean
+  calculation_ready?: boolean
+  submission_blocking_fields?: string[]
+  unconfirmed_fields?: string[]
+  review_progress?: QuoteDraftReviewProgress
+  review_errors?: Array<{
+    code: string
+    field_names: string[]
+    group_id: string | null
+    message: string
+  }>
   review_findings: ReviewFinding[]
   fields: QuoteField[]
   calls_used: number
@@ -338,7 +414,7 @@ export interface QuoteDraftListResponse {
 export interface QuoteDraftCorrectionInput {
   fieldName: string
   rawValue: string
-  normalizedValue: string | number | boolean
+  normalizedValue: string | number | boolean | null
   unit: string | null
   reason: string
 }
@@ -408,6 +484,7 @@ export interface FieldEvidence {
 }
 
 export interface QuoteField {
+  field_id?: string
   field_name: string
   field_version: number
   raw_value: string | null
@@ -416,6 +493,13 @@ export interface QuoteField {
   validation_status: string
   origin: string | null
   evidence: FieldEvidence[]
+  criticality?: string
+  applicable?: boolean
+  required_for_submission?: boolean
+  review_state?: string
+  accepted_for_calculation?: boolean
+  allowed_actions?: QuoteReviewAction[]
+  findings?: ReviewFinding[]
 }
 
 export interface ReviewFinding {

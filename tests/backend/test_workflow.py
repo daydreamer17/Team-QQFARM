@@ -283,7 +283,7 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     }
     assert review_envelopes
     assert {artifact.schema_version for artifact in review_envelopes} == {
-        "review-envelope/1.0.0"
+        "review-envelope/1.1.0"
     }
     assert [change.change_type for change in revision_changes[-2:]] == [
         "ISSUE_ANSWERED:CONFIRM_MISSING",

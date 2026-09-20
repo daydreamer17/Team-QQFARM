@@ -22,6 +22,7 @@ from .criticality import (
     ALWAYS_CRITICAL_FIELDS,
     CONDITIONAL_CRITICAL_FIELDS,
     NON_CRITICAL_FIELDS,
+    POLICY_FIELDS,
     CriticalityContext,
     resolve_criticalities,
     validate_policy_fields,
@@ -36,8 +37,13 @@ from .evidence import (
     source_semantic_contexts,
 )
 from .files import stable_id
+from .quote_field_rules import (
+    select_document_unit_price,
+    validate_fee_status_amount,
+)
 from .review_contracts import (
     CandidateValueSnapshot,
+    CorrectionAction,
     CorrectionEvent,
     CorrectionState,
     CriticalityAssessment,
@@ -53,6 +59,7 @@ from .review_contracts import (
     ReviewStatus,
     ReviewSummary,
 )
+from .submission import evaluate_submission_gate
 
 
 CROSS_FIELD_CODES = frozenset(
@@ -65,6 +72,7 @@ CROSS_FIELD_CODES = frozenset(
         "LEAD_TIME_GROUP_INCOMPLETE",
         "QUOTE_DATE_AFTER_VALID_UNTIL",
         "CRITICAL_FIELD_CONFLICT",
+        "CURRENT_UNIT_PRICE_MISMATCH",
     }
 )
 IDENTITY_CODES = frozenset(
@@ -88,6 +96,18 @@ TYPE_CODES = frozenset(
         "MONEY_VALUE_INVALID",
         "ISO_DATE_REQUIRED",
         "HUMAN_ORIGIN_REQUIRES_VERIFIED",
+    }
+)
+HARD_SUBMISSION_CODES = frozenset(
+    set(CROSS_FIELD_CODES)
+    | set(IDENTITY_CODES)
+    | set(TYPE_CODES)
+    | {
+        "SOURCE_SEMANTIC_MISMATCH",
+        "NORMALIZED_PRICE_NOT_IN_EVIDENCE",
+        "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE",
+        "OTHER_FEES_ABSENCE_AMOUNT_CONFLICT",
+        "OTHER_FEES_ABSENCE_STATUS_CONFLICT",
     }
 )
 FEE_STATUS_FIELDS = {
@@ -121,11 +141,24 @@ CURRENCY_AMOUNT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 OTHER_FEE_SOURCE_PATTERN = re.compile(
-    r"\b(?:other|additional|ancillary|extra|handling|service|surcharge|"
-    r"administration|admin)\s+(?:fee|fees|charge|charges)\b|"
+    r"\b(?:other|additional|ancillary|extra)"
+    r"(?:\s+(?:mandatory|required|applicable|commercial|miscellaneous)){0,3}"
+    r"\s+(?:fee|fees|charge|charges)\b|"
+    r"\b(?:handling|service|surcharge|administration|admin)"
+    r"\s+(?:fee|fees|charge|charges)\b|"
     r"\bextras?\s+(?:policy|total|status|amount|fee|fees|charge|charges)\b|"
     r"\bfee\s+total\b|"
     r"\bhandling\s+and\s+admin(?:istration)?\b",
+    re.IGNORECASE,
+)
+NO_OTHER_FEES_PATTERN = re.compile(
+    r"\bno\s+(?:other|additional)"
+    r"(?:\s+(?:mandatory|required|applicable|commercial|miscellaneous)){0,3}"
+    r"\s+(?:fee|fees|charge|charges)\b|"
+    r"\b(?:other|additional)"
+    r"(?:\s+(?:mandatory|required|applicable|commercial|miscellaneous)){0,3}"
+    r"\s+(?:fee|fees|charge|charges)\s*(?::|=|-)?\s*"
+    r"(?:none|nil|n/?a|not\s+applicable)\b",
     re.IGNORECASE,
 )
 DECIMAL_TOKEN_PATTERN = re.compile(r'(?<![A-Za-z0-9])([0-9][0-9,]*(?:\.[0-9]+)?)(?![A-Za-z0-9])')
@@ -249,6 +282,26 @@ def review_extraction_batch(
     blocking_fields = tuple(
         sorted({finding.field_name for finding in unresolved_blocking})
     )
+    submission_blocking_fields = tuple(
+        sorted(
+            {
+                finding.field_name
+                for finding in findings
+                if not finding.resolved
+                and (
+                    finding.severity == ReviewSeverity.BLOCKING
+                    or bool(set(finding.codes) & HARD_SUBMISSION_CODES)
+                )
+            }
+        )
+    )
+    submission_gate = evaluate_submission_gate(
+        batch,
+        assessments,
+        review_events=review_events,
+        corrections=corrections,
+        deterministic_blocking_fields=submission_blocking_fields,
+    )
     review_run_id = stable_id(
         "review",
         {
@@ -303,6 +356,14 @@ def review_extraction_batch(
         review_status=review_status,
         downstream_ready=downstream_ready,
         calculation_inputs_complete=critical_values_complete,
+        human_review_complete=submission_gate.human_review_complete,
+        submission_ready=submission_gate.submission_ready,
+        calculation_ready=(
+            submission_gate.submission_ready and critical_values_complete
+        ),
+        submission_blocking_fields=submission_gate.submission_blocking_fields,
+        unconfirmed_fields=submission_gate.unconfirmed_fields,
+        review_policy_version=submission_gate.review_policy_version,
         checks=checks,
         review=summary,
         batch=batch,
@@ -327,6 +388,11 @@ def model_failed_envelope(
         review_status=ReviewStatus.MODEL_FAILED,
         downstream_ready=False,
         calculation_inputs_complete=False,
+        human_review_complete=False,
+        submission_ready=False,
+        calculation_ready=False,
+        submission_blocking_fields=("__model__",),
+        unconfirmed_fields=(),
         errors=errors,
     )
 
@@ -409,6 +475,11 @@ def _candidate_set_rejected_envelope(
         review_status=ReviewStatus.REJECTED,
         downstream_ready=False,
         calculation_inputs_complete=False,
+        human_review_complete=False,
+        submission_ready=False,
+        calculation_ready=False,
+        submission_blocking_fields=("__batch__",),
+        unconfirmed_fields=tuple(sorted(POLICY_FIELDS)),
         checks=checks,
         review=summary,
         batch=batch,
@@ -578,6 +649,11 @@ def _review_human_events(
         )
         action_valid = candidate is not None and (
             (
+                event.action == HumanReviewAction.CONFIRM_VALUE
+                and candidate.validation_status
+                in {ValidationStatus.EXTRACTED, ValidationStatus.VERIFIED}
+            )
+            or (
                 event.action == HumanReviewAction.CONFIRM_MISSING
                 and candidate.validation_status == ValidationStatus.MISSING
             )
@@ -624,11 +700,22 @@ def _review_correction_events(
         latest_by_field[event.field_name] = event
     for field_name, event in latest_by_field.items():
         candidate = by_name.get(field_name)
+        candidate_shape_valid = candidate is not None and (
+            (
+                event.action == CorrectionAction.MARK_MISSING
+                and candidate.validation_status == ValidationStatus.MISSING
+                and candidate.origin is None
+            )
+            or (
+                event.action != CorrectionAction.MARK_MISSING
+                and candidate.validation_status == ValidationStatus.VERIFIED
+                and candidate.origin == Origin(event.action.value)
+            )
+        )
         valid = (
             candidate is not None
             and event.after == CandidateValueSnapshot.from_candidate(candidate)
-            and candidate.validation_status == ValidationStatus.VERIFIED
-            and candidate.origin == Origin(event.action.value)
+            and candidate_shape_valid
             and event.task_revision == context.task_revision
             and event.quote_id == context.quote_id
             and event.quote_version == context.quote_version
@@ -928,6 +1015,15 @@ def _review_candidate_shape(
                 message="Candidate must be a non-empty normalized string.",
             )
         ]
+    elif candidate.field_name == "currency" and re.fullmatch(r"[A-Z]{3}", value) is None:
+        return [
+            _candidate_problem(
+                candidate,
+                assessment,
+                code="NORMALIZED_TYPE_INVALID",
+                message="Currency must be a three-letter uppercase code such as SGD.",
+            )
+        ]
     return []
 
 
@@ -1001,6 +1097,45 @@ def _review_sources(
                 assessment,
                 code="SOURCE_SEMANTIC_MISMATCH",
                 message="Evidence does not contain other-fee-specific semantics.",
+                reason=ReviewReason.EVIDENCE_ERROR,
+            )
+        )
+    no_other_fees = any(
+        NO_OTHER_FEES_PATTERN.search(context) for context in source_contexts
+    )
+    if (
+        candidate.field_name == "other_fees_status"
+        and no_other_fees
+        and candidate.normalized_value != "NOT_APPLICABLE"
+    ):
+        findings.append(
+            _candidate_problem(
+                candidate,
+                assessment,
+                code="OTHER_FEES_ABSENCE_STATUS_CONFLICT",
+                message=(
+                    "Evidence explicitly says that no other fees apply; "
+                    "other_fees_status must be NOT_APPLICABLE."
+                ),
+                reason=ReviewReason.EVIDENCE_ERROR,
+            )
+        )
+    if (
+        candidate.field_name == "other_fees_amount"
+        and no_other_fees
+        and isinstance(candidate.normalized_value, str)
+        and _valid_decimal(candidate.normalized_value)
+        and not _decimal_is_zero(candidate.normalized_value)
+    ):
+        findings.append(
+            _candidate_problem(
+                candidate,
+                assessment,
+                code="OTHER_FEES_ABSENCE_AMOUNT_CONFLICT",
+                message=(
+                    "Evidence explicitly says that no other fees apply; "
+                    "other_fees_amount must be zero or empty."
+                ),
                 reason=ReviewReason.EVIDENCE_ERROR,
             )
         )
@@ -1157,11 +1292,19 @@ def _review_cross_field(
         )
 
     unit_price = by_name.get("unit_price")
-    document_unit_prices = _document_unit_price_values(batch)
+    document_unit_price = select_document_unit_price(batch.parsed_input)
+    unversioned_document_prices = (
+        _document_unit_price_values(batch)
+        if not document_unit_price.observations
+        else frozenset()
+    )
     if (
         unit_price is not None
         and _usable_value(unit_price) is not None
-        and len(document_unit_prices) > 1
+        and (
+            document_unit_price.has_conflict
+            or len(unversioned_document_prices) > 1
+        )
     ):
         findings.append(
             _candidate_problem(
@@ -1169,8 +1312,27 @@ def _review_cross_field(
                 assessments["unit_price"],
                 code="CRITICAL_FIELD_CONFLICT",
                 message=(
-                    "Document contains multiple distinct product unit-price amounts; "
-                    "a single extracted value cannot be selected automatically."
+                    "Document does not identify one authoritative current unit price "
+                    f"({document_unit_price.conflict_code or 'MULTIPLE_UNVERSIONED_UNIT_PRICES'})."
+                ),
+                reason=ReviewReason.DOCUMENT_CONFLICT,
+            )
+        )
+    elif (
+        unit_price is not None
+        and isinstance(_usable_value(unit_price), str)
+        and document_unit_price.selected_value is not None
+        and _decimal_value(_usable_value(unit_price))
+        != document_unit_price.selected_value
+    ):
+        findings.append(
+            _candidate_problem(
+                unit_price,
+                assessments["unit_price"],
+                code="CURRENT_UNIT_PRICE_MISMATCH",
+                message=(
+                    "Extracted unit price does not match the document's current "
+                    "versioned unit price."
                 ),
                 reason=ReviewReason.DOCUMENT_CONFLICT,
             )
@@ -1250,20 +1412,24 @@ def _review_cross_field(
         amount_candidate = by_name[amount_field]
         status = _usable_value(status_candidate)
         amount = _usable_value(amount_candidate)
-        conflict = False
-        if status in {"UNKNOWN", "INCLUDED"} and amount is not None:
-            conflict = True
-        elif status in {"FREE", "NOT_APPLICABLE"} and amount is not None:
-            conflict = not (isinstance(amount, str) and _decimal_is_zero(amount))
-        elif status == "KNOWN_AMOUNT" and amount is None:
-            conflict = True
-        if conflict and amount_field not in review_events:
+        fee_validation = (
+            None
+            if status is None and amount is None
+            else validate_fee_status_amount(status, amount)
+        )
+        if (
+            fee_validation is not None
+            and not fee_validation.valid
+        ):
             findings.append(
                 _candidate_problem(
                     amount_candidate,
                     assessments[amount_field],
                     code="FEE_STATUS_AMOUNT_CONFLICT",
-                    message=f"{status_field} and {amount_field} are inconsistent.",
+                    message=(
+                        f"{status_field} and {amount_field} are inconsistent: "
+                        f"{fee_validation.message}"
+                    ),
                 )
             )
 
@@ -1576,11 +1742,23 @@ def _normalize_whitespace(value: str) -> str:
 
 
 def _valid_decimal(value: str) -> bool:
+    if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", value) is None:
+        return False
     try:
         amount = Decimal(value)
     except InvalidOperation:
         return False
     return amount.is_finite() and amount >= 0
+
+
+def _decimal_value(value: object | None) -> Decimal | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        amount = Decimal(value)
+    except InvalidOperation:
+        return None
+    return amount if amount.is_finite() else None
 
 
 def _source_contains_decimal(source_text: str, normalized_value: str) -> bool:

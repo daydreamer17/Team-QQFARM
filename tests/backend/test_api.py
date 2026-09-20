@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -15,7 +16,7 @@ from supplier_comparison.backend.models import Base, Document, Task, WorkflowArt
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import BackendError
 from supplier_comparison.backend.service import content_hash
-from supplier_comparison.backend.workflow import WorkflowRunner
+from supplier_comparison.backend.workflow import DraftReviewRunner, WorkflowRunner
 from langgraph.checkpoint.memory import InMemorySaver
 from tests.backend.test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
 
@@ -320,6 +321,37 @@ def test_health_endpoints_separate_liveness_and_readiness(
     assert http.get("/health/ready").json() == {"status": "ready"}
 
 
+def test_quote_field_schema_is_backend_owned_and_complete(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+
+    response = http.get("/api/v1/quote-field-schema")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "quote-review-schema/1.0.0"
+    assert payload["dictionary_version"] == "1.2.0"
+    assert len(payload["dictionary_sha256"]) == 64
+    assert len(payload["fields"]) == 30
+    assert {item["required_level"] for item in payload["fields"]} == {
+        "关键",
+        "条件关键",
+        "可选",
+    }
+    assert sum(item["required_level"] == "关键" for item in payload["fields"]) == 16
+    assert sum(item["required_level"] == "条件关键" for item in payload["fields"]) == 10
+    assert sum(item["required_level"] == "可选" for item in payload["fields"]) == 4
+    assert "supplier_id" not in {item["field_name"] for item in payload["fields"]}
+    shipping = next(item for item in payload["fields"] if item["field_name"] == "shipping_fee_status")
+    assert "UNKNOWN" in shipping["allowed_values"]
+    assert {item["group_id"] for item in payload["relation_groups"]} >= {
+        "shipping_fee",
+        "price_basis",
+        "relative_delivery",
+    }
+
+
 def test_quote_draft_mutations_define_json_request_bodies(
     client: tuple[TestClient, BackendService],
 ) -> None:
@@ -330,6 +362,11 @@ def test_quote_draft_mutations_define_json_request_bodies(
     assert schema_response.status_code == 200
     paths = schema_response.json()["paths"]
     operations = (
+        (
+            "/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/review",
+            "put",
+            "QuoteDraftReviewRequest",
+        ),
         (
             "/api/v1/tasks/{task_id}/quote-drafts/{draft_id}/corrections",
             "put",
@@ -351,6 +388,170 @@ def test_quote_draft_mutations_define_json_request_bodies(
             "application/json"
         ]["schema"]
         assert body_schema == {"$ref": f"#/components/schemas/{schema_name}"}
+
+
+def test_put_quote_draft_review_accepts_exactly_all_30_field_actions(
+    client: tuple[TestClient, BackendService],
+    tmp_path: Path,
+) -> None:
+    http, service = client
+    task = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-full-field-review"},
+        json={"requirement": REQUIREMENT, "scenario_id": "MCU-DEMO-001"},
+    ).json()
+    uploaded = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quote-drafts",
+        headers={"Idempotency-Key": "upload-full-field-review"},
+        data={
+            "expected_task_revision": "1",
+            "supplier_id": "SUP-022",
+            "is_synthetic": "true",
+        },
+        files={"file": ("supplier-a.csv", b"synthetic quote", "text/csv")},
+    )
+    assert uploaded.status_code == 202
+    draft = uploaded.json()
+    processed = DraftReviewRunner(
+        service,
+        processor=CanonicalCsvProcessor(tmp_path),
+        dictionary_path=DICTIONARY_PATH,
+    ).run_job(draft["job"]["job_id"])
+    assert processed["status"] == "REVIEW_REQUIRED"
+
+    current_response = http.get(
+        f"/api/v1/tasks/{task['task_id']}/quote-drafts/{draft['quote_draft_id']}"
+    )
+    assert current_response.status_code == 200
+    current = current_response.json()
+    assert len(current["fields"]) == 30
+    actions = [
+        {
+            "action": (
+                "CONFIRM_VALUE"
+                if field["validation_status"] in {"EXTRACTED", "VERIFIED"}
+                else "CONFIRM_MISSING"
+                if field["validation_status"] == "MISSING"
+                else "CONFIRM_CONFLICT"
+            ),
+            "field_name": field["field_name"],
+            "expected_field_id": field["field_id"],
+            "expected_field_version": field["field_version"],
+        }
+        for field in current["fields"]
+    ]
+
+    review_url = (
+        f"/api/v1/tasks/{task['task_id']}"
+        f"/quote-drafts/{draft['quote_draft_id']}/review"
+    )
+    review_request = {
+        "expected_draft_revision": current["draft_revision"],
+        "schema_version": current["schema_version"],
+        "actions": actions,
+    }
+    review_headers = {"Idempotency-Key": "review-all-fields"}
+    reviewed = http.put(
+        review_url,
+        headers=review_headers,
+        json=review_request,
+    )
+
+    assert reviewed.status_code == 200
+    payload = reviewed.json()
+    assert payload["status"] == "READY_TO_SUBMIT"
+    assert payload["human_review_complete"] is True
+    assert payload["submission_ready"] is True
+    assert payload["review_progress"]["reviewed"] == 30
+    assert payload["unconfirmed_fields"] == []
+
+    replayed = http.put(
+        review_url,
+        headers=review_headers,
+        json=review_request,
+    )
+    assert replayed.status_code == 200
+    assert replayed.json() == payload
+
+    different_request = {
+        **review_request,
+        "actions": [dict(action) for action in actions],
+    }
+    different_request["actions"][0]["reason"] = "A different human review request."
+    conflicting = http.put(
+        review_url,
+        headers=review_headers,
+        json=different_request,
+    )
+    assert conflicting.status_code == 409
+    assert conflicting.json()["error"]["code"] == "idempotency_key_reused"
+    assert service.get_quote_draft(
+        task["task_id"], draft["quote_draft_id"]
+    )["draft_revision"] == payload["draft_revision"]
+
+
+def test_quote_draft_endpoints_hide_drafts_across_tasks_and_owners(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(
+        _requirement(), idempotency_key="create-private-draft"
+    )
+    other_task = service.create_task(
+        _requirement(), idempotency_key="create-other-private-task"
+    )
+    draft = service.upload_quote_draft_stream(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-PRIVATE",
+        original_filename="private.csv",
+        media_type="text/csv",
+        stream=BytesIO(b"supplier_name,unit_price\nPrivate Supplier,10.00\n"),
+        idempotency_key="upload-private-draft",
+    )
+    draft_id = draft["quote_draft_id"]
+    review_body = {
+        "expected_draft_revision": draft["draft_revision"],
+        "schema_version": service.quote_field_schema()["schema_version"],
+        "actions": [
+            {
+                "action": "CONFIRM_VALUE",
+                "field_name": "supplier_name",
+                "expected_field_id": "field-not-disclosed",
+                "expected_field_version": 1,
+            }
+        ],
+    }
+
+    wrong_task_base = (
+        f"/api/v1/tasks/{other_task['task_id']}/quote-drafts/{draft_id}"
+    )
+    assert http.get(wrong_task_base).status_code == 404
+    assert http.get(f"{wrong_task_base}/content").status_code == 404
+    wrong_task_review = http.put(
+        f"{wrong_task_base}/review",
+        headers={"Idempotency-Key": "wrong-task-review"},
+        json=review_body,
+    )
+    assert wrong_task_review.status_code == 404
+    assert wrong_task_review.json()["error"]["code"] == "quote_draft_not_found"
+
+    outsider = BackendService(
+        service.session_factory,
+        service.storage_root,
+        actor_id="quote-draft-outsider",
+    )
+    outsider_http = TestClient(create_app(outsider, readiness_check=lambda: True))
+    owned_base = f"/api/v1/tasks/{task['task_id']}/quote-drafts/{draft_id}"
+    assert outsider_http.get(owned_base).status_code == 404
+    assert outsider_http.get(f"{owned_base}/content").status_code == 404
+    outsider_review = outsider_http.put(
+        f"{owned_base}/review",
+        headers={"Idempotency-Key": "outsider-review"},
+        json=review_body,
+    )
+    assert outsider_review.status_code == 404
+    assert outsider_review.json()["error"]["code"] == "quote_draft_not_found"
 
 
 def test_requirement_draft_is_grounded_and_bound_to_created_task(
@@ -514,6 +715,34 @@ def test_document_content_stream_is_scoped_and_audited(
     )
     assert escaped.status_code == 404
     assert escaped.json()["error"]["code"] == "document_content_not_found"
+
+
+def test_quote_draft_content_can_be_previewed_before_submission(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(_requirement(), idempotency_key="create-draft-preview")
+    source = b"supplier_name,unit_price\nSynthetic Supplier,10.00\n"
+    draft = service.upload_quote_draft_stream(
+        task["task_id"],
+        expected_task_revision=1,
+        supplier_id="SUP-DRAFT",
+        original_filename="draft.csv",
+        media_type="text/csv",
+        stream=BytesIO(source),
+        idempotency_key="upload-draft-preview",
+    )
+
+    response = http.get(
+        f"/api/v1/tasks/{task['task_id']}/quote-drafts/{draft['quote_draft_id']}/content",
+        params={"disposition": "inline"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == source
+    assert response.headers["etag"] == f'"{draft["document_sha256"]}"'
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"].startswith("inline;")
 
 
 def test_summary_is_bound_to_current_result_and_worker_output(

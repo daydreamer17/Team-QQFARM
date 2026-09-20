@@ -21,8 +21,9 @@ from .contracts import (
 )
 
 
-REVIEW_SCHEMA_VERSION = "review-envelope/1.0.0"
-REVIEW_POLICY_VERSION = "extraction-review/1.2.0"
+LEGACY_REVIEW_SCHEMA_VERSION = "review-envelope/1.0.0"
+REVIEW_SCHEMA_VERSION = "review-envelope/1.1.0"
+REVIEW_POLICY_VERSION = "extraction-review/1.3.0"
 CRITICALITY_POLICY_VERSION = "c-field-criticality/1.0.0"
 
 
@@ -73,6 +74,7 @@ class ReviewerType(StrEnum):
 
 
 class HumanReviewAction(StrEnum):
+    CONFIRM_VALUE = "CONFIRM_VALUE"
     CONFIRM_MISSING = "CONFIRM_MISSING"
     CONFIRM_CONFLICT = "CONFIRM_CONFLICT"
 
@@ -80,6 +82,7 @@ class HumanReviewAction(StrEnum):
 class CorrectionAction(StrEnum):
     USER_INPUT = "USER_INPUT"
     USER_CORRECTION = "USER_CORRECTION"
+    MARK_MISSING = "MARK_MISSING"
 
 
 class CorrectionState(StrEnum):
@@ -138,12 +141,17 @@ class ReviewEvent(FrozenReviewModel):
     review_event_id: str = Field(min_length=1)
     field_name: str = Field(min_length=1)
     candidate_field_id: str = Field(min_length=1)
+    # Optional only so persisted review-envelope/1.0.0 payloads remain readable.
+    # New events always populate it and the 1.1 submission gate requires it.
+    candidate_field_version: int | None = Field(default=None, ge=1)
     action: HumanReviewAction
     candidate_status: ValidationStatus
     reason_code: str = Field(min_length=1)
     reviewer_id: str = Field(min_length=1)
     reviewed_at: datetime
     task_revision: int = Field(ge=1)
+    # Absent on workflow-era events; unified quote-draft review always records it.
+    draft_revision: int | None = Field(default=None, ge=1)
     quote_id: str = Field(min_length=1)
     quote_version: int = Field(ge=1)
     document_id: str = Field(min_length=1)
@@ -157,10 +165,14 @@ class ReviewEvent(FrozenReviewModel):
         if self.reviewed_at.tzinfo is None or self.reviewed_at.utcoffset() is None:
             raise ValueError("reviewed_at must be timezone-aware")
         expected = {
-            HumanReviewAction.CONFIRM_MISSING: ValidationStatus.MISSING,
-            HumanReviewAction.CONFIRM_CONFLICT: ValidationStatus.CONFLICT,
+            HumanReviewAction.CONFIRM_VALUE: {
+                ValidationStatus.EXTRACTED,
+                ValidationStatus.VERIFIED,
+            },
+            HumanReviewAction.CONFIRM_MISSING: {ValidationStatus.MISSING},
+            HumanReviewAction.CONFIRM_CONFLICT: {ValidationStatus.CONFLICT},
         }[self.action]
-        if self.candidate_status != expected:
+        if self.candidate_status not in expected:
             raise ValueError("human review action does not match candidate status")
         if self.action == HumanReviewAction.CONFIRM_CONFLICT and not self.basis_source_ids:
             raise ValueError("CONFIRM_CONFLICT must retain the conflicting source IDs")
@@ -203,6 +215,8 @@ class CorrectionEvent(FrozenReviewModel):
     reviewer_id: str = Field(min_length=1)
     reviewed_at: datetime
     task_revision: int = Field(ge=1)
+    # Absent on workflow-era events; unified quote-draft review always records it.
+    draft_revision: int | None = Field(default=None, ge=1)
     quote_id: str = Field(min_length=1)
     quote_version: int = Field(ge=1)
     document_id: str = Field(min_length=1)
@@ -215,11 +229,25 @@ class CorrectionEvent(FrozenReviewModel):
             raise ValueError("reviewed_at must be timezone-aware")
         if self.after.field_version != self.before.field_version + 1:
             raise ValueError("correction must increment field_version exactly once")
-        expected_origin = self.action.value
-        if self.after.origin != expected_origin:
-            raise ValueError("corrected candidate origin must match correction action")
-        if self.after.validation_status != ValidationStatus.VERIFIED:
-            raise ValueError("corrected candidate must be VERIFIED")
+        if self.action == CorrectionAction.MARK_MISSING:
+            if self.after.validation_status != ValidationStatus.MISSING:
+                raise ValueError("MARK_MISSING correction must produce a MISSING candidate")
+            if any(
+                value is not None
+                for value in (
+                    self.after.raw_value,
+                    self.after.normalized_value,
+                    self.after.unit,
+                    self.after.origin,
+                )
+            ) or self.after.source_ids:
+                raise ValueError("MARK_MISSING correction must clear value and provenance")
+        else:
+            expected_origin = self.action.value
+            if self.after.origin != expected_origin:
+                raise ValueError("corrected candidate origin must match correction action")
+            if self.after.validation_status != ValidationStatus.VERIFIED:
+                raise ValueError("corrected candidate must be VERIFIED")
         return self
 
 
@@ -258,8 +286,33 @@ class ReviewSummary(FrozenReviewModel):
         return self
 
 
+class SubmissionGate(FrozenReviewModel):
+    """Deterministic, human-review-aware admission result for one quote draft."""
+
+    human_review_complete: bool
+    submission_ready: bool
+    calculation_ready: bool
+    submission_blocking_fields: tuple[str, ...] = ()
+    unconfirmed_fields: tuple[str, ...] = ()
+    review_policy_version: str = REVIEW_POLICY_VERSION
+
+    @model_validator(mode="after")
+    def flags_are_consistent(self) -> "SubmissionGate":
+        if self.human_review_complete != (not self.unconfirmed_fields):
+            raise ValueError("human_review_complete must match unconfirmed_fields")
+        if self.submission_ready and (
+            not self.human_review_complete or self.submission_blocking_fields
+        ):
+            raise ValueError("submission_ready cannot bypass review or blocking fields")
+        if self.calculation_ready and not self.submission_ready:
+            raise ValueError("calculation_ready requires submission_ready")
+        return self
+
+
 class ReviewEnvelope(FrozenReviewModel):
-    schema_version: Literal["review-envelope/1.0.0"] = REVIEW_SCHEMA_VERSION
+    schema_version: Literal[
+        "review-envelope/1.0.0", "review-envelope/1.1.0"
+    ] = REVIEW_SCHEMA_VERSION
     result_kind: Literal["REVIEWED_EXTRACTION"] = "REVIEWED_EXTRACTION"
     environment: AdapterEnvironment
     input_is_synthetic: bool
@@ -267,6 +320,12 @@ class ReviewEnvelope(FrozenReviewModel):
     review_status: ReviewStatus
     downstream_ready: bool
     calculation_inputs_complete: bool
+    human_review_complete: bool = False
+    submission_ready: bool = False
+    calculation_ready: bool = False
+    submission_blocking_fields: tuple[str, ...] = ()
+    unconfirmed_fields: tuple[str, ...] = ()
+    review_policy_version: str = REVIEW_POLICY_VERSION
     checks: ReviewChecks | None = None
     review: ReviewSummary | None = None
     batch: ExtractionBatch | None = None
@@ -282,6 +341,30 @@ class ReviewEnvelope(FrozenReviewModel):
             raise ValueError("downstream_ready must match READY_FOR_DOWNSTREAM")
         if self.calculation_inputs_complete and not self.downstream_ready:
             raise ValueError("complete calculation inputs cannot bypass review")
+        if self.human_review_complete and self.unconfirmed_fields:
+            raise ValueError("complete human review cannot have unconfirmed fields")
+        if (
+            self.schema_version == REVIEW_SCHEMA_VERSION
+            and self.batch is not None
+            and self.review_status != ReviewStatus.REJECTED
+            and not self.human_review_complete
+            and not self.unconfirmed_fields
+        ):
+            raise ValueError("incomplete human review must identify unconfirmed fields")
+        if self.submission_ready and (
+            not self.human_review_complete
+            or self.submission_blocking_fields
+            or not self.downstream_ready
+        ):
+            raise ValueError(
+                "submission_ready cannot bypass human or deterministic review"
+            )
+        if self.calculation_ready != (
+            self.submission_ready and self.calculation_inputs_complete
+        ):
+            raise ValueError(
+                "calculation_ready must match submission and calculation input readiness"
+            )
         if self.review_status == ReviewStatus.MODEL_FAILED:
             if not self.errors:
                 raise ValueError("MODEL_FAILED envelope requires errors")

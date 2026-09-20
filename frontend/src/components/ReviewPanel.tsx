@@ -10,6 +10,11 @@ import type {
   TaskQuote,
 } from '../api/types'
 import { fieldLabel } from '../lib/presentation'
+import {
+  reviewFindingAction,
+  reviewFindingActionMessages,
+  reviewFindingCodeLabel,
+} from '../lib/reviewMessages'
 
 interface ReviewPanelProps {
   task: TaskDetail
@@ -71,45 +76,9 @@ const fieldLabels: Record<string, string> = {
   valid_until: '报价有效期',
 }
 
-const findingCodeLabels: Record<string, string> = {
-  OCR_CRITICAL_CONFIDENCE_LOW: '文字识别可信度不足',
-  OCR_CRITICAL_CONFIDENCE_UNAVAILABLE: '文字识别可信度未知',
-  OCR_CRITICAL_CONFUSABLE_TOKEN: '料号字符可能混淆',
-  CRITICAL_FIELD_MISSING: '缺少必填信息',
-  CRITICAL_FIELD_CONFLICT: '报价内容相互矛盾',
-  FEE_STATUS_UNKNOWN: '费用状态尚未确认',
-  MONEY_VALUE_INVALID: '金额格式不正确',
-  NORMALIZED_ENUM_INVALID: '填写值不在允许范围内',
-  NORMALIZED_TYPE_INVALID: '填写格式不正确',
-  SOURCE_SEMANTIC_MISMATCH: '引用的原文与字段含义不一致',
-  NORMALIZED_PRICE_NOT_IN_EVIDENCE: '填写的价格与原文证据不一致',
-  CORRECTION_EVENT_INVALID: '修正记录与当前报价版本不一致',
-  CORRECTION_AUDIT_MISSING: '缺少人工修正记录',
-}
-
-const findingActionMessages: Record<string, string> = {
-  OCR_CRITICAL_CONFIDENCE_LOW: '请对照原 PDF 确认实际值。',
-  OCR_CRITICAL_CONFIDENCE_UNAVAILABLE: '请对照原 PDF 确认实际值。',
-  OCR_CRITICAL_CONFUSABLE_TOKEN: '请逐字核对原 PDF 中的制造商料号。',
-  CRITICAL_FIELD_MISSING: '请根据原报价或供应商确认补充实际值。',
-  CRITICAL_FIELD_CONFLICT: '请核对原报价并填写最终确认值。',
-  FEE_STATUS_UNKNOWN: '请确认该费用是免费、已包含、不适用，还是另有金额。',
-  MONEY_VALUE_INVALID: '请填写有效的十进制金额。',
-  NORMALIZED_ENUM_INVALID: '请从系统允许的选项中选择。',
-  NORMALIZED_TYPE_INVALID: '请按字段要求重新填写。',
-  SOURCE_SEMANTIC_MISMATCH: '请核对引用原文与填写字段是否一致。',
-  NORMALIZED_PRICE_NOT_IN_EVIDENCE: '请按原报价填写价格，不要换算或猜测。',
-  CORRECTION_EVENT_INVALID: '请刷新任务后重新提交修正。',
-  CORRECTION_AUDIT_MISSING: '请通过字段修正表单提交，不要直接改数据。',
-}
-
-function findingCodeLabel(code: string) {
-  return findingCodeLabels[code] ?? code
-}
-
 function findingDisplayMessage(finding: ReviewFinding) {
-  const firstKnownCode = finding.codes.find((code) => findingActionMessages[code])
-  return firstKnownCode ? findingActionMessages[firstKnownCode] : finding.message
+  const firstKnownCode = finding.codes.find((code) => reviewFindingActionMessages[code])
+  return firstKnownCode ? reviewFindingAction(firstKnownCode, finding.message) : finding.message
 }
 
 function blockingFindingSummary(
@@ -137,7 +106,7 @@ function blockingFindingSummary(
       const filename = filenames.get(quoteId) ?? quoteId
       const fieldLabel = fieldLabels[fieldName] ?? fieldName
       const reason = codes.length > 0
-        ? codes.map(findingCodeLabel).join('、')
+        ? codes.map(reviewFindingCodeLabel).join('、')
         : '仍未通过审核'
       return `${filename} 的“${fieldLabel}”：${reason}`
     })
@@ -429,7 +398,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
 
                       <div className="review-finding-reason">
                         <span>待审核原因</span>
-                        <strong>{reasonCodes.map(findingCodeLabel).join(' / ')}</strong>
+                        <strong>{reasonCodes.map(reviewFindingCodeLabel).join(' / ')}</strong>
                         {messages.map((message) => <p key={message}>{message}</p>)}
                       </div>
 

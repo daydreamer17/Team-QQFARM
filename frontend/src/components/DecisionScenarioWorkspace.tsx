@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   api,
@@ -60,6 +60,54 @@ function Changes({ changes, currency }: { changes: DecisionChanges; currency: st
   )
 }
 
+interface DisplayCitation {
+  id: string
+  number: number
+}
+
+function citationTitle(id: string) {
+  if (id.startsWith('RESULT:')) return '当前决策结果'
+  if (id.startsWith('QUOTE:')) return '供应商报价'
+  if (id.startsWith('POLICY:')) return '制度证据'
+  return '来源证据'
+}
+
+function citationPresentation(content: string, referenceIds: string[]) {
+  const ids = [...new Set(referenceIds)]
+  const detected = content.match(/(?:RESULT:artifact_|QUOTE:quote_|quote_)[A-Za-z0-9_-]+/g) ?? []
+  for (const token of detected) {
+    const matchingReference = ids.find((id) => id === token || id.endsWith(`:${token}`))
+    const canonical = matchingReference ?? (token.startsWith('quote_') ? `QUOTE:${token}` : token)
+    if (!ids.includes(canonical)) ids.push(canonical)
+  }
+
+  const citations: DisplayCitation[] = ids.map((id, index) => ({ id, number: index + 1 }))
+  let displayContent = content
+  const replacements = citations.flatMap((citation) => {
+    const shortId = citation.id.includes(':') ? citation.id.slice(citation.id.indexOf(':') + 1) : citation.id
+    return [...new Set([citation.id, shortId])].map((token) => ({
+      token,
+      marker: `[${citation.number}]`,
+    }))
+  }).sort((left, right) => right.token.length - left.token.length)
+
+  for (const replacement of replacements) {
+    const escaped = replacement.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    displayContent = displayContent
+      .replace(new RegExp(`[（(]\\s*${escaped}\\s*[）)]`, 'g'), replacement.marker)
+      .replace(new RegExp(escaped, 'g'), replacement.marker)
+  }
+  return { displayContent, citations }
+}
+
+function CitedText({ text }: { text: string }) {
+  return text.split(/(\[\d+\])/g).map((part, index) => (
+    /^\[\d+\]$/.test(part)
+      ? <span className="chat-citation-marker" key={`${part}-${index}`}>{part}</span>
+      : part
+  ))
+}
+
 function MessageBubble({
   message,
   currency,
@@ -75,18 +123,29 @@ function MessageBubble({
   confirming: boolean
   onConfirm: (intentId: string) => void
 }) {
+  const citation = citationPresentation(message.content ?? '', message.reference_ids)
   return (
     <article className={`decision-chat-message chat-role-${message.role.toLowerCase()}`}>
       <header>
         <strong>{message.role === 'USER' ? '你' : 'AI 决策助手'}</strong>
         <span>{message.status}</span>
       </header>
-      {message.content && <p>{message.content}</p>}
+      {message.content && <p><CitedText text={citation.displayContent} /></p>}
       {message.status === 'FAILED' && (
         <p className="chat-message-error">生成失败：{message.error_message ?? message.error_code ?? '未知错误'}</p>
       )}
-      {message.reference_ids.length > 0 && (
-        <small>引用：{message.reference_ids.join('、')}</small>
+      {citation.citations.length > 0 && (
+        <footer className="chat-citations">
+          <strong>引用</strong>
+          <ol>
+            {citation.citations.map((item) => (
+              <li key={item.id}>
+                <span>[{item.number}]</span>
+                <div><small>{citationTitle(item.id)}</small><code>{item.id}</code></div>
+              </li>
+            ))}
+          </ol>
+        </footer>
       )}
       {message.proposed_changes && (
         <section className="chat-proposal">
@@ -168,9 +227,11 @@ function ScenarioCard({
 export function DecisionScenarioWorkspace({
   task,
   result,
+  compact = false,
 }: {
   task: TaskDetail
   result: ComparisonResultResponse
+  compact?: boolean
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -188,6 +249,7 @@ export function DecisionScenarioWorkspace({
   const [excludedSuppliers, setExcludedSuppliers] = useState('')
   const [clearExclusions, setClearExclusions] = useState(false)
   const [formError, setFormError] = useState('')
+  const transcriptRef = useRef<HTMLDivElement>(null)
 
   const readOnly = !result.is_current || task.status === 'ABANDONED'
   const conversations = useQuery({
@@ -218,10 +280,17 @@ export function DecisionScenarioWorkspace({
     () => conversations.data?.items.find((item) => item.conversation_id === selectedConversationId),
     [selectedConversationId, conversations.data],
   )
+  const activeMessageCount = activeConversation?.messages.length ?? 0
   const lastMessage = activeConversation?.messages.at(-1)
   const pendingReplyTo = queuedTurn?.conversationId === selectedConversationId
     ? queuedTurn.messageId
     : lastMessage?.role === 'USER' ? lastMessage.message_id : null
+
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    if (!transcript) return
+    transcript.scrollTo({ top: transcript.scrollHeight, behavior: streamingText ? 'auto' : 'smooth' })
+  }, [activeMessageCount, selectedConversationId, streamingText])
 
   useEffect(() => {
     if (!selectedConversationId || !pendingReplyTo || readOnly) return
@@ -386,31 +455,45 @@ export function DecisionScenarioWorkspace({
     ?? createScenario.error ?? applyScenario.error
 
   return (
-    <section className="decision-assistant-workspace">
-      <header className="decision-assistant-heading">
-        <div>
-          <p className="eyebrow">DECISION SCENARIO LAB</p>
-          <h2>自然语言决策分析</h2>
-          <p>AI 只负责解释和提取变更意图；金额、可行性、推荐与应用操作仍由后端确定性执行。</p>
-        </div>
-        <div className="decision-profile-summary">
-          <span>Profile v{task.decision_profile.profile_version}</span>
-          <strong>{task.decision_profile.preferences.ranking_mode
-            ? rankingLabels[task.decision_profile.preferences.ranking_mode]
-            : task.requirement.ranking_preference}</strong>
-          <small>
-            成本容差：{task.decision_profile.preferences.cost_tolerance_amount === null
-              ? '未设置'
-              : `${task.requirement.currency} ${task.decision_profile.preferences.cost_tolerance_amount}`}
-            {' · '}排除：{task.decision_profile.preferences.excluded_supplier_ids.join('、') || '无'}
-          </small>
-        </div>
-      </header>
+    <section className={`decision-assistant-workspace${compact ? ' decision-assistant-compact' : ''}`}>
+      {compact ? (
+        <header className="decision-compact-chat-heading">
+          <span className="decision-chat-spark" aria-hidden="true">✦</span>
+          <div><h2>Ask QuoteWise</h2><p>基于当前冻结结果回答</p></div>
+          <span className="decision-chat-state">{activeConversation?.status ?? 'READY'}</span>
+        </header>
+      ) : (
+        <header className="decision-assistant-heading">
+          <div>
+            <p className="eyebrow">DECISION SCENARIO LAB</p>
+            <h2>自然语言决策分析</h2>
+            <p>AI 只负责解释和提取变更意图；金额、可行性、推荐与应用操作仍由后端确定性执行。</p>
+          </div>
+          <div className="decision-profile-summary">
+            <span>Profile v{task.decision_profile.profile_version}</span>
+            <strong>{task.decision_profile.preferences.ranking_mode
+              ? rankingLabels[task.decision_profile.preferences.ranking_mode]
+              : task.requirement.ranking_preference}</strong>
+            <small>
+              成本容差：{task.decision_profile.preferences.cost_tolerance_amount === null
+                ? '未设置'
+                : `${task.requirement.currency} ${task.decision_profile.preferences.cost_tolerance_amount}`}
+              {' · '}排除：{task.decision_profile.preferences.excluded_supplier_ids.join('、') || '无'}
+            </small>
+          </div>
+        </header>
+      )}
 
       {readOnly && (
         <div className="run-notice">当前是历史结果或任务已废弃，对话、确认和应用操作已禁用。</div>
       )}
       {operationError && <div className="form-error" role="alert">{mutationError(operationError)}</div>}
+
+      {compact && (
+        <div className="decision-compact-chat-context">
+          <span>{task.scenario_id}</span><span>{task.quotes.length} 家供应商</span><span>Revision {task.task_revision}</span>
+        </div>
+      )}
 
       <div className="decision-assistant-grid">
         <article className="decision-chat-panel">
@@ -449,7 +532,7 @@ export function DecisionScenarioWorkspace({
             </div>
           </header>
 
-          <div className="decision-chat-transcript" aria-live="polite">
+          <div className="decision-chat-transcript" aria-live="polite" ref={transcriptRef}>
             {!activeConversation && (
               <div className="decision-chat-empty">
                 <strong>和当前冻结结果对话</strong>
@@ -485,13 +568,24 @@ export function DecisionScenarioWorkspace({
             {streamError && <div className="chat-message-error">{streamError}</div>}
           </div>
 
+          {compact && activeConversation && (
+            <details className="decision-chat-prompt-menu">
+              <summary><span>示例问题</span><small>3 个</small></summary>
+              <div className="decision-chat-prompts" aria-label="快捷问题">
+                <button type="button" onClick={() => setMessage('为什么推荐当前供应商？')}>为什么这样推荐？</button>
+                <button type="button" onClick={() => setMessage('如果优先交期，推荐会变化吗？')}>如果优先交期？</button>
+                <button type="button" onClick={() => setMessage('请解释当前关键风险及来源。')}>查看关键风险</button>
+              </div>
+            </details>
+          )}
+
           <form className="decision-chat-composer" onSubmit={submitMessage}>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               placeholder="用自然语言询问或描述你希望模拟的条件…"
               maxLength={4000}
-              rows={3}
+              rows={compact ? 2 : 3}
               disabled={readOnly || !activeConversation || activeConversation.status !== 'ACTIVE' || activeTurn}
             />
             <div>
@@ -505,7 +599,9 @@ export function DecisionScenarioWorkspace({
           </form>
         </article>
 
-        <aside className="scenario-workbench">
+        <details className={`decision-scenario-manager${compact ? ' decision-scenario-manager-compact' : ''}`} open={compact ? undefined : true}>
+          <summary>Scenario 管理 · {scenarios.data?.items.length ?? 0} 个</summary>
+          <aside className="scenario-workbench">
           <details className="scenario-builder">
             <summary>结构化创建 Scenario</summary>
             <form onSubmit={submitScenario}>
@@ -561,7 +657,8 @@ export function DecisionScenarioWorkspace({
               <p className="scenario-empty">还没有 Scenario。通过对话提出变更，或使用上方结构化表单。</p>
             )}
           </div>
-        </aside>
+          </aside>
+        </details>
       </div>
     </section>
   )
