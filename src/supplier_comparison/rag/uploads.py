@@ -42,11 +42,14 @@ class UploadModel(BaseModel):
 
 
 class PolicyFileImportMetadata(UploadModel):
-    policy_set_id: str = Field(min_length=1, max_length=128)
-    policy_set_version: str = Field(min_length=1, max_length=128)
-    policy_id: str = Field(min_length=1, max_length=128)
-    document_id: str = Field(min_length=1, max_length=128)
-    document_version: str = Field(min_length=1, max_length=64)
+    # Technical identifiers remain accepted for administrative/backward-compatible
+    # imports. Ordinary uploads omit them and let the service generate immutable,
+    # collision-resistant values.
+    policy_set_id: str | None = Field(default=None, min_length=1, max_length=128)
+    policy_set_version: str | None = Field(default=None, min_length=1, max_length=128)
+    policy_id: str | None = Field(default=None, min_length=1, max_length=128)
+    document_id: str | None = Field(default=None, min_length=1, max_length=128)
+    document_version: str | None = Field(default=None, min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=512)
     effective_from: datetime
     effective_to: datetime | None = None
@@ -193,6 +196,20 @@ class PolicyFileImportService:
                     if repeated is not None:
                         return repeated
                     policy_import_id = _id("pfi")
+                    identifier_suffix = policy_import_id.removeprefix("pfi_")
+                    resolved_metadata = metadata.model_dump()
+                    resolved_metadata.update(
+                        {
+                            "policy_set_id": metadata.policy_set_id
+                            or f"policy-set-{identifier_suffix}",
+                            "policy_set_version": metadata.policy_set_version or "1.0.0",
+                            "policy_id": metadata.policy_id
+                            or f"POL-{identifier_suffix.upper()}",
+                            "document_id": metadata.document_id
+                            or f"DOC-{identifier_suffix.upper()}",
+                            "document_version": metadata.document_version or "1.0.0",
+                        }
+                    )
                     final_path = (
                         self._storage_root
                         / policy_import_id
@@ -218,7 +235,7 @@ class PolicyFileImportService:
                         storage_path=str(final_path),
                         extracted_text=extracted_text,
                         extraction_metadata=extraction_metadata,
-                        **metadata.model_dump(),
+                        **resolved_metadata,
                     )
                     session.add(record)
                     session.flush()

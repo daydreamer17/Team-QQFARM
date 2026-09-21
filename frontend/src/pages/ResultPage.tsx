@@ -1,7 +1,7 @@
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { api, ApiClientError } from '../api/client'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type {
   FieldEvidence,
   QuoteDecisionImpact,
@@ -29,6 +29,15 @@ const rankingLabels: Record<string, string> = {
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '结果读取失败。'
+}
+
+function reanalysisErrorMessage(error: unknown) {
+  if (error instanceof ApiClientError) {
+    if (error.code === 'task_revision_conflict') return '任务内容已变化，请刷新后重试。'
+    if (error.code === 'graph_run_active') return '当前已有分析正在运行，请返回决策页查看状态。'
+    return error.message
+  }
+  return '重新分析启动失败。'
 }
 
 function valueText(value: unknown) {
@@ -247,6 +256,8 @@ function EvidenceDrawer({
 
 export function ResultPage() {
   const { taskId = '', resultId = '' } = useParams()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [selectedSupplierIndex, setSelectedSupplierIndex] = useState<number | null>(null)
   const [expandedGapQuoteId, setExpandedGapQuoteId] = useState<string | null | undefined>(undefined)
   const resultQuery = useQuery({
@@ -258,6 +269,21 @@ export function ResultPage() {
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
     enabled: Boolean(taskId),
+  })
+  const reanalysis = useMutation({
+    mutationFn: () => {
+      const currentTask = taskQuery.data
+      if (!currentTask) throw new Error('任务尚未读取完成。')
+      return api.startRun(
+        currentTask.task_id,
+        currentTask.task_revision,
+        createIdempotencyKey(),
+      )
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
+      navigate(`/tasks/${taskId}/decision`)
+    },
   })
   const suppliers = resultQuery.data?.result.supplier_results ?? []
   const fieldQueries = useQueries({
@@ -299,6 +325,13 @@ export function ResultPage() {
   const pendingCount = suppliers.filter((supplier) => supplier.status === 'PENDING').length
   const loadedEvidenceCount = fieldQueries.filter((query) => Boolean(query.data)).length
   const task = taskQuery.data
+  const canReanalyze = Boolean(
+    task &&
+    task.current_result_id === null &&
+    task.quotes.length > 0 &&
+    task.task_revision > 1 &&
+    (task.status === 'DRAFT' || task.status === 'FAILED' || task.status === 'NEEDS_INPUT'),
+  )
   const selectedSupplier = selectedSupplierIndex === null ? null : suppliers[selectedSupplierIndex]
   const selectedFieldsQuery = selectedSupplierIndex === null ? null : fieldQueries[selectedSupplierIndex]
   const frozenRequirement = resultQuery.data.input_snapshot?.requirement
@@ -371,6 +404,15 @@ export function ResultPage() {
         <div className="run-notice">该结果仅用于采购比较；供应商合规仍需单独核验。</div>
       )}
 
+      {reanalysis.isError && (
+        <div className="form-error compact-error" role="alert">
+          <div>
+            <strong>重新分析未启动</strong>
+            <p>{reanalysisErrorMessage(reanalysis.error)}</p>
+          </div>
+        </div>
+      )}
+
       <section className="decision-ready-banner">
         <div>
           <strong>{resultQuery.data.is_current ? '报价审核已完成，可以比较' : '正在查看历史决策结果'}</strong>
@@ -379,6 +421,16 @@ export function ResultPage() {
         <div>
           <span>{feasibleCount} 家可行{pendingCount > 0 ? ` · ${pendingCount} 家待确认` : ''}</span>
           <strong>{resultQuery.data.is_current ? '分析完成' : '历史版本'}</strong>
+          {canReanalyze && (
+            <button
+              className="button button-secondary"
+              type="button"
+              onClick={() => reanalysis.mutate()}
+              disabled={reanalysis.isPending}
+            >
+              {reanalysis.isPending ? '正在启动…' : '重新分析'}
+            </button>
+          )}
         </div>
       </section>
 

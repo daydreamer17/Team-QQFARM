@@ -68,6 +68,7 @@ function findingMessage(finding: QuoteDraftResponse['review_findings'][number]):
 
 function apiErrorMessage(error: unknown): string {
   if (!(error instanceof ApiClientError)) return error instanceof Error ? error.message : '操作失败，请稍后重试。'
+  if (error.code === 'quote_revision_unchanged') return '未检测到任何修改，无需生成新版本。如需继续修改，请更新字段后再提交。'
   if (error.status === 409) {
     const serverVersion = error.details.actual ?? error.details.actual_draft_revision ?? error.details.actual_field_version
     const suffix = typeof serverVersion === 'number' || typeof serverVersion === 'string'
@@ -167,6 +168,11 @@ function QuoteFieldEditor({
   const hasValue = value.trim().length > 0
   const hasConflict = field.validation_status === 'CONFLICT'
   const needsAttention = errors.length > 0 || hasConflict
+  const requiresResolvedFeeStatus = definition.field_name === 'shipping_fee_status' || definition.field_name === 'other_fees_status'
+  const selectableOptions = definition.allowed_values?.filter((option) => (
+    !requiresResolvedFeeStatus || option !== 'UNKNOWN'
+  )) ?? []
+  const displayedValue = requiresResolvedFeeStatus && value === 'UNKNOWN' ? '' : value
   return (
     <article
       className={`quote-review-field${needsAttention ? ' has-error' : ''}`}
@@ -196,11 +202,13 @@ function QuoteFieldEditor({
           <select
             aria-label={definition.label}
             aria-invalid={errors.length > 0}
-            value={value}
+            value={displayedValue}
             onChange={(event) => onChange(event.target.value)}
           >
-            <option value="">未提供 / 当前不适用</option>
-            {definition.allowed_values.map((option) => (
+            <option value="" disabled={requiresResolvedFeeStatus}>
+              {requiresResolvedFeeStatus ? '请选择费用状态' : '未提供 / 当前不适用'}
+            </option>
+            {selectableOptions.map((option) => (
               <option key={option} value={option}>{optionLabels[option] ? `${optionLabels[option]}（${option}）` : option}</option>
             ))}
           </select>
@@ -247,6 +255,7 @@ export function QuoteDraftReviewWorkspace({
     }
     return result
   })
+  const [otherFieldsOpen, setOtherFieldsOpen] = useState(() => priorityFieldNames.size === 0)
   const [validationIssues, setValidationIssues] = useState<ReturnType<typeof validateQuoteReview>>([])
   const [reviewKey, setReviewKey] = useState<string | null>(null)
   const [submitKey, setSubmitKey] = useState<string | null>(null)
@@ -322,7 +331,6 @@ export function QuoteDraftReviewWorkspace({
   const optionalEmptyCount = schema.fields.filter((definition) => (
     !currentProblemFieldNames.has(definition.field_name) && !(values[definition.field_name] ?? '').trim()
   )).length
-  const readyFieldsContainProblem = readyFields.some((definition) => currentProblemFieldNames.has(definition.field_name))
   const canSubmitWithoutReview = draft.human_review_complete === true && draft.submission_ready === true && !isDirty
 
   const finalize = useMutation({
@@ -372,7 +380,12 @@ export function QuoteDraftReviewWorkspace({
   })
 
   function changeValue(fieldName: string, nextValue: string) {
-    setValues((current) => ({ ...current, [fieldName]: nextValue }))
+    const nextValues = { ...values, [fieldName]: nextValue }
+    setValues(nextValues)
+    const nextIssues = validateQuoteReview(draft, schema, nextValues)
+    if (nextIssues.some((issue) => issue.fieldNames.some((name) => !priorityFieldNames.has(name)))) {
+      setOtherFieldsOpen(true)
+    }
     setValidationIssues((current) => current.filter((item) => !item.fieldNames.includes(fieldName)))
     setReviewKey(null)
     setSubmitKey(null)
@@ -413,6 +426,7 @@ export function QuoteDraftReviewWorkspace({
 
   const backendMessages = backendIssueMessages(finalize.error ?? discard.error)
   const mutationError = finalize.error ?? discard.error
+  const unchangedRevision = mutationError instanceof ApiClientError && mutationError.code === 'quote_revision_unchanged'
   const schemaChanged = Boolean(draft.schema_version && draft.schema_version !== schema.schema_version)
   const legacyReview = Boolean(
     draft.review_envelope_schema_version &&
@@ -497,7 +511,11 @@ export function QuoteDraftReviewWorkspace({
                 <div className="draft-field-grid">{attentionFields.map(renderField)}</div>
               </section>
             )}
-            <details className="quote-review-ready-fields" open={attentionFields.length === 0 || readyFieldsContainProblem}>
+            <details
+              className="quote-review-ready-fields"
+              open={otherFieldsOpen}
+              onToggle={(event) => setOtherFieldsOpen(event.currentTarget.open)}
+            >
               <summary>查看其他内容（{readyFields.length} 项）</summary>
               <div className="quote-review-groups">
                 {groups.map(([groupId, group]) => {
@@ -522,7 +540,14 @@ export function QuoteDraftReviewWorkspace({
         </form>
       )}
 
-      {mutationError && (
+      {unchangedRevision && (
+        <div className="quote-no-change-notice" role="status">
+          <strong>无需更新</strong>
+          <p>报价内容没有变化，已保留当前版本。</p>
+        </div>
+      )}
+
+      {mutationError && !unchangedRevision && (
         <div className="form-error compact-error" role="alert">
           <div>
             <strong>操作未完成</strong>
@@ -543,7 +568,7 @@ export function QuoteDraftReviewWorkspace({
           }}
           disabled={discard.isPending || draft.status === 'SUBMITTED'}
         >
-          废弃草稿
+          {unchangedRevision ? '返回报价列表' : draft.replacement_quote_id ? '取消修改' : '废弃草稿'}
         </button>
       </div>
     </section>

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, type ReactNode } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { ResultReason } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
@@ -194,8 +194,8 @@ export function SummaryPage() {
 
       <section className="summary-report-toolbar">
         <div>
-          <strong>采购分析报告</strong>
-          <span>{data.scenario_id ?? data.requirement.manufacturer_part_number} · 第 {current?.task_revision ?? data.task_revision} 版 · {generatedAt}</span>
+          <strong>采购总结</strong>
+          {current && <span>{data.scenario_id ?? data.requirement.manufacturer_part_number} · 第 {current.task_revision} 版 · {generatedAt}</span>}
         </div>
         <div className="summary-report-actions">
           {mayGenerate && (
@@ -214,12 +214,11 @@ export function SummaryPage() {
               onClick={() => retry.mutate(current.summary_id)}
             >重试生成</button>
           )}
-          <button
+          {isExportable && <button
             className="button button-secondary summary-print-button"
             type="button"
-            disabled={!isExportable}
             onClick={exportPdf}
-          >打印 / 导出 PDF</button>
+          >打印 / 导出 PDF</button>}
         </div>
       </section>
 
@@ -239,10 +238,10 @@ export function SummaryPage() {
 
       {!narrative && current?.status !== 'FAILED' && (
         <section className="card summary-report-empty">
-          <span>报告</span>
           <div>
             <h2>{current ? '采购总结正在生成' : '尚未生成采购总结'}</h2>
-            <p>{current ? 'Worker 完成后会自动刷新为可阅读、可导出的报告。' : '完成决策比较后，可生成基于冻结事实的采购报告。'}</p>
+            <p>{current ? '生成完成后页面会自动更新。' : '完成决策比较后即可生成。'}</p>
+            {!current && !data.current_result_id && <Link className="button button-secondary" to={`/tasks/${taskId}/decision`}>前往决策比较</Link>}
           </div>
         </section>
       )}

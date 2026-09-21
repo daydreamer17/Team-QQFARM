@@ -21,7 +21,9 @@ ZERO = Decimal("0.00")
 KNOWN_FEE_STATUSES = frozenset(
     {"KNOWN_AMOUNT", "FREE", "INCLUDED", "NOT_APPLICABLE", "UNKNOWN"}
 )
-SUPPORTED_CONFIRMED_TAX_MODES = frozenset({"NOT_APPLICABLE", "INCLUDED"})
+SUPPORTED_CONFIRMED_TAX_MODES = frozenset(
+    {"NOT_APPLICABLE", "INCLUDED", "EXCLUDED"}
+)
 
 
 def calculate_cost(
@@ -254,22 +256,22 @@ def _validate_tax_mode(
     tax_mode = _string(tax_raw, "tax_mode", issues)
     if tax_mode is None:
         return
-    if tax_mode != requirement.tax_mode:
-        issues.append(
-            RuleIssue(
-                code="TAX_MODE_MISMATCH",
-                fields=("tax_mode",),
-                message="Quote tax treatment does not match the requirement.",
-            )
-        )
-    elif tax_mode not in SUPPORTED_CONFIRMED_TAX_MODES:
+    if tax_mode not in SUPPORTED_CONFIRMED_TAX_MODES:
         issues.append(
             RuleIssue(
                 code="TAX_CALCULATION_UNSUPPORTED",
                 fields=("tax_mode",),
+                message="The quote tax treatment is not supported.",
+            )
+        )
+    elif tax_mode != "NOT_APPLICABLE" and tax_mode != requirement.tax_mode:
+        issues.append(
+            RuleIssue(
+                code="TAX_CONVERSION_REQUIRED",
+                fields=("tax_mode",),
                 message=(
-                    "MVP cost calculation supports tax that is explicitly included "
-                    "or not applicable; separately calculated tax is unsupported."
+                    "Tax-inclusive and tax-exclusive prices require a confirmed tax "
+                    "amount or rate before they can be compared."
                 ),
             )
         )

@@ -28,6 +28,7 @@ export function DecisionPage() {
 
   const data = task.data
   const policyBlocked = data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'
+  const batchReviewBlocked = data.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
   const quoteBlocked = Boolean(data.current_issue) && !policyBlocked
     || data.current_job?.error_code === 'review_required'
 
@@ -51,24 +52,24 @@ export function DecisionPage() {
 
       <section className="decision-section-lead">
         <div>
-          <p className="eyebrow">DECISION ANALYSIS</p>
           <h2>决策比较</h2>
-          <p>仅使用已正式提交的报价，由后端完成金额、可行性、排序和制度检索。</p>
         </div>
       </section>
 
       {data.quotes.length === 0 ? (
         <section className="card decision-empty-state">
-          <div><span>01</span><h2>先完成报价审核</h2></div>
-          <p>草稿报价不会进入决策计算。请上传报价、处理全部阻塞字段并正式提交。</p>
-          <Link className="button button-submit" to={`/tasks/${taskId}/quotes/new`}>进入报价与审核</Link>
+          <div><h2>暂无可比较的报价</h2></div>
+          <p>请先完成报价审核并正式提交。</p>
+          <Link className="button button-submit" to={`/tasks/${taskId}/quotes/new`}>前往报价审核</Link>
         </section>
       ) : (
         <>
           {quoteBlocked && (
             <div className="run-notice decision-blocker-link">
               报价字段或证据仍有阻塞项。
-              <Link to={`/tasks/${taskId}/quotes/new`}>返回报价与证据处理</Link>
+              <Link to={batchReviewBlocked ? `/tasks/${taskId}/review` : `/tasks/${taskId}/quotes/new`}>
+                {batchReviewBlocked ? '进入待处理事项' : '返回报价与证据处理'}
+              </Link>
             </div>
           )}
           {policyBlocked && (

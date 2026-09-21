@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
-from supplier_comparison.backend.models import Base, GraphRun, Job, QuoteDraft, WorkflowArtifact
+from supplier_comparison.backend.models import Base, Document, GraphRun, Job, QuoteDraft, WorkflowArtifact
 from supplier_comparison.backend.service import (
     BackendError,
     BackendService,
@@ -319,6 +319,29 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
         draft,
         current,
         key="review-version-one",
+        overrides={
+            "supplier_name": {
+                "action": "SET_VALUE",
+                "raw_value": "Reviewed Supplier",
+                "normalized_value": "Reviewed Supplier",
+                "unit": None,
+                "reason": "人工确认供应商名称。",
+            },
+            "shipping_fee_status": {
+                "action": "SET_VALUE",
+                "raw_value": "KNOWN_AMOUNT",
+                "normalized_value": "KNOWN_AMOUNT",
+                "unit": None,
+                "reason": "Shipping has a separately confirmed amount.",
+            },
+            "shipping_fee_amount": {
+                "action": "SET_VALUE",
+                "raw_value": "SGD 200.00",
+                "normalized_value": "200.00",
+                "unit": "SGD",
+                "reason": "Shipping amount was confirmed from the quote.",
+            },
+        },
     )
     first = service.submit_quote_draft(
         task["task_id"],
@@ -327,6 +350,23 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
         expected_draft_revision=reviewed["draft_revision"],
         idempotency_key="submit-version-one",
     )
+
+    # CanonicalProcessor rewrites authority columns into a generated fixture, so
+    # align this test document with that reviewed fixture before exercising the
+    # production same-document carry-forward path.
+    with service.session_factory.begin() as session:
+        submitted_draft = session.get(QuoteDraft, draft["quote_draft_id"])
+        assert submitted_draft is not None and submitted_draft.batch_artifact_id
+        submitted_batch = session.get(
+            WorkflowArtifact, submitted_draft.batch_artifact_id
+        )
+        submitted_document = session.get(Document, first["document_id"])
+        assert submitted_batch is not None and submitted_document is not None
+        reviewed_sha = ExtractionBatch.model_validate(
+            submitted_batch.payload
+        ).parsed_input.document_sha256
+        submitted_draft.sha256 = reviewed_sha
+        submitted_document.sha256 = reviewed_sha
 
     replacement = service.create_quote_revision_draft(
         task["task_id"],
@@ -339,11 +379,62 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
         prompt_version="quote-extraction/1.0.0",
     )
     assert replacement["replacement_quote_id"] == first["quote_id"]
-    DraftReviewRunner(
-        service,
-        processor=CanonicalProcessor(tmp_path),
-        dictionary_path=DICTIONARY_PATH,
-    ).run_job(replacement["job"]["job_id"])
+    assert replacement["job"] is None
+    assert replacement["status"] == "READY_TO_SUBMIT"
+    assert replacement["review_progress"]["reviewed"] == 30
+    assert replacement["unconfirmed_fields"] == []
+    assert _field(replacement, "supplier_name")["normalized_value"] == "Reviewed Supplier"
+    assert _field(replacement, "supplier_name")["review_state"] == "CORRECTED"
+    assert _field(replacement, "shipping_fee_status")["normalized_value"] == "KNOWN_AMOUNT"
+    assert _field(replacement, "shipping_fee_amount")["normalized_value"] == "200.00"
+
+    with service.session_factory() as session:
+        replacement_draft = session.get(
+            QuoteDraft, replacement["quote_draft_id"]
+        )
+        assert replacement_draft is not None
+        carried_artifacts = session.scalars(
+            select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task["task_id"],
+                WorkflowArtifact.task_revision == 2,
+                WorkflowArtifact.quote_id == first["quote_id"],
+                WorkflowArtifact.document_id
+                == replacement_draft.proposed_document_id,
+                WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
+            )
+        ).all()
+    assert {
+        artifact.payload["field_name"] for artifact in carried_artifacts
+    } >= {"supplier_name", "shipping_fee_status", "shipping_fee_amount"}
+
+    # Simulate a replacement draft created before correction events were
+    # persisted separately.  The immutable review envelope must remain a
+    # usable audit source for those already-created drafts.
+    with service.session_factory.begin() as session:
+        legacy_artifacts = session.scalars(
+            select(WorkflowArtifact).where(
+                WorkflowArtifact.artifact_id.in_(
+                    [artifact.artifact_id for artifact in carried_artifacts]
+                )
+            )
+        ).all()
+        for artifact in legacy_artifacts:
+            artifact.artifact_type = "LEGACY_CORRECTION_EVENT"
+
+    with pytest.raises(ConflictError) as unchanged:
+        service.submit_quote_draft(
+            task["task_id"],
+            replacement["quote_draft_id"],
+            expected_task_revision=2,
+            expected_draft_revision=replacement["draft_revision"],
+            idempotency_key="submit-unchanged-version-two",
+        )
+    assert unchanged.value.code == "quote_revision_unchanged"
+    unchanged_history = service.list_quotes(task["task_id"])
+    assert unchanged_history["items"][0]["current_version"] == 1
+    assert len(unchanged_history["items"][0]["versions"]) == 1
+    assert service.get_task(task["task_id"])["task_revision"] == 2
+
     replacement_current = service.get_quote_draft(
         task["task_id"], replacement["quote_draft_id"]
     )
@@ -353,7 +444,31 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
         replacement,
         replacement_current,
         key="review-version-two",
+        overrides={
+            "supplier_name": {
+                "action": "SET_VALUE",
+                "raw_value": "Updated Supplier",
+                "normalized_value": "Updated Supplier",
+                "unit": None,
+                "reason": "Supplier name was updated for the replacement quote.",
+            }
+        },
     )
+    with service.session_factory() as session:
+        replacement_draft = session.get(
+            QuoteDraft, replacement["quote_draft_id"]
+        )
+        assert replacement_draft is not None
+        replacement_batch_artifact_id = replacement_draft.batch_artifact_id
+    assert replacement_batch_artifact_id is not None
+    correction_payloads = service.correction_event_payloads_for_batch(
+        replacement_batch_artifact_id
+    )
+    assert {payload["field_name"] for payload in correction_payloads} >= {
+        "supplier_name",
+        "shipping_fee_status",
+        "shipping_fee_amount",
+    }
     second = service.submit_quote_draft(
         task["task_id"],
         replacement["quote_draft_id"],
@@ -390,6 +505,40 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
     ]
     assert "QUOTE_REPLACEMENT_SUBMITTED" in change_types
     assert "QUOTE_DEACTIVATED" in change_types
+
+    reactivated = service.reactivate_quote(
+        task["task_id"],
+        first["quote_id"],
+        expected_task_revision=4,
+        idempotency_key="reactivate-replaced-quote",
+    )
+    repeated = service.reactivate_quote(
+        task["task_id"],
+        first["quote_id"],
+        expected_task_revision=4,
+        idempotency_key="reactivate-replaced-quote",
+    )
+
+    assert repeated == reactivated
+    assert reactivated["active"] is True
+    assert reactivated["task_revision"] == 5
+    assert service.get_task(task["task_id"])["quotes"][0]["quote_id"] == first["quote_id"]
+    reactivated_history = service.list_quotes(task["task_id"])["items"][0]
+    assert reactivated_history["active"] is True
+    assert [item["is_current"] for item in reactivated_history["versions"]] == [True, False]
+    change_types = [
+        item["change_type"] for item in service.task_audit(task["task_id"])["revisions"]
+    ]
+    assert "QUOTE_REACTIVATED" in change_types
+
+    with pytest.raises(ConflictError) as already_active:
+        service.reactivate_quote(
+            task["task_id"],
+            first["quote_id"],
+            expected_task_revision=5,
+            idempotency_key="reactivate-already-active",
+        )
+    assert already_active.value.code == "quote_already_active"
 
 
 def test_unknown_required_fee_blocks_review_and_rolls_back_all_actions(

@@ -53,7 +53,8 @@ function changeLabel(value: string) {
   const labels: Record<string, string> = {
     CREATED: '创建采购任务', TASK_CREATED: '创建采购任务', REQUIREMENT_UPDATED: '修改采购需求',
     QUOTE_ADDED: '新增报价', QUOTE_UPLOADED: '正式提交报价', QUOTE_DRAFT_SUBMITTED: '正式提交报价',
-    QUOTE_UPDATED: '更新报价', FIELD_CORRECTED: '人工校正报价', FIELDS_CORRECTED_BATCH: '批量校正报价',
+    QUOTE_UPDATED: '更新报价', QUOTE_DEACTIVATED: '停用报价', QUOTE_REACTIVATED: '重新启用报价',
+    FIELD_CORRECTED: '人工校正报价', FIELDS_CORRECTED_BATCH: '批量校正报价',
     ISSUE_ANSWERED: '完成人工确认', RESULT_PUBLISHED: '生成比较结果', TASK_ABANDONED: '废弃任务',
   }
   if (value.startsWith('FIELD_CORRECTED:')) return '人工校正报价'
@@ -66,7 +67,8 @@ function changeDetail(details: Record<string, unknown>) {
   const filename = typeof details.original_filename === 'string' ? details.original_filename : ''
   if (supplier && filename) return `${supplier} · ${filename}`
   if (filename) return filename
-  return '该版本保存了一次会改变任务权威输入的操作。'
+  if (supplier) return supplier
+  return ''
 }
 
 function errorMessage(error: unknown) {
@@ -128,27 +130,28 @@ export function AuditPage() {
 
       <section className="review-workspace-lead">
         <div>
-          <p className="eyebrow">版本记录</p>
-          <h2>任务版本与处理记录</h2>
+          <h2>版本记录</h2>
           <p>查看报价文件、人工确认和分析结果的历史变化。</p>
         </div>
-        <span className="status-pill status-ready">当前第 {data.task_revision} 版</span>
       </section>
 
-      <section className="card audit-empty">任务创建时为第 1 版；正式提交报价、修改需求、人工校正或回答阻塞问题时版本加 1。上传和校对草稿、运行分析、生成结果本身不会增加任务版本。</section>
+      <details className="audit-version-help">
+        <summary>版本说明</summary>
+        <p>提交报价、修改需求或完成人工处理时生成新版本；草稿编辑和运行分析不会增加版本。</p>
+      </details>
 
       <section className="audit-overview">
         <article><span>当前任务版本</span><strong>第 {data.task_revision} 版</strong><small>{taskStatusLabel(data.status)}</small></article>
-        <article><span>当前分析结果</span><strong>{data.current_result_id ? '已生成' : '尚未生成'}</strong><small>{data.current_result_id ? '可在“决策结果”查看' : '等待完成分析'}</small></article>
-        <article><span>制度绑定</span><strong>{data.policy_binding?.policy_set_version ?? '未绑定'}</strong><small>{data.policy_binding ? '已保存制度版本' : '未执行制度检索'}</small></article>
+        <article><span>当前分析结果</span><strong>{data.current_result_id ? '已生成' : '尚未生成'}</strong></article>
+        <article><span>制度绑定</span><strong>{data.policy_binding?.policy_set_version ?? '未绑定'}</strong></article>
       </section>
 
       {childError && <section className="card error-panel" role="alert">部分审计数据读取失败：{errorMessage(childError)}</section>}
 
       <section className="audit-section">
         <div className="section-heading">
-          <div><p className="eyebrow">报价版本</p><h2>报价与文件版本</h2></div>
-          <span>{quotes.data?.items.length ?? 0} 个报价</span>
+          <div><h2>报价文件</h2></div>
+          {(quotes.data?.items.length ?? 0) > 0 && <span>{quotes.data?.items.length} 个报价</span>}
         </div>
         {quotes.isPending && <div className="card loading-panel">正在读取报价版本…</div>}
         {quotes.data?.items.length === 0 && <div className="card audit-empty">暂无报价版本。</div>}
@@ -156,17 +159,16 @@ export function AuditPage() {
           {quotes.data?.items.map((quote) => (
             <article className="card audit-record" key={quote.quote_id}>
               <header>
-                <div><strong>{quote.supplier_id}</strong><span>{quote.versions.length} 个文件版本</span></div>
-                <span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>{quote.active ? `当前 v${quote.current_version}` : '非当前报价'}</span>
+                <div><strong>{quote.supplier_id}</strong>{quote.versions.length > 1 && <span>{quote.versions.length} 个版本</span>}</div>
+                <span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>{quote.active ? '当前报价' : '已停用'}</span>
               </header>
               <div className="audit-version-list">
                 {quote.versions.map((version) => (
                   <div className={version.is_current ? 'audit-version audit-version-current' : 'audit-version'} key={`${quote.quote_id}-${version.quote_version}`}>
-                    <strong>第 {version.quote_version} 版报价</strong>
+                    <strong>第 {version.quote_version} 版</strong>
                     <span>{version.original_filename}</span>
                     <span>{displayDate(version.created_at)}</span>
-                    <small>{version.media_type}</small>
-                    {version.is_current && <b>当前版本</b>}
+                    {version.is_current && quote.versions.length > 1 && <b>当前文件</b>}
                     <button className="button button-secondary" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>预览 / 下载</button>
                   </div>
                 ))}
@@ -178,11 +180,11 @@ export function AuditPage() {
 
       <section className="audit-section">
         <div className="section-heading">
-          <div><p className="eyebrow">人工确认</p><h2>问题处理历史</h2></div>
-          <span>{issues.data?.length ?? 0} 条记录</span>
+          <div><h2>问题处理历史</h2></div>
+          {(issues.data?.length ?? 0) > 0 && <span>{issues.data?.length} 条记录</span>}
         </div>
         {issues.isPending && <div className="card loading-panel">正在读取问题历史…</div>}
-        {issues.data?.length === 0 && <div className="card audit-empty">暂无人工问题。</div>}
+        {issues.data?.length === 0 && <div className="card audit-empty">无人工处理记录。</div>}
         <div className="audit-table-wrap">
           {(issues.data?.length ?? 0) > 0 && (
             <table className="audit-table">
@@ -205,8 +207,8 @@ export function AuditPage() {
 
       <section className="audit-section">
         <div className="section-heading">
-          <div><p className="eyebrow">分析结果</p><h2>结果历史</h2></div>
-          <span>{results.data?.length ?? 0} 个结果</span>
+          <div><h2>结果历史</h2></div>
+          {(results.data?.length ?? 0) > 0 && <span>{results.data?.length} 个结果</span>}
         </div>
         {results.isPending && <div className="card loading-panel">正在读取结果历史…</div>}
         {results.data?.length === 0 && <div className="card audit-empty">暂无比较结果。</div>}
@@ -233,8 +235,11 @@ export function AuditPage() {
       </section>
 
       <section className="audit-section">
-        <div className="section-heading"><div><p className="eyebrow">任务变更</p><h2>任务变更与文件访问</h2></div><span>{audit.data?.revisions.length ?? 0} 个版本</span></div>
-        <div className="audit-list">{audit.data?.revisions.map((revision) => <article className="card audit-record" key={revision.revision}><header><strong>第 {revision.revision} 版 · {changeLabel(revision.change_type)}</strong><span>{displayDate(revision.created_at)}</span></header><p>{changeDetail(revision.details)}</p></article>)}</div>
+        <div className="section-heading"><div><h2>任务变更</h2></div>{(audit.data?.revisions.length ?? 0) > 0 && <span>{audit.data?.revisions.length} 个版本</span>}</div>
+        <div className="audit-list">{audit.data?.revisions.map((revision) => {
+          const detail = changeDetail(revision.details)
+          return <article className="card audit-record" key={revision.revision}><header><strong>第 {revision.revision} 版 · {changeLabel(revision.change_type)}</strong><span>{displayDate(revision.created_at)}</span></header>{detail && <p>{detail}</p>}</article>
+        })}</div>
         {(audit.data?.document_accesses.length ?? 0) > 0 && <details><summary>文件访问记录（{audit.data?.document_accesses.length}）</summary><div className="audit-list">{audit.data?.document_accesses.map((event) => <article className="card audit-record" key={event.access_event_id}><strong>访问报价文件</strong><span>{displayDate(event.created_at)}</span></article>)}</div></details>}
       </section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}

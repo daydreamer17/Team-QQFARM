@@ -289,6 +289,11 @@ class DeactivateQuoteRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
 
 
+class ReactivateQuoteRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+
+
 class CreateQuoteRevisionRequest(ApiModel):
     model_config = ConfigDict(extra="forbid")
     expected_task_revision: int = Field(ge=1)
@@ -701,6 +706,20 @@ def create_app(
         idempotency_key: IdempotencyKey,
     ):
         return service.deactivate_quote(
+            task_id,
+            quote_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post("/api/v1/tasks/{task_id}/quotes/{quote_id}/reactivate")
+    def reactivate_quote(
+        task_id: str,
+        quote_id: str,
+        body: ReactivateQuoteRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.reactivate_quote(
             task_id,
             quote_id,
             expected_task_revision=body.expected_task_revision,

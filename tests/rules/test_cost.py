@@ -330,6 +330,59 @@ def test_included_tax_is_already_part_of_confirmed_total() -> None:
     assert result.pending_reasons == ()
 
 
+def test_not_applicable_tax_is_compatible_with_tax_exclusive_comparison() -> None:
+    result = calculate_cost(
+        _requirement(tax_mode="EXCLUDED"),
+        _quote(
+            price="6.20",
+            basis=1,
+            shipping_status="FREE",
+            shipping_amount="0.00",
+            tax_mode="NOT_APPLICABLE",
+        ),
+        _quantity(1000),
+    )
+
+    assert result.total_cost == Decimal("6200.00")
+    assert result.pending_reasons == ()
+
+
+def test_matching_tax_exclusive_quote_is_comparable_without_rewriting_the_quote() -> None:
+    result = calculate_cost(
+        _requirement(tax_mode="EXCLUDED"),
+        _quote(
+            price="6.20",
+            basis=1,
+            shipping_status="FREE",
+            shipping_amount="0.00",
+            tax_mode="EXCLUDED",
+        ),
+        _quantity(1000),
+    )
+
+    assert result.total_cost == Decimal("6200.00")
+    assert result.pending_reasons == ()
+
+
+def test_cross_tax_basis_requires_conversion_data_instead_of_value_rewrite() -> None:
+    result = calculate_cost(
+        _requirement(tax_mode="EXCLUDED"),
+        _quote(
+            price="6.20",
+            basis=1,
+            shipping_status="FREE",
+            shipping_amount="0.00",
+            tax_mode="INCLUDED",
+        ),
+        _quantity(1000),
+    )
+
+    assert result.total_cost is None
+    assert [issue.code for issue in result.pending_reasons] == [
+        "TAX_CONVERSION_REQUIRED"
+    ]
+
+
 def test_human_confirmed_free_status_supersedes_old_amount_conflict() -> None:
     quote = _quote(
         price="6.50",

@@ -92,7 +92,7 @@ export function TaskPage() {
           <div><dt>基础单位</dt><dd>{requirement.base_unit}</dd></div>
           <div><dt>预算</dt><dd>{requirement.currency} {requirement.budget_amount}</dd></div>
           <div><dt>预算包含运费</dt><dd>{requirement.includes_shipping ? '是' : '否'}</dd></div>
-          <div><dt>税费口径</dt><dd>{requirement.tax_mode}</dd></div>
+          <div><dt>成本比较口径</dt><dd>{requirement.tax_mode}</dd></div>
           <div><dt>其他费用要求</dt><dd>{requirement.other_fees_required ? '需要' : '不需要'}</dd></div>
           <div><dt>计划下单日期</dt><dd>{requirement.planned_order_date ?? '—'}</dd></div>
           <div><dt>交付截止日期</dt><dd>{requirement.delivery_deadline}</dd></div>

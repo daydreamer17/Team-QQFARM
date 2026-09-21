@@ -30,6 +30,7 @@ from supplier_comparison.extraction import (
     CriticalityContext,
     ExtractionBatch,
     HumanReviewAction,
+    Origin,
     ReviewEnvelope,
     ReviewSeverity,
     ValidationStatus,
@@ -38,7 +39,9 @@ from supplier_comparison.extraction import (
     review_extraction_batch,
 )
 from supplier_comparison.extraction.dictionary import QuoteDictionary
+from supplier_comparison.extraction.files import stable_id
 from supplier_comparison.extraction.review_contracts import (
+    CandidateValueSnapshot,
     EffectiveCriticality,
     REVIEW_POLICY_VERSION,
     REVIEW_SCHEMA_VERSION,
@@ -124,6 +127,30 @@ QUOTE_REVIEW_ERROR_MESSAGES = {
     "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID": "供应商名称混入了系统编号，请分开填写。",
     "REQUIRED_FIELD_UNAVAILABLE": "必填字段缺少可用值，UNKNOWN、MISSING 或 CONFLICT 不能正式提交。",
 }
+
+# Comparison rules may discover either an incorrect/unknown quote fact or a
+# real commercial difference that the current calculator cannot yet convert.
+# Only the first category may be written back as a field correction.  A valid
+# supplier term must never be overwritten merely to match the requirement.
+COMPARISON_FACT_CORRECTION_CODES = frozenset(
+    {
+        "DECIMAL_STRING_REQUIRED",
+        "FEE_AMOUNT_UNKNOWN",
+        "FEE_CURRENCY_MISMATCH",
+        "FEE_STATUS_UNSUPPORTED",
+        "FIELD_CONFLICT",
+        "FIELD_MISSING",
+        "FIELD_NON_NEGATIVE_INTEGER_REQUIRED",
+        "FIELD_POSITIVE_INTEGER_REQUIRED",
+        "FIELD_STRING_REQUIRED",
+        "FIELD_VALUE_INVALID",
+        "ISO_DATE_REQUIRED",
+        "MONEY_VALUE_INVALID",
+        "MOQ_PACKAGING_UNIT_MISMATCH",
+        "UNIT_PRICE_CURRENCY_MISMATCH",
+        "ZERO_FEE_STATUS_AMOUNT_CONFLICT",
+    }
+)
 
 
 def _quote_draft_submission_ready(envelope: ReviewEnvelope) -> bool:
@@ -931,6 +958,88 @@ class BackendService:
             )
             return response
 
+    def reactivate_quote(
+        self,
+        task_id: str,
+        quote_id: str,
+        *,
+        expected_task_revision: int,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Re-enable a soft-disabled quote without uploading its document again."""
+
+        request = {
+            "task_id": task_id,
+            "quote_id": quote_id,
+            "expected_task_revision": expected_task_revision,
+        }
+        request_sha = content_hash(request)
+        operation = f"reactivate_quote:{quote_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            quote = session.scalar(
+                select(Quote)
+                .where(Quote.quote_id == quote_id, Quote.task_id == task_id)
+                .with_for_update()
+            )
+            if quote is None:
+                raise NotFoundError("quote_not_found", "Quote was not found.")
+            if quote.active:
+                raise ConflictError(
+                    "quote_already_active", "Quote is already active."
+                )
+
+            self._supersede_current_graph(session, task)
+            quote.active = True
+            next_revision = task.current_revision + 1
+            task.current_revision = next_revision
+            task.status = "DRAFT"
+            session.add(
+                TaskRevision(
+                    revision_id=new_id("rev"),
+                    task_id=task_id,
+                    revision=next_revision,
+                    change_type="QUOTE_REACTIVATED",
+                    actor_id=self.actor_id,
+                    request_sha256=request_sha,
+                    details={
+                        "quote_id": quote.quote_id,
+                        "supplier_id": quote.supplier_id,
+                        "quote_version": quote.current_version,
+                    },
+                )
+            )
+            response = {
+                "task_id": task_id,
+                "task_revision": next_revision,
+                "status": task.status,
+                "quote_id": quote.quote_id,
+                "supplier_id": quote.supplier_id,
+                "active": True,
+            }
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=200,
+                response=response,
+            )
+            return response
+
     def create_quote_revision_draft(
         self,
         task_id: str,
@@ -1028,13 +1137,21 @@ class BackendService:
                 dictionary_sha = hashlib.sha256(
                     self.quote_dictionary_path.read_bytes()
                 ).hexdigest()
+                carried_review = self._carry_forward_quote_review(
+                    session,
+                    task=task,
+                    quote=quote,
+                    document=document,
+                    proposed_document_id=proposed_document_id,
+                    dictionary_sha=dictionary_sha,
+                )
                 draft = QuoteDraft(
                     quote_draft_id=draft_id,
                     task_id=task_id,
                     actor_id=self.actor_id,
                     base_task_revision=task.current_revision,
-                    revision=1,
-                    status="PROCESSING",
+                    revision=2 if carried_review is not None else 1,
+                    status="READY_TO_SUBMIT" if carried_review is not None else "PROCESSING",
                     proposed_quote_id=proposed_quote_id,
                     replacement_quote_id=quote.quote_id,
                     proposed_document_id=proposed_document_id,
@@ -1050,20 +1167,36 @@ class BackendService:
                     environment=environment,
                     prompt_version=prompt_version,
                     dictionary_sha256=dictionary_sha,
+                    parsed_artifact_id=(
+                        carried_review["parsed_artifact_id"]
+                        if carried_review is not None
+                        else None
+                    ),
+                    batch_artifact_id=(
+                        carried_review["batch_artifact_id"]
+                        if carried_review is not None
+                        else None
+                    ),
+                    review_artifact_id=(
+                        carried_review["review_artifact_id"]
+                        if carried_review is not None
+                        else None
+                    ),
                 )
                 session.add(draft)
                 session.flush([draft])
-                session.add(
-                    Job(
-                        job_id=job_id,
-                        task_id=task_id,
-                        graph_run_id=None,
-                        quote_draft_id=draft_id,
-                        job_type="DRAFT_REVIEW",
-                        status="PENDING",
-                        task_revision=task.current_revision,
+                if carried_review is None:
+                    session.add(
+                        Job(
+                            job_id=job_id,
+                            task_id=task_id,
+                            graph_run_id=None,
+                            quote_draft_id=draft_id,
+                            job_type="DRAFT_REVIEW",
+                            status="PENDING",
+                            task_revision=task.current_revision,
+                        )
                     )
-                )
                 session.flush()
                 response = self._quote_draft_response(session, draft)
                 self._save_idempotent(
@@ -1079,6 +1212,368 @@ class BackendService:
             if copied_path is not None and copied_path.exists():
                 copied_path.unlink()
             raise
+
+    def _carry_forward_quote_review(
+        self,
+        session: Session,
+        *,
+        task: Task,
+        quote: Quote,
+        document: Document,
+        proposed_document_id: str,
+        dictionary_sha: str,
+    ) -> dict[str, str] | None:
+        """Seed an edit draft from its submitted, fully reviewed quote version."""
+
+        source_draft = session.scalar(
+            select(QuoteDraft)
+            .where(
+                QuoteDraft.task_id == task.task_id,
+                QuoteDraft.proposed_document_id == document.document_id,
+                QuoteDraft.status == "SUBMITTED",
+                QuoteDraft.dictionary_sha256 == dictionary_sha,
+                QuoteDraft.batch_artifact_id.is_not(None),
+                QuoteDraft.review_artifact_id.is_not(None),
+            )
+            .order_by(QuoteDraft.submitted_at.desc(), QuoteDraft.created_at.desc())
+        )
+        if source_draft is None:
+            return None
+        batch_artifact = session.get(WorkflowArtifact, source_draft.batch_artifact_id)
+        review_artifact = session.get(WorkflowArtifact, source_draft.review_artifact_id)
+        if batch_artifact is None or review_artifact is None:
+            return None
+        source_batch = ExtractionBatch.model_validate(batch_artifact.payload)
+        source_review = ReviewEnvelope.model_validate(review_artifact.payload)
+        if (
+            source_batch.parsed_input.document_sha256 != document.sha256
+            or not _quote_draft_submission_ready(source_review)
+            or source_review.schema_version != REVIEW_SCHEMA_VERSION
+            or source_review.review_policy_version != REVIEW_POLICY_VERSION
+        ):
+            return None
+
+        next_quote_version = quote.current_version + 1
+        now = datetime.now(timezone.utc)
+        source_id_map = {
+            source.source_id: stable_id(
+                "src",
+                {
+                    "carried_from": source.source_id,
+                    "document_id": proposed_document_id,
+                    "document_version": 1,
+                    "document_sha256": document.sha256,
+                },
+            )
+            for source in source_batch.parsed_input.sources
+        }
+        context = source_batch.parsed_input.context.model_copy(
+            update={
+                "task_revision": task.current_revision,
+                "quote_id": quote.quote_id,
+                "quote_version": next_quote_version,
+                "document_id": proposed_document_id,
+                "document_version": 1,
+            }
+        )
+        sources = tuple(
+            source.model_copy(
+                update={
+                    "source_id": source_id_map[source.source_id],
+                    "document_id": proposed_document_id,
+                    "document_version": 1,
+                }
+            )
+            for source in source_batch.parsed_input.sources
+        )
+        context_groups = tuple(
+            group.model_copy(
+                update={
+                    "context_group_id": stable_id(
+                        "context",
+                        {
+                            "carried_from": group.context_group_id,
+                            "document_id": proposed_document_id,
+                        },
+                    ),
+                    "source_ids": tuple(source_id_map[item] for item in group.source_ids),
+                }
+            )
+            for group in source_batch.parsed_input.context_groups
+        )
+        parsed_input = source_batch.parsed_input.model_copy(
+            update={
+                "context": context,
+                "sources": sources,
+                "context_groups": context_groups,
+            }
+        )
+        candidates = tuple(
+            candidate.model_copy(
+                update={
+                    "field_id": stable_id(
+                        "fld",
+                        {
+                            "quote_id": quote.quote_id,
+                            "quote_version": next_quote_version,
+                            "field_name": candidate.field_name,
+                            "field_version": candidate.field_version,
+                        },
+                    ),
+                    "quote_id": quote.quote_id,
+                    "quote_version": next_quote_version,
+                    "source_refs": tuple(
+                        source_ref.model_copy(
+                            update={"source_id": source_id_map[source_ref.source_id]}
+                        )
+                        for source_ref in candidate.source_refs
+                    ),
+                }
+            )
+            for candidate in source_batch.candidates
+        )
+        carried_batch = ExtractionBatch.model_validate(
+            source_batch.model_copy(
+                update={
+                    "parsed_input": parsed_input,
+                    "candidates": candidates,
+                    "run": None,
+                    "created_at": now,
+                }
+            ).model_dump(mode="python")
+        )
+
+        source_corrections = {
+            correction.field_name: correction
+            for correction in source_review.corrections
+        }
+        carried_corrections: list[CorrectionEvent] = []
+        for candidate in carried_batch.candidates:
+            if candidate.origin not in {Origin.USER_INPUT, Origin.USER_CORRECTION}:
+                continue
+            source_correction = source_corrections.get(candidate.field_name)
+            if source_correction is None:
+                return None
+            before = source_correction.before.model_copy(
+                update={
+                    "field_id": stable_id(
+                        "fld",
+                        {
+                            "quote_id": quote.quote_id,
+                            "quote_version": next_quote_version,
+                            "field_name": candidate.field_name,
+                            "field_version": source_correction.before.field_version,
+                        },
+                    ),
+                    "source_ids": tuple(
+                        source_id_map[source_id]
+                        for source_id in source_correction.before.source_ids
+                    ),
+                }
+            )
+            after = CandidateValueSnapshot.from_candidate(candidate)
+            carried_corrections.append(
+                source_correction.model_copy(
+                    update={
+                        "correction_id": stable_id(
+                            "correction",
+                            {
+                                "carried_from": source_correction.correction_id,
+                                "document_id": proposed_document_id,
+                                "reviewed_at": now.isoformat(),
+                            },
+                        ),
+                        "before": before,
+                        "after": after,
+                        "reason_code": "CARRIED_FORWARD_FROM_CURRENT_QUOTE",
+                        "reason": "从当前已确认报价版本继承。",
+                        "basis_source_ids": tuple(
+                            source_id_map[source_id]
+                            for source_id in source_correction.basis_source_ids
+                        ),
+                        "reviewer_id": self.actor_id,
+                        "reviewed_at": now,
+                        "task_revision": task.current_revision,
+                        "draft_revision": 1,
+                        "quote_id": quote.quote_id,
+                        "quote_version": next_quote_version,
+                        "document_id": proposed_document_id,
+                        "document_version": 1,
+                        "document_sha256": document.sha256,
+                    }
+                )
+            )
+
+        review_events = tuple(
+            create_review_event(
+                carried_batch,
+                field_name=candidate.field_name,
+                action={
+                    ValidationStatus.MISSING: HumanReviewAction.CONFIRM_MISSING,
+                    ValidationStatus.CONFLICT: HumanReviewAction.CONFIRM_CONFLICT,
+                }.get(candidate.validation_status, HumanReviewAction.CONFIRM_VALUE),
+                reviewer_id=self.actor_id,
+                reviewed_at=now,
+                reason_code="CARRIED_FORWARD_FROM_CURRENT_QUOTE",
+                draft_revision=1,
+            )
+            for candidate in carried_batch.candidates
+        )
+        requirement_record = session.scalar(
+            select(RequirementRecord)
+            .where(RequirementRecord.task_id == task.task_id)
+            .order_by(RequirementRecord.requirement_version.desc())
+        )
+        if requirement_record is None:
+            return None
+        requirement = ProcurementRequirement.model_validate(requirement_record.payload)
+        carried_review = review_extraction_batch(
+            carried_batch,
+            self.quote_dictionary,
+            CriticalityContext(
+                required_revision=requirement.revision,
+                base_unit=requirement.base_unit,
+            ),
+            input_is_synthetic=document.is_synthetic,
+            reviewed_at=now,
+            environment=source_review.environment,
+            review_events=review_events,
+            corrections=tuple(carried_corrections),
+        )
+        if not _quote_draft_submission_ready(carried_review):
+            return None
+
+        parsed_artifact_id = new_id("artifact")
+        batch_artifact_id = new_id("artifact")
+        review_artifact_id = new_id("artifact")
+
+        def add_artifact(
+            *,
+            artifact_id: str,
+            artifact_type: str,
+            payload: dict[str, Any],
+            parent_id: str | None,
+            schema_version: str | None = None,
+        ) -> None:
+            session.add(
+                WorkflowArtifact(
+                    artifact_id=artifact_id,
+                    task_id=task.task_id,
+                    task_revision=task.current_revision,
+                    artifact_type=artifact_type,
+                    schema_version=schema_version,
+                    parent_artifact_id=parent_id,
+                    quote_id=quote.quote_id,
+                    document_id=proposed_document_id,
+                    graph_run_id=None,
+                    payload=payload,
+                    content_sha256=content_hash(payload),
+                )
+            )
+
+        add_artifact(
+            artifact_id=parsed_artifact_id,
+            artifact_type="PARSED_INPUT",
+            schema_version=carried_batch.schema_version,
+            payload=carried_batch.parsed_input.model_dump(mode="json"),
+            parent_id=None,
+        )
+        add_artifact(
+            artifact_id=batch_artifact_id,
+            artifact_type="EXTRACTION_BATCH",
+            schema_version=carried_batch.schema_version,
+            payload=carried_batch.model_dump(mode="json"),
+            parent_id=parsed_artifact_id,
+        )
+        parent_artifact_id = batch_artifact_id
+        for correction in carried_corrections:
+            correction_artifact_id = new_id("artifact")
+            add_artifact(
+                artifact_id=correction_artifact_id,
+                artifact_type="CORRECTION_EVENT",
+                payload=correction.model_dump(mode="json"),
+                parent_id=parent_artifact_id,
+            )
+            parent_artifact_id = correction_artifact_id
+        add_artifact(
+            artifact_id=review_artifact_id,
+            artifact_type="REVIEW_ENVELOPE",
+            schema_version=carried_review.schema_version,
+            payload=carried_review.model_dump(mode="json"),
+            parent_id=parent_artifact_id,
+        )
+        return {
+            "parsed_artifact_id": parsed_artifact_id,
+            "batch_artifact_id": batch_artifact_id,
+            "review_artifact_id": review_artifact_id,
+        }
+
+    def _quote_revision_has_material_changes(
+        self,
+        session: Session,
+        *,
+        draft: QuoteDraft,
+        batch: ExtractionBatch,
+    ) -> bool:
+        """Return whether an edit draft differs from the current submitted quote."""
+
+        if draft.replacement_quote_id is None:
+            return True
+        quote = session.scalar(
+            select(Quote).where(
+                Quote.quote_id == draft.replacement_quote_id,
+                Quote.task_id == draft.task_id,
+            )
+        )
+        if quote is None:
+            return True
+        document = session.scalar(
+            select(Document).where(
+                Document.quote_id == quote.quote_id,
+                Document.quote_version == quote.current_version,
+            )
+        )
+        if document is None or document.sha256 != draft.sha256:
+            return True
+        submitted_draft = session.scalar(
+            select(QuoteDraft)
+            .where(
+                QuoteDraft.task_id == draft.task_id,
+                QuoteDraft.proposed_document_id == document.document_id,
+                QuoteDraft.status == "SUBMITTED",
+                QuoteDraft.batch_artifact_id.is_not(None),
+            )
+            .order_by(QuoteDraft.submitted_at.desc(), QuoteDraft.created_at.desc())
+        )
+        if submitted_draft is None or submitted_draft.batch_artifact_id is None:
+            return True
+        submitted_artifact = session.get(
+            WorkflowArtifact, submitted_draft.batch_artifact_id
+        )
+        if submitted_artifact is None:
+            return True
+        submitted_batch = ExtractionBatch.model_validate(submitted_artifact.payload)
+        return self._quote_field_snapshot(batch) != self._quote_field_snapshot(
+            submitted_batch
+        )
+
+    @staticmethod
+    def _quote_field_snapshot(batch: ExtractionBatch) -> str:
+        """Hash business field state while ignoring version-specific identities."""
+
+        fields = [
+            {
+                "field_name": candidate.field_name,
+                "raw_value": candidate.raw_value,
+                "normalized_value": candidate.normalized_value,
+                "unit": candidate.unit,
+                "validation_status": candidate.validation_status,
+            }
+            for candidate in sorted(
+                batch.candidates, key=lambda candidate: candidate.field_name
+            )
+        ]
+        return content_hash(fields)
 
     def upload_quote_draft_stream(
         self,
@@ -1533,6 +2028,9 @@ class BackendService:
                 return repeated
 
             draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            artifact_quote_id = (
+                draft.replacement_quote_id or draft.proposed_quote_id
+            )
             task = session.scalar(
                 select(Task).where(Task.task_id == task_id).with_for_update()
             )
@@ -1838,7 +2336,7 @@ class BackendService:
                     artifact_type="EXTRACTION_BATCH",
                     schema_version=working_batch.schema_version,
                     parent_artifact_id=parent_artifact_id,
-                    quote_id=draft.proposed_quote_id,
+                    quote_id=artifact_quote_id,
                     document_id=draft.proposed_document_id,
                     payload=batch_payload,
                     content_sha256=content_hash(batch_payload),
@@ -1854,7 +2352,7 @@ class BackendService:
                     task_revision=draft.base_task_revision,
                     artifact_type="CORRECTION_EVENT",
                     parent_artifact_id=parent_artifact_id,
-                    quote_id=draft.proposed_quote_id,
+                    quote_id=artifact_quote_id,
                     document_id=draft.proposed_document_id,
                     payload=payload,
                     content_sha256=content_hash(payload),
@@ -1869,7 +2367,7 @@ class BackendService:
                     task_revision=draft.base_task_revision,
                     artifact_type="REVIEW_EVENT",
                     parent_artifact_id=parent_artifact_id,
-                    quote_id=draft.proposed_quote_id,
+                    quote_id=artifact_quote_id,
                     document_id=draft.proposed_document_id,
                     payload=payload,
                     content_sha256=content_hash(payload),
@@ -1884,7 +2382,7 @@ class BackendService:
                 artifact_type="REVIEW_ENVELOPE",
                 schema_version=reviewed.schema_version,
                 parent_artifact_id=parent_artifact_id,
-                quote_id=draft.proposed_quote_id,
+                quote_id=artifact_quote_id,
                 document_id=draft.proposed_document_id,
                 payload=review_payload,
                 content_sha256=content_hash(review_payload),
@@ -1931,6 +2429,9 @@ class BackendService:
             if repeated is not None:
                 return repeated
             draft = self._owned_quote_draft(session, task_id, draft_id, lock=True)
+            artifact_quote_id = (
+                draft.replacement_quote_id or draft.proposed_quote_id
+            )
             task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
             if task is None:
                 raise NotFoundError("task_not_found", "Task was not found.")
@@ -1978,7 +2479,7 @@ class BackendService:
                 .where(
                     WorkflowArtifact.task_id == task_id,
                     WorkflowArtifact.task_revision == draft.base_task_revision,
-                    WorkflowArtifact.quote_id == draft.proposed_quote_id,
+                    WorkflowArtifact.quote_id == artifact_quote_id,
                     WorkflowArtifact.document_id == draft.proposed_document_id,
                     WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
                 )
@@ -2051,7 +2552,7 @@ class BackendService:
                 artifact_type="EXTRACTION_BATCH",
                 schema_version=batch.schema_version,
                 parent_artifact_id=batch_artifact.artifact_id,
-                quote_id=draft.proposed_quote_id,
+                quote_id=artifact_quote_id,
                 document_id=draft.proposed_document_id,
                 payload=corrected_payload,
                 content_sha256=content_hash(corrected_payload),
@@ -2066,7 +2567,7 @@ class BackendService:
                         task_revision=draft.base_task_revision,
                         artifact_type="CORRECTION_EVENT",
                         parent_artifact_id=corrected_artifact.artifact_id,
-                        quote_id=draft.proposed_quote_id,
+                        quote_id=artifact_quote_id,
                         document_id=draft.proposed_document_id,
                         payload=payload,
                         content_sha256=content_hash(payload),
@@ -2088,7 +2589,7 @@ class BackendService:
                 artifact_type="REVIEW_ENVELOPE",
                 schema_version=reviewed.schema_version,
                 parent_artifact_id=corrected_artifact.artifact_id,
-                quote_id=draft.proposed_quote_id,
+                quote_id=artifact_quote_id,
                 document_id=draft.proposed_document_id,
                 payload=review_payload,
                 content_sha256=content_hash(review_payload),
@@ -2280,6 +2781,13 @@ class BackendService:
                                 "message": "字段确认记录不属于当前草稿版本。",
                             }
                         ],
+                    )
+                if not self._quote_revision_has_material_changes(
+                    session, draft=draft, batch=batch
+                ):
+                    raise ConflictError(
+                        "quote_revision_unchanged",
+                        "No quote changes were detected; a new version is not required.",
                     )
                 self._raise_if_duplicate_quote(
                     session,
@@ -3893,6 +4401,7 @@ class BackendService:
                                and issue["code"] in p["codes"] for p in problems):
                             continue
                         candidate = candidates.get(field_name, {})
+                        correctable_fact = issue["code"] in COMPARISON_FACT_CORRECTION_CODES
                         problems.append({
                             "finding_id": f"comparison:{quote.quote_id}:{field_name}:{issue['code']}",
                             "field_name": field_name, "codes": [issue["code"]],
@@ -3904,7 +4413,13 @@ class BackendService:
                             "normalized_value": candidate.get("normalized_value"), "unit": candidate.get("unit"),
                             "document_id": report["document_id"], "original_filename": report["original_filename"],
                             "needs_resolution": quote.quote_id not in nonblocking,
-                            "resolution": "FIELD_CORRECTION" if candidate else "REEXTRACT_OR_SYSTEM_REPAIR",
+                            "resolution": (
+                                "FIELD_CORRECTION"
+                                if candidate and correctable_fact
+                                else "ADDITIONAL_INFORMATION_REQUIRED"
+                                if candidate
+                                else "REEXTRACT_OR_SYSTEM_REPAIR"
+                            ),
                         })
             return {
                 "task_id": task_id, "task_revision": task.current_revision,
@@ -5472,9 +5987,11 @@ class BackendService:
             artifacts = session.scalars(
                 select(WorkflowArtifact)
                 .where(
+                    WorkflowArtifact.task_id == batch_artifact.task_id,
                     WorkflowArtifact.graph_run_id == batch_artifact.graph_run_id,
                     WorkflowArtifact.task_revision == batch_artifact.task_revision,
                     WorkflowArtifact.quote_id == batch_artifact.quote_id,
+                    WorkflowArtifact.document_id == batch_artifact.document_id,
                     WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
                 )
                 .order_by(WorkflowArtifact.created_at, WorkflowArtifact.artifact_id)
@@ -5489,7 +6006,12 @@ class BackendService:
             while parent_id and parent_id not in visited:
                 visited.add(parent_id)
                 parent = session.get(WorkflowArtifact, parent_id)
-                if parent is None or parent.task_id != batch_artifact.task_id or parent.quote_id != batch_artifact.quote_id:
+                if (
+                    parent is None
+                    or parent.task_id != batch_artifact.task_id
+                    or parent.quote_id != batch_artifact.quote_id
+                    or parent.document_id != batch_artifact.document_id
+                ):
                     break
                 historical = [parent] if parent.artifact_type == "CORRECTION_EVENT" else []
                 if parent.artifact_type == "EXTRACTION_BATCH":
@@ -5497,6 +6019,7 @@ class BackendService:
                         WorkflowArtifact.graph_run_id == parent.graph_run_id,
                         WorkflowArtifact.task_revision == parent.task_revision,
                         WorkflowArtifact.quote_id == parent.quote_id,
+                        WorkflowArtifact.document_id == parent.document_id,
                         WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
                     ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())).all()
                 for event in historical:
@@ -5506,6 +6029,38 @@ class BackendService:
                         payloads.append(dict(payload))
                         seen_fields.add(payload["field_name"])
                 parent_id = parent.parent_artifact_id
+
+            # Older replacement drafts stored carried corrections only inside
+            # their immutable review envelope.  Recover those audit records so
+            # an already-created quote version does not become impossible to
+            # review after the stricter correction-audit check is introduced.
+            review_artifacts = session.scalars(
+                select(WorkflowArtifact)
+                .where(
+                    WorkflowArtifact.task_id == batch_artifact.task_id,
+                    WorkflowArtifact.task_revision == batch_artifact.task_revision,
+                    WorkflowArtifact.quote_id == batch_artifact.quote_id,
+                    WorkflowArtifact.document_id == batch_artifact.document_id,
+                    WorkflowArtifact.artifact_type == "REVIEW_ENVELOPE",
+                )
+                .order_by(
+                    WorkflowArtifact.created_at.desc(),
+                    WorkflowArtifact.artifact_id.desc(),
+                )
+            ).all()
+            for review_artifact in review_artifacts:
+                envelope = ReviewEnvelope.model_validate(review_artifact.payload)
+                for correction in reversed(envelope.corrections):
+                    payload = correction.model_dump(mode="json")
+                    field_name = payload["field_name"]
+                    candidate = candidates.get(field_name, {})
+                    if (
+                        field_name not in seen_fields
+                        and payload.get("after", {}).get("field_id")
+                        == candidate.get("field_id")
+                    ):
+                        payloads.append(payload)
+                        seen_fields.add(field_name)
             return payloads
 
     def correct_field(self, *, task_id: str, quote_id: str, field_name: str,
@@ -5566,19 +6121,36 @@ class BackendService:
                 select(Quote).where(Quote.task_id == task_id, Quote.active.is_(True))
             ).all()
             for active_quote in active_quotes:
-                artifact = session.scalar(
-                    select(WorkflowArtifact)
+                execution = session.scalar(
+                    select(DocumentExecution)
+                    .join(Document, Document.document_id == DocumentExecution.document_id)
                     .where(
-                        WorkflowArtifact.task_id == task_id,
-                        WorkflowArtifact.quote_id == active_quote.quote_id,
-                        WorkflowArtifact.artifact_type == "EXTRACTION_BATCH",
+                        DocumentExecution.graph_run_id == task.current_graph_run_id,
+                        Document.task_id == task_id,
+                        Document.quote_id == active_quote.quote_id,
+                        Document.quote_version == active_quote.current_version,
                     )
-                    .order_by(
-                        WorkflowArtifact.task_revision.desc(),
-                        WorkflowArtifact.created_at.desc(),
-                    )
+                    .order_by(DocumentExecution.document_execution_id)
+                )
+                artifact = (
+                    session.get(WorkflowArtifact, execution.batch_artifact_id)
+                    if execution is not None and execution.batch_artifact_id
+                    else None
                 )
                 if artifact is None:
+                    previous_batch = session.scalar(
+                        select(WorkflowArtifact.artifact_id).where(
+                            WorkflowArtifact.task_id == task_id,
+                            WorkflowArtifact.quote_id == active_quote.quote_id,
+                            WorkflowArtifact.artifact_type == "EXTRACTION_BATCH",
+                        )
+                    )
+                    if previous_batch is not None:
+                        raise ConflictError(
+                            "extraction_batch_stale",
+                            "Re-extract the current quote before correction.",
+                            quote_id=active_quote.quote_id,
+                        )
                     raise ConflictError(
                         "extraction_batch_missing",
                         "Every active quote must have an extraction batch before correction.",
@@ -6036,11 +6608,15 @@ class BackendService:
                 if current is not None and current.status in {
                     "PENDING",
                     "RUNNING",
-                    "INTERRUPTED",
                 }:
                     raise ConflictError(
                         "graph_run_active", "The task already has an active graph run."
                     )
+                if current is not None and current.status == "INTERRUPTED":
+                    # A run waiting for user input is not actively computing. Allow an
+                    # explicit rerun to replace it so updated rules or source data can
+                    # clear an obsolete review interruption.
+                    self._supersede_current_graph(session, task)
             graph_run_id = new_id("graph")
             job_id = new_id("job")
             session.add(
@@ -7122,12 +7698,20 @@ class BackendService:
         ]
         if allow_quote_id is not None:
             document_filters.append(Document.quote_id != allow_quote_id)
-        document = session.scalar(select(Document).where(*document_filters))
-        if document is not None:
+        duplicate = session.execute(
+            select(Document, Quote)
+            .join(Quote, Quote.quote_id == Document.quote_id)
+            .where(*document_filters)
+        ).first()
+        if duplicate is not None:
+            document, quote = duplicate
             raise ConflictError(
                 "duplicate_quote_uploaded",
                 "该报价单已上传。",
                 document_id=document.document_id,
+                quote_id=quote.quote_id,
+                supplier_id=quote.supplier_id,
+                quote_active=quote.active,
             )
         draft_filters = [
             QuoteDraft.task_id == task_id,

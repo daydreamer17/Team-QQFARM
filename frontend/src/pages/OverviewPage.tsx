@@ -68,11 +68,6 @@ export function OverviewPage() {
     queryFn: api.healthReady,
     refetchInterval: 30_000,
   })
-  const liveness = useQuery({
-    queryKey: ['health', 'live'],
-    queryFn: api.healthLive,
-    refetchInterval: 30_000,
-  })
   const tasks = useQuery({
     queryKey: ['tasks', 'center', serverQuery, statusFilter, sortBy, offset],
     queryFn: () => api.listTasks({ limit: 20, offset, query: serverQuery, status: statusFilter === 'ALL' ? undefined : statusFilter, sort: sortBy }),
@@ -96,28 +91,17 @@ export function OverviewPage() {
     <div className="page-stack task-center-page">
       <section className="task-center-heading">
         <div>
-          <p className="eyebrow">PROCUREMENT OPERATIONS</p>
           <h1>任务中心</h1>
-          <p>集中查看采购任务状态，并从同一工作台进入报价、审核和决策结果。</p>
+          <p>查看和管理采购任务。</p>
         </div>
         <Link className="button button-submit" to="/tasks/new">＋ 新建采购任务</Link>
       </section>
 
       <section className="task-center-metrics" aria-label="任务概况">
-        <article><span>全部任务</span><strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)}</strong><small>服务端全部任务</small></article>
-        <article><span>待我处理</span><strong>{waitingCount}</strong><small>需要补充或确认</small></article>
-        <article><span>运行中</span><strong>{runningCount}</strong><small>排队或正在分析</small></article>
-        <article><span>已完成</span><strong>{completedCount}</strong><small>已生成比较结果</small></article>
-        <article className="service-metric">
-          <span>后端服务</span>
-          <strong className={isReady ? 'service-online' : 'service-offline'}>
-            {health.isPending ? '检查中' : isReady ? '已连接' : '未连接'}
-          </strong>
-          <small>进程：{liveness.data?.status === 'alive' ? '存活' : liveness.isPending ? '检查中' : '不可达'} · 数据库：{isReady ? '就绪' : '未就绪'}</small>
-          <button type="button" onClick={() => void Promise.all([health.refetch(), liveness.refetch()])} disabled={health.isFetching || liveness.isFetching}>
-            {health.isFetching || liveness.isFetching ? '正在检查…' : '重新检查'}
-          </button>
-        </article>
+        <article><span>全部任务</span><strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)}</strong></article>
+        <article><span>待我处理</span><strong>{waitingCount}</strong></article>
+        <article><span>运行中</span><strong>{runningCount}</strong></article>
+        <article><span>已完成</span><strong>{completedCount}</strong></article>
       </section>
 
       {!isReady && !health.isPending && (
@@ -126,11 +110,7 @@ export function OverviewPage() {
 
       <section className="task-list-panel">
         <div className="section-heading task-list-heading">
-          <div>
-            <p className="eyebrow">ACTIVE WORK</p>
-            <h2>最近采购任务</h2>
-          </div>
-          <span>每 5 秒自动刷新</span>
+          <h2>最近采购任务</h2>
         </div>
 
         <div className="task-list-tools">
@@ -169,7 +149,7 @@ export function OverviewPage() {
         </div>
 
         {tasks.isPending && <div className="task-center-empty">正在读取任务…</div>}
-        {tasks.isError && <div className="task-center-empty">任务列表读取失败，请确认后端服务。</div>}
+        {tasks.isError && <div className="task-center-empty">任务列表读取失败，请稍后重试。</div>}
         {!tasks.isPending && !tasks.isError && items.length === 0 && !serverQuery && statusFilter === 'ALL' && (
           <div className="task-center-empty">
             <strong>还没有采购任务</strong>
@@ -190,7 +170,6 @@ export function OverviewPage() {
                 <tr>
                   <th>任务</th>
                   <th>物料</th>
-                  <th>版本</th>
                   <th>当前状态</th>
                   <th>计划下单</th>
                   <th>最近更新</th>
@@ -204,11 +183,10 @@ export function OverviewPage() {
                       <Link className="task-name-link" to={`/tasks/${task.task_id}`}>{taskTitle(task)}</Link>
                     </td>
                     <td>{task.manufacturer_part_number ?? '—'}<small>{task.manufacturer ?? '—'}</small></td>
-                    <td>第 {task.task_revision} 版</td>
                     <td><span className={`status-pill ${statusTone(task.status)}`}>{statusLabels[task.status] ?? task.status}</span></td>
                     <td>{displayDay(task.planned_order_date)}</td>
                     <td>{displayDate(task.updated_at)}</td>
-                    <td><Link className="table-open-action" to={`/tasks/${task.task_id}`}>打开工作台 →</Link></td>
+                    <td><Link className="table-open-action" to={`/tasks/${task.task_id}`}>打开</Link></td>
                   </tr>
                 ))}
               </tbody>

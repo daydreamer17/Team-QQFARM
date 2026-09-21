@@ -50,17 +50,6 @@
   font-size: 0.76rem;
 }
 
-.environment-badge {
-  padding: 5px 9px;
-  border: 1px solid #bfdbcb;
-  border-radius: 999px;
-  color: var(--green-dark);
-  background: var(--green-soft);
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-}
-
 .app-frame {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
@@ -743,6 +732,24 @@
   font-size: 0.72rem;
 }
 
+.quote-history {
+  margin-top: 2px;
+}
+
+.quote-history summary {
+  width: fit-content;
+  color: var(--green);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.quote-history-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .session-note {
   margin-top: 10px;
 }
@@ -800,6 +807,17 @@
   color: var(--green-dark);
   font-size: 0.92rem;
   font-weight: 800;
+}
+
+.requirement-advanced-settings > summary {
+  cursor: pointer;
+  color: #354139;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.requirement-advanced-settings[open] > summary {
+  margin-bottom: 20px;
 }
 
 .form-grid {
@@ -912,6 +930,10 @@
   margin: 0;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.form-actions-compact {
+  justify-content: flex-end;
 }
 
 .button-submit {
@@ -1812,6 +1834,124 @@
   border-top: 1px solid var(--line);
 }
 
+.review-action-card {
+  grid-column: span 1;
+}
+
+.review-business-value {
+  display: grid;
+  gap: 0.45rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.review-business-value-control {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.review-business-value-control:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 13%, transparent);
+}
+
+.review-business-value-control input {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.review-business-value-control > span {
+  flex: none;
+  padding: 0 0.9rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.review-merged-note {
+  color: var(--muted);
+}
+
+.review-rule-details,
+.review-records {
+  color: var(--muted);
+}
+
+.review-rule-details summary,
+.review-records summary {
+  cursor: pointer;
+  color: var(--blue-dark);
+  font-weight: 700;
+}
+
+.review-rule-details p {
+  margin-top: 0.55rem;
+  font-size: 0.85rem;
+}
+
+.review-rule-details blockquote {
+  margin: 0.7rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border-left: 3px solid var(--line-strong, #c9d0dc);
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.review-rule-details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0.7rem 0 0;
+}
+
+.review-rule-details dl > div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.review-rule-details dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.review-rule-details dd {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.review-records > div,
+.review-manual-blockers {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.review-records p {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.review-records p:first-child {
+  margin-top: 0.9rem;
+}
+
+.review-manual-blockers h3,
+.review-manual-blockers p {
+  margin: 0;
+}
+
 .investigation-observations {
   display: grid;
   gap: 0.65rem;
@@ -1863,6 +2003,10 @@
 @media (max-width: 800px) {
   .review-correction-fields,
   .simulation-form {
+    grid-template-columns: 1fr;
+  }
+
+  .review-rule-details dl {
     grid-template-columns: 1fr;
   }
 }

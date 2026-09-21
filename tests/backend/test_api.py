@@ -172,6 +172,32 @@ def test_quote_replacement_upload_and_deactivation_endpoints(
     assert history["items"][0]["active"] is False
     assert len(history["items"][0]["versions"]) == 1
 
+    duplicate = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quotes",
+        headers={"Idempotency-Key": "duplicate-disabled-quote-api"},
+        data={
+            "expected_task_revision": str(deactivated.json()["task_revision"]),
+            "supplier_id": "SUP-022",
+            "is_synthetic": "true",
+        },
+        files={"file": ("supplier-v1.csv", b"version one", "text/csv")},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"]["code"] == "duplicate_quote_uploaded"
+    assert duplicate.json()["error"]["details"]["quote_id"] == uploaded["quote_id"]
+    assert duplicate.json()["error"]["details"]["quote_active"] is False
+
+    reactivated = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quotes/{uploaded['quote_id']}/reactivate",
+        headers={"Idempotency-Key": "reactivate-replacement-api-v1"},
+        json={"expected_task_revision": deactivated.json()["task_revision"]},
+    )
+    assert reactivated.status_code == 200
+    assert reactivated.json()["active"] is True
+    assert reactivated.json()["task_revision"] == deactivated.json()["task_revision"] + 1
+    history = http.get(f"/api/v1/tasks/{task['task_id']}/quotes").json()
+    assert history["items"][0]["active"] is True
+
 
 def test_list_tasks_returns_safe_recent_summaries(
     client: tuple[TestClient, BackendService],
@@ -1019,6 +1045,45 @@ def test_batch_review_lists_all_quotes_and_current_problems(batch_review):
     assert "storage_path" not in str(review)
 
 
+def test_comparison_limitation_does_not_offer_rewriting_a_valid_quote_field(batch_review):
+    http, service, task, _runner, review, _body = batch_review
+    import copy
+    from sqlalchemy import select
+
+    quote_id = review["quotes"][0]["quote_id"]
+    with service.session_factory.begin() as session:
+        impact = session.scalar(
+            select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task["task_id"],
+                WorkflowArtifact.artifact_type == "DECISION_IMPACT_RESULT",
+            )
+        )
+        payload = copy.deepcopy(impact.payload)
+        row = next(
+            item
+            for item in payload["comparison"]["supplier_results"]
+            if item["quote_id"] == quote_id
+        )
+        row["pending_reasons"].append(
+            {
+                "code": "TAX_CONVERSION_REQUIRED",
+                "fields": ["tax_mode"],
+                "message": "Tax conversion data is required.",
+            }
+        )
+        impact.payload = payload
+
+    current = http.get(f"/api/v1/tasks/{task['task_id']}/review").json()
+    problem = next(
+        item
+        for item in current["problems"]
+        if item["field_name"] == "tax_mode"
+        and "TAX_CONVERSION_REQUIRED" in item["codes"]
+    )
+    assert problem["needs_resolution"] is True
+    assert problem["resolution"] == "ADDITIONAL_INFORMATION_REQUIRED"
+
+
 def test_batch_corrections_reaudit_once_and_recompute_without_reextraction(batch_review):
     http, service, task, runner, _review, body = batch_review
     url = f"/api/v1/tasks/{task['task_id']}/fields/corrections"
@@ -1053,6 +1118,48 @@ def test_batch_corrections_reaudit_once_and_recompute_without_reextraction(batch
             TaskRevision.task_id == task["task_id"], TaskRevision.change_type == "FIELDS_CORRECTED_BATCH"
         )).all()) == 1
         assert len(session.scalars(select(Job).where(Job.graph_run_id == updated["graph_run_id"])).all()) == 1
+
+
+def test_batch_correction_uses_current_execution_instead_of_newer_unreferenced_batch(batch_review):
+    http, service, task, _runner, review, body = batch_review
+    import copy
+    from sqlalchemy import select
+    from supplier_comparison.backend.models import DocumentExecution
+
+    quote = review["quotes"][0]
+    with service.session_factory.begin() as session:
+        task_row = session.get(Task, task["task_id"])
+        execution = session.scalar(
+            select(DocumentExecution)
+            .join(Document, Document.document_id == DocumentExecution.document_id)
+            .where(
+                DocumentExecution.graph_run_id == task_row.current_graph_run_id,
+                Document.quote_id == quote["quote_id"],
+                Document.quote_version == quote["quote_version"],
+            )
+        )
+        current = session.get(WorkflowArtifact, execution.batch_artifact_id)
+        stale_payload = copy.deepcopy(current.payload)
+        stale_payload["parsed_input"]["context"]["quote_version"] += 1
+        session.add(WorkflowArtifact(
+            artifact_id="artifact_unreferenced_stale_batch",
+            task_id=task["task_id"],
+            task_revision=current.task_revision + 100,
+            artifact_type="EXTRACTION_BATCH",
+            schema_version=current.schema_version,
+            quote_id=quote["quote_id"],
+            document_id=current.document_id,
+            graph_run_id=current.graph_run_id,
+            payload=stale_payload,
+            content_sha256=content_hash(stale_payload),
+        ))
+
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/fields/corrections",
+        headers={"Idempotency-Key": "current-execution-batch"},
+        json=body,
+    )
+    assert response.status_code == 202, response.text
 
 
 @pytest.mark.parametrize("case", ["stale_task", "stale_fields", "duplicates", "invalid_fields", "foreign_quote", "wrong_scalar"])

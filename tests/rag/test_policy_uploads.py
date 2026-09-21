@@ -152,6 +152,40 @@ def test_txt_upload_is_immutable_idempotent_and_does_not_expose_storage_path(
         assert session.scalar(select(func.count()).select_from(PolicyFileImport)) == 1
 
 
+def test_upload_generates_missing_technical_identifiers(
+    sessions, tmp_path: Path
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    metadata = PolicyFileImportMetadata(
+        title="Supplier Qualification Policy",
+        effective_from="2026-09-21T00:00:00Z",
+        categories=["Electronics"],
+        regions=["SG"],
+    )
+
+    uploaded = service.upload_stream(
+        metadata=metadata,
+        original_filename="qualification.txt",
+        media_type="text/plain",
+        stream=BytesIO(b"Suppliers must provide valid qualification evidence."),
+        idempotency_key="upload-policy-generated-identifiers",
+    )
+    repeated = service.upload_stream(
+        metadata=metadata,
+        original_filename="qualification.txt",
+        media_type="text/plain",
+        stream=BytesIO(b"Suppliers must provide valid qualification evidence."),
+        idempotency_key="upload-policy-generated-identifiers",
+    )
+
+    assert repeated == uploaded
+    assert uploaded["policy_set_id"].startswith("policy-set-")
+    assert uploaded["policy_set_version"] == "1.0.0"
+    assert uploaded["policy_id"].startswith("POL-")
+    assert uploaded["document_id"].startswith("DOC-")
+    assert uploaded["document_version"] == "1.0.0"
+
+
 def test_pdf_upload_extracts_native_text_and_page_count(sessions, tmp_path: Path) -> None:
     service, _embedding = _service(sessions, tmp_path)
 

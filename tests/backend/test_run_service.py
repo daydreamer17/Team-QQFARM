@@ -66,6 +66,46 @@ def test_start_run_creates_one_shot_job_without_advancing_revision(
     assert job is not None and job.graph_run_id == graph.graph_run_id
 
 
+def test_start_run_can_replace_run_waiting_for_user_input(
+    service: BackendService,
+) -> None:
+    task = service.create_task(_requirement(), idempotency_key="create")
+    first = service.start_run(
+        task["task_id"], expected_task_revision=1, idempotency_key="run-1"
+    )
+
+    with pytest.raises(ConflictError) as active:
+        service.start_run(
+            task["task_id"], expected_task_revision=1, idempotency_key="run-active"
+        )
+    assert active.value.code == "graph_run_active"
+
+    issue = service.open_issue(
+        task_id=task["task_id"],
+        graph_run_id=first["graph_run_id"],
+        task_revision=1,
+        issue_type="CONFIRM_MISSING",
+        quote_id="quote-b",
+        field_name="shipping_fee_status",
+        question="Confirm that the PDF does not state shipping.",
+        answer_schema={"answer_type": "CONFIRM_MISSING"},
+    )
+    second = service.start_run(
+        task["task_id"], expected_task_revision=1, idempotency_key="run-2"
+    )
+
+    assert second["graph_run_id"] != first["graph_run_id"]
+    with service.session_factory() as session:
+        old_graph = session.get(GraphRun, first["graph_run_id"])
+        old_issue = session.get(Issue, issue["issue_id"])
+        old_job = session.get(Job, first["job_id"])
+        new_graph = session.get(GraphRun, second["graph_run_id"])
+    assert old_graph is not None and old_graph.status == "SUPERSEDED"
+    assert old_issue is not None and old_issue.status == "SUPERSEDED"
+    assert old_job is not None and old_job.status == "SUPERSEDED"
+    assert new_graph is not None and new_graph.status == "PENDING"
+
+
 def test_answer_issue_advances_revision_and_creates_idempotent_resume_job(
     service: BackendService,
 ) -> None:

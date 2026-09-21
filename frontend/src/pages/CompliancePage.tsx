@@ -131,12 +131,12 @@ export function CompliancePage() {
       <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.requirement.manufacturer_part_number} subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} 份报价`} status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={policyIssue} active="compliance" />
 
       <section className="review-workspace-lead">
-        <div><p className="eyebrow">制度检查</p><h2>每份报价是否符合制度</h2><p>先看逐供应商结论，再按需展开制度依据。制度检索成功不等于供应商已经通过。</p></div>
-        <span className={`status-pill ${allEvidenceReady ? 'status-pending' : 'status-offline'}`}>{allEvidenceReady ? '制度依据已准备' : '制度依据不完整'}</span>
+        <div><h2>制度检查</h2>{data.policy_binding && <p>查看各供应商的制度核验结果和依据。</p>}</div>
+        {data.policy_binding && <span className={`status-pill ${allEvidenceReady ? 'status-pending' : 'status-offline'}`}>{!currentResultId ? '等待分析' : allEvidenceReady ? '依据已准备' : '依据待补充'}</span>}
       </section>
 
       {!data.policy_binding ? (
-        <section className="card compliance-empty"><span className="compliance-empty-mark">—</span><div><h2>本任务未绑定制度</h2><p>系统没有执行制度检索，因此不能把任何报价标记为“制度通过”。</p></div></section>
+        <section className="card compliance-empty"><div><h2>本任务未启用制度检查</h2></div></section>
       ) : (
         <>
           <section className="policy-binding-card policy-binding-friendly">
@@ -183,7 +183,7 @@ export function CompliancePage() {
         </>
       )}
 
-      <p className="result-boundary">本页只展示系统已保存的制度检查事实，不代表采购批准、签约或下单授权。</p>
+      {data.policy_binding && <p className="result-boundary">制度检查结果仅供核验，不代表采购批准。</p>}
     </div>
   )
 }

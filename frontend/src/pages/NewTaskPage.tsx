@@ -20,40 +20,26 @@ interface Submission {
 }
 
 const initialForm: FormState = {
-  scenario_id: 'MCU-DEMO-001',
-  manufacturer: 'QQ Demo Components',
-  manufacturer_part_number: 'QW-MCU9-DEMO',
-  package: 'QFN-32',
-  revision: 'R1',
-  condition: 'NEW',
-  allow_substitutes: false,
-  base_unit: 'piece',
-  required_quantity: '1000',
-  quantity_unit: 'piece',
-  budget_amount: '8000.00',
-  currency: 'SGD',
-  includes_shipping: true,
-  tax_mode: 'EXCLUDED',
-  other_fees_required: false,
-  planned_order_date: '2026-09-14',
-  delivery_deadline: '2026-09-19',
-  delivery_location: 'Singapore',
-  ranking_preference: 'LOWEST_CONFIRMED_TOTAL_COST',
-  secondary_preference: '',
-}
-
-const emptyForm: FormState = {
-  ...initialForm,
   scenario_id: '',
   manufacturer: '',
   manufacturer_part_number: '',
   package: '',
   revision: '',
+  condition: '',
+  allow_substitutes: false,
+  base_unit: '',
   required_quantity: '',
+  quantity_unit: '',
   budget_amount: '',
+  currency: '',
+  includes_shipping: false,
+  tax_mode: '',
+  other_fees_required: false,
   planned_order_date: '',
   delivery_deadline: '',
   delivery_location: '',
+  ranking_preference: '',
+  secondary_preference: '',
 }
 
 function errorMessage(error: unknown) {
@@ -65,7 +51,8 @@ function validateForm(form: FormState): FieldErrors {
   const errors: FieldErrors = {}
   const requiredText: (keyof FormState)[] = [
     'manufacturer', 'manufacturer_part_number', 'package', 'revision', 'condition',
-    'base_unit', 'quantity_unit', 'delivery_deadline', 'delivery_location',
+    'base_unit', 'quantity_unit', 'currency', 'tax_mode', 'delivery_deadline',
+    'delivery_location', 'ranking_preference',
   ]
   for (const field of requiredText) {
     if (!String(form[field]).trim()) errors[field] = '此字段为必填项。'
@@ -167,7 +154,7 @@ export function NewTaskPage() {
       setAutoFilledFields(nextFields)
       setFieldErrors({})
       setLocalError('')
-      setExtractionNotice(`真实解析完成：已提取 ${draft.candidates.length} 个带来源字段，请复核后创建任务。`)
+      setExtractionNotice(`已自动填入 ${draft.candidates.length} 个字段，请检查后创建任务。`)
     },
   })
 
@@ -331,9 +318,8 @@ export function NewTaskPage() {
     <div className="page-stack new-task-page">
       <section className="page-heading">
         <div>
-          <p className="eyebrow">NEW PROCUREMENT TASK</p>
           <h1>创建采购任务</h1>
-          <p>可以上传采购需求文件辅助填写，也可以跳过附件直接手动录入。</p>
+          <p>上传采购需求文件，或直接填写采购信息。</p>
         </div>
         <Link className="button button-secondary" to="/">返回工作台</Link>
       </section>
@@ -342,11 +328,8 @@ export function NewTaskPage() {
         <div className="requirement-source-intro">
           <span className="source-step">01</span>
           <div>
-            <p className="eyebrow">OPTIONAL DOCUMENT INTAKE</p>
-            <h2>上传采购需求文件 <small>可选</small></h2>
-            <p>LLM 解析后将建议值填入下方字段；所有结果仍需人工复核，并通过确定性校验后才能创建任务。</p>
+            <h2>导入采购需求 <small>可选</small></h2>
           </div>
-          <span className="prototype-badge">后端解析并保留来源</span>
         </div>
 
         <div className="requirement-source-actions">
@@ -362,11 +345,9 @@ export function NewTaskPage() {
               <span className="source-file-icon">DOC</span>
               <div><strong>{requirementFile.name}</strong><small>{formatBytes(requirementFile.size)} · 等待解析</small></div>
               <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>预览</button>
-              <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '✨ 解析并自动填入'}</button>
+              <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '解析并填入'}</button>
             </div>
-          ) : (
-            <div className="manual-entry-note"><strong>不上传也可以继续</strong><span>直接填写下方字段，提交时执行同一套前后端校验。</span></div>
-          )}
+          ) : null}
         </div>
         {requirementExtraction.isError && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
         {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{requirementDraft.error_message}</p></div>}
@@ -376,8 +357,8 @@ export function NewTaskPage() {
 
       <form className="requirement-form" noValidate onSubmit={handleSubmit}>
         <div className="form-title-row">
-          <div><span className="source-step">02</span><div><p className="eyebrow">REVIEW &amp; VALIDATE</p><h2>确认采购需求字段</h2></div></div>
-          <button className="button button-secondary" type="button" onClick={() => { setForm(emptyForm); setFieldErrors({}); setAutoFilledFields(new Set()); setExtractionNotice('') }}>清空并手动填写</button>
+          <div><span className="source-step">02</span><div><h2>采购需求</h2></div></div>
+          <button className="button button-secondary" type="button" onClick={() => { setForm(initialForm); setFieldErrors({}); setAutoFilledFields(new Set()); setExtractionNotice('') }}>清空表单</button>
         </div>
 
         <RequirementFields
@@ -387,16 +368,13 @@ export function NewTaskPage() {
             : update(field, value)}
           errors={fieldErrors}
           highlightedFields={autoFilledFields}
+          deferAdvancedFields
           materialPrefix={<label className={`field field-wide ${fieldErrors.scenario_id ? 'field-invalid' : ''}`}><span>场景编号 <small>可选</small></span><input value={form.scenario_id} onChange={(event) => update('scenario_id', event.target.value)} />{fieldErrors.scenario_id && <small className="field-error-text">{fieldErrors.scenario_id}</small>}</label>}
         />
 
         <fieldset className="form-section policy-binding-section">
-          <legend>制度检查 <small>可选</small></legend>
-          <p className="policy-binding-intro">绑定后，系统会将这个已发布的策略与索引版本冻结到任务。创建后不能在任务内修改。</p>
-          <div className="policy-mode-options">
-            <label className={!bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={!bindPolicy} onChange={() => setPolicyMode(false)} /><span><strong>不绑定制度</strong><small>默认选项，按现有采购流程创建任务</small></span></label>
-            <label className={bindPolicy ? 'policy-mode-active' : ''}><input type="radio" name="policy-mode" checked={bindPolicy} onChange={() => setPolicyMode(true)} /><span><strong>绑定已发布制度</strong><small>在分析中检索相关制度依据</small></span></label>
-          </div>
+          <legend>制度检查</legend>
+          <label className="field checkbox-field policy-binding-toggle"><input type="checkbox" checked={bindPolicy} onChange={(event) => setPolicyMode(event.target.checked)} /><span>启用制度检查</span></label>
 
           {bindPolicy && (
             <div className="policy-binding-picker">
@@ -433,9 +411,8 @@ export function NewTaskPage() {
           </div>
         )}
 
-        <div className="form-actions">
-          <p>只有前端规则和后端权威校验都通过后才会创建任务；已解析附件、哈希、候选字段和人工确认值会随任务留痕。</p>
-          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? '正在校验并创建…' : '校验并创建任务'}</button>
+        <div className="form-actions form-actions-compact">
+          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? '正在创建…' : '创建任务'}</button>
         </div>
       </form>
 

@@ -171,6 +171,26 @@ class ScopedInvestigationTools:
         for prefix in ("shipping_fee", "other_fees"):
             if names.intersection({prefix + "_status", prefix + "_amount"}):
                 names.update({prefix + "_status", prefix + "_amount"})
+
+        def resolution(name: str) -> str:
+            matching = [
+                problem
+                for problem in self.review["problems"]
+                if problem["quote_id"] == case.quote_id
+                and problem["field_name"] == name
+            ]
+            if any(
+                problem["resolution"] == "ADDITIONAL_INFORMATION_REQUIRED"
+                for problem in matching
+            ):
+                return "ADDITIONAL_INFORMATION_REQUIRED"
+            if name in candidates and not any(
+                problem["resolution"] == "REEXTRACT_OR_SYSTEM_REPAIR"
+                for problem in matching
+            ):
+                return "FIELD_CORRECTION"
+            return "REEXTRACT_OR_SYSTEM_REPAIR"
+
         return tuple({
             "quote_id": case.quote_id, "field_name": name,
             "expected_field_version": candidates.get(name, {}).get("field_version"),
@@ -178,10 +198,7 @@ class ScopedInvestigationTools:
             "source_refs": candidates.get(name, {}).get("source_refs", []),
             "current_value": candidates.get(name, {}).get("normalized_value"),
             "question": "请核对指定原文件或供应商确认信息，再提交真实字段值；未知金额不能填零。",
-            "resolution": "FIELD_CORRECTION" if name in candidates and not any(
-                p["quote_id"] == case.quote_id and p["field_name"] == name
-                and p["resolution"] == "REEXTRACT_OR_SYSTEM_REPAIR" for p in self.review["problems"]
-            ) else "REEXTRACT_OR_SYSTEM_REPAIR",
+            "resolution": resolution(name),
         } for name in sorted(names))
 
     def execute(self, case: InvestigationCase, name: str, arguments: dict) -> ToolResult:

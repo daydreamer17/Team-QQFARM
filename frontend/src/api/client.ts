@@ -18,7 +18,7 @@ import type {
   PolicyClauseInput,
   PolicyImportListQuery,
   PolicyImportListResponse,
-  PolicyImportMetadata,
+  PolicyImportUploadMetadata,
   PolicyImportResponse,
   PolicySetListQuery,
   PolicySetListResponse,
@@ -28,6 +28,7 @@ import type {
   QuoteDraftReviewActionInput,
   QuoteDraftResponse,
   QuoteDeactivateResponse,
+  QuoteReactivateResponse,
   QuoteFieldSchemaResponse,
   QuoteHistoryResponse,
   QuoteUploadResponse,
@@ -356,6 +357,23 @@ export const api = {
         body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
       },
     ),
+  reactivateQuote: (
+    taskId: string,
+    quoteId: string,
+    expectedTaskRevision: number,
+    idempotencyKey: string,
+  ) =>
+    request<QuoteReactivateResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes/${encodeURIComponent(quoteId)}/reactivate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+      },
+    ),
   createQuoteRevision: (
     taskId: string,
     quoteId: string,
@@ -663,7 +681,7 @@ export const api = {
       },
     ),
   uploadPolicy: (
-    input: { metadata: PolicyImportMetadata; file: File },
+    input: { metadata: PolicyImportUploadMetadata; file: File },
     idempotencyKey: string,
   ) => {
     const body = new FormData()

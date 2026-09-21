@@ -460,6 +460,15 @@ export interface QuoteDeactivateResponse {
   active: false
 }
 
+export interface QuoteReactivateResponse {
+  task_id: string
+  task_revision: number
+  status: string
+  quote_id: string
+  supplier_id: string
+  active: true
+}
+
 export interface StartRunResponse {
   task_id: string
   task_revision: number
@@ -1027,6 +1036,19 @@ export interface PolicyImportMetadata {
   effective_to: string | null
   categories: string[]
   regions: string[]
+}
+
+export interface PolicyImportUploadMetadata {
+  title: string
+  effective_from: string
+  effective_to: string | null
+  categories: string[]
+  regions: string[]
+  policy_set_id?: string
+  policy_set_version?: string
+  policy_id?: string
+  document_id?: string
+  document_version?: string
 }
 
 export interface PolicyDraftClause {

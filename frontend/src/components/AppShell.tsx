@@ -108,11 +108,9 @@ export function AppShell() {
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-title">
-            <small>Electronics Procurement</small>
             <strong>供应商比选工作区</strong>
           </div>
           <div className="topbar-actions">
-            <span className="environment-badge">LOCAL</span>
             <span className="user-avatar" aria-label="当前用户 LC">LC</span>
           </div>
         </header>

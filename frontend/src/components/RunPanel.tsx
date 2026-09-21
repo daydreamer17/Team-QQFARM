@@ -39,7 +39,9 @@ function statusCopy(task: TaskDetail) {
     case 'RUNNING':
       return ['分析进行中', '后台正在处理报价，页面会自动刷新状态。']
     case 'NEEDS_INPUT':
-      return ['需要人工确认', '分析已暂停，必须处理当前问题后才能继续。']
+      return task.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
+        ? ['需要集中确认', '分析已暂停，请进入“待处理事项”一次性完成本轮确认。']
+        : ['需要人工确认', '分析已暂停，必须处理当前问题后才能继续。']
     case 'COMPLETED':
       return ['分析已完成', '当前版本已生成比较结果。']
     case 'FAILED':
@@ -52,7 +54,7 @@ function statusCopy(task: TaskDetail) {
 function jobErrorMessage(task: TaskDetail) {
   const code = task.current_job?.error_code
   const messages: Record<string, string> = {
-    review_required: '报价中有字段需要人工核对。请返回“报价与证据”，一次性处理全部阻塞项。',
+    review_required: '报价中有字段需要人工核对。请进入“待处理事项”，一次性处理全部阻塞项。',
     csv_header_unregistered: 'CSV 表头不是当前支持的报价模板。请使用 V1、V2、V3、V5 的已登记供应商模板，或 V6 固定模板。',
     csv_duplicate_headers: 'CSV 表头包含重复列名，无法确定字段来源。请修正重复列后重新上传。',
     csv_header_missing: 'CSV 没有表头，无法识别字段。',
@@ -185,8 +187,12 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
     task.status === 'FAILED' &&
     task.current_job?.job_type === 'RESUME' &&
     task.current_job.error_code !== 'review_required'
+  const canRestartInterrupted =
+    task.status === 'NEEDS_INPUT' &&
+    !task.current_job?.correction_batch_incomplete
   const canStart =
     (task.status === 'DRAFT' ||
+      canRestartInterrupted ||
       (task.status === 'FAILED' &&
         task.current_job?.error_code !== 'review_required' &&
         !canRetryResume)) &&
@@ -244,7 +250,9 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
 
       {task.status === 'NEEDS_INPUT' && (
         <div className="run-notice">
-          请在下方人工确认区处理当前问题；提交后会从暂停位置继续分析。
+          {task.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
+            ? '请进入“待处理事项”完成集中确认；提交后系统会统一重新审核与计算。'
+            : '请处理当前问题；提交后会从暂停位置继续分析。'}
         </div>
       )}
 
@@ -304,7 +312,7 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
           >
             {startRun.isPending
               ? '正在排队…'
-              : task.status === 'FAILED'
+              : task.status === 'FAILED' || task.status === 'NEEDS_INPUT'
                 ? '按当前版本重新分析'
                 : '启动分析'}
           </button>

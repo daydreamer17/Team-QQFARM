@@ -21,15 +21,17 @@ const dispositions: Record<string, string> = {
 }
 
 const fields: Record<string, string> = {
+  supplier_name: '供应商名称', supplier_country: '供应商所在国家', category: '采购类别', item: '商品名称',
   manufacturer: '制造商', manufacturer_part_number: '制造商料号', package: '封装', revision: '版本',
   condition: '物料状态', unit_price: '单价', currency: '币种', base_unit: '采购计量单位',
-  price_basis_unit: '计价单位', packaging_type: '包装类型', units_per_pack: '每包装数量',
+  price_basis_quantity: '单价对应数量', price_basis_unit: '计价单位',
+  packaging_type: '包装类型', units_per_pack: '每包装数量',
   order_multiple_units: '订购倍数', moq_quantity: '最低订购量', moq_unit: '最低订购量单位',
   shipping_fee_status: '运费状态', shipping_fee_amount: '运费金额',
   other_fees_status: '其他费用状态', other_fees_amount: '其他费用金额', tax_mode: '税费方式',
   lead_time_days: '交期天数', day_basis: '交期计算方式', delivery_semantics: '交付承诺',
   start_event: '交期起算时间', delivery_date: '交付日期', delivery_deadline: '交付截止日期',
-  payment_terms: '付款条件', valid_until: '报价有效期',
+  payment_terms: '付款条件', quote_date: '报价日期', valid_until: '报价有效期',
 }
 
 const reasons: Record<string, string> = {
@@ -43,7 +45,7 @@ const reasons: Record<string, string> = {
   PRICE_BASIS_UNIT_MISMATCH: '计价单位无法换算为采购比较单位。',
   REQUIREMENT_UNIT_CONVERSION_UNSUPPORTED: '采购数量单位暂时无法换算。',
   SUBSTITUTE_COMPATIBILITY_REVIEW_REQUIRED: '该报价涉及替代料，需要人工确认兼容性。',
-  TAX_MODE_MISMATCH: '报价税费方式不符合采购要求。',
+  TAX_CONVERSION_REQUIRED: '当前税费方式需要补充换算信息后才能比较。',
   TAX_CALCULATION_UNSUPPORTED: '当前税费条件超出自动计算范围。',
   FEE_AMOUNT_UNKNOWN: '费用金额尚未确认，暂时无法计算确定总成本。',
   FEE_STATUS_UNSUPPORTED: '费用状态无法识别，需要人工确认。',
