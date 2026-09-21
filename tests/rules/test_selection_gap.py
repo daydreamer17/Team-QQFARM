@@ -117,7 +117,8 @@ def test_requirement_simulation_supports_ranking_tolerance_and_supplier_exclusio
         RequirementChanges(cost_tolerance_amount='100.00'),
         user_authorized=True,
     )
-    assert tolerance.comparison.recommended_quote_ids == ('QUOTE-C',)
+    assert tolerance.comparison.recommended_quote_ids == ('QUOTE-B', 'QUOTE-C')
+    assert tolerance.comparison.ranking_trace.tie_group == ('QUOTE-B', 'QUOTE-C')
     assert tolerance.changes['cost_tolerance_amount'] == '100.00'
 
     excluded = simulate_requirement_change(
@@ -126,7 +127,8 @@ def test_requirement_simulation_supports_ranking_tolerance_and_supplier_exclusio
         user_authorized=True,
     )
     assert excluded.excluded_quote_ids == ('QUOTE-C',)
-    assert tuple(row.quote_id for row in excluded.comparison.supplier_results) == ('QUOTE-B',)
+    assert tuple(row.quote_id for row in excluded.comparison.supplier_results) == ('QUOTE-B', 'QUOTE-C')
+    assert excluded.comparison.ranking_trace.excluded_quote_ids == ('QUOTE-C',)
     assert excluded.comparison.recommended_quote_ids == ('QUOTE-B',)
     assert original.comparison.quotes == (b, _supplier_c())
 

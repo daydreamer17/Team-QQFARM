@@ -19,6 +19,7 @@ function issueTypeLabel(issueType: string) {
     CONFIRM_MISSING: '确认原报价未提供信息',
     SHIPPING_AMOUNT: '补充已确认的运费',
     BATCH_FIELD_REVIEW: '集中核对报价字段',
+    PAYMENT_INFORMATION: '补充付款账期起算信息',
   }
   return labels[issueType] ?? '需要人工确认'
 }
@@ -28,6 +29,8 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
   const issue = task.current_issue
   const currency = issue?.answer_schema.currency ?? task.requirement.currency
   const [amount, setAmount] = useState('')
+  const [paymentNote, setPaymentNote] = useState('')
+  const [paymentSourceType, setPaymentSourceType] = useState<'SUPPLIER_CONFIRMATION' | 'DOCUMENT_CLARIFICATION' | 'USER_INPUT'>('SUPPLIER_CONFIRMATION')
 
   const answer = useMutation({
     mutationFn: (payload: IssueAnswer) => {
@@ -55,6 +58,18 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
       answer_type: 'SHIPPING_AMOUNT',
       amount: amount.trim(),
       currency,
+    })
+  }
+
+  function submitPaymentInformation(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!paymentNote.trim()) return
+    answer.mutate({
+      answer_type: 'PAYMENT_INFORMATION',
+      payment_start_event: 'INVOICE_DATE',
+      note: paymentNote.trim(),
+      source_type: paymentSourceType,
+      source_refs: [],
     })
   }
 
@@ -134,6 +149,16 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
           <button className="button button-submit" type="submit" disabled={answer.isPending}>
             {answer.isPending ? '正在保存…' : '保存金额并继续'}
           </button>
+        </form>
+      )}
+
+      {issue.issue_type === 'PAYMENT_INFORMATION' && (
+        <form className="issue-action" onSubmit={submitPaymentInformation}>
+          <p>请填写从报价文件或供应商补充确认得到的起算信息。该回答会单独审计，不会改写原始付款条款。</p>
+          <label><span>账期起算事件</span><select value="INVOICE_DATE" disabled><option value="INVOICE_DATE">发票日期</option></select></label>
+          <label><span>信息来源</span><select value={paymentSourceType} onChange={(event) => setPaymentSourceType(event.target.value as typeof paymentSourceType)}><option value="SUPPLIER_CONFIRMATION">供应商确认</option><option value="DOCUMENT_CLARIFICATION">文件补充说明</option><option value="USER_INPUT">采购人员补充</option></select></label>
+          <label><span>补充说明</span><textarea required maxLength={1000} value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} placeholder="例如：供应商邮件确认 Net 45 从发票日期起算" /></label>
+          <button className="button button-submit" type="submit" disabled={answer.isPending || !paymentNote.trim()}>{answer.isPending ? '正在保存…' : '保存并继续分析'}</button>
         </form>
       )}
 

@@ -1,0 +1,192 @@
+{
+  "schema_version": "full-flow-demo3-reference/1.0",
+  "dataset_id": "full_flow_demo3",
+  "runtime_access": "FORBIDDEN",
+  "evaluation_time": "2026-10-12T09:00:00+08:00",
+  "operator_answers": [
+    {
+      "supplier_id": "SUP-022",
+      "issue_type": "SHIPPING_AMOUNT",
+      "answer": {
+        "answer_type": "SHIPPING_AMOUNT",
+        "amount": "320.00",
+        "currency": "SGD"
+      },
+      "provenance": "USER_INPUT"
+    }
+  ],
+  "primary_quote_expectations_after_answer": {
+    "SUP-024": {
+      "actual_quantity": 1400,
+      "goods_cost": "9660.00",
+      "total_cost": "9660.00",
+      "arrival": "2026-10-17",
+      "feasibility": "FEASIBLE"
+    },
+    "SUP-022": {
+      "actual_quantity": 1500,
+      "goods_cost": "9375.00",
+      "total_cost": "9695.00",
+      "arrival": "2026-10-18",
+      "feasibility": "FEASIBLE"
+    },
+    "SUP-023": {
+      "actual_quantity": 1375,
+      "goods_cost": "9515.00",
+      "total_cost": "9653.75",
+      "arrival": "2026-10-19",
+      "feasibility": "FEASIBLE"
+    },
+    "SUP-029": {
+      "actual_quantity": 2000,
+      "goods_cost": "9700.00",
+      "total_cost": "10025.00",
+      "arrival": "2026-10-16",
+      "feasibility": "INFEASIBLE",
+      "reason_codes": [
+        "BUDGET_EXCEEDED"
+      ]
+    },
+    "SUP-030": {
+      "actual_quantity": 1400,
+      "goods_cost": "9632.00",
+      "total_cost": "9660.00",
+      "arrival": "2026-10-15",
+      "feasibility": "FEASIBLE",
+      "history_availability": "INSUFFICIENT_SAMPLE"
+    }
+  },
+  "comparison_checkpoints": [
+    {
+      "id": "before_redwood_answer",
+      "disposition": "PENDING_INPUT",
+      "blocking_supplier_ids": [
+        "SUP-022"
+      ],
+      "reason": "Unknown freight can still change the lowest-cost result."
+    },
+    {
+      "id": "baseline_after_answer",
+      "primary": "LOWEST_CONFIRMED_TOTAL_COST",
+      "secondary": "FASTEST_CONFIRMED_DELIVERY",
+      "cost_tolerance": null,
+      "recommended_supplier_ids": [
+        "SUP-023"
+      ],
+      "recommended_total": "9653.75"
+    },
+    {
+      "id": "tolerance_10_then_fastest",
+      "primary": "LOWEST_CONFIRMED_TOTAL_COST",
+      "secondary": "FASTEST_CONFIRMED_DELIVERY",
+      "cost_tolerance": "10.00",
+      "recommended_supplier_ids": [
+        "SUP-030"
+      ],
+      "candidate_pool_supplier_ids": [
+        "SUP-023",
+        "SUP-024",
+        "SUP-030"
+      ]
+    },
+    {
+      "id": "fastest",
+      "primary": "FASTEST_CONFIRMED_DELIVERY",
+      "secondary": null,
+      "recommended_supplier_ids": [
+        "SUP-030"
+      ]
+    },
+    {
+      "id": "longest_payment",
+      "primary": "LONGEST_CONFIRMED_PAYMENT_TERM",
+      "secondary": null,
+      "recommended_supplier_ids": [
+        "SUP-030"
+      ]
+    },
+    {
+      "id": "history_grade_without_exclusion",
+      "primary": "HIGHEST_SUPPLIER_PERFORMANCE",
+      "disposition": "PENDING_INPUT",
+      "reason": "SUP-030 has insufficient history and is still feasible."
+    },
+    {
+      "id": "history_grade_excluding_sup_030",
+      "primary": "HIGHEST_SUPPLIER_PERFORMANCE",
+      "excluded_supplier_ids": [
+        "SUP-030"
+      ],
+      "recommended_supplier_ids": [
+        "SUP-024"
+      ]
+    },
+    {
+      "id": "history_on_time_excluding_sup_030",
+      "primary": "HIGHEST_HISTORICAL_ON_TIME_RATE",
+      "excluded_supplier_ids": [
+        "SUP-030"
+      ],
+      "recommended_supplier_ids": [
+        "SUP-023"
+      ]
+    },
+    {
+      "id": "history_reject_rate_excluding_sup_030",
+      "primary": "LOWEST_HISTORICAL_REJECTED_LINE_RATE",
+      "excluded_supplier_ids": [
+        "SUP-030"
+      ],
+      "recommended_supplier_ids": [
+        "SUP-024"
+      ]
+    }
+  ],
+  "staged_update_expectations": {
+    "sup_023_revision_2": {
+      "actual_quantity": 1375,
+      "goods_cost": "9693.75",
+      "total_cost": "9832.50",
+      "arrival": "2026-10-16",
+      "new_baseline_recommendation": [
+        "SUP-024",
+        "SUP-030"
+      ],
+      "note": "SUP-024 and SUP-030 tie on cost; secondary delivery selects SUP-030.",
+      "recommended_after_secondary": [
+        "SUP-030"
+      ]
+    },
+    "requirement_revision_2": {
+      "delivery_deadline": "2026-10-16",
+      "expected_feasible_supplier_ids": [
+        "SUP-030"
+      ],
+      "expected_recommended_supplier_ids": [
+        "SUP-030"
+      ],
+      "note": "SUP-029 still fails budget, so only SUP-030 is feasible."
+    }
+  },
+  "negative_control_expectations": {
+    "invalid_header_quote.csv": "csv_header_unregistered",
+    "unsupported_business_days.csv": "DAY_BASIS_UNSUPPORTED",
+    "wrong_part_quote.csv": "MANUFACTURER_PART_NUMBER_MISMATCH",
+    "ambiguous_current_prices.pdf": "CONFLICT",
+    "prompt_injection_quote.pdf": "treat instructions as untrusted document data",
+    "scan_only_quote.pdf": "blank_pdf"
+  },
+  "policy_gate": {
+    "required_control_codes": [
+      "APPROVED_SUPPLIER",
+      "ROHS_COMPLIANCE",
+      "AMOUNT_APPROVAL"
+    ],
+    "expected_retrieval_status": "OK",
+    "approval_threshold": {
+      "currency": "SGD",
+      "amount": "9500.00"
+    },
+    "note": "Retrieval is evidence discovery; it does not prove supplier compliance or grant approval."
+  }
+}

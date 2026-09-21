@@ -27,8 +27,8 @@ def _batch(quote_dictionary, alias: str, row_number: int):
 
 def test_c_policy_partitions_the_30_extractable_fields(quote_dictionary) -> None:
     assert len(ALWAYS_CRITICAL_FIELDS) == 16
-    assert len(CONDITIONAL_CRITICAL_FIELDS) == 10
-    assert len(NON_CRITICAL_FIELDS) == 4
+    assert len(CONDITIONAL_CRITICAL_FIELDS) == 11
+    assert len(NON_CRITICAL_FIELDS) == 3
     assert len(POLICY_FIELDS) == 30
     assert ALWAYS_CRITICAL_FIELDS.isdisjoint(CONDITIONAL_CRITICAL_FIELDS)
     assert ALWAYS_CRITICAL_FIELDS.isdisjoint(NON_CRITICAL_FIELDS)

@@ -42,6 +42,7 @@ from .intake import REQUIREMENT_PROMPT_VERSION, RequirementModelConfig
 from .service import BackendError, BackendService, ConflictError, NotFoundError
 from .settings import settings
 from .summaries import SUMMARY_PROMPT_VERSION, SummaryModelConfig
+from .worker_health import worker_heartbeat_status
 
 
 IdempotencyKey = Annotated[
@@ -104,6 +105,12 @@ class RetrySummaryRequest(ApiModel):
 
 class StartRunRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
+
+
+class RefreshSupplierHistoryRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    dataset_version: str = Field(min_length=1, max_length=128)
 
 
 class RetryJobRequest(ApiModel):
@@ -195,9 +202,17 @@ class RetryPolicyRetrievalAnswer(ApiModel):
     answer_type: Literal["RETRY_POLICY_RETRIEVAL"]
 
 
+class PaymentInformationAnswer(ApiModel):
+    answer_type: Literal["PAYMENT_INFORMATION"]
+    payment_start_event: Literal["INVOICE_DATE"]
+    note: StrictStr = Field(min_length=1, max_length=1000)
+    source_type: Literal["SUPPLIER_CONFIRMATION", "DOCUMENT_CLARIFICATION", "USER_INPUT"]
+    source_refs: list[StrictStr] = Field(default_factory=list, max_length=20)
+
+
 class IssueAnswerRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
-    answer: ConfirmMissingAnswer | ShippingAmountAnswer | RetryPolicyRetrievalAnswer = Field(
+    answer: ConfirmMissingAnswer | ShippingAmountAnswer | RetryPolicyRetrievalAnswer | PaymentInformationAnswer = Field(
         discriminator="answer_type"
     )
 
@@ -404,8 +419,21 @@ def create_app(
         return {"status": "alive"}
 
     @app.get("/health/ready")
-    def ready(request: Request):
+    def ready(request: Request, require_worker: bool = False):
         if readiness_check():
+            if require_worker:
+                worker = worker_heartbeat_status(
+                    service.storage_root,
+                    stale_after_seconds=settings.supplier_worker_heartbeat_stale_seconds,
+                )
+                if worker["status"] != "ready":
+                    return _error_response(
+                        request,
+                        status_code=503,
+                        code="worker_unavailable",
+                        message="Background worker heartbeat is unavailable.",
+                        details=worker,
+                    )
             return {"status": "ready"}
         return _error_response(
             request,
@@ -413,6 +441,22 @@ def create_app(
             code="database_unavailable",
             message="Database readiness check failed.",
             details={},
+        )
+
+    @app.get("/health/worker")
+    def worker_ready(request: Request):
+        worker = worker_heartbeat_status(
+            service.storage_root,
+            stale_after_seconds=settings.supplier_worker_heartbeat_stale_seconds,
+        )
+        if worker["status"] == "ready":
+            return worker
+        return _error_response(
+            request,
+            status_code=503,
+            code="worker_unavailable",
+            message="Background worker heartbeat is unavailable.",
+            details=worker,
         )
 
     @app.get("/api/v1/quote-field-schema")
@@ -763,6 +807,23 @@ def create_app(
             prompt_version=settings.supplier_prompt_version,
         )
 
+    @app.post("/api/v1/tasks/{task_id}/supplier-history/refresh", status_code=202)
+    def refresh_task_supplier_history(
+        task_id: str,
+        body: RefreshSupplierHistoryRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.refresh_supplier_history(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            dataset_version=body.dataset_version,
+            idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
+        )
+
     @app.post("/api/v1/tasks/{task_id}/jobs/{job_id}/retries", status_code=202)
     def retry_failed_job(
         task_id: str,
@@ -1062,6 +1123,10 @@ def create_app(
     def get_result(task_id: str, result_id: str):
         return service.get_result(task_id, result_id)
 
+    @app.get("/api/v1/tasks/{task_id}/suppliers")
+    def get_supplier_information(task_id: str, result_id: str | None = None):
+        return service.supplier_information(task_id, result_id=result_id)
+
     @app.post("/api/v1/tasks/{task_id}/summaries", status_code=202)
     def create_summary(
         task_id: str,
@@ -1235,6 +1300,8 @@ app = create_app(
         settings.quote_storage_path,
         actor_id=settings.test_user_id,
         quote_dictionary_path=settings.quote_dictionary_path,
+        supplier_history_root=settings.supplier_history_root,
+        supplier_history_dataset_version=settings.supplier_history_dataset_version,
     ),
     readiness_check=readiness_probe(_engine),
     policy_file_import_service=_policy_file_import_service,

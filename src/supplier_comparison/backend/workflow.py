@@ -59,6 +59,7 @@ from .service import BackendError, BackendService, ConflictError, new_id
 from .investigation import CaseStatus, InvestigationRunner
 from .investigation_tools import ScopedInvestigationTools
 from .policy_investigation import ScopedPolicyInvestigationTools, diagnose_policy
+from .supplier_history import history_inputs
 
 
 logger = logging.getLogger(__name__)
@@ -229,6 +230,12 @@ class DraftReviewRunner:
                 CriticalityContext(
                     required_revision=requirement.revision,
                     base_unit=requirement.base_unit,
+                    payment_terms_required=(
+                        requirement.ranking_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                        or requirement.secondary_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    ),
                 ),
                 input_is_synthetic=context["is_synthetic"],
                 reviewed_at=datetime.now(timezone.utc),
@@ -288,6 +295,7 @@ class WorkflowState(TypedDict, total=False):
     evaluated_at: str
     investigation_waiting: bool
     investigation_case_ids: list[str]
+    payment_information_quote_ids: list[str]
 
 
 class WorkflowRunner:
@@ -326,6 +334,7 @@ class WorkflowRunner:
         builder.add_node("investigate_quotes", self._investigate_quotes)
         builder.add_node("await_batch_review", self._await_batch_review)
         builder.add_node("await_missing_confirmation", self._await_missing_confirmation)
+        builder.add_node("await_payment_information", self._await_payment_information)
         builder.add_node("apply_missing_confirmation", self._apply_missing_confirmation)
         builder.add_node("freeze_draft_and_compare", self._freeze_draft_and_compare)
         builder.add_node("await_shipping_amount", self._await_shipping_amount)
@@ -345,11 +354,13 @@ class WorkflowRunner:
             self._route_after_review,
             {
                 "needs_shipping_confirmation": "await_missing_confirmation",
+                "needs_payment_information": "await_payment_information",
                 "ready": "freeze_final_and_compare",
                 "needs_batch_review": "await_batch_review",
             },
         )
         builder.add_edge("await_missing_confirmation", "apply_missing_confirmation")
+        builder.add_edge("await_payment_information", "analyze_decision_impact")
         builder.add_edge("apply_missing_confirmation", "freeze_draft_and_compare")
         builder.add_edge("freeze_draft_and_compare", "await_shipping_amount")
         builder.add_edge("await_shipping_amount", "apply_shipping_amount")
@@ -563,6 +574,7 @@ class WorkflowRunner:
                 or parsed.document_sha256 != document["document_sha256"]
             ):
                 raise BackendError("decision_impact_identity_mismatch", "Impact input is stale.")
+        history_context, history_snapshots = history_inputs(context, envelopes)
         try:
             return analyze_reviewed_decision_impact(
                 ProcurementRequirement.model_validate(context["requirement"]), envelopes,
@@ -574,6 +586,9 @@ class WorkflowRunner:
                 decision_preferences=DecisionPreferences.model_validate(
                     context["decision_profile"]["preferences"]
                 ),
+                supplier_history_snapshots=history_snapshots,
+                history_dataset_context=history_context,
+                payment_supplements=context.get("payment_supplements", {}),
             )
         except DownstreamNotReadyError as exc:
             raise BackendError(
@@ -599,6 +614,18 @@ class WorkflowRunner:
             row.quote_id for row in report.comparison.supplier_results
         }
         excluded_quote_ids = set(state["review_artifact_ids"]) - compared_quote_ids
+        trace = report.comparison.ranking_trace
+        payment_criterion_required = bool(
+            trace
+            and (
+                (trace.ordered_criteria and trace.ordered_criteria[0].value == "LONGEST_CONFIRMED_PAYMENT_TERM")
+                or any(
+                    round_.criterion.value == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    and "SECONDARY_NOT_TRIGGERED" not in round_.reason_codes
+                    for round_ in trace.rounds
+                )
+            )
+        )
         return {
             "decision_impact_artifact_id": artifact["artifact_id"],
             "nonblocking_unknown_quote_ids": sorted(
@@ -608,6 +635,20 @@ class WorkflowRunner:
             "undetermined_quote_ids": [
                 impact.quote_id for impact in report.quote_impacts
                 if impact.status == ImpactStatus.UNDETERMINED
+            ],
+            "payment_information_quote_ids": [
+                row.quote_id
+                for row in report.comparison.supplier_results
+                if payment_criterion_required
+                and any(
+                    evaluation.criterion.value == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    and "PAYMENT_START_EVENT_MISSING" in evaluation.reason_codes
+                    for evaluation in row.criterion_evaluations
+                )
+                and row.quote_id not in set(
+                    report.comparison.ranking_trace.excluded_quote_ids
+                    if report.comparison.ranking_trace else ()
+                )
             ],
         }
 
@@ -644,6 +685,8 @@ class WorkflowRunner:
         raise ConflictError("batch_review_requires_correction", "Submit corrections to start a new reviewed input version.")
 
     def _route_after_review(self, state: WorkflowState) -> str:
+        if state.get("payment_information_quote_ids"):
+            return "needs_payment_information"
         if state.get("investigation_waiting"):
             return "needs_batch_review"
         if state.get("undetermined_quote_ids"):
@@ -693,6 +736,37 @@ class WorkflowRunner:
             "One or more quotes require a correction before comparison.",
             quote_ids=sorted(set(not_ready) | set(state.get("blocking_unknown_quote_ids", []))),
         )
+
+    def _await_payment_information(self, state: WorkflowState) -> WorkflowState:
+        quote_id = state["payment_information_quote_ids"][0]
+        issue = self.service.open_issue(
+            task_id=state["task_id"],
+            graph_run_id=state["graph_run_id"],
+            task_revision=state["task_revision"],
+            issue_type="PAYMENT_INFORMATION",
+            quote_id=quote_id,
+            field_name="payment_start_event",
+            question="该报价的 Net 账期缺少起算口径。请根据供应商确认或文件补充信息确认账期从何时开始。",
+            answer_schema={
+                "answer_type": "PAYMENT_INFORMATION",
+                "payment_start_event_options": ["INVOICE_DATE"],
+                "requires_note": True,
+                "source_type_options": [
+                    "SUPPLIER_CONFIRMATION", "DOCUMENT_CLARIFICATION", "USER_INPUT"
+                ],
+                "expected_task_revision": state["task_revision"],
+            },
+        )
+        resumed = interrupt(self._safe_interrupt(issue))
+        if not isinstance(resumed, dict) or resumed.get("issue_id") != issue["issue_id"]:
+            raise ConflictError("resume_issue_mismatch", "Resume token does not match the issue.")
+        resolved = self.service.get_issue(issue["issue_id"])
+        if resolved["status"] != "RESOLVED":
+            raise ConflictError("issue_not_resolved", "Issue must be resolved before resume.")
+        return {
+            "task_revision": resolved["resolved_revision"],
+            "payment_information_quote_ids": state["payment_information_quote_ids"][1:],
+        }
 
     def _await_missing_confirmation(self, state: WorkflowState) -> WorkflowState:
         target_quote_id = self._missing_shipping_quote(state)
@@ -1006,6 +1080,26 @@ class WorkflowRunner:
             "graph_run_id": state["graph_run_id"],
             "requirement": context["requirement"],
             "decision_profile": context["decision_profile"],
+            "supplier_history_binding": context.get("supplier_history_binding"),
+            "supplier_history_dataset_context": (
+                (context.get("supplier_history_dataset") or {}).get("context")
+            ),
+            "supplier_history_snapshots": [
+                row.history_snapshot.model_dump(mode="json")
+                for row in result.supplier_results
+                if row.history_snapshot is not None
+            ],
+            "documents": [
+                {
+                    key: document.get(key)
+                    for key in (
+                        "quote_id", "quote_version", "supplier_id", "document_id",
+                        "document_version", "document_sha256", "original_filename",
+                        "is_synthetic",
+                    )
+                }
+                for document in context["documents"]
+            ],
             "batch_artifact_ids": state["batch_artifact_ids"],
             "review_artifact_ids": state["review_artifact_ids"],
             "decision_impact_artifact_id": impact_artifact["artifact_id"],
@@ -1287,6 +1381,12 @@ class WorkflowRunner:
             CriticalityContext(
                 required_revision=requirement.revision,
                 base_unit=requirement.base_unit,
+                payment_terms_required=(
+                    requirement.ranking_preference
+                    == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    or requirement.secondary_preference
+                    == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                ),
             ),
             input_is_synthetic=input_is_synthetic,
             reviewed_at=reviewed_at,

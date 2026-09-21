@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import type { TaskDetail } from '../api/types'
 import { taskStatusLabel } from '../lib/presentation'
 
-type WorkspaceSection = 'overview' | 'quotes' | 'review' | 'investigations' | 'decision' | 'gaps' | 'compliance' | 'summary' | 'audit'
+type WorkspaceSection = 'overview' | 'quotes' | 'review' | 'suppliers' | 'investigations' | 'decision' | 'gaps' | 'compliance' | 'summary' | 'audit'
 
 interface TaskWorkspaceHeaderProps {
   taskId: string
@@ -79,6 +79,7 @@ export function TaskWorkspaceHeader({
         <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>概览</Link>
         <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>报价与证据</Link>
         {(reviewBlocked || active === 'review') && <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>待处理事项</Link>}
+        <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>供应商信息</Link>
         <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策结果</Link>
         {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>差距详情</Link>}
         {active === 'investigations' && <Link className={tabClass(true)} to={`/tasks/${taskId}/investigations`}>调查详情</Link>}

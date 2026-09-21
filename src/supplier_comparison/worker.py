@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -15,6 +16,7 @@ from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
+from .backend.worker_health import write_worker_heartbeat
 from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
 from .backend.intake import RequirementModelConfig, extract_requirement_candidates, parse_requirement_document
 from .backend.summaries import SummaryModelConfig, generate_summary_narrative
@@ -39,6 +41,8 @@ def run_job(job_id: str) -> dict:
         actor_id=settings.test_user_id,
         quote_dictionary_path=settings.quote_dictionary_path,
         conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
+        supplier_history_root=settings.supplier_history_root,
+        supplier_history_dataset_version=settings.supplier_history_dataset_version,
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
@@ -163,6 +167,8 @@ def _run_decision_conversation_job(
             code=exc.error_code,
             message=message,
             attempts=attempts,
+            **({"diagnostic": str(exc)[:1000]}
+               if exc.error_code == "conversation_model_output_invalid" else {}),
         )
         raise
     except Exception as exc:
@@ -197,9 +203,25 @@ def run_loop(
             actor_id=settings.test_user_id,
             quote_dictionary_path=settings.quote_dictionary_path,
             conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
+            supplier_history_root=settings.supplier_history_root,
+            supplier_history_dataset_version=settings.supplier_history_dataset_version,
         )
     execute = execute_job or run_job
     processed = 0
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
+    if owned_engine is not None:
+        def heartbeat_loop() -> None:
+            while not heartbeat_stop.is_set():
+                write_worker_heartbeat(settings.quote_storage_path)
+                heartbeat_stop.wait(settings.supplier_worker_heartbeat_interval_seconds)
+
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_loop,
+            name="supplier-worker-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
     try:
         while True:
             job_id = service.next_pending_job_id()
@@ -218,15 +240,25 @@ def run_loop(
     except KeyboardInterrupt:
         return {"status": "STOPPED", "processed_jobs": processed}
     finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=2)
         if owned_engine is not None:
             owned_engine.dispose()
 
 
 def _error_payload(job_id: str, exc: Exception) -> dict:
-    known_error = isinstance(exc, (BackendError, ExtractionError))
+    known_error = isinstance(exc, (BackendError, ExtractionError, ModelClientError))
+    code = (
+        exc.error_code
+        if isinstance(exc, ModelClientError)
+        else exc.code
+        if isinstance(exc, (BackendError, ExtractionError))
+        else "worker_failed"
+    )
     return {
         "error": {
-            "code": exc.code if known_error else "worker_failed",
+            "code": code,
             "message": str(exc) if known_error else "Workflow execution failed.",
         },
         "job_id": job_id,

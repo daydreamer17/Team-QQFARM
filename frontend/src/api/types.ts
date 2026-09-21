@@ -27,8 +27,8 @@ export interface ProcurementRequirement {
   planned_order_date: string | null
   delivery_deadline: string
   delivery_location: string
-  ranking_preference: string
-  secondary_preference: string | null
+  ranking_preference: RankingCriterion
+  secondary_preference: RankingCriterion | null
 }
 
 export interface CreateTaskRequest {
@@ -211,6 +211,9 @@ export interface CurrentIssue {
     retrieval_statuses?: Record<string, PolicyRetrievalStatus>
     submit_to?: string
     expected_task_revision?: number
+    payment_start_event_options?: string[]
+    source_type_options?: string[]
+    requires_note?: boolean
     cards?: BatchReviewCard[]
   }
   created_revision: number
@@ -242,20 +245,30 @@ export interface TaskDetail extends TaskSummary {
   }
   policy_binding: PolicyBinding | null
   decision_profile: DecisionProfile
+  supplier_history_binding?: {
+    binding_status: string
+    dataset_version: string
+    as_of_date: string
+    is_synthetic: boolean
+  } | null
   current_issue: CurrentIssue | null
   current_job: CurrentJob | null
   quotes: TaskQuote[]
   requirement: ProcurementRequirement
 }
 
-export type DecisionRankingMode =
+export type RankingCriterion =
   | 'LOWEST_CONFIRMED_TOTAL_COST'
   | 'FASTEST_CONFIRMED_DELIVERY'
-  | 'LOWEST_COST_THEN_FASTEST_DELIVERY'
-  | 'FASTEST_DELIVERY_THEN_LOWEST_COST'
+  | 'LONGEST_CONFIRMED_PAYMENT_TERM'
+  | 'HIGHEST_SUPPLIER_PERFORMANCE'
+  | 'HIGHEST_HISTORICAL_ON_TIME_RATE'
+  | 'LOWEST_HISTORICAL_REJECTED_LINE_RATE'
 
 export interface DecisionPreferences {
-  ranking_mode: DecisionRankingMode | null
+  schema_version: string
+  primary_criterion: RankingCriterion | null
+  secondary_criterion: RankingCriterion | null
   excluded_supplier_ids: string[]
   cost_tolerance_amount: string | null
 }
@@ -271,7 +284,8 @@ export interface DecisionProfile {
 export interface DecisionChanges {
   budget_amount?: string
   delivery_deadline?: string
-  ranking_mode?: DecisionRankingMode | null
+  primary_criterion?: RankingCriterion | null
+  secondary_criterion?: RankingCriterion | null
   excluded_supplier_ids?: string[]
   cost_tolerance_amount?: string | null
 }
@@ -483,6 +497,13 @@ export type IssueAnswer =
   | { answer_type: 'CONFIRM_MISSING' }
   | { answer_type: 'SHIPPING_AMOUNT'; amount: string; currency: string }
   | { answer_type: 'RETRY_POLICY_RETRIEVAL' }
+  | {
+      answer_type: 'PAYMENT_INFORMATION'
+      payment_start_event: 'INVOICE_DATE'
+      note: string
+      source_type: 'SUPPLIER_CONFIRMATION' | 'DOCUMENT_CLARIFICATION' | 'USER_INPUT'
+      source_refs: string[]
+    }
 
 export interface FieldCorrectionInput {
   quoteId: string
@@ -564,8 +585,54 @@ export interface SupplierComparisonResult {
   total_cost: string | null
   actual_quantity: number | null
   estimated_arrival_date: string | null
+  payment_term?: {
+    raw_text: string | null
+    normalized_text: string | null
+    net_days: number | null
+    payment_start_event: string | null
+    parse_status: string
+    reason_codes: string[]
+  } | null
+  history_snapshot?: SupplierHistorySnapshot | null
+  criterion_evaluations?: CriterionEvaluation[]
   failed_reasons: ResultReason[]
   pending_reasons: ResultReason[]
+}
+
+export interface RateMetric {
+  numerator: number
+  denominator: number
+  rate: string | null
+}
+
+export interface SupplierHistorySnapshot {
+  quote_id: string
+  supplier_id: string | null
+  supplier_name: string | null
+  identity_match_status: string
+  history_availability_status: string
+  overall_grade: string | null
+  on_time: RateMetric | null
+  rejected_lines: RateMetric | null
+  evidence_refs: string[]
+}
+
+export interface CriterionEvaluation {
+  criterion: RankingCriterion
+  status: string
+  exact_value: string | number | null
+  display_value: string | null
+  direction: string
+  reason_codes: string[]
+  evidence_refs: string[]
+}
+
+export interface RankingTrace {
+  ordered_criteria: RankingCriterion[]
+  excluded_quote_ids: string[]
+  secondary_applied: boolean
+  tie_group: string[]
+  comparison_disposition: string
 }
 
 export interface ComparisonPayload {
@@ -579,6 +646,54 @@ export interface ComparisonPayload {
   recommended_quote_ids: string[]
   blocking_pending_quote_ids: string[]
   final_recommendation_allowed: boolean
+  ranking_trace?: RankingTrace | null
+}
+
+export interface SupplierInformationQuote {
+  quote_id: string
+  quote_version: number
+  active: boolean | null
+  in_scope_at_result: boolean | null
+  document_id: string | null
+  document_sha256: string | null
+  is_synthetic: boolean | null
+  evaluation: SupplierComparisonResult | null
+  policy_assessment: PolicyComplianceSupplierAssessment | null
+  decision_impact: QuoteDecisionImpact | null
+}
+
+export interface SupplierInformationEntry {
+  supplier_identity_id: string | null
+  display_name: string
+  supplier_id: string | null
+  identity_match_status: string
+  history_availability_status: string
+  history_snapshot: SupplierHistorySnapshot | null
+  quotes: SupplierInformationQuote[]
+}
+
+export interface SupplierInformationResponse {
+  schema_version: string
+  task_id: string
+  snapshot_revision: number
+  result_id: string | null
+  snapshot_id: string | null
+  view_state: 'QUOTE_ONLY' | 'CURRENT_RESULT' | 'HISTORICAL_RESULT'
+  is_current: boolean
+  context_sha256: string
+  data_availability: string
+  dataset_status: string
+  history_dataset_context: Record<string, unknown> | null
+  history_binding: Record<string, unknown> | null
+  effective_preferences: DecisionPreferences | null
+  ranking_trace: RankingTrace | null
+  quote_count: number
+  matched_supplier_count: number
+  unresolved_identity_quote_count: number
+  draft_count: number | null
+  inactive_quote_count: number | null
+  suppliers: SupplierInformationEntry[]
+  unresolved_identity_quotes: Array<SupplierInformationQuote & Partial<SupplierInformationEntry>>
 }
 
 export interface ComparisonResultResponse {

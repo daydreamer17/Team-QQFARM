@@ -86,6 +86,32 @@ class RequirementRecord(Base):
     )
 
 
+class TaskHistoryBinding(Base):
+    __tablename__ = "task_history_bindings"
+
+    history_binding_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.task_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    binding_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    dataset_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    rating_method_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    identity_matcher_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    alias_allowlist_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    scope: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    as_of_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now
+    )
+
+    __table_args__ = (UniqueConstraint("task_id", "task_revision"),)
+
+
 class DecisionProfile(Base):
     __tablename__ = "decision_profiles"
 
@@ -437,6 +463,10 @@ class GraphRun(Base):
     thread_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     started_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     effective_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    history_binding_id: Mapped[str | None] = mapped_column(
+        ForeignKey("task_history_bindings.history_binding_id", ondelete="RESTRICT"),
+        index=True,
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     current_interrupt_issue_id: Mapped[str | None] = mapped_column(String(64))
     provider: Mapped[str | None] = mapped_column(String(64))
@@ -525,6 +555,10 @@ class Job(Base):
     job_type: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    history_binding_id: Mapped[str | None] = mapped_column(
+        ForeignKey("task_history_bindings.history_binding_id", ondelete="RESTRICT"),
+        index=True,
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_code: Mapped[str | None] = mapped_column(String(128))
     error_message: Mapped[str | None] = mapped_column(Text)

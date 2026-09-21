@@ -14,6 +14,7 @@ from .contracts import (
     DecisionPreferences,
     FeasibilityStatus,
     FrozenModel,
+    RankingCriterion,
     RankingMode,
     RuleIssue,
     ranking_mode_for,
@@ -34,9 +35,26 @@ GAP_VERSION = "selection-gap/1.1.0"
 class RequirementChanges(FrozenModel):
     budget_amount: Decimal | None = Field(default=None, ge=0)
     delivery_deadline: date | None = None
-    ranking_mode: RankingMode | None = None
+    primary_criterion: RankingCriterion | None = None
+    secondary_criterion: RankingCriterion | None = None
+    ranking_mode: RankingMode | None = Field(default=None, exclude=True)
     excluded_supplier_ids: tuple[str, ...] | None = None
     cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def translate_legacy_mode(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or not value.get("ranking_mode"):
+            return value
+        payload = dict(value)
+        primary, secondary = ranking_pair(RankingMode(payload["ranking_mode"]))
+        if payload.get("primary_criterion") not in (None, primary):
+            raise ValueError("legacy and V2 primary ranking fields conflict")
+        if payload.get("secondary_criterion") not in (None, secondary):
+            raise ValueError("legacy and V2 secondary ranking fields conflict")
+        payload["primary_criterion"] = primary
+        payload["secondary_criterion"] = secondary
+        return payload
 
     @field_validator("budget_amount", "cost_tolerance_amount", mode="before")
     @classmethod
@@ -61,6 +79,11 @@ class RequirementChanges(FrozenModel):
     def nonempty(self):
         if not self.model_fields_set:
             raise ValueError("provide a requirement or decision-preference change")
+        if (
+            self.primary_criterion is not None
+            and self.primary_criterion == self.secondary_criterion
+        ):
+            raise ValueError("primary and secondary criteria must differ")
         return self
 
 
@@ -177,9 +200,28 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
             values[field] = supplied[field]
     requirement = type(request.comparison.requirement).model_validate(values)
     base_preferences = request.decision_preferences
-    base_mode = base_preferences.ranking_mode or ranking_mode_for(requirement)
+    legacy_primary = legacy_secondary = None
+    if base_preferences.ranking_mode is not None:
+        legacy_primary, legacy_secondary = ranking_pair(base_preferences.ranking_mode)
+    elif ranking_mode_for(requirement) is not None:
+        legacy_primary, legacy_secondary = ranking_pair(ranking_mode_for(requirement))
+    base_primary = base_preferences.primary_criterion or legacy_primary or requirement.ranking_preference
+    base_secondary = (
+        base_preferences.secondary_criterion
+        if base_preferences.primary_criterion is not None
+        else legacy_secondary if legacy_primary is not None else requirement.secondary_preference
+    )
     effective_preferences = DecisionPreferences(
-        ranking_mode=(changes.ranking_mode if "ranking_mode" in changes.model_fields_set else base_mode),
+        primary_criterion=(
+            changes.primary_criterion
+            if "primary_criterion" in changes.model_fields_set
+            else base_primary
+        ),
+        secondary_criterion=(
+            changes.secondary_criterion
+            if "secondary_criterion" in changes.model_fields_set
+            else base_secondary
+        ),
         excluded_supplier_ids=(
             changes.excluded_supplier_ids or ()
             if "excluded_supplier_ids" in changes.model_fields_set
@@ -191,10 +233,11 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
             else base_preferences.cost_tolerance_amount
         ),
     )
-    if effective_preferences.ranking_mode is not None:
-        primary, _secondary = ranking_pair(effective_preferences.ranking_mode)
-        if effective_preferences.cost_tolerance_amount is not None and primary != COST_RANKING:
-            raise ValueError("cost tolerance requires cost-primary ranking")
+    if (
+        effective_preferences.cost_tolerance_amount is not None
+        and effective_preferences.primary_criterion != COST_RANKING
+    ):
+        raise ValueError("cost tolerance requires cost-primary ranking")
     requested_suppliers = set(effective_preferences.excluded_supplier_ids)
     available_suppliers = set(request.supplier_bindings.values())
     explicitly_requested = (
@@ -221,7 +264,7 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
     if effective_preferences.cost_tolerance_amount is not None:
         assumptions.append(
             f"Candidate pool is minimum confirmed total cost plus {effective_preferences.cost_tolerance_amount} "
-            f"{requirement.currency}; earliest confirmed arrival wins within the pool, then lowest cost."
+            f"{requirement.currency}; the pool remains tied unless the user selected a secondary criterion."
         )
     if excluded_quote_ids:
         assumptions.append("Excluded suppliers are omitted only from this hypothetical comparison.")

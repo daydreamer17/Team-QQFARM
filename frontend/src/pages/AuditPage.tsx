@@ -3,8 +3,10 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, documentContentUrl } from '../api/client'
 import type { IssueHistoryItem, ResultHistoryItem } from '../api/types'
-import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
+import { TablePagination } from '../components/TablePagination'
+import { useTablePagination } from '../hooks/useTablePagination'
+import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { fieldLabel, policyStatusLabel, taskStatusLabel } from '../lib/presentation'
 
 function displayDate(value: string | null | undefined) {
@@ -103,6 +105,16 @@ export function AuditPage() {
     queryFn: () => api.getTaskAudit(taskId),
     enabled: Boolean(taskId),
   })
+  const quoteRows = (quotes.data?.items ?? []).flatMap((quote) => quote.versions.map((version) => ({ quote, version })))
+  const quotePage = useTablePagination(quoteRows)
+  const issueRows = issues.data ?? []
+  const issuePage = useTablePagination(issueRows)
+  const resultRows = results.data ?? []
+  const resultPage = useTablePagination(resultRows)
+  const revisionRows = audit.data?.revisions ?? []
+  const revisionPage = useTablePagination(revisionRows)
+  const accessRows = audit.data?.document_accesses ?? []
+  const accessPage = useTablePagination(accessRows)
 
   if (task.isPending) return <section className="card loading-panel">正在读取任务审计信息…</section>
   if (task.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error)}</section>
@@ -128,22 +140,16 @@ export function AuditPage() {
         active="audit"
       />
 
-      <section className="review-workspace-lead">
-        <div>
+      <section className="card audit-summary-bar">
+        <div className="audit-summary-copy">
           <h2>版本记录</h2>
-          <p>查看报价文件、人工确认和分析结果的历史变化。</p>
+          <p>提交报价、修改需求或完成人工处理时生成版本；草稿和运行分析不增加版本。</p>
         </div>
-      </section>
-
-      <details className="audit-version-help">
-        <summary>版本说明</summary>
-        <p>提交报价、修改需求或完成人工处理时生成新版本；草稿编辑和运行分析不会增加版本。</p>
-      </details>
-
-      <section className="audit-overview">
-        <article><span>当前任务版本</span><strong>第 {data.task_revision} 版</strong><small>{taskStatusLabel(data.status)}</small></article>
-        <article><span>当前分析结果</span><strong>{data.current_result_id ? '已生成' : '尚未生成'}</strong></article>
-        <article><span>制度绑定</span><strong>{data.policy_binding?.policy_set_version ?? '未绑定'}</strong></article>
+        <dl className="audit-summary-status" aria-label="当前版本状态">
+          <div><dt>当前任务</dt><dd>第 {data.task_revision} 版 · {taskStatusLabel(data.status)}</dd></div>
+          <div><dt>分析结果</dt><dd>{data.current_result_id ? '已生成' : '尚未生成'}</dd></div>
+          <div><dt>制度</dt><dd>{data.policy_binding?.policy_set_version ?? '未绑定'}</dd></div>
+        </dl>
       </section>
 
       {childError && <section className="card error-panel" role="alert">部分审计数据读取失败：{errorMessage(childError)}</section>}
@@ -151,31 +157,11 @@ export function AuditPage() {
       <section className="audit-section">
         <div className="section-heading">
           <div><h2>报价文件</h2></div>
-          {(quotes.data?.items.length ?? 0) > 0 && <span>{quotes.data?.items.length} 个报价</span>}
+          {(quotes.data?.items.length ?? 0) > 0 && <span>{quotes.data?.items.length} 个供应商 · {quoteRows.length} 个文件</span>}
         </div>
         {quotes.isPending && <div className="card loading-panel">正在读取报价版本…</div>}
         {quotes.data?.items.length === 0 && <div className="card audit-empty">暂无报价版本。</div>}
-        <div className="audit-list">
-          {quotes.data?.items.map((quote) => (
-            <article className="card audit-record" key={quote.quote_id}>
-              <header>
-                <div><strong>{quote.supplier_id}</strong>{quote.versions.length > 1 && <span>{quote.versions.length} 个版本</span>}</div>
-                <span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>{quote.active ? '当前报价' : '已停用'}</span>
-              </header>
-              <div className="audit-version-list">
-                {quote.versions.map((version) => (
-                  <div className={version.is_current ? 'audit-version audit-version-current' : 'audit-version'} key={`${quote.quote_id}-${version.quote_version}`}>
-                    <strong>第 {version.quote_version} 版</strong>
-                    <span>{version.original_filename}</span>
-                    <span>{displayDate(version.created_at)}</span>
-                    {version.is_current && quote.versions.length > 1 && <b>当前文件</b>}
-                    <button className="button button-secondary" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>预览 / 下载</button>
-                  </div>
-                ))}
-              </div>
-            </article>
-          ))}
-        </div>
+        {quoteRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-quote-table"><thead><tr><th>供应商</th><th>状态</th><th>版本</th><th>文件</th><th>提交时间</th><th aria-label="操作">操作</th></tr></thead><tbody>{quotePage.pageItems.map(({ quote, version }) => <tr className={version.is_current ? 'audit-current-row' : ''} key={`${quote.quote_id}-${version.quote_version}`}><td><strong>{quote.supplier_id}</strong></td><td><span className={`status-pill ${version.is_current && quote.active ? 'status-ready' : 'status-muted'}`}>{version.is_current ? (quote.active ? '当前报价' : '停用前版本') : '历史版本'}</span></td><td>第 {version.quote_version} 版</td><td><span title={version.original_filename}>{version.original_filename}</span></td><td>{displayDate(version.created_at)}</td><td><button className="quote-preview-action" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>预览 / 下载</button></td></tr>)}</tbody></table></div><TablePagination page={quotePage.page} pageSize={quotePage.pageSize} pageCount={quotePage.pageCount} total={quoteRows.length} onPageChange={quotePage.setPage} /></>}
       </section>
 
       <section className="audit-section">
@@ -190,7 +176,7 @@ export function AuditPage() {
             <table className="audit-table">
               <thead><tr><th>问题</th><th>状态</th><th>任务版本</th><th>回答</th><th>处理信息</th></tr></thead>
               <tbody>
-                {issues.data?.map((issue) => (
+                {issuePage.pageItems.map((issue) => (
                   <tr key={issue.issue_id}>
                     <td><strong>{issueLabel(issue)}</strong><span>{issue.question}</span><small>{issue.field_name ? fieldLabel(issue.field_name) : '制度依据'}</small></td>
                     <td><span className={`status-pill ${issue.status === 'RESOLVED' ? 'status-ready' : 'status-pending'}`}>{issueStatus(issue.status)}</span></td>
@@ -203,6 +189,7 @@ export function AuditPage() {
             </table>
           )}
         </div>
+        <TablePagination page={issuePage.page} pageSize={issuePage.pageSize} pageCount={issuePage.pageCount} total={issueRows.length} onPageChange={issuePage.setPage} />
       </section>
 
       <section className="audit-section">
@@ -212,35 +199,14 @@ export function AuditPage() {
         </div>
         {results.isPending && <div className="card loading-panel">正在读取结果历史…</div>}
         {results.data?.length === 0 && <div className="card audit-empty">暂无比较结果。</div>}
-        <div className="audit-result-list">
-          {results.data?.map((result) => (
-            <article className={`card audit-result ${result.is_current ? 'audit-result-current' : ''}`} key={result.result_id}>
-              <div>
-                <span className="audit-result-revision">采购任务第 {result.task_revision} 版</span>
-                <strong>{result.is_current ? '当前分析结果' : '历史分析结果'}</strong>
-                <small>{result.result.supplier_results.length} 份报价参与比较</small>
-              </div>
-              <dl>
-                <div><dt>规则版本</dt><dd>{result.result.rule_version}</dd></div>
-                <div><dt>评估时间</dt><dd>{displayDate(result.result.evaluated_at)}</dd></div>
-                <div><dt>制度检索</dt><dd>{retrievalSummary(result)}</dd></div>
-                <div><dt>结果状态</dt><dd>{result.is_current ? '当前结果' : '历史结果'}</dd></div>
-              </dl>
-              <Link className="button button-secondary" to={`/tasks/${taskId}/results/${result.result_id}`}>
-                {result.is_current ? '查看当前结果' : '查看历史结果'}
-              </Link>
-            </article>
-          ))}
-        </div>
+        {resultRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-result-table"><thead><tr><th>任务版本</th><th>结果状态</th><th>报价数</th><th>规则版本</th><th>制度检索</th><th>评估时间</th><th aria-label="操作">操作</th></tr></thead><tbody>{resultPage.pageItems.map((result) => <tr className={result.is_current ? 'audit-current-row' : ''} key={result.result_id}><td><strong>第 {result.task_revision} 版</strong></td><td><span className={`status-pill ${result.is_current ? 'status-ready' : 'status-muted'}`}>{result.is_current ? '当前结果' : '历史结果'}</span></td><td>{result.result.supplier_results.length}</td><td>{result.result.rule_version}</td><td>{retrievalSummary(result)}</td><td>{displayDate(result.result.evaluated_at)}</td><td><Link className="table-open-action" to={`/tasks/${taskId}/results/${result.result_id}`}>查看</Link></td></tr>)}</tbody></table></div><TablePagination page={resultPage.page} pageSize={resultPage.pageSize} pageCount={resultPage.pageCount} total={resultRows.length} onPageChange={resultPage.setPage} /></>}
       </section>
 
       <section className="audit-section">
         <div className="section-heading"><div><h2>任务变更</h2></div>{(audit.data?.revisions.length ?? 0) > 0 && <span>{audit.data?.revisions.length} 个版本</span>}</div>
-        <div className="audit-list">{audit.data?.revisions.map((revision) => {
-          const detail = changeDetail(revision.details)
-          return <article className="card audit-record" key={revision.revision}><header><strong>第 {revision.revision} 版 · {changeLabel(revision.change_type)}</strong><span>{displayDate(revision.created_at)}</span></header>{detail && <p>{detail}</p>}</article>
-        })}</div>
-        {(audit.data?.document_accesses.length ?? 0) > 0 && <details><summary>文件访问记录（{audit.data?.document_accesses.length}）</summary><div className="audit-list">{audit.data?.document_accesses.map((event) => <article className="card audit-record" key={event.access_event_id}><strong>访问报价文件</strong><span>{displayDate(event.created_at)}</span></article>)}</div></details>}
+        {revisionRows.length === 0 && !audit.isPending && <div className="card audit-empty">暂无任务变更记录。</div>}
+        {revisionRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-revision-table"><thead><tr><th>版本</th><th>变更类型</th><th>相关信息</th><th>操作人</th><th>时间</th></tr></thead><tbody>{revisionPage.pageItems.map((revision) => <tr key={revision.revision}><td><strong>第 {revision.revision} 版</strong></td><td>{changeLabel(revision.change_type)}</td><td>{changeDetail(revision.details) || '—'}</td><td>{revision.actor_id}</td><td>{displayDate(revision.created_at)}</td></tr>)}</tbody></table></div><TablePagination page={revisionPage.page} pageSize={revisionPage.pageSize} pageCount={revisionPage.pageCount} total={revisionRows.length} onPageChange={revisionPage.setPage} /></>}
+        {accessRows.length > 0 && <details className="audit-access-details"><summary>文件访问记录（{accessRows.length}）</summary><div className="audit-table-wrap"><table className="audit-table audit-access-table"><thead><tr><th>操作</th><th>文件</th><th>操作人</th><th>时间</th></tr></thead><tbody>{accessPage.pageItems.map((event) => <tr key={event.access_event_id}><td>{event.action === 'DOWNLOAD' ? '下载' : '预览'}</td><td>{event.document_id}</td><td>{event.actor_id}</td><td>{displayDate(event.created_at)}</td></tr>)}</tbody></table></div><TablePagination page={accessPage.page} pageSize={accessPage.pageSize} pageCount={accessPage.pageCount} total={accessRows.length} onPageChange={accessPage.setPage} /></details>}
       </section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>

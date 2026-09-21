@@ -179,10 +179,9 @@ def test_reviewed_adapter_excludes_noncritical_display_fields() -> None:
     quote = quote_input_from_reviewed_extraction(envelope)
 
     field_names = {candidate.field_name for candidate in quote.candidates}
-    assert field_names.isdisjoint(
-        {"supplier_country", "category", "item", "payment_terms"}
-    )
-    assert len(field_names) == 26
+    assert field_names.isdisjoint({"supplier_country", "category", "item"})
+    assert "payment_terms" in field_names
+    assert len(field_names) == 27
 
 
 def test_user_correction_without_its_event_is_rejected() -> None:

@@ -239,6 +239,61 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByRole('button', { name: '按当前版本重新分析' })).toBeInTheDocument()
   })
 
+  test('decision page does not redirect to a cached result older than the applied scenario revision', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
+      task_revision: 6,
+      current_result_id: 'result-old',
+      status: 'COMPLETED',
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[{
+          pathname: '/tasks/task-1/decision',
+          state: { expectedRevision: 7 },
+        }] }>
+          <Routes>
+            <Route path="/tasks/:taskId/decision" element={<DecisionPage />} />
+            <Route path="/tasks/:taskId/results/:resultId" element={<div>旧结果页</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '决策比较' })).toBeInTheDocument()
+    expect(screen.queryByText('旧结果页')).not.toBeInTheDocument()
+  })
+
+  test('decision page waits for an explicit rerun instead of reopening the previous result', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
+      status: 'QUEUED',
+      current_graph_run_id: 'run-new',
+      current_result_id: 'result-old',
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[{
+          pathname: '/tasks/task-1/decision',
+          state: {
+            expectedGraphRunId: 'run-new',
+            previousResultId: 'result-old',
+          },
+        }] }>
+          <Routes>
+            <Route path="/tasks/:taskId/decision" element={<DecisionPage />} />
+            <Route path="/tasks/:taskId/results/:resultId" element={<div>旧结果页</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText(/正在按当前代码重新分析/)).toBeInTheDocument()
+    expect(screen.queryByText('旧结果页')).not.toBeInTheDocument()
+  })
+
   test('historical result uses its frozen requirement and requests frozen quote evidence', async () => {
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
     vi.spyOn(api, 'getResult').mockResolvedValue(makeHistoricalResult())
@@ -289,7 +344,7 @@ describe('frontend and backend version consistency', () => {
             sequence: 1,
             role: 'ASSISTANT',
             status: 'SUCCEEDED',
-            content: '这是历史第五版的回答。',
+            content: '这是历史第五版的回答；模型文本中的 quote_fake_999 不应成为引用。',
             reference_ids: ['RESULT:result-old', 'QUOTE:quote-1', 'POLICY:CIT-old'],
             proposed_changes: null,
             decision_intent_id: null,
@@ -320,11 +375,14 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByText('历史结果第 5 版')).toBeInTheDocument()
     expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'CURRENT-PART' })).not.toBeInTheDocument()
-    expect(screen.getByText('这是历史第五版的回答。')).toBeInTheDocument()
+    expect(screen.getByText(/这是历史第五版的回答/)).toBeInTheDocument()
     expect(screen.queryByText('这是当前第六版的回答。')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument()
     await waitFor(() => expect(fields).toHaveBeenCalledWith('task-1', 'quote-1', 'result-old'))
-    expect(conversations).toHaveBeenCalledWith('task-1', 'result-old')
+    expect(conversations).toHaveBeenCalledWith('task-1')
+    expect(screen.getByRole('option', { name: /Rev 6 · 当前版本对话/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Rev 5 · 历史版本对话/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^查看引用/ })).toHaveLength(3)
 
     await userEvent.click(screen.getByRole('button', { name: '查看引用 [2] 供应商报价' }))
     expect(screen.getByRole('dialog', { name: 'Supplier One 字段证据' })).toBeInTheDocument()
@@ -378,6 +436,42 @@ describe('frontend and backend version consistency', () => {
       6,
       expect.any(String),
     ))
+    expect(await screen.findByText('决策页')).toBeInTheDocument()
+  })
+
+  test('current completed result can be rerun after deterministic logic changes', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getResult').mockResolvedValue({
+      ...makeHistoricalResult(),
+      result_id: 'result-current',
+      task_revision: 6,
+      graph_run_id: 'run-current',
+      is_current: true,
+    })
+    vi.spyOn(api, 'getQuoteFields').mockResolvedValue({
+      quote_id: 'quote-1', review_status: 'REVIEW_REQUIRED', review_findings: [], fields: [],
+    })
+    vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionScenarios').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionIntents').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    const startRun = vi.spyOn(api, 'startRun').mockResolvedValue({
+      task_id: 'task-1',
+      task_revision: 6,
+      graph_run_id: 'run-new',
+      job_id: 'job-new',
+      job_type: 'GRAPH_RUN',
+      job_status: 'PENDING',
+    })
+
+    renderRoute(
+      '/tasks/task-1/results/result-current',
+      '/tasks/:taskId/results/:resultId',
+      <ResultPage />,
+    )
+
+    await user.click(await screen.findByRole('button', { name: '重新分析' }))
+    await waitFor(() => expect(startRun).toHaveBeenCalledWith('task-1', 6, expect.any(String)))
     expect(await screen.findByText('决策页')).toBeInTheDocument()
   })
 
@@ -498,10 +592,14 @@ describe('frontend and backend version consistency', () => {
     for (const label of [
       '制造商', '制造商料号', '封装', '物料版本', '物料状态',
       '数量单位', '币种', '成本比较口径', '计划下单日期 可选',
-      '交付截止日期', '交付地点', '主要排序偏好',
+      '交付截止日期', '交付地点', '主要排序偏好', '次要偏好 可选，仅在主指标并列时使用',
     ]) {
       expect(screen.getByLabelText(label), label).toHaveValue('')
     }
+    const primaryPreference = screen.getByLabelText('主要排序偏好')
+    const secondaryPreference = screen.getByLabelText('次要偏好 可选，仅在主指标并列时使用')
+    expect(primaryPreference.closest('fieldset')).toBe(secondaryPreference.closest('fieldset'))
+    expect(secondaryPreference.closest('details')).toBeNull()
     expect(screen.getByLabelText('需求数量')).toHaveValue(null)
     expect(screen.getByLabelText(/预算金额/)).toHaveValue('')
     expect(screen.getByLabelText('允许替代料')).not.toBeChecked()

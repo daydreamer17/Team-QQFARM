@@ -60,12 +60,11 @@ CONDITIONAL_CRITICAL_FIELDS = frozenset(
         "delivery_semantics",
         "start_event",
         "quote_date",
+        "payment_terms",
     }
 )
 
-NON_CRITICAL_FIELDS = frozenset(
-    {"supplier_country", "category", "item", "payment_terms"}
-)
+NON_CRITICAL_FIELDS = frozenset({"supplier_country", "category", "item"})
 
 POLICY_FIELDS = ALWAYS_CRITICAL_FIELDS | CONDITIONAL_CRITICAL_FIELDS | NON_CRITICAL_FIELDS
 
@@ -93,6 +92,7 @@ class CriticalityContext:
     base_unit: str
     relative_delivery_required: bool | None = None
     relative_validity_requires_quote_date: bool | None = None
+    payment_terms_required: bool = False
 
     def __post_init__(self) -> None:
         if not self.base_unit:
@@ -173,6 +173,7 @@ def resolve_criticalities(
             other_amount_required=other_amount_required,
             relative_delivery_required=relative_delivery_required,
             quote_date_required=quote_date_required,
+            payment_terms_required=context.payment_terms_required,
         )
         assessments.append(
             CriticalityAssessment(
@@ -198,6 +199,7 @@ def _conditional_rule(
     other_amount_required: bool,
     relative_delivery_required: bool,
     quote_date_required: bool,
+    payment_terms_required: bool,
 ) -> tuple[bool, str]:
     if field_name == "revision":
         return bool(required_revision), "procurement requirement specifies revision" if required_revision else "no revision required"
@@ -230,6 +232,12 @@ def _conditional_rule(
             "quote validity is expressed relative to quote date"
             if quote_date_required
             else "an explicit valid_until date is available"
+        )
+    if field_name == "payment_terms":
+        return payment_terms_required, (
+            "payment term is selected as a ranking criterion"
+            if payment_terms_required
+            else "payment term is display-only for the current preferences"
         )
     raise ContractError(
         "criticality_rule_missing",

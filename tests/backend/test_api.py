@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,11 +12,20 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
-from supplier_comparison.backend.models import Base, Document, Job, Task, WorkflowArtifact
+from supplier_comparison.backend.models import (
+    Base,
+    Document,
+    Job,
+    Task,
+    TaskHistoryBinding,
+    WorkflowArtifact,
+)
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import BackendError
 from supplier_comparison.backend.service import content_hash
 from supplier_comparison.backend.workflow import DraftReviewRunner, WorkflowRunner
+from supplier_comparison.rules import ProcurementRequirement
+from supplier_comparison.supplier_history import generate_supplier_history
 from langgraph.checkpoint.memory import InMemorySaver
 from tests.backend.test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
 
@@ -122,6 +131,88 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
         }
     ]
     assert "storage_path" not in str(history.json())
+
+    supplier_information = http.get(
+        f"/api/v1/tasks/{task['task_id']}/suppliers"
+    )
+    assert supplier_information.status_code == 200
+    supplier_payload = supplier_information.json()
+    assert supplier_payload["view_state"] == "QUOTE_ONLY"
+    assert supplier_payload["suppliers"] == []
+    assert supplier_payload["unresolved_identity_quote_count"] == 1
+    assert len(supplier_payload["unresolved_identity_quotes"]) == 1
+    assert supplier_payload["unresolved_identity_quotes"][0]["document_id"] == uploaded.json()["document_id"]
+    assert supplier_payload["unresolved_identity_quotes"][0]["quote_version"] == 1
+    assert "storage_path" not in supplier_information.text
+
+
+def test_supplier_history_binding_is_frozen_and_refresh_is_explicit(tmp_path: Path) -> None:
+    history_root = tmp_path / "history"
+    source = Path(__file__).resolve().parents[2] / "data/purchase_orders.csv"
+    for version in ("history-v1", "history-v2"):
+        generate_supplier_history(
+            source,
+            history_root,
+            dataset_version=version,
+            generated_at=datetime(2026, 9, 21, tzinfo=timezone.utc),
+            as_of_date=date(2026, 8, 6),
+        )
+
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = BackendService(
+        sessions,
+        tmp_path / "quotes",
+        actor_id="local-test-user",
+        supplier_history_root=history_root,
+        supplier_history_dataset_version="history-v1",
+    )
+    created = service.create_task(_requirement(), idempotency_key="history-create")
+    assert created["supplier_history_binding"]["binding_status"] == "AVAILABLE"
+    assert created["supplier_history_binding"]["dataset_version"] == "history-v1"
+
+    with pytest.raises(BackendError) as unchanged:
+        service.refresh_supplier_history(
+            created["task_id"],
+            expected_task_revision=1,
+            dataset_version="history-v1",
+            idempotency_key="history-same",
+        )
+    assert unchanged.value.code == "supplier_history_unchanged"
+
+    refreshed = service.refresh_supplier_history(
+        created["task_id"],
+        expected_task_revision=1,
+        dataset_version="history-v2",
+        idempotency_key="history-refresh",
+    )
+    assert refreshed["task_revision"] == 2
+    assert refreshed["status"] == "DRAFT"
+    assert refreshed["supplier_history_binding"]["dataset_version"] == "history-v2"
+    with sessions() as session:
+        bindings = session.query(TaskHistoryBinding).order_by(
+            TaskHistoryBinding.task_revision
+        ).all()
+        assert [(row.task_revision, row.dataset_version) for row in bindings] == [
+            (1, "history-v1"),
+            (2, "history-v2"),
+        ]
+
+    out_of_scope = ProcurementRequirement.model_validate(
+        _requirement().model_dump(mode="json")
+        | {
+            "manufacturer_part_number": "OTHER-PART",
+            "ranking_preference": "HIGHEST_SUPPLIER_PERFORMANCE",
+        }
+    )
+    with pytest.raises(BackendError) as invalid_scope:
+        service.create_task(out_of_scope, idempotency_key="history-out-of-scope")
+    assert invalid_scope.value.code == "ranking_criterion_not_applicable"
 
 
 def test_quote_replacement_upload_and_deactivation_endpoints(
@@ -394,6 +485,12 @@ def test_health_endpoints_separate_liveness_and_readiness(
     http, _service = client
     assert http.get("/health/live").json() == {"status": "alive"}
     assert http.get("/health/ready").json() == {"status": "ready"}
+    worker = http.get("/health/worker")
+    assert worker.status_code == 503
+    assert worker.json()["error"]["code"] == "worker_unavailable"
+    worker_required = http.get("/health/ready", params={"require_worker": "true"})
+    assert worker_required.status_code == 503
+    assert worker_required.json()["error"]["code"] == "worker_unavailable"
 
 
 def test_quote_field_schema_is_backend_owned_and_complete(
@@ -1329,9 +1426,8 @@ def test_selection_analysis_and_authorized_simulation_are_read_only(batch_review
     excluded_result = exclusion.json()['result']
     assert excluded_result['changes']['excluded_supplier_ids'] == ['SUP-023']
     assert len(excluded_result['excluded_quote_ids']) == 1
-    assert [row['quote_id'] for row in excluded_result['comparison']['supplier_results']] == [
-        next(q['quote_id'] for q in _review['quotes'] if q['supplier_id'] == 'SUP-024')
-    ]
+    assert len(excluded_result['comparison']['supplier_results']) == 2
+    assert len(excluded_result['comparison']['ranking_trace']['excluded_quote_ids']) == 1
     unknown_supplier = http.post(url + '/requirement-simulations', json={
         'expected_task_revision': 4, 'confirm_hypothetical': True,
         'changes': {'excluded_supplier_ids': ['SUP-NOT-IN-TASK']}})
@@ -1344,6 +1440,39 @@ def test_selection_analysis_and_authorized_simulation_are_read_only(batch_review
     assert invalid.status_code == 422 and invalid.json()['error']['code'] == 'simulation_change_invalid'
     assert service.get_task(task['task_id']) == before
     assert http.get(url + '/selection-gaps', params={'expected_task_revision': 3}).status_code == 409
+
+
+def test_supplier_information_uses_current_frozen_result(batch_review):
+    http, _service, task, runner, _review, body = batch_review
+    updated = http.post(
+        f"/api/v1/tasks/{task['task_id']}/fields/corrections",
+        json=body,
+        headers={'Idempotency-Key': 'supplier-information-ready'},
+    ).json()
+    runner.run_job(updated['job_id'])
+    current_task = http.get(f"/api/v1/tasks/{task['task_id']}").json()
+    response = http.get(f"/api/v1/tasks/{task['task_id']}/suppliers")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload['view_state'] == 'CURRENT_RESULT'
+    assert payload['result_id'] == current_task['current_result_id']
+    assert payload['quote_count'] == 2
+    assert payload['matched_supplier_count'] == 2
+    assert payload['unresolved_identity_quote_count'] == 0
+    assert {row['supplier_id'] for row in payload['suppliers']} == {'SUP-023', 'SUP-024'}
+    assert all(row['history_snapshot']['on_time'] for row in payload['suppliers'])
+    assert payload['context_sha256']
+    assert 'storage_path' not in response.text
+    historical = http.get(
+        f"/api/v1/tasks/{task['task_id']}/suppliers",
+        params={'result_id': current_task['current_result_id']},
+    )
+    assert historical.status_code == 200
+    assert historical.json()['view_state'] == 'CURRENT_RESULT'
+    assert http.get(
+        f"/api/v1/tasks/{task['task_id']}/suppliers",
+        params={'result_id': 'missing-result'},
+    ).status_code == 404
 
 
 @pytest.mark.parametrize('authorization', [False, 'true', 1, None])
@@ -1390,7 +1519,7 @@ def test_decision_scenario_persists_delta_becomes_stale_and_applies(batch_review
     second = http.post(url, json={
         'expected_task_revision': 4,
         'confirm_hypothetical': True,
-        'changes': {'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'},
+        'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'},
     }, headers={'Idempotency-Key': 'scenario-2'})
     assert second.status_code == 201, second.text
     assert len(http.get(url).json()['items']) == 2
@@ -1466,7 +1595,7 @@ def test_decision_scenario_apply_updates_hard_requirement_and_profile_atomically
             'confirm_hypothetical': True,
             'changes': {
                 'budget_amount': '7500.00',
-                'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY',
+                'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
             },
         },
         headers={'Idempotency-Key': 'scenario-combined'},
@@ -1480,10 +1609,10 @@ def test_decision_scenario_apply_updates_hard_requirement_and_profile_atomically
     assert applied.status_code == 202, applied.text
     assert applied.json()['task_revision'] == 5
     assert applied.json()['changed_requirement_fields'] == ['budget_amount']
-    assert applied.json()['changed_decision_preference_fields'] == ['ranking_mode']
+    assert applied.json()['changed_decision_preference_fields'] == ['primary_criterion']
     current = service.get_task(task_id)
     assert current['requirement']['budget_amount'] == '7500.00'
-    assert current['decision_profile']['preferences']['ranking_mode'] == 'FASTEST_CONFIRMED_DELIVERY'
+    assert current['decision_profile']['preferences']['primary_criterion'] == 'FASTEST_CONFIRMED_DELIVERY'
     revisions = http.get(f"/api/v1/tasks/{task_id}/revisions").json()['revisions']
     assert sum(item['revision'] == 5 for item in revisions) == 1
 
@@ -1523,7 +1652,8 @@ def test_natural_language_intent_requires_confirmation_before_creating_scenario(
     intent = parsed.json()
     assert intent['status'] == 'READY' and intent['is_current']
     assert intent['parsed_changes'] == {
-        'ranking_mode': 'LOWEST_COST_THEN_FASTEST_DELIVERY',
+        'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST',
+        'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
         'excluded_supplier_ids': ['SUP-024'],
         'cost_tolerance_amount': '300.00',
     }
@@ -1707,24 +1837,20 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     assert blocked.json()['error']['code'] == 'conversation_turn_in_progress'
     context = service.conversation_job_context(job_id)
     assert context['recent_messages'][-1]['content'] == '现在为什么推荐这个报价？'
-    assert f"REQUEST:{first.json()['message']['message_id']}" in context['allowed_reference_ids']
+    assert not any(
+        reference_id.startswith('REQUEST:')
+        for reference_id in context['allowed_reference_ids']
+    )
     assert 'POLICY:CIT-chat-1' in context['allowed_reference_ids']
     assert f"INVESTIGATION:{investigation['artifact_id']}" in context['allowed_reference_ids']
     assert f"COMPLIANCE:{context['result_id']}" in context['allowed_reference_ids']
     assert context['frozen_references']['POLICY:CIT-chat-1']['text'].startswith('Approved suppliers')
     result_ref = 'RESULT:' + context['result_id']
-    grounded_refs = [
-        result_ref,
-        f"REQUEST:{first.json()['message']['message_id']}",
-        'POLICY:CIT-chat-1',
-        f"INVESTIGATION:{investigation['artifact_id']}",
-        f"COMPLIANCE:{context['result_id']}",
-    ]
     completed = service.complete_conversation_job(
         job_id,
         turn={
-            'assistant_text': '当前推荐来自冻结的确定性比较结果；聊天不会改变该结论。',
-            'reference_ids': grounded_refs,
+            'assistant_text': f'当前推荐来自冻结的确定性比较结果（{result_ref}）。',
+            'reference_ids': [result_ref],
             'changes': None,
         },
         attempts=1,
@@ -1733,7 +1859,7 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     )
     assert completed['job_status'] == 'SUCCEEDED'
     assert completed['message']['role'] == 'ASSISTANT'
-    assert completed['message']['reference_ids'] == grounded_refs
+    assert completed['message']['reference_ids'] == [result_ref]
 
     second = http.post(
         message_url,
@@ -1747,7 +1873,7 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     proposed = service.complete_conversation_job(
         second.json()['job']['job_id'],
         turn={
-            'assistant_text': '可以生成“到货最快优先”的决策情景；请先确认该变更。',
+            'assistant_text': f'可以生成“到货最快优先”的决策情景（RESULT:{second_context["result_id"]}）。',
             'reference_ids': ['RESULT:' + second_context['result_id']],
             'changes': {'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'},
         },
@@ -1758,7 +1884,8 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     intent_id = proposed['message']['decision_intent_id']
     assert intent_id
     assert proposed['message']['proposed_changes'] == {
-        'ranking_mode': 'FASTEST_CONFIRMED_DELIVERY'
+        'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
+        'secondary_criterion': None,
     }
     assert service.list_decision_scenarios(task['task_id'])['items'] == []
     confirmed = http.post(
@@ -1775,7 +1902,7 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     )
     assert events.status_code == 200
     assert events.headers['content-type'].startswith('text/event-stream')
-    assert 'event: assistant.delta' in events.text
+    assert 'event: assistant.delta' not in events.text
     assert 'event: assistant.completed' in events.text
     loaded = http.get(base + '/' + conversation_id).json()
     assert [row['role'] for row in loaded['messages']] == [
@@ -1810,6 +1937,89 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     failed = http.get(base + '/' + conversation_id).json()['messages'][-1]
     assert failed['role'] == 'ASSISTANT' and failed['status'] == 'FAILED'
     assert failed['attempts'] == 2 and failed['error_code'] == 'model_transport_error'
+
+    continued = http.post(
+        base,
+        json={'expected_task_revision': 4, 'title': '继续此前讨论'},
+        headers={'Idempotency-Key': 'create-continuation-conversation'},
+    ).json()
+    continued_message = http.post(
+        base + '/' + continued['conversation_id'] + '/messages',
+        json={'expected_task_revision': 4, 'message': '继续考虑我之前提到的交期偏好。'},
+        headers={'Idempotency-Key': 'continuation-message'},
+    ).json()
+    continued_context = service.conversation_job_context(
+        continued_message['job']['job_id']
+    )
+    assert any(
+        row['content'] == '现在为什么推荐这个报价？'
+        for row in continued_context['prior_user_context']
+    )
+    assert all(
+        row['trust'] == 'UNTRUSTED_USER_INTENT_ONLY'
+        for row in continued_context['prior_user_context']
+    )
+    assert not any(
+        row['content'] == completed['message']['content']
+        for row in continued_context['prior_user_context']
+    )
+    service.fail_conversation_job(
+        continued_message['job']['job_id'],
+        code='test_cleanup',
+        message='test cleanup',
+        attempts=1,
+    )
+
+
+def test_conversation_clarification_noop_and_proposal_through_worker(batch_review, monkeypatch):
+    """Exercise both validators, persistence and scenario confirmation, not just parsing."""
+    import json
+    from supplier_comparison import worker
+    from supplier_comparison.backend import conversations
+
+    http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'], idempotency_key='dialogue-ready',
+    )
+    runner.run_job(updated['job_id'])
+    base = f"/api/v1/tasks/{task['task_id']}/decision-conversations"
+    conversation = http.post(base, json={'expected_task_revision': 4, 'title': '回归'},
+                             headers={'Idempotency-Key': 'dialogue-create'}).json()
+    monkeypatch.setattr(worker.ConversationModelConfig, 'from_env', lambda: conversations.ConversationModelConfig(
+        'fixed-test', 'fixture', 'https://example.invalid/v1', 'UNUSED', max_attempts=1,
+    ))
+    cases = [
+        ('我就想在10月18号那天收到货，我就那天有时间',
+         {'assistant_text': '', 'reference_ids': [], 'changes': None, 'clarification': 'EXACT_DELIVERY_DAY'},
+         '不能保证恰好当天', False),
+        ('我想要成本最低',
+         {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST'}},
+         '与当前设置一致', False),
+        ('改成到货最快优先',
+         {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'}},
+         '待确认', True),
+    ]
+    for index, (question, response, expected_text, has_intent) in enumerate(cases):
+        monkeypatch.setattr(conversations, '_post_json', lambda *args, **kwargs: (
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(response)}}]}, 1,
+        ))
+        queued = http.post(base + '/' + conversation['conversation_id'] + '/messages',
+                           json={'expected_task_revision': 4, 'message': question},
+                           headers={'Idempotency-Key': f'dialogue-message-{index}'})
+        assert queued.status_code == 202, queued.text
+        completed = worker._run_decision_conversation_job(service, queued.json()['job']['job_id'])
+        assert completed['job_status'] == 'SUCCEEDED'
+        assert expected_text in completed['message']['content']
+        assert bool(completed['message']['decision_intent_id']) == has_intent
+    intent_id = completed['message']['decision_intent_id']
+    confirmed = http.post(
+        f"/api/v1/tasks/{task['task_id']}/decision-intents/{intent_id}/confirm",
+        json={'expected_task_revision': 4, 'confirm': True},
+        headers={'Idempotency-Key': 'dialogue-confirm'},
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    assert confirmed.json()['scenario']['status'] == 'READY'
 
 
 def test_stale_running_conversation_job_is_requeued(batch_review):

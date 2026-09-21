@@ -9,9 +9,11 @@ import type {
   ResultReason,
   SelectionGap,
   SupplierComparisonResult,
+  TaskDetail,
 } from '../api/types'
 import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspace'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import {
   fieldLabel,
   originLabel,
@@ -19,13 +21,6 @@ import {
   reasonText,
   validationStatusLabel,
 } from '../lib/presentation'
-
-const rankingLabels: Record<string, string> = {
-  LOWEST_CONFIRMED_TOTAL_COST: '确认总成本最低',
-  FASTEST_CONFIRMED_DELIVERY: '确认到货最快',
-  LOWEST_COST_THEN_FASTEST_DELIVERY: '成本优先，其次交期',
-  FASTEST_DELIVERY_THEN_LOWEST_COST: '交期优先，其次成本',
-}
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '结果读取失败。'
@@ -96,7 +91,7 @@ function recommendationNarrative(
   ranking: string | undefined,
 ) {
   if (!primary) return '当前结果没有可发布的推荐方案，请先处理阻塞项或补齐待确认信息。'
-  const rankingText = rankingLabels[ranking ?? ''] ?? ranking ?? '当前排序规则'
+  const rankingText = rankingCriterionLabel(ranking) || '当前排序规则'
   const arrival = primary.estimated_arrival_date
     ? `，预计于 ${primary.estimated_arrival_date} 到货`
     : ''
@@ -280,9 +275,24 @@ export function ResultPage() {
         createIdempotencyKey(),
       )
     },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
-      navigate(`/tasks/${taskId}/decision`)
+    onSuccess: async (response) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks', taskId] })
+      queryClient.setQueryData<TaskDetail>(['tasks', taskId], (current) => (
+        current
+          ? {
+              ...current,
+              status: 'QUEUED',
+              current_graph_run_id: response.graph_run_id,
+            }
+          : current
+      ))
+      navigate(`/tasks/${taskId}/decision`, {
+        state: {
+          expectedGraphRunId: response.graph_run_id,
+          previousResultId: resultId,
+        },
+      })
+      void queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
     },
   })
   const suppliers = resultQuery.data?.result.supplier_results ?? []
@@ -325,13 +335,17 @@ export function ResultPage() {
   const pendingCount = suppliers.filter((supplier) => supplier.status === 'PENDING').length
   const loadedEvidenceCount = fieldQueries.filter((query) => Boolean(query.data)).length
   const task = taskQuery.data
-  const canReanalyze = Boolean(
-    task &&
-    task.current_result_id === null &&
-    task.quotes.length > 0 &&
-    task.task_revision > 1 &&
-    (task.status === 'DRAFT' || task.status === 'FAILED' || task.status === 'NEEDS_INPUT'),
-  )
+  const canReanalyze = Boolean(task && task.quotes.length > 0 && task.task_revision > 1 && (
+    (
+      task.current_result_id === null
+      && (task.status === 'DRAFT' || task.status === 'FAILED' || task.status === 'NEEDS_INPUT')
+    )
+    || (
+      resultQuery.data.is_current
+      && task.current_result_id === resultId
+      && task.status === 'COMPLETED'
+    )
+  ))
   const selectedSupplier = selectedSupplierIndex === null ? null : suppliers[selectedSupplierIndex]
   const selectedFieldsQuery = selectedSupplierIndex === null ? null : fieldQueries[selectedSupplierIndex]
   const frozenRequirement = resultQuery.data.input_snapshot?.requirement
@@ -341,8 +355,10 @@ export function ResultPage() {
   const currency = frozenRequirement?.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
   const policyReviewCount = resultQuery.data.policy_compliance.counts.REVIEW_REQUIRED ?? 0
-  const currentRanking = frozenDecisionProfile?.preferences.ranking_mode
+  const currentRanking = frozenDecisionProfile?.preferences.primary_criterion
     ?? frozenRequirement?.ranking_preference
+  const currentSecondaryRanking = frozenDecisionProfile?.preferences.secondary_criterion
+    ?? frozenRequirement?.secondary_preference
   const suppliersByQuote = new Map(suppliers.map((supplier) => [supplier.quote_id, supplier]))
   const quoteImpactsByQuote = new Map(decisionImpact?.quote_impacts.map((impact) => [impact.quote_id, impact]) ?? [])
   const selectionGapsByQuote = new Map(selectionGapsQuery.data?.gaps.map((gap) => [gap.quote_id, gap]) ?? [])
@@ -358,6 +374,14 @@ export function ResultPage() {
   const activeGapImpact = activeGapQuoteId ? quoteImpactsByQuote.get(activeGapQuoteId) : undefined
   const activeGapDraft = activeGapQuoteId ? clarificationDraftsByQuote.get(activeGapQuoteId) : undefined
   const activeGapReasons = activeGap ? [...activeGap.failed_reasons, ...activeGap.pending_reasons] : []
+  const headerProgress = resultQuery.data.is_current || !task
+    ? task?.progress
+    : {
+        requirement_completed: true,
+        quote_review_completed: true,
+        decision_completed: true,
+        summary_completed: false,
+      }
   let policyState = '未绑定制度'
   if (taskQuery.isPending) policyState = '正在读取制度绑定'
   else if (taskQuery.isError) policyState = '制度绑定读取失败'
@@ -378,13 +402,13 @@ export function ResultPage() {
           subtitle={frozenRequirement
             ? `${frozenRequirement.required_quantity} ${frozenRequirement.quantity_unit} · ${frozenRequirement.currency} · 最晚交付 ${frozenRequirement.delivery_deadline}`
             : '该历史结果缺少可展示的冻结采购需求'}
-          status={task.status}
+          status={resultQuery.data.is_current ? task.status : 'COMPLETED'}
           revision={resultQuery.data.task_revision}
           revisionContext={resultQuery.data.is_current ? 'current' : 'historical'}
-          resultId={task.current_result_id}
-          quoteCount={task.quotes.length}
-          summaryComplete={task.summary_completed}
-          progress={task.progress}
+          resultId={resultQuery.data.result_id}
+          quoteCount={suppliers.length}
+          summaryComplete={resultQuery.data.is_current ? task.summary_completed : false}
+          progress={headerProgress ?? task.progress}
           reviewBlocked={Boolean(task.current_issue)}
           policyReviewBlocked={task.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'}
           active="decision"
@@ -449,7 +473,7 @@ export function ResultPage() {
                 </p>
                 {frozenRequirement && (
                   <div className="decision-hero-context">
-                    <span>{rankingLabels[currentRanking ?? ''] ?? currentRanking}</span>
+                    <span>{rankingCriterionLabel(currentRanking)}</span>
                     <span>截止 {frozenRequirement.delivery_deadline}</span>
                     <span>{frozenRequirement.allow_substitutes ? '允许替代料' : '禁止替代料'}</span>
                   </div>
@@ -464,7 +488,8 @@ export function ResultPage() {
                   <span className="signal-badge">Rev {resultQuery.data.task_revision}</span>
                 </div>
                 <dl>
-                  <div><dt>排序</dt><dd>{rankingLabels[currentRanking ?? ''] ?? currentRanking ?? '未设置'}</dd></div>
+                  <div><dt>主指标</dt><dd>{rankingCriterionLabel(currentRanking)}</dd></div>
+                  <div><dt>次指标</dt><dd>{rankingCriterionLabel(currentSecondaryRanking)}</dd></div>
                   <div><dt>成本容差</dt><dd>{!frozenDecisionProfile || frozenDecisionProfile.preferences.cost_tolerance_amount === null ? '未设置' : moneyText(currency, frozenDecisionProfile.preferences.cost_tolerance_amount)}</dd></div>
                   <div><dt>排除供应商</dt><dd>{frozenDecisionProfile?.preferences.excluded_supplier_ids.join('、') || '无'}</dd></div>
                 </dl>
@@ -597,6 +622,8 @@ export function ResultPage() {
               task={task}
               result={resultQuery.data}
               compact
+              onReanalyze={canReanalyze ? () => reanalysis.mutate() : undefined}
+              reanalyzing={reanalysis.isPending}
               onOpenQuoteEvidence={(quoteId) => {
                 const index = suppliers.findIndex((supplier) => supplier.quote_id === quoteId)
                 if (index >= 0) setSelectedSupplierIndex(index)

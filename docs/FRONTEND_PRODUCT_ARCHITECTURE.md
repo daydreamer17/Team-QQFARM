@@ -460,3 +460,13 @@ src/
 10. 前端轮询停止条件，以及 worker 未运行时的用户提示。
 
 上述合同冻结后，前端可以先完成当前闭环，同时保证未来合规、审批和 Supplier 360 能以新模块接入，而不需要推翻任务工作台的整体结构。
+## V2 任务内供应商信息页补充
+
+任务工作台新增 `/tasks/:taskId/suppliers`，位置在“报价与证据”和“决策结果”之间。
+页面只消费 `GET /api/v1/tasks/{task_id}/suppliers` 的只读聚合响应，严格区分
+`QUOTE_ONLY`、`CURRENT_RESULT`、`HISTORICAL_RESULT`。图表不得读取原始 CSV、重算评级、
+成本、可行性或赢家；主次指标高亮和次指标是否触发只读取后端 `RankingTrace`。
+
+Requirement 普通模式、折叠模式和 Scenario 管理复用同一个 `RankingCriterionSelect`。
+六个指标均可展示，但每次只有一个主指标和至多一个次指标参与排序；历史 scope 不适用时，
+前端给出禁用原因，后端继续执行同一验证。

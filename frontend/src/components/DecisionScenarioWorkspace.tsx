@@ -11,22 +11,18 @@ import type {
   ComparisonResultResponse,
   DecisionChanges,
   DecisionMessage,
-  DecisionRankingMode,
+  RankingCriterion,
   DecisionScenario,
   TaskDetail,
 } from '../api/types'
-
-const rankingLabels: Record<DecisionRankingMode, string> = {
-  LOWEST_CONFIRMED_TOTAL_COST: '确认总成本最低',
-  FASTEST_CONFIRMED_DELIVERY: '确认到货最快',
-  LOWEST_COST_THEN_FASTEST_DELIVERY: '成本优先，其次交期',
-  FASTEST_DELIVERY_THEN_LOWEST_COST: '交期优先，其次成本',
-}
+import { RankingCriterionSelect } from './RankingCriterionSelect'
+import { rankingCriterionLabel } from '../lib/rankingCriteria'
 
 const changeLabels: Record<string, string> = {
   budget_amount: '预算',
   delivery_deadline: '最晚到货日',
-  ranking_mode: '排序方式',
+  primary_criterion: '主排序指标',
+  secondary_criterion: '次排序指标',
   excluded_supplier_ids: '排除供应商',
   cost_tolerance_amount: '成本容差',
 }
@@ -38,8 +34,8 @@ function mutationError(error: unknown) {
 function changeValue(key: string, value: unknown, currency: string) {
   if (value === null) return '清除此设置'
   if (Array.isArray(value)) return value.length > 0 ? value.join('、') : '清空排除列表'
-  if (key === 'ranking_mode' && typeof value === 'string' && value in rankingLabels) {
-    return rankingLabels[value as DecisionRankingMode]
+  if ((key === 'primary_criterion' || key === 'secondary_criterion') && typeof value === 'string') {
+    return rankingCriterionLabel(value)
   }
   if ((key === 'budget_amount' || key === 'cost_tolerance_amount') && value !== undefined) {
     return `${currency} ${String(value)}`
@@ -66,24 +62,17 @@ interface DisplayCitation {
 }
 
 function citationTitle(id: string) {
+  if (id.startsWith('REQUIREMENT:')) return '已确认采购需求与偏好'
   if (id.startsWith('RESULT:')) return '当前决策结果'
   if (id.startsWith('QUOTE:')) return '供应商报价'
   if (id.startsWith('POLICY:')) return '制度证据'
   if (id.startsWith('COMPLIANCE:')) return '合规检查状态'
   if (id.startsWith('INVESTIGATION:')) return 'Agent 调查记录'
-  if (id.startsWith('REQUEST:')) return '本轮用户请求'
   return '来源证据'
 }
 
 function citationPresentation(content: string, referenceIds: string[]) {
   const ids = [...new Set(referenceIds)]
-  const detected = content.match(/(?:RESULT:artifact_|QUOTE:quote_|quote_)[A-Za-z0-9_-]+/g) ?? []
-  for (const token of detected) {
-    const matchingReference = ids.find((id) => id === token || id.endsWith(`:${token}`))
-    const canonical = matchingReference ?? (token.startsWith('quote_') ? `QUOTE:${token}` : token)
-    if (!ids.includes(canonical)) ids.push(canonical)
-  }
-
   const citations: DisplayCitation[] = ids.map((id, index) => ({ id, number: index + 1 }))
   let displayContent = content
   const replacements = citations.flatMap((citation) => {
@@ -241,11 +230,15 @@ export function DecisionScenarioWorkspace({
   result,
   compact = false,
   onOpenQuoteEvidence,
+  onReanalyze,
+  reanalyzing = false,
 }: {
   task: TaskDetail
   result: ComparisonResultResponse
   compact?: boolean
   onOpenQuoteEvidence?: (quoteId: string) => void
+  onReanalyze?: () => void
+  reanalyzing?: boolean
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -255,7 +248,8 @@ export function DecisionScenarioWorkspace({
   const [streamError, setStreamError] = useState('')
   const [queuedTurn, setQueuedTurn] = useState<{ conversationId: string; messageId: string } | null>(null)
   const [confirmedIntents, setConfirmedIntents] = useState<Set<string>>(() => new Set())
-  const [rankingMode, setRankingMode] = useState('')
+  const [primaryCriterion, setPrimaryCriterion] = useState('')
+  const [secondaryCriterion, setSecondaryCriterion] = useState('')
   const [budgetAmount, setBudgetAmount] = useState('')
   const [deliveryDeadline, setDeliveryDeadline] = useState('')
   const [tolerance, setTolerance] = useState('')
@@ -267,9 +261,12 @@ export function DecisionScenarioWorkspace({
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const readOnly = !result.is_current || task.status === 'ABANDONED'
+  const viewRequirement = result.input_snapshot?.requirement ?? task.requirement
+  const viewDecisionProfile = result.input_snapshot?.decision_profile ?? task.decision_profile
+  const viewCurrency = viewRequirement?.currency ?? task.requirement.currency
   const conversations = useQuery({
-    queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
-    queryFn: () => api.listDecisionConversations(task.task_id, result.result_id),
+    queryKey: ['tasks', task.task_id, 'decision-conversations'],
+    queryFn: () => api.listDecisionConversations(task.task_id),
     refetchInterval: (query) => {
       const pending = query.state.data?.items.some((item) => {
         const last = item.messages.at(-1)
@@ -287,9 +284,10 @@ export function DecisionScenarioWorkspace({
     queryFn: () => api.listDecisionIntents(task.task_id),
   })
 
-  const resultConversations = conversations.data?.items.filter(
+  const allConversations = conversations.data?.items ?? []
+  const resultConversations = allConversations.filter(
     (item) => item.base_result_id === result.result_id,
-  ) ?? []
+  )
   const resultScenarios = scenarios.data?.items.filter(
     (item) => item.base_result_id === result.result_id,
   ) ?? []
@@ -304,11 +302,15 @@ export function DecisionScenarioWorkspace({
   )
   const defaultConversation = resultConversations.find((item) => item.status === 'ACTIVE')
     ?? resultConversations[0]
+    ?? allConversations[0]
   const selectedConversationId = activeConversationId || defaultConversation?.conversation_id || ''
 
-  const activeConversation = resultConversations.find(
+  const activeConversation = allConversations.find(
     (item) => item.conversation_id === selectedConversationId,
   )
+  const conversationReadOnly = readOnly
+    || activeConversation?.status !== 'ACTIVE'
+    || activeConversation.base_result_id !== result.result_id
   const activeMessageCount = activeConversation?.messages.length ?? 0
   const lastMessage = activeConversation?.messages.at(-1)
   const pendingReplyTo = queuedTurn?.conversationId === selectedConversationId
@@ -322,8 +324,11 @@ export function DecisionScenarioWorkspace({
   }, [activeMessageCount, selectedConversationId, streamingText])
 
   useEffect(() => {
-    if (!selectedConversationId || !pendingReplyTo || readOnly) return
+    if (!selectedConversationId || !pendingReplyTo || conversationReadOnly) return
     let turnStarted = false
+    let waitWarning = window.setTimeout(() => {
+      setStreamError('等待时间较长，请确认 Worker 正在运行；任务会保留在队列中。')
+    }, 45_000)
     const source = new EventSource(
       decisionConversationEventsUrl(task.task_id, selectedConversationId),
     )
@@ -332,6 +337,10 @@ export function DecisionScenarioWorkspace({
       const payload = parse(event)
       if (payload.reply_to_message_id === pendingReplyTo) {
         turnStarted = true
+        window.clearTimeout(waitWarning)
+        waitWarning = window.setTimeout(() => {
+          setStreamError('模型处理时间较长，系统仍在等待经过事实校验的完整回答。')
+        }, 130_000)
         setStreamingText('')
         setStreamError('')
       }
@@ -346,10 +355,11 @@ export function DecisionScenarioWorkspace({
       const assistant = payload.message as { reply_to_message_id?: string } | undefined
       if (assistant?.reply_to_message_id !== pendingReplyTo) return
       source.close()
+      window.clearTimeout(waitWarning)
       setStreamingText('')
       setQueuedTurn(null)
       void queryClient.invalidateQueries({
-        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+        queryKey: ['tasks', task.task_id, 'decision-conversations'],
       })
     }
     const failed = (event: Event) => {
@@ -357,18 +367,22 @@ export function DecisionScenarioWorkspace({
       const assistant = payload.message as { reply_to_message_id?: string; error_message?: string } | undefined
       if (assistant?.reply_to_message_id !== pendingReplyTo) return
       source.close()
-      setStreamError(assistant.error_message ?? 'AI 回复生成失败。')
+      window.clearTimeout(waitWarning)
+      setStreamError('')
       setQueuedTurn(null)
       void queryClient.invalidateQueries({
-        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+        queryKey: ['tasks', task.task_id, 'decision-conversations'],
       })
     }
     source.addEventListener('assistant.started', started)
     source.addEventListener('assistant.delta', delta)
     source.addEventListener('assistant.completed', completed)
     source.addEventListener('assistant.failed', failed)
-    return () => source.close()
-  }, [pendingReplyTo, queryClient, readOnly, result.result_id, selectedConversationId, task.task_id])
+    return () => {
+      window.clearTimeout(waitWarning)
+      source.close()
+    }
+  }, [conversationReadOnly, pendingReplyTo, queryClient, selectedConversationId, task.task_id])
 
   const createConversation = useMutation({
     mutationFn: () => api.createDecisionConversation(
@@ -383,7 +397,7 @@ export function DecisionScenarioWorkspace({
       setStreamError('')
       setQueuedTurn(null)
       void queryClient.invalidateQueries({
-        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+        queryKey: ['tasks', task.task_id, 'decision-conversations'],
       })
     },
   })
@@ -405,7 +419,7 @@ export function DecisionScenarioWorkspace({
         messageId: response.message.message_id,
       })
       void queryClient.invalidateQueries({
-        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+        queryKey: ['tasks', task.task_id, 'decision-conversations'],
       })
     },
   })
@@ -441,9 +455,24 @@ export function DecisionScenarioWorkspace({
       task.task_revision,
       createIdempotencyKey(),
     ),
-    onSuccess: () => {
+    onSuccess: async (response) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks', task.task_id] })
+      queryClient.setQueryData<TaskDetail>(['tasks', task.task_id], (current) => (
+        current
+          ? {
+              ...current,
+              task_revision: response.task_revision,
+              status: response.status,
+              current_result_id: null,
+              current_snapshot_id: null,
+            }
+          : current
+      ))
+      navigate(`/tasks/${task.task_id}/decision`, {
+        replace: true,
+        state: { expectedRevision: response.task_revision },
+      })
       void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id] })
-      navigate(`/tasks/${task.task_id}/decision`)
     },
   })
 
@@ -457,7 +486,8 @@ export function DecisionScenarioWorkspace({
   const submitScenario = (event: FormEvent) => {
     event.preventDefault()
     const changes: DecisionChanges = {}
-    if (rankingMode) changes.ranking_mode = rankingMode as DecisionRankingMode
+    if (primaryCriterion) changes.primary_criterion = primaryCriterion as RankingCriterion
+    if (secondaryCriterion) changes.secondary_criterion = secondaryCriterion as RankingCriterion
     if (budgetAmount.trim()) changes.budget_amount = budgetAmount.trim()
     if (deliveryDeadline) changes.delivery_deadline = deliveryDeadline
     if (clearTolerance) changes.cost_tolerance_amount = null
@@ -482,6 +512,16 @@ export function DecisionScenarioWorkspace({
   }
 
   const openCitation = (referenceId: string) => {
+    if (
+      activeConversation
+      && activeConversation.base_result_id !== result.result_id
+    ) {
+      navigate(
+        `/tasks/${task.task_id}/results/${activeConversation.base_result_id}`,
+        { state: { conversationId: activeConversation.conversation_id } },
+      )
+      return
+    }
     if (referenceId.startsWith('QUOTE:') && onOpenQuoteEvidence) {
       onOpenQuoteEvidence(referenceId.slice('QUOTE:'.length))
       return
@@ -498,6 +538,8 @@ export function DecisionScenarioWorkspace({
   )
   const operationError = createConversation.error ?? sendMessage.error ?? confirmIntent.error
     ?? createScenario.error ?? applyScenario.error
+  const requiresReanalysis = operationError instanceof ApiClientError
+    && operationError.code === 'scenario_baseline_stale'
 
   return (
     <section className={`decision-assistant-workspace${compact ? ' decision-assistant-compact' : ''}`}>
@@ -515,15 +557,18 @@ export function DecisionScenarioWorkspace({
             <p>AI 只负责解释和提取变更意图；金额、可行性、推荐与应用操作仍由后端确定性执行。</p>
           </div>
           <div className="decision-profile-summary">
-            <span>Profile v{task.decision_profile.profile_version}</span>
-            <strong>{task.decision_profile.preferences.ranking_mode
-              ? rankingLabels[task.decision_profile.preferences.ranking_mode]
-              : task.requirement.ranking_preference}</strong>
+            <span>Profile v{viewDecisionProfile?.profile_version ?? '—'}</span>
+            <strong>{rankingCriterionLabel(
+              viewDecisionProfile?.preferences.primary_criterion ?? viewRequirement?.ranking_preference,
+            )}</strong>
+            <small>次指标：{rankingCriterionLabel(
+              viewDecisionProfile?.preferences.secondary_criterion ?? viewRequirement?.secondary_preference,
+            )}</small>
             <small>
-              成本容差：{task.decision_profile.preferences.cost_tolerance_amount === null
+              成本容差：{viewDecisionProfile?.preferences.cost_tolerance_amount == null
                 ? '未设置'
-                : `${task.requirement.currency} ${task.decision_profile.preferences.cost_tolerance_amount}`}
-              {' · '}排除：{task.decision_profile.preferences.excluded_supplier_ids.join('、') || '无'}
+                : `${viewCurrency} ${viewDecisionProfile.preferences.cost_tolerance_amount}`}
+              {' · '}排除：{viewDecisionProfile?.preferences.excluded_supplier_ids.join('、') || '无'}
             </small>
           </div>
         </header>
@@ -532,11 +577,27 @@ export function DecisionScenarioWorkspace({
       {readOnly && (
         <div className="run-notice">当前是历史结果或任务已废弃，对话、确认和应用操作已禁用。</div>
       )}
-      {operationError && <div className="form-error" role="alert">{mutationError(operationError)}</div>}
+      {operationError && (
+        <div className="form-error" role="alert">
+          <span>{mutationError(operationError)}</span>
+          {requiresReanalysis && onReanalyze && (
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={reanalyzing}
+              onClick={onReanalyze}
+            >
+              {reanalyzing ? '正在启动…' : '按当前代码重新分析'}
+            </button>
+          )}
+        </div>
+      )}
 
       {compact && (
         <div className="decision-compact-chat-context">
-          <span>{task.scenario_id}</span><span>{task.quotes.length} 家供应商</span><span>Revision {task.task_revision}</span>
+          <span>{task.scenario_id}</span>
+          <span>{result.result.supplier_results.length} 家供应商</span>
+          <span>Revision {result.task_revision}</span>
         </div>
       )}
 
@@ -548,7 +609,7 @@ export function DecisionScenarioWorkspace({
               <span>{activeConversation?.status ?? '尚未开始'}</span>
             </div>
             <div>
-              {resultConversations.length > 0 && (
+              {allConversations.length > 0 && (
                 <select
                   aria-label="选择历史对话"
                   value={selectedConversationId}
@@ -559,9 +620,9 @@ export function DecisionScenarioWorkspace({
                     setQueuedTurn(null)
                   }}
                 >
-                  {resultConversations.map((item) => (
+                  {allConversations.map((item) => (
                     <option key={item.conversation_id} value={item.conversation_id}>
-                      {item.title} · {item.status}
+                      Rev {item.base_task_revision} · {item.title} · {item.status}
                     </option>
                   ))}
                 </select>
@@ -578,6 +639,11 @@ export function DecisionScenarioWorkspace({
           </header>
 
           <div className="decision-chat-transcript" aria-live="polite" ref={transcriptRef}>
+            {activeConversation && activeConversation.base_result_id !== result.result_id && (
+              <div className="run-notice">
+                这是 Revision {activeConversation.base_task_revision} 的历史对话，仅作背景；新回复会基于当前冻结结果重新核验。
+              </div>
+            )}
             {!activeConversation && (
               <div className="decision-chat-empty">
                 <strong>和当前冻结结果对话</strong>
@@ -594,8 +660,8 @@ export function DecisionScenarioWorkspace({
               <MessageBubble
                 key={item.message_id}
                 message={item}
-                currency={task.requirement.currency}
-                readOnly={readOnly}
+                currency={viewCurrency}
+                readOnly={conversationReadOnly}
                 confirmed={Boolean(item.decision_intent_id && (
                   confirmedIntents.has(item.decision_intent_id)
                   || persistedConfirmedIntents.has(item.decision_intent_id)
@@ -607,8 +673,8 @@ export function DecisionScenarioWorkspace({
             ))}
             {(streamingText || activeTurn) && (
               <article className="decision-chat-message chat-role-assistant chat-streaming">
-                <header><strong>AI 决策助手</strong><span>生成中</span></header>
-                <p>{streamingText || '正在读取冻结事实并生成经过校验的回复…'}</p>
+                <header><strong>AI 决策助手</strong><span>生成并校验中</span></header>
+                <p>{streamingText || '正在读取冻结事实；完整回答通过事实与引用校验后才会显示。'}</p>
               </article>
             )}
             {streamError && <div className="chat-message-error">{streamError}</div>}
@@ -632,14 +698,14 @@ export function DecisionScenarioWorkspace({
               placeholder="用自然语言询问或描述你希望模拟的条件…"
               maxLength={4000}
               rows={compact ? 2 : 3}
-              disabled={readOnly || !activeConversation || activeConversation.status !== 'ACTIVE' || activeTurn}
+              disabled={conversationReadOnly || !activeConversation || activeTurn}
             />
             <div>
               <small>{message.length} / 4000</small>
               <button
                 className="button button-submit"
                 type="submit"
-                disabled={readOnly || !message.trim() || !activeConversation || activeTurn}
+                disabled={conversationReadOnly || !message.trim() || !activeConversation || activeTurn}
               >发送</button>
             </div>
           </form>
@@ -651,13 +717,14 @@ export function DecisionScenarioWorkspace({
           <details className="scenario-builder">
             <summary>结构化创建 Scenario</summary>
             <form onSubmit={submitScenario}>
-              <label><span>排序方式</span>
-                <select value={rankingMode} onChange={(event) => setRankingMode(event.target.value)}>
-                  <option value="">保持当前设置</option>
-                  {Object.entries(rankingLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
+              <label><span>主排序指标</span>
+                <RankingCriterionSelect historyApplicable={task.supplier_history_binding?.binding_status === 'AVAILABLE'} value={primaryCriterion} exclude={secondaryCriterion} onChange={(next) => {
+                  setPrimaryCriterion(next)
+                  if (next === secondaryCriterion) setSecondaryCriterion('')
+                }} />
+              </label>
+              <label><span>次排序指标 <small>仅在主指标并列时使用</small></span>
+                <RankingCriterionSelect allowEmpty historyApplicable={task.supplier_history_binding?.binding_status === 'AVAILABLE'} value={secondaryCriterion} exclude={primaryCriterion} onChange={setSecondaryCriterion} />
               </label>
               <div className="scenario-form-pair">
                 <label><span>预算（{task.requirement.currency}）</span>
@@ -742,6 +809,14 @@ export function DecisionScenarioWorkspace({
                   <p>Result ID：{result.result_id}</p>
                   <p>Task Revision：{result.task_revision}</p>
                   <p>生成时间：{result.result.evaluated_at}</p>
+                </section>
+              ) : selectedCitationId.startsWith('REQUIREMENT:') ? (
+                <section className="drawer-fields">
+                  <h3>本结果冻结的采购要求</h3>
+                  <p>任务版本：{result.task_revision}</p>
+                  <p>预算：{viewCurrency} {viewRequirement.budget_amount}</p>
+                  <p>最晚到货日：{viewRequirement.delivery_deadline}</p>
+                  <p>主排序：{rankingCriterionLabel(viewDecisionProfile?.preferences.primary_criterion ?? viewRequirement.ranking_preference)}</p>
                 </section>
               ) : selectedCitationId.startsWith('COMPLIANCE:') ? (
                 <section className="drawer-fields">

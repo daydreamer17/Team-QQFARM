@@ -1,0 +1,304 @@
+{
+  "context": {
+    "as_of_date": "2026-08-06",
+    "dataset_id": "synthetic-mcu9-supplier-performance",
+    "dataset_version": "2026-08-06-v1",
+    "identity_matcher_version": "exact-supplier-directory/1.0.0",
+    "is_synthetic": true,
+    "lookback": "ALL_COMPLETED_HISTORY",
+    "period_end": "2026-06-29",
+    "period_start": "2023-01-02",
+    "rating_method_version": "mcu9-demo-rating/1.0.0",
+    "schema_version": "supplier-history/1.0.0",
+    "scope": {
+      "category": "Electronics",
+      "item": "Microcontroller MCU-9",
+      "task_product_mappings": [
+        "QW-MCU9-DEMO"
+      ]
+    },
+    "source_license": "MIT",
+    "source_project": "dytcoke23/procurement-spend-analysis-dashboard",
+    "thresholds": {
+      "grade_a_on_time_min": "0.90",
+      "grade_a_rejected_max": "0.02",
+      "grade_b_on_time_min": "0.80",
+      "grade_b_rejected_max": "0.05",
+      "grade_c_on_time_min": "0.70",
+      "grade_c_rejected_max": "0.10",
+      "min_sample_size": 10
+    }
+  },
+  "suppliers": [
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 86,
+        "numerator": 74,
+        "rate": "0.8604651162790697674418604651"
+      },
+      "order_line_count": 86,
+      "overall_grade": "B",
+      "rejected_lines": {
+        "denominator": 86,
+        "numerator": 2,
+        "rate": "0.02325581395348837209302325581"
+      },
+      "supplier_id": "SUP-022",
+      "supplier_name": "Redwood Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 11,
+        "numerator": 11,
+        "rate": "1"
+      },
+      "order_line_count": 11,
+      "overall_grade": "C",
+      "rejected_lines": {
+        "denominator": 11,
+        "numerator": 1,
+        "rate": "0.09090909090909090909090909091"
+      },
+      "supplier_id": "SUP-023",
+      "supplier_name": "Schwarzwald Circuits"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 55,
+        "numerator": 51,
+        "rate": "0.9272727272727272727272727273"
+      },
+      "order_line_count": 55,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 55,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-024",
+      "supplier_name": "Sterling Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 192,
+        "numerator": 177,
+        "rate": "0.921875"
+      },
+      "order_line_count": 192,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 192,
+        "numerator": 2,
+        "rate": "0.01041666666666666666666666667"
+      },
+      "supplier_id": "SUP-025",
+      "supplier_name": "Cascade Semitech"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 18,
+        "numerator": 15,
+        "rate": "0.8333333333333333333333333333"
+      },
+      "order_line_count": 18,
+      "overall_grade": "C",
+      "rejected_lines": {
+        "denominator": 18,
+        "numerator": 1,
+        "rate": "0.05555555555555555555555555556"
+      },
+      "supplier_id": "SUP-026",
+      "supplier_name": "Great Wall Circuits"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 15,
+        "numerator": 14,
+        "rate": "0.9333333333333333333333333333"
+      },
+      "order_line_count": 15,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 15,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-027",
+      "supplier_name": "Golden Dragon Circuits"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 230,
+        "numerator": 209,
+        "rate": "0.9086956521739130434782608696"
+      },
+      "order_line_count": 230,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 230,
+        "numerator": 2,
+        "rate": "0.008695652173913043478260869565"
+      },
+      "supplier_id": "SUP-028",
+      "supplier_name": "Summit Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 71,
+        "numerator": 4,
+        "rate": "0.05633802816901408450704225352"
+      },
+      "order_line_count": 71,
+      "overall_grade": "D",
+      "rejected_lines": {
+        "denominator": 71,
+        "numerator": 9,
+        "rate": "0.1267605633802816901408450704"
+      },
+      "supplier_id": "SUP-029",
+      "supplier_name": "Great Wall Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "INSUFFICIENT_SAMPLE",
+      "on_time": {
+        "denominator": 6,
+        "numerator": 6,
+        "rate": "1"
+      },
+      "order_line_count": 6,
+      "overall_grade": "N",
+      "rejected_lines": {
+        "denominator": 6,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-030",
+      "supplier_name": "Sterling Semitech"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "INSUFFICIENT_SAMPLE",
+      "on_time": {
+        "denominator": 4,
+        "numerator": 4,
+        "rate": "1"
+      },
+      "order_line_count": 4,
+      "overall_grade": "N",
+      "rejected_lines": {
+        "denominator": 4,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-031",
+      "supplier_name": "Hanseatic Circuits"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 146,
+        "numerator": 127,
+        "rate": "0.8698630136986301369863013699"
+      },
+      "order_line_count": 146,
+      "overall_grade": "B",
+      "rejected_lines": {
+        "denominator": 146,
+        "numerator": 6,
+        "rate": "0.04109589041095890410958904110"
+      },
+      "supplier_id": "SUP-032",
+      "supplier_name": "Lotus Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 83,
+        "numerator": 73,
+        "rate": "0.8795180722891566265060240964"
+      },
+      "order_line_count": 83,
+      "overall_grade": "B",
+      "rejected_lines": {
+        "denominator": 83,
+        "numerator": 1,
+        "rate": "0.01204819277108433734939759036"
+      },
+      "supplier_id": "SUP-033",
+      "supplier_name": "Busan Components"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 115,
+        "numerator": 104,
+        "rate": "0.9043478260869565217391304348"
+      },
+      "order_line_count": 115,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 115,
+        "numerator": 1,
+        "rate": "0.008695652173913043478260869565"
+      },
+      "supplier_id": "SUP-034",
+      "supplier_name": "Pacific Rim Circuits"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 33,
+        "numerator": 30,
+        "rate": "0.9090909090909090909090909091"
+      },
+      "order_line_count": 33,
+      "overall_grade": "A",
+      "rejected_lines": {
+        "denominator": 33,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-035",
+      "supplier_name": "Pacific Rim Semitech"
+    },
+    {
+      "aliases": [],
+      "history_availability_status": "AVAILABLE",
+      "on_time": {
+        "denominator": 120,
+        "numerator": 100,
+        "rate": "0.8333333333333333333333333333"
+      },
+      "order_line_count": 120,
+      "overall_grade": "B",
+      "rejected_lines": {
+        "denominator": 120,
+        "numerator": 0,
+        "rate": "0"
+      },
+      "supplier_id": "SUP-036",
+      "supplier_name": "Golden Dragon Components"
+    }
+  ]
+}

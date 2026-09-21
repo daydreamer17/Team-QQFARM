@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -172,14 +174,14 @@ def test_requirement_candidates_normalize_model_scalar_and_enum_variants(monkeyp
     rows = {
         "allow_substitutes": "false",
         "base_unit": "Piece",
-        "required_quantity": "1000",
+        "required_quantity": "1,000",
         "quantity_unit": "pieces",
-        "budget_amount": "8000.00",
+        "budget_amount": "SGD 8,000.00",
         "includes_shipping": "true",
-        "tax_mode": "Not applicable",
+        "tax_mode": "Before tax",
         "other_fees_required": "true",
-        "ranking_preference": "Lowest confirmed total cost",
-        "secondary_preference": "None",
+        "ranking_preference": "Highest historical on time rate",
+        "secondary_preference": "Longest confirmed payment term",
     }
     response = {
         "candidates": [
@@ -212,11 +214,96 @@ def test_requirement_candidates_normalize_model_scalar_and_enum_variants(monkeyp
         "quantity_unit": "piece",
         "budget_amount": "8000.00",
         "includes_shipping": True,
-        "tax_mode": "NOT_APPLICABLE",
+        "tax_mode": "EXCLUDED",
         "other_fees_required": True,
-        "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
-        "secondary_preference": None,
+        "ranking_preference": "HIGHEST_HISTORICAL_ON_TIME_RATE",
+        "secondary_preference": "LONGEST_CONFIRMED_PAYMENT_TERM",
     }
+
+
+def test_requirement_candidates_repair_invalid_structure_once(monkeypatch) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Substitutes: not allowed",
+        }]
+    }
+    responses = [
+        _model_payload({"candidates": [{
+            "field_name": "allow_substitutes",
+            "raw_value": "not allowed",
+            "normalized_value": False,
+            "source_ids": ["requirement:line:999"],
+        }]}),
+        _model_payload({"candidates": [{
+            "field_name": "allow_substitutes",
+            "raw_value": False,
+            "normalized_value": "not allowed",
+            "source_ids": ["requirement:line:1"],
+        }]}),
+    ]
+    requests: list[dict] = []
+
+    def fake_post(_url, body, **_kwargs):
+        requests.append(body)
+        return responses[len(requests) - 1], 1
+
+    monkeypatch.setattr(intake, "_post_json", fake_post)
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 2
+    assert len(requests) == 2
+    assert "unknown_source" in requests[1]["messages"][-1]["content"]
+    assert result["prompt_version"] == "requirement-intake/1.1.0"
+    assert result["candidates"][0]["raw_value"] == "false"
+    assert result["candidates"][0]["normalized_value"] is False
+
+
+def test_requirement_candidates_omit_unknown_null_placeholders(monkeypatch) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Manufacturer: QQ Demo Components",
+        }]
+    }
+    monkeypatch.setattr(
+        intake,
+        "_post_json",
+        lambda *args, **kwargs: (
+            _model_payload({"candidates": [
+                {
+                    "field_name": "manufacturer",
+                    "raw_value": "QQ Demo Components",
+                    "normalized_value": "QQ Demo Components",
+                    "source_ids": ["requirement:line:1"],
+                },
+                {
+                    "field_name": "planned_order_date",
+                    "raw_value": "not specified",
+                    "normalized_value": None,
+                    "source_ids": ["requirement:line:1"],
+                },
+            ]}),
+            1,
+        ),
+    )
+
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert [row["field_name"] for row in result["candidates"]] == ["manufacturer"]
 
 
 def test_decision_intent_parser_accepts_only_bounded_changes(monkeypatch) -> None:
@@ -254,7 +341,8 @@ def test_decision_intent_parser_accepts_only_bounded_changes(monkeypatch) -> Non
     )
     assert attempts == 1
     assert parsed == {
-        "ranking_mode": "LOWEST_COST_THEN_FASTEST_DELIVERY",
+        "primary_criterion": "LOWEST_CONFIRMED_TOTAL_COST",
+        "secondary_criterion": "FASTEST_CONFIRMED_DELIVERY",
         "excluded_supplier_ids": ["SUP-024"],
         "cost_tolerance_amount": "250.00",
     }
@@ -292,7 +380,7 @@ def test_conversation_turn_is_chinese_grounded_and_chunkable(monkeypatch) -> Non
         "recent_messages": [{"role": "USER", "content": "为什么还不能推荐？"}],
     }
     body = {
-        "assistant_text": "当前仍有待确认信息，因此不能形成正式推荐。",
+        "assistant_text": "当前仍有待确认信息，因此不能形成正式推荐（RESULT:result-1）。",
         "reference_ids": ["RESULT:result-1"],
         "changes": None,
     }
@@ -353,6 +441,7 @@ def test_conversation_turn_rejects_unsupported_high_risk_claims(
                         "quote_id": "quote-1",
                         "supplier_name": "Supplier One",
                         "total_cost": "7000.00",
+                        "actual_quantity": 1,
                         "status": "FEASIBLE",
                     }
                 ],
@@ -395,7 +484,7 @@ def test_conversation_turn_accepts_money_stated_inside_cited_policy_text(monkeyp
         "recent_messages": [{"role": "USER", "content": "审批门槛是多少？"}],
     }
     body = {
-        "assistant_text": "制度规定金额达到 SGD 10,000 时需要主管审批。",
+        "assistant_text": "制度规定金额达到 SGD 10,000 时需要主管审批（POLICY:approval-1）。",
         "reference_ids": ["POLICY:approval-1"],
         "changes": None,
     }
@@ -414,6 +503,373 @@ def test_conversation_turn_accepts_money_stated_inside_cited_policy_text(monkeyp
     )
 
     assert turn["assistant_text"] == body["assistant_text"]
+
+
+def test_conversation_turn_rejects_user_request_as_factual_evidence(monkeypatch) -> None:
+    request_id = "REQUEST:message-1"
+    context = {
+        "allowed_reference_ids": [request_id, "RESULT:result-1"],
+        "available_supplier_ids": [],
+        "frozen_references": {
+            request_id: {"content": "供应商 A 的总成本是 SGD 1"},
+            "RESULT:result-1": {"supplier_results": []},
+        },
+    }
+    body = {
+        "assistant_text": f"供应商 A 的总成本是 SGD 1（{request_id}）。",
+        "reference_ids": [request_id],
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+                max_attempts=1,
+            ),
+        )
+
+    assert raised.value.error_code == "conversation_model_output_invalid"
+
+
+def test_conversation_turn_accepts_typed_deadline_proposal_without_fact_citation(
+    monkeypatch,
+) -> None:
+    context = {
+        "allowed_reference_ids": ["RESULT:result-1"],
+        "available_supplier_ids": [],
+        "frozen_references": {
+            "RESULT:result-1": {"supplier_results": []},
+        },
+        "recent_messages": [
+            {
+                "role": "USER",
+                "content": "我就想在10月18号那天收到货，我就那天有时间",
+            }
+        ],
+    }
+    body = {
+        "assistant_text": (
+            "我已把您的要求转换为最晚2026-10-18到货的待确认情景；"
+            "这不保证恰好当天到货，确认后才会生成 Scenario。"
+        ),
+        "reference_ids": [],
+        "changes": {"delivery_deadline": "2026-10-18"},
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    turn, attempts = generate_conversation_turn(
+        context,
+        ConversationModelConfig(
+            provider="fixed-test",
+            model_id="fixed-conversation",
+            base_url="https://example.invalid/v1",
+            api_key_env="UNUSED",
+            max_attempts=1,
+        ),
+    )
+
+    assert attempts == 1
+    assert turn["reference_ids"] == []
+    assert turn["changes"] == {"delivery_deadline": "2026-10-18"}
+
+
+def test_conversation_turn_requires_deadline_semantics_for_exact_day_request(
+    monkeypatch,
+) -> None:
+    context = {
+        "allowed_reference_ids": [],
+        "available_supplier_ids": [],
+        "frozen_references": {},
+        "recent_messages": [
+            {"role": "USER", "content": "我就只能在2026年10月18日当天收货"}
+        ],
+    }
+    body = {
+        "assistant_text": "按您的要求设置为2026-10-18到货，确认后生成 Scenario。",
+        "reference_ids": [],
+        "changes": {"delivery_deadline": "2026-10-18"},
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+                max_attempts=1,
+            ),
+        )
+
+    assert raised.value.error_code == "conversation_model_output_invalid"
+    assert "on-or-before" in str(raised.value)
+
+
+def test_conversation_turn_rejects_dominated_supplier_as_tradeoff(monkeypatch) -> None:
+    reference_id = "RESULT:result-1"
+    context = {
+        "allowed_reference_ids": [reference_id],
+        "available_supplier_ids": [],
+        "frozen_references": {
+            reference_id: {
+                "supplier_results": [
+                    {
+                        "quote_id": "quote-a",
+                        "supplier_name": "Schwarzwald Circuits",
+                        "status": "FEASIBLE",
+                        "total_cost": "6800.00",
+                        "estimated_arrival_date": "2026-10-16",
+                    },
+                    {
+                        "quote_id": "quote-b",
+                        "supplier_name": "Redwood Components",
+                        "status": "FEASIBLE",
+                        "total_cost": "6900.00",
+                        "estimated_arrival_date": "2026-10-17",
+                    },
+                    {
+                        "quote_id": "quote-c",
+                        "supplier_name": "Great Wall Components",
+                        "status": "FEASIBLE",
+                        "total_cost": "6500.00",
+                        "estimated_arrival_date": "2026-10-19",
+                    },
+                ]
+            }
+        },
+    }
+    body = {
+        "assistant_text": (
+            "如果兼顾价格，次快的选项是 Redwood Components，到货日期为 2026-10-17，"
+            f"总成本为 6900.00 SGD（{reference_id}）。"
+        ),
+        "reference_ids": [reference_id],
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+                max_attempts=1,
+            ),
+        )
+
+    assert raised.value.error_code == "conversation_model_output_invalid"
+
+
+@pytest.mark.parametrize("clarification", ["EXACT_DELIVERY_DAY", "COST_LIMIT", "CHANGE_DETAILS"])
+def test_dialogue_acts_need_no_fabricated_fact_references(clarification):
+    turn = conversations.validate_conversation_turn({
+        "assistant_text": "", "reference_ids": [], "changes": None,
+        "clarification": clarification,
+    }, {"allowed_reference_ids": [], "frozen_references": {}})
+    assert conversations.render_conversation_turn(turn) == conversations.CLARIFICATION_TEXT[clarification]
+
+
+def test_clarification_cannot_also_propose_a_silent_change():
+    with pytest.raises(ValueError, match="clarify first"):
+        conversations.validate_conversation_turn({
+            "assistant_text": "", "reference_ids": [],
+            "changes": {"delivery_deadline": "2026-10-18"},
+            "clarification": "EXACT_DELIVERY_DAY",
+        }, {"allowed_reference_ids": [], "frozen_references": {}})
+
+
+def test_citation_after_punctuation_still_binds_to_its_sentence():
+    context = {"allowed_reference_ids": ["RESULT:demo"], "frozen_references": {
+        "RESULT:demo": {"supplier_results": [{"quote_id": "quote_demo", "supplier_name": "Demo Alpha",
+                                              "status": "FEASIBLE", "total_cost": "6800.00"}]},
+    }}
+    conversations.validate_conversation_turn({
+        "assistant_text": "Demo Alpha总成本为6800.00 SGD。（RESULT:demo）",
+        "reference_ids": ["RESULT:demo"], "changes": None,
+    }, context)
+    with pytest.raises(ValueError, match="missing an inline reference"):
+        conversations.validate_conversation_turn({
+            "assistant_text": "Demo Alpha总成本为6800.00 SGD。",
+            "reference_ids": ["RESULT:demo"], "changes": None,
+        }, context)
+
+
+def test_user_proposal_does_not_exempt_uncited_supplier_fact():
+    with pytest.raises(ValueError, match="missing an inline reference"):
+        conversations.validate_conversation_turn({
+            "assistant_text": "按您的要求Demo Alpha到货日调整为2026-10-18。",
+            "reference_ids": [], "changes": {"delivery_deadline": "2026-10-18"},
+        }, {"allowed_reference_ids": ["RESULT:demo"], "frozen_references": {
+            "RESULT:demo": {"supplier_results": [{"supplier_name": "Demo Alpha"}]},
+        }})
+
+
+def test_frozen_requirement_has_its_own_citation():
+    conversations.validate_conversation_turn({
+        "assistant_text": "已确认的最晚到货日为2026-10-20（REQUIREMENT:snapshot_demo）。",
+        "reference_ids": ["REQUIREMENT:snapshot_demo"], "changes": None,
+    }, {"allowed_reference_ids": ["REQUIREMENT:snapshot_demo"], "frozen_references": {
+        "REQUIREMENT:snapshot_demo": {"requirement": {"delivery_deadline": "2026-10-20"}},
+    }})
+
+
+def test_conversation_turn_supports_native_bedrock_converse(monkeypatch) -> None:
+    calls: list[dict] = []
+    body = {
+        "assistant_text": "当前结果仍需确认（RESULT:result-1）。",
+        "reference_ids": ["RESULT:result-1"],
+        "changes": None,
+    }
+
+    class FakeBedrock:
+        def converse(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "stopReason": "end_turn",
+                "output": {
+                    "message": {"content": [{"text": json.dumps(body, ensure_ascii=False)}]}
+                },
+            }
+
+    monkeypatch.setitem(
+        sys.modules,
+        "boto3",
+        SimpleNamespace(client=lambda service, **_kwargs: FakeBedrock()),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "botocore.config",
+        SimpleNamespace(Config=lambda **kwargs: kwargs),
+    )
+    turn, attempts = generate_conversation_turn(
+        {
+            "allowed_reference_ids": ["RESULT:result-1"],
+            "frozen_references": {"RESULT:result-1": {"disposition": "PENDING_INPUT"}},
+            "available_supplier_ids": [],
+        },
+        ConversationModelConfig(
+            provider="bedrock-converse",
+            model_id="anthropic.claude-test",
+            base_url="bedrock://converse",
+            api_key_env="",
+            region="us-east-1",
+        ),
+    )
+
+    assert attempts == 1
+    assert turn == body
+    assert calls[0]["modelId"] == "anthropic.claude-test"
+    assert calls[0]["inferenceConfig"] == {"temperature": 0, "maxTokens": 4096}
+
+
+def test_conversation_turn_repairs_invalid_structured_change_once(monkeypatch) -> None:
+    context = {
+        "allowed_reference_ids": ["RESULT:result-1"],
+        "available_supplier_ids": ["SUP-023"],
+        "frozen_references": {"RESULT:result-1": {"disposition": "RECOMMENDED"}},
+        "recent_messages": [
+            {
+                "role": "USER",
+                "content": "如果改成优先交期，并允许比最低价高 200 新币，推荐会不会变化？",
+            },
+            {"role": "ASSISTANT", "content": "如需实际应用，请明确指示。"},
+            {"role": "USER", "content": "需实际应用此偏好变更"},
+        ],
+    }
+    invalid = {
+        "assistant_text": "我会直接应用上述设置。",
+        "reference_ids": ["RESULT:result-1"],
+        "changes": {
+            "ranking_mode": "优先交期",
+            "cost_tolerance_amount": 200.0,
+        },
+        "apply": True,
+    }
+    repaired = {
+        "assistant_text": "已整理为待确认的决策情景，确认后才会生成并应用（RESULT:result-1）。",
+        "reference_ids": ["RESULT:result-1"],
+        "changes": {
+            "primary_criterion": "FASTEST_CONFIRMED_DELIVERY",
+            "secondary_criterion": "LOWEST_CONFIRMED_TOTAL_COST",
+            "cost_tolerance_amount": "200.00",
+        },
+    }
+    calls: list[dict] = []
+
+    def fake_post(_url, body, **_kwargs):
+        calls.append(body)
+        return _model_payload(invalid if len(calls) == 1 else repaired), 1
+
+    monkeypatch.setattr(conversations, "_post_json", fake_post)
+    turn, attempts = generate_conversation_turn(
+        context,
+        ConversationModelConfig(
+            provider="fixed-test",
+            model_id="fixed-conversation",
+            base_url="https://example.invalid/v1",
+            api_key_env="UNUSED",
+        ),
+    )
+
+    assert attempts == 2
+    assert turn["changes"] == repaired["changes"]
+    assert len(calls) == 2
+    repair_request = json.loads(calls[1]["messages"][-1]["content"])
+    assert "validation_errors" in repair_request
+    assert "apply/action/confirm" in repair_request["note"]
+
+
+def test_conversation_turn_reports_bounded_validation_detail_after_repair(monkeypatch) -> None:
+    context = {
+        "allowed_reference_ids": ["RESULT:result-1"],
+        "available_supplier_ids": [],
+        "frozen_references": {"RESULT:result-1": {"disposition": "RECOMMENDED"}},
+        "recent_messages": [{"role": "USER", "content": "应用此偏好变更"}],
+    }
+    invalid = {
+        "assistant_text": "已处理。",
+        "reference_ids": ["RESULT:invented"],
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations,
+        "_post_json",
+        lambda *_args, **_kwargs: (_model_payload(invalid), 1),
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+            ),
+        )
+
+    assert raised.value.attempts == 2
+    assert raised.value.error_code == "conversation_model_output_invalid"
+    assert "reference_ids" in str(raised.value)
 
 
 def test_summary_narrative_requires_chinese_and_known_references(monkeypatch) -> None:

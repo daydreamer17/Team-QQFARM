@@ -1,7 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { api } from '../api/client'
 import type { TaskListItem } from '../api/types'
+
+const HISTORY_PAGE_SIZE = 8
 
 function navClass({ isActive }: { isActive: boolean }) {
   return `nav-link${isActive ? ' nav-link-active' : ''}`
@@ -25,11 +28,15 @@ function taskStage(task: TaskListItem) {
 }
 
 export function AppShell() {
+  const [historyPage, setHistoryPage] = useState(0)
   const taskHistory = useQuery({
-    queryKey: ['tasks', 'history'],
-    queryFn: () => api.listTasks(8),
+    queryKey: ['tasks', 'history', historyPage],
+    queryFn: () => api.listTasks({ limit: HISTORY_PAGE_SIZE, offset: historyPage * HISTORY_PAGE_SIZE, sort: 'updated_desc' }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: 5_000,
   })
+  const historyTotal = taskHistory.data?.total ?? 0
+  const historyPageCount = Math.max(1, Math.ceil(historyTotal / HISTORY_PAGE_SIZE))
 
   return (
     <div className="app-shell">
@@ -57,7 +64,7 @@ export function AppShell() {
           <section className="sidebar-history" aria-label="历史任务">
             <div className="sidebar-history-heading">
               <span>历史任务</span>
-              <small>{taskHistory.data?.items.length ?? 0}</small>
+              <small>{historyTotal}</small>
             </div>
             {taskHistory.isPending && (
               <p className="sidebar-history-message">正在读取…</p>
@@ -79,7 +86,7 @@ export function AppShell() {
                   to={'/tasks/' + task.task_id}
                 >
                   <span className="history-task-index">
-                    {String(index + 1).padStart(2, '0')}
+                    {String(historyPage * HISTORY_PAGE_SIZE + index + 1).padStart(2, '0')}
                   </span>
                   <span className="history-task-copy">
                     <strong>
@@ -99,6 +106,13 @@ export function AppShell() {
                 </NavLink>
               ))}
             </div>
+            {historyTotal > HISTORY_PAGE_SIZE && (
+              <nav className="sidebar-history-pagination" aria-label="历史任务分页">
+                <button type="button" aria-label="上一页历史任务" disabled={historyPage === 0 || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}>‹</button>
+                <span>{historyPage + 1} / {historyPageCount}</span>
+                <button type="button" aria-label="下一页历史任务" disabled={historyPage + 1 >= historyPageCount || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.min(historyPageCount - 1, page + 1))}>›</button>
+              </nav>
+            )}
           </section>
           <div className="sidebar-note">
             <strong>当前工作区</strong>

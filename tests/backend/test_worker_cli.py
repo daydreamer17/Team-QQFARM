@@ -29,6 +29,25 @@ def test_worker_cli_sanitizes_unexpected_exception(monkeypatch, capsys) -> None:
     }
 
 
+def test_worker_cli_reports_sanitized_model_error_code() -> None:
+    payload = worker._error_payload(
+        "job_model",
+        ModelClientError(
+            "conversation validation failed: missing reference",
+            attempts=2,
+            error_code="conversation_model_output_invalid",
+        ),
+    )
+
+    assert payload == {
+        "error": {
+            "code": "conversation_model_output_invalid",
+            "message": "conversation validation failed: missing reference",
+        },
+        "job_id": "job_model",
+    }
+
+
 def test_worker_loop_processes_pending_jobs_until_idle() -> None:
     class FakeService:
         def __init__(self) -> None:
@@ -139,5 +158,6 @@ def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> No
             "code": "conversation_model_output_invalid",
             "message": "回答未通过事实与引用校验，请重试或缩小问题范围。",
             "attempts": 1,
+            "diagnostic": "conversation model response failed validation",
         },
     )

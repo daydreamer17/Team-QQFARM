@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, Navigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useLocation, useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
 import { RunPanel } from '../components/RunPanel'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
@@ -10,19 +10,56 @@ function errorMessage(error: unknown) {
 
 export function DecisionPage() {
   const { taskId = '' } = useParams()
+  const location = useLocation()
+  const expectedRevision = typeof location.state === 'object'
+    && location.state !== null
+    && 'expectedRevision' in location.state
+    && typeof location.state.expectedRevision === 'number'
+    ? location.state.expectedRevision
+    : null
+  const expectedGraphRunId = typeof location.state === 'object'
+    && location.state !== null
+    && 'expectedGraphRunId' in location.state
+    && typeof location.state.expectedGraphRunId === 'string'
+    ? location.state.expectedGraphRunId
+    : null
+  const previousResultId = typeof location.state === 'object'
+    && location.state !== null
+    && 'previousResultId' in location.state
+    && typeof location.state.previousResultId === 'string'
+    ? location.state.previousResultId
+    : null
   const task = useQuery({
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
     enabled: Boolean(taskId),
     refetchInterval: (query) => {
       const status = query.state.data?.status
-      return status === 'QUEUED' || status === 'RUNNING' ? 1_500 : false
+      const waitingForAppliedRevision = expectedRevision !== null && (
+        !query.state.data
+        || query.state.data.task_revision < expectedRevision
+        || !query.state.data.current_result_id
+      )
+      const waitingForRerun = expectedGraphRunId !== null
+        && query.state.data?.current_graph_run_id === expectedGraphRunId
+        && (status === 'QUEUED' || status === 'RUNNING')
+      return waitingForAppliedRevision || waitingForRerun || status === 'QUEUED' || status === 'RUNNING'
+        ? 1_500
+        : false
     },
   })
 
   if (task.isPending) return <section className="card loading-panel">正在读取决策工作区…</section>
   if (task.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error)}</section>
-  if (task.data.current_result_id) {
+  const expectedRerunReady = expectedGraphRunId !== null
+    && task.data.current_graph_run_id === expectedGraphRunId
+    && task.data.status === 'COMPLETED'
+    && Boolean(task.data.current_result_id)
+    && task.data.current_result_id !== previousResultId
+  const normalResultReady = expectedGraphRunId === null
+    && Boolean(task.data.current_result_id)
+    && (expectedRevision === null || task.data.task_revision >= expectedRevision)
+  if (expectedRerunReady || normalResultReady) {
     return <Navigate to={`/tasks/${taskId}/results/${task.data.current_result_id}`} replace />
   }
 
@@ -53,6 +90,12 @@ export function DecisionPage() {
       <section className="decision-section-lead">
         <div>
           <h2>决策比较</h2>
+          {expectedRevision !== null && !data.current_result_id && (
+            <p>正在生成第 {expectedRevision} 版决策结果，完成后将自动打开。</p>
+          )}
+          {expectedGraphRunId !== null && (data.status === 'QUEUED' || data.status === 'RUNNING') && (
+            <p>正在按当前代码重新分析；旧结果仍保留为历史记录，新结果完成后将自动打开。</p>
+          )}
         </div>
       </section>
 

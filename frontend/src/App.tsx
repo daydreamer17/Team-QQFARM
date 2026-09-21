@@ -15,6 +15,7 @@ import { ReviewPage } from './pages/ReviewPage'
 import { ResultPage } from './pages/ResultPage'
 import { SelectionGapPage } from './pages/SelectionGapPage'
 import { SummaryPage } from './pages/SummaryPage'
+import { SupplierInfoPage } from './pages/SupplierInfoPage'
 import { TaskPage } from './pages/TaskPage'
 import './App.css'
 import './styles/blueprint.css'
@@ -38,6 +39,7 @@ function App() {
         <Route path="tasks/:taskId/edit" element={<EditTaskPage />} />
         <Route path="tasks/:taskId/quotes/new" element={<QuoteUploadPage />} />
         <Route path="tasks/:taskId/review" element={<ReviewPage />} />
+        <Route path="tasks/:taskId/suppliers" element={<SupplierInfoPage />} />
         <Route path="tasks/:taskId/investigations" element={<InvestigationPage />} />
         <Route path="tasks/:taskId/decision" element={<DecisionPage />} />
         <Route path="tasks/:taskId/gaps" element={<SelectionGapPage />} />

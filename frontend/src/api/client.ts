@@ -45,6 +45,7 @@ import type {
   TaskSummary,
   SummaryListResponse,
   SummaryReportResponse,
+  SupplierInformationResponse,
   ResultHistoryItem,
 } from './types'
 
@@ -187,6 +188,10 @@ export const api = {
     }),
   getTask: (taskId: string) =>
     request<TaskDetail>(`/api/v1/tasks/${encodeURIComponent(taskId)}`),
+  getSupplierInformation: (taskId: string, resultId?: string) =>
+    request<SupplierInformationResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/suppliers${queryString({ result_id: resultId })}`,
+    ),
   listQuotes: (taskId: string) =>
     request<QuoteHistoryResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quotes`,
