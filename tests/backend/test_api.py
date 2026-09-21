@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
-from supplier_comparison.backend.models import Base, Document, Task, WorkflowArtifact
+from supplier_comparison.backend.models import Base, Document, Job, Task, WorkflowArtifact
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import BackendError
 from supplier_comparison.backend.service import content_hash
@@ -1539,6 +1539,50 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     assert created.status_code == 201, created.text
     conversation = created.json()
     conversation_id = conversation['conversation_id']
+    assert http.get(base, params={'result_id': conversation['base_result_id']}).json()['items'] == [conversation]
+    assert http.get(base, params={'result_id': 'another-result'}).json()['items'] == []
+
+    task_state = service.get_task(task['task_id'])
+    policy = service.append_artifact(
+        task_id=task['task_id'],
+        task_revision=task_state['task_revision'],
+        graph_run_id=task_state['current_graph_run_id'],
+        parent_artifact_id=task_state['current_result_id'],
+        artifact_type='POLICY_RETRIEVAL_RESULT',
+        payload={
+            'retrieval_id': 'RET-chat',
+            'status': 'OK',
+            'covered_control_codes': ['APPROVED_SUPPLIER'],
+            'missing_control_codes': [],
+            'citations': [{
+                'citation_id': 'CIT-chat-1',
+                'control_code': 'APPROVED_SUPPLIER',
+                'text': 'Approved suppliers require a current registry record.',
+                'policy_set_version': '2026.09.1',
+                'document_id': 'POL-001',
+                'document_version': '1.0',
+                'clause_id': 'approved-1',
+                'section': 'Approved suppliers',
+                'content_sha256': 'a' * 64,
+            }],
+        },
+    )
+    investigation = service.append_artifact(
+        task_id=task['task_id'],
+        task_revision=task_state['task_revision'],
+        graph_run_id=task_state['current_graph_run_id'],
+        artifact_type='INVESTIGATION_CASE',
+        payload={
+            'case_id': 'CASE-chat',
+            'kind': 'QUOTE',
+            'status': 'WAITING_INPUT',
+            'stop_reason': 'EVIDENCE_INSUFFICIENT',
+            'goal': 'Confirm the unknown shipping amount.',
+            'unknown_fields': ['shipping_fee_amount'],
+            'clarification': [{'question': 'Please confirm shipping.'}],
+            'observations': [],
+        },
+    )
     message_url = base + '/' + conversation_id + '/messages'
     first = http.post(
         message_url,
@@ -1556,12 +1600,24 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     assert blocked.json()['error']['code'] == 'conversation_turn_in_progress'
     context = service.conversation_job_context(job_id)
     assert context['recent_messages'][-1]['content'] == '现在为什么推荐这个报价？'
+    assert f"REQUEST:{first.json()['message']['message_id']}" in context['allowed_reference_ids']
+    assert 'POLICY:CIT-chat-1' in context['allowed_reference_ids']
+    assert f"INVESTIGATION:{investigation['artifact_id']}" in context['allowed_reference_ids']
+    assert f"COMPLIANCE:{context['result_id']}" in context['allowed_reference_ids']
+    assert context['frozen_references']['POLICY:CIT-chat-1']['text'].startswith('Approved suppliers')
     result_ref = 'RESULT:' + context['result_id']
+    grounded_refs = [
+        result_ref,
+        f"REQUEST:{first.json()['message']['message_id']}",
+        'POLICY:CIT-chat-1',
+        f"INVESTIGATION:{investigation['artifact_id']}",
+        f"COMPLIANCE:{context['result_id']}",
+    ]
     completed = service.complete_conversation_job(
         job_id,
         turn={
             'assistant_text': '当前推荐来自冻结的确定性比较结果；聊天不会改变该结论。',
-            'reference_ids': [result_ref],
+            'reference_ids': grounded_refs,
             'changes': None,
         },
         attempts=1,
@@ -1570,6 +1626,7 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     )
     assert completed['job_status'] == 'SUCCEEDED'
     assert completed['message']['role'] == 'ASSISTANT'
+    assert completed['message']['reference_ids'] == grounded_refs
 
     second = http.post(
         message_url,
@@ -1622,6 +1679,13 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     assert service.decision_conversation_events(
         task['task_id'], conversation_id, after_sequence=replay[-2]['sequence']
     ) == replay[-1:]
+    resumed = http.get(
+        base + '/' + conversation_id + '/events',
+        params={'follow': 'false'},
+        headers={'Last-Event-ID': str(replay[-2]['sequence'])},
+    )
+    assert f"id: {replay[-1]['sequence']}" in resumed.text
+    assert 'id: 1\n' not in resumed.text
 
     third = http.post(
         message_url,
@@ -1639,6 +1703,54 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     failed = http.get(base + '/' + conversation_id).json()['messages'][-1]
     assert failed['role'] == 'ASSISTANT' and failed['status'] == 'FAILED'
     assert failed['attempts'] == 2 and failed['error_code'] == 'model_transport_error'
+
+
+def test_stale_running_conversation_job_is_requeued(batch_review):
+    http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='conversation-recovery-ready',
+    )
+    runner.run_job(updated['job_id'])
+    base = f"/api/v1/tasks/{task['task_id']}/decision-conversations"
+    conversation = http.post(
+        base,
+        json={'expected_task_revision': 4},
+        headers={'Idempotency-Key': 'conversation-recovery-create'},
+    ).json()
+    sent = http.post(
+        base + '/' + conversation['conversation_id'] + '/messages',
+        json={'expected_task_revision': 4, 'message': '请解释当前结果。'},
+        headers={'Idempotency-Key': 'conversation-recovery-message'},
+    ).json()
+    job_id = sent['job']['job_id']
+    service.conversation_job_context(job_id)
+    with service.session_factory.begin() as session:
+        job = session.get(Job, job_id)
+        job.started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    assert service.next_pending_job_id() == job_id
+    with service.session_factory() as session:
+        recovered = session.get(Job, job_id)
+        assert recovered.status == 'PENDING'
+        assert recovered.error_code == 'conversation_worker_interrupted'
+
+    service.conversation_job_context(job_id)
+    with service.session_factory.begin() as session:
+        session.get(Job, job_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    assert service.next_pending_job_id() == job_id
+    service.conversation_job_context(job_id)
+    with service.session_factory.begin() as session:
+        session.get(Job, job_id).started_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+
+    assert service.next_pending_job_id() is None
+    with service.session_factory() as session:
+        exhausted = session.get(Job, job_id)
+        assert exhausted.status == 'FAILED'
+        assert exhausted.error_code == 'conversation_retry_exhausted'
+    loaded = http.get(base + '/' + conversation['conversation_id']).json()
+    assert loaded['messages'][-1]['error_code'] == 'conversation_retry_exhausted'
 
 
 def test_pending_conversation_is_superseded_when_task_changes(batch_review):

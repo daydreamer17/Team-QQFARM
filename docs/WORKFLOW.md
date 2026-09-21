@@ -297,10 +297,15 @@ Compose 重启但不删除卷时，任务、问题、checkpoint、报价文件�
 - `GET /api/v1/tasks/{task_id}/quotes/{quote_id}/fields`：字段候选、审核状态和证据引用；
 - `GET /api/v1/tasks/{task_id}/issues`：当前及历史问题；
 - `GET /api/v1/tasks/{task_id}/selection-gaps`：选择差距分析；
+- `GET /api/v1/tasks/{task_id}/results/{result_id}`：按冻结结果读取对应 revision 的比较、制度检索和合规边界；
+- `GET /api/v1/tasks/{task_id}/decision-conversations?result_id={result_id}`：只读取绑定到指定结果的决策对话；
+- `GET /api/v1/tasks/{task_id}/decision-conversations/{conversation_id}/events`：以 SSE 推送已经过后端校验的回答，断线时使用 `Last-Event-ID` 续传；
 - `GET /api/v1/policy-sets`：创建任务时选择已发布制度绑定；
 - `GET /api/v1/policy-imports`：制度上传和审核列表。
 
-当前仓库没有完成 React 页面或自然语言聊天入口。前端不能在浏览器中自行计算权威金额，也不能把 Agent 输出直接写回数据库。
+React 已提供受控的决策对话入口。模型只能解释当前冻结结果并提出结构化 Scenario 变更，不能直接修改需求、重算金额、裁决合规或发布结果。后端向模型提供当前结果、报价行、RAG 条款、合规状态、Agent 调查记录和本轮请求的冻结引用，并在持久化前再次检查引用范围、金额、推荐供应商、报价状态和正向合规陈述。历史结果只显示绑定到该 `result_id` 的历史对话，且保持只读。
+
+聊天引用可以在结果页打开：报价引用进入对应字段证据抽屉，制度引用显示完整条款、版本和哈希，结果与合规引用显示其冻结边界。RAG 条款只能解释制度要求；在供应商事实和确定性合规矩阵完成前，结果页固定显示“仅用于采购比较，供应商合规仍需单独核验”。
 
 ## 14. 当前完成状态
 
@@ -324,23 +329,17 @@ Compose 重启但不删除卷时，任务、问题、checkpoint、报价文件�
 | React 操作界面 | 已实现任务中心、需求草稿/修改、报价审核、决策、Summary 与审计页面 |
 | 版本化 AI Summary | 已实现确定性事实骨架、受约束模型叙述与异步失败重试；不代表审批 |
 | 正式登录、审批和 HTML 报告 | 未实现 |
-| 常驻 worker 自动调度 | 未实现；当前使用一次性 worker |
-| 自由聊天 Chatbot | 当前 MVP 范围外 |
+| 常驻 worker 自动调度 | 已实现单 worker 轮询；聊天任务中断超过阈值后最多恢复两次，第三次失败关闭 |
+| 受控决策 Chatbot | 已实现结果绑定、多轮对话、SSE、引用核验和结构化 Scenario 提议；不提供自由知识问答 |
 | Lightsail 完整部署验收 | 待执行 |
 
 ## 15. 验证与部署注意事项
 
 普通测试使用固定模型和固定检索适配器，不访问外部 API。真实 PostgreSQL、Agent 模型、embedding/rerank 和 Lightsail 验收必须显式启用并分别记录，不能用固定输出测试替代。
 
-截至 2026-09-18，本地默认测试结果为：
+默认测试使用固定适配器；准确数量以当前提交的实际 `pytest`、Vitest、lint 和 build 结果为准。跳过项包含显式 PostgreSQL 恢复测试和付费 live Agent 测试，不能用固定输出测试替代这些部署验收。
 
-```text
-586 passed, 13 skipped
-```
-
-跳过项包含显式 PostgreSQL 恢复测试和付费 live Agent 测试。本次更新文档时 Docker Desktop Linux engine 未运行，因此没有重新确认 PostgreSQL 专项结果。
-
-当前 Compose 已传递报价模型和 RAG embedding/rerank 配置，但还没有向 worker 显式传递 `SUPPLIER_AGENT_ENABLED`、Agent 独立模型／预算和制度重试变量。因此在补齐 Compose 映射前，即使宿主机 `.env` 设置了这些变量，容器 worker 仍会使用 Agent 默认关闭值。直接从本地 `.env` 启动 Python worker 时不受这项 Compose 缺口影响。
+Compose 已向 worker 传递报价模型、决策聊天模型、RAG embedding/rerank、Agent 开关与预算配置。`SUPPLIER_CONVERSATION_JOB_STALE_SECONDS` 默认 120 秒，用于识别 worker 中断后遗留的聊天 `RUNNING` job；重试次数仍由后端固定上限保护。
 
 一次性 worker 命令为：
 

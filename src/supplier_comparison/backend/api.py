@@ -896,8 +896,8 @@ def create_app(
         )
 
     @app.get("/api/v1/tasks/{task_id}/decision-conversations")
-    def list_task_decision_conversations(task_id: str):
-        return service.list_decision_conversations(task_id)
+    def list_task_decision_conversations(task_id: str, result_id: str | None = None):
+        return service.list_decision_conversations(task_id, result_id=result_id)
 
     @app.get("/api/v1/tasks/{task_id}/decision-conversations/{conversation_id}")
     def get_task_decision_conversation(task_id: str, conversation_id: str):
@@ -928,6 +928,7 @@ def create_app(
         task_id: str,
         conversation_id: str,
         after: int = Query(default=0, ge=0),
+        last_event_id: int | None = Header(default=None, alias="Last-Event-ID", ge=0),
         follow: bool = Query(default=True),
         timeout_seconds: float = Query(default=25.0, ge=0.1, le=30.0),
     ):
@@ -935,7 +936,7 @@ def create_app(
         service.get_decision_conversation(task_id, conversation_id)
 
         def event_stream():
-            cursor = after
+            cursor = max(after, last_event_id or 0)
             deadline = time.monotonic() + timeout_seconds
             yield "retry: 1000\n\n"
             while True:

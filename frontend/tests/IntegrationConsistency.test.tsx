@@ -136,10 +136,47 @@ function makeHistoricalResult(): ComparisonResultResponse {
       final_recommendation_allowed: false,
     },
     decision_impact: null,
-    policy_retrievals: [],
+    policy_retrievals: [{
+      retrieval_id: 'RET-old',
+      status: 'OK',
+      policy_set_version: '2026.09.1',
+      policy_index_version: 'index-old',
+      embedding_model: 'fixed-embedding',
+      rerank_model: 'fixed-rerank',
+      filters: {},
+      covered_control_codes: ['APPROVED_SUPPLIER'],
+      missing_control_codes: [],
+      citations: [{
+        citation_id: 'CIT-old',
+        retrieval_id: 'RET-old',
+        policy_set_version: '2026.09.1',
+        policy_id: 'POL-001',
+        document_id: 'DOC-001',
+        document_version: '1.0',
+        clause_id: 'approved-1',
+        section: 'Approved suppliers',
+        text: 'A current supplier registry record is required before approval.',
+        content_sha256: 'a'.repeat(64),
+        control_code: 'APPROVED_SUPPLIER',
+        bm25_rank: 1,
+        bm25_score: 1,
+        vector_rank: 1,
+        vector_score: 1,
+        fusion_rank: 1,
+        fusion_score: 1,
+        rerank_rank: 1,
+        rerank_score: 1,
+      }],
+      candidates: [],
+      latency_ms: { total: 1 },
+      attempts: { embedding: 1, rerank: 1 },
+      error_code: null,
+    }],
     policy_compliance: {
       schema_version: 'policy-compliance/1',
       disposition: 'NO_CONFIRMED_COMPLIANT_SUPPLIER',
+      recommendation_scope: 'PROCUREMENT_COMPARISON_ONLY',
+      requires_human_review: false,
       counts: { COMPLIANT: 0, NON_COMPLIANT: 0, REVIEW_REQUIRED: 0, NOT_EVALUATED: 1 },
       assessments: [],
     },
@@ -174,7 +211,68 @@ describe('frontend and backend version consistency', () => {
     const fields = vi.spyOn(api, 'getQuoteFields').mockResolvedValue({
       quote_id: 'quote-1', review_status: 'REVIEW_REQUIRED', review_findings: [], fields: [],
     })
-    vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    const conversations = vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({
+      task_id: 'task-1',
+      task_revision: 6,
+      items: [
+        {
+          conversation_id: 'conversation-current',
+          task_id: 'task-1',
+          base_task_revision: 6,
+          base_result_id: 'result-current',
+          status: 'ACTIVE',
+          title: '当前版本对话',
+          messages: [{
+            message_id: 'message-current',
+            sequence: 1,
+            role: 'ASSISTANT',
+            status: 'SUCCEEDED',
+            content: '这是当前第六版的回答。',
+            reference_ids: ['RESULT:result-current'],
+            proposed_changes: null,
+            decision_intent_id: null,
+            reply_to_message_id: null,
+            provider: 'fixed',
+            model_id: 'fixed',
+            prompt_version: 'conversation/1',
+            attempts: 1,
+            error_code: null,
+            error_message: null,
+            created_at: '2026-09-13T00:00:00Z',
+          }],
+          created_at: '2026-09-13T00:00:00Z',
+          updated_at: '2026-09-13T00:00:00Z',
+        },
+        {
+          conversation_id: 'conversation-old',
+          task_id: 'task-1',
+          base_task_revision: 5,
+          base_result_id: 'result-old',
+          status: 'STALE',
+          title: '历史版本对话',
+          messages: [{
+            message_id: 'message-old',
+            sequence: 1,
+            role: 'ASSISTANT',
+            status: 'SUCCEEDED',
+            content: '这是历史第五版的回答。',
+            reference_ids: ['RESULT:result-old', 'QUOTE:quote-1', 'POLICY:CIT-old'],
+            proposed_changes: null,
+            decision_intent_id: null,
+            reply_to_message_id: null,
+            provider: 'fixed',
+            model_id: 'fixed',
+            prompt_version: 'conversation/1',
+            attempts: 1,
+            error_code: null,
+            error_message: null,
+            created_at: '2026-09-12T00:00:00Z',
+          }],
+          created_at: '2026-09-12T00:00:00Z',
+          updated_at: '2026-09-12T00:00:00Z',
+        },
+      ],
+    })
     vi.spyOn(api, 'listDecisionScenarios').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
     vi.spyOn(api, 'listDecisionIntents').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
 
@@ -186,8 +284,20 @@ describe('frontend and backend version consistency', () => {
 
     expect(await screen.findByRole('heading', { name: 'FROZEN-PART' })).toBeInTheDocument()
     expect(screen.getByText('历史结果第 5 版')).toBeInTheDocument()
+    expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'CURRENT-PART' })).not.toBeInTheDocument()
+    expect(screen.getByText('这是历史第五版的回答。')).toBeInTheDocument()
+    expect(screen.queryByText('这是当前第六版的回答。')).not.toBeInTheDocument()
     await waitFor(() => expect(fields).toHaveBeenCalledWith('task-1', 'quote-1', 'result-old'))
+    expect(conversations).toHaveBeenCalledWith('task-1', 'result-old')
+
+    await userEvent.click(screen.getByRole('button', { name: '查看引用 [2] 供应商报价' }))
+    expect(screen.getByRole('dialog', { name: 'Supplier One 字段证据' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '关闭' }))
+    await userEvent.click(screen.getByRole('button', { name: '查看引用 [3] 制度证据' }))
+    expect(screen.getByRole('dialog', { name: '制度引用详情' })).toHaveTextContent(
+      'A current supplier registry record is required before approval.',
+    )
   })
 
   test('compliance page never falls back to a historical result', async () => {

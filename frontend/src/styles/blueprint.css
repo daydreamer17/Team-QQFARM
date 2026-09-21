@@ -2652,23 +2652,43 @@ body {
   list-style: none;
 }
 
-.chat-citations li {
+.chat-citation-link {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   align-items: start;
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
   color: var(--blue-dark);
   font-size: 0.59rem;
+  text-align: left;
+  cursor: pointer;
 }
 
-.chat-citations li > span {
+.chat-citation-link:hover,
+.chat-citation-link:focus-visible {
+  border-color: var(--line);
+  background: #f6f8fc;
+}
+
+.chat-citation-link > span {
   font-weight: 800;
 }
 
-.chat-citations li > div {
+.chat-citation-link > div {
   display: grid;
   min-width: 0;
   gap: 1px;
+}
+
+.chat-reference-drawer blockquote {
+  margin: 12px 0;
+  padding: 12px;
+  border-left: 3px solid var(--blue);
+  background: #f6f8fc;
 }
 
 .chat-citations small {

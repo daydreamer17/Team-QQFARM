@@ -367,6 +367,10 @@ export function ResultPage() {
         <div className="run-notice">这是历史结果，不代表任务当前版本。</div>
       )}
 
+      {resultQuery.data.policy_compliance.recommendation_scope !== 'COMPLIANCE_VERIFIED' && (
+        <div className="run-notice">该结果仅用于采购比较；供应商合规仍需单独核验。</div>
+      )}
+
       <section className="decision-ready-banner">
         <div>
           <strong>{resultQuery.data.is_current ? '报价审核已完成，可以比较' : '正在查看历史决策结果'}</strong>
@@ -536,7 +540,16 @@ export function ResultPage() {
 
         {task && (
           <aside className="decision-chat-rail">
-            <DecisionScenarioWorkspace task={task} result={resultQuery.data} compact />
+            <DecisionScenarioWorkspace
+              key={resultQuery.data.result_id}
+              task={task}
+              result={resultQuery.data}
+              compact
+              onOpenQuoteEvidence={(quoteId) => {
+                const index = suppliers.findIndex((supplier) => supplier.quote_id === quoteId)
+                if (index >= 0) setSelectedSupplierIndex(index)
+              }}
+            />
           </aside>
         )}
       </div>

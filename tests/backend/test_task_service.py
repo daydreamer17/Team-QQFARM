@@ -201,6 +201,8 @@ def test_policy_compliance_reports_missing_supplier_facts_without_false_failure(
     result = BackendService._policy_compliance_payload(comparison, retrievals)
 
     assert result["disposition"] == "NO_CONFIRMED_COMPLIANT_SUPPLIER"
+    assert result["recommendation_scope"] == "PROCUREMENT_COMPARISON_ONLY"
+    assert result["requires_human_review"] is True
     assert result["counts"] == {
         "COMPLIANT": 0,
         "NON_COMPLIANT": 0,

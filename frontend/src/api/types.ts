@@ -614,6 +614,8 @@ export interface PolicyComplianceSupplierAssessment {
 export interface PolicyComplianceResult {
   schema_version: string
   disposition: 'COMPLIANT_SUPPLIERS_AVAILABLE' | 'NO_CONFIRMED_COMPLIANT_SUPPLIER' | 'NO_SUPPLIERS'
+  recommendation_scope: 'COMPLIANCE_VERIFIED' | 'PROCUREMENT_COMPARISON_ONLY'
+  requires_human_review: boolean
   counts: Record<PolicyComplianceStatus, number>
   assessments: PolicyComplianceSupplierAssessment[]
 }

@@ -328,6 +328,94 @@ def test_conversation_turn_is_chinese_grounded_and_chunkable(monkeypatch) -> Non
     assert raised.value.error_code == "conversation_model_output_invalid"
 
 
+@pytest.mark.parametrize(
+    "assistant_text,reference_ids",
+    [
+        ("当前推荐供应商的总成本为 1 元。", ["RESULT:result-1"]),
+        ("当前供应商已经通过全部合规审批。", ["RESULT:result-1"]),
+        ("推荐供应商：Supplier Two。", ["RESULT:result-1"]),
+        ("Supplier One 不符合采购要求。", ["RESULT:result-1"]),
+        ("该报价是三个可行报价中成本最低的。", ["RESULT:result-1"]),
+        ("当前结果来自冻结事实。", []),
+    ],
+)
+def test_conversation_turn_rejects_unsupported_high_risk_claims(
+    monkeypatch, assistant_text, reference_ids
+) -> None:
+    context = {
+        "allowed_reference_ids": ["RESULT:result-1"],
+        "available_supplier_ids": ["SUP-023"],
+        "frozen_references": {
+            "RESULT:result-1": {
+                "recommended_quote_ids": ["quote-1"],
+                "supplier_results": [
+                    {
+                        "quote_id": "quote-1",
+                        "supplier_name": "Supplier One",
+                        "total_cost": "7000.00",
+                        "status": "FEASIBLE",
+                    }
+                ],
+            }
+        },
+        "recent_messages": [{"role": "USER", "content": "请解释当前结果。"}],
+    }
+    body = {
+        "assistant_text": assistant_text,
+        "reference_ids": reference_ids,
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        generate_conversation_turn(
+            context,
+            ConversationModelConfig(
+                provider="fixed-test",
+                model_id="fixed-conversation",
+                base_url="https://example.invalid/v1",
+                api_key_env="UNUSED",
+            ),
+        )
+
+    assert raised.value.error_code == "conversation_model_output_invalid"
+
+
+def test_conversation_turn_accepts_money_stated_inside_cited_policy_text(monkeypatch) -> None:
+    context = {
+        "allowed_reference_ids": ["POLICY:approval-1"],
+        "available_supplier_ids": [],
+        "frozen_references": {
+            "POLICY:approval-1": {
+                "text": "Orders over SGD 10,000 require director approval."
+            }
+        },
+        "recent_messages": [{"role": "USER", "content": "审批门槛是多少？"}],
+    }
+    body = {
+        "assistant_text": "制度规定金额达到 SGD 10,000 时需要主管审批。",
+        "reference_ids": ["POLICY:approval-1"],
+        "changes": None,
+    }
+    monkeypatch.setattr(
+        conversations, "_post_json", lambda *_args, **_kwargs: (_model_payload(body), 1)
+    )
+
+    turn, _attempts = generate_conversation_turn(
+        context,
+        ConversationModelConfig(
+            provider="fixed-test",
+            model_id="fixed-conversation",
+            base_url="https://example.invalid/v1",
+            api_key_env="UNUSED",
+        ),
+    )
+
+    assert turn["assistant_text"] == body["assistant_text"]
+
+
 def test_summary_narrative_requires_chinese_and_known_references(monkeypatch) -> None:
     facts = {"references": ["result:RESULT-1"], "formal_recommendation_allowed": False}
     valid = {

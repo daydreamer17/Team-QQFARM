@@ -160,12 +160,14 @@ class BackendService:
         *,
         actor_id: str,
         quote_dictionary_path: str | Path = "data/contracts/quote_data_field.csv",
+        conversation_job_stale_seconds: int = 120,
     ) -> None:
         self.session_factory = session_factory
         self.storage_root = Path(storage_root)
         self.actor_id = actor_id
         self.quote_dictionary_path = Path(quote_dictionary_path)
         self.quote_dictionary = QuoteDictionary.load(self.quote_dictionary_path)
+        self.conversation_job_stale_seconds = conversation_job_stale_seconds
 
     def quote_field_schema(self) -> dict[str, Any]:
         """Return the versioned, backend-owned quote review form contract."""
@@ -2647,6 +2649,8 @@ class BackendService:
             job.status = "RUNNING"
             job.attempts += 1
             job.started_at = datetime.now(timezone.utc)
+            job.error_code = None
+            job.error_message = None
             draft.status = "PROCESSING"
             return {
                 "job_id": job_id,
@@ -3291,7 +3295,87 @@ class BackendService:
     def next_pending_job_id(self) -> str | None:
         """Return the oldest pending job for the single background worker."""
 
-        with self.session_factory() as session:
+        with self.session_factory.begin() as session:
+            cutoff = datetime.now(timezone.utc) - timedelta(
+                seconds=self.conversation_job_stale_seconds
+            )
+            stale_jobs = session.scalars(
+                select(Job)
+                .where(
+                    Job.job_type == "DECISION_CONVERSATION",
+                    Job.status == "RUNNING",
+                    Job.started_at.is_not(None),
+                    Job.started_at <= cutoff,
+                )
+                .order_by(Job.started_at, Job.job_id)
+                .with_for_update()
+            ).all()
+            for job in stale_jobs:
+                conversation = session.get(DecisionConversation, job.conversation_id)
+                task = session.get(Task, job.task_id)
+                if (
+                    conversation is None
+                    or task is None
+                    or conversation.status != "ACTIVE"
+                    or conversation.base_task_revision != task.current_revision
+                    or conversation.base_result_id != task.current_result_id
+                ):
+                    job.status = "SUPERSEDED"
+                    if conversation is not None:
+                        conversation.status = "STALE"
+                    continue
+                if job.attempts < 3:
+                    job.status = "PENDING"
+                    job.started_at = None
+                    job.error_code = "conversation_worker_interrupted"
+                    job.error_message = (
+                        "The previous conversation worker stopped before completion."
+                    )
+                    self._append_conversation_event(
+                        session,
+                        conversation.conversation_id,
+                        "assistant.retrying",
+                        {
+                            "job_id": job.job_id,
+                            "reply_to_message_id": job.conversation_message_id,
+                            "attempts": job.attempts,
+                        },
+                    )
+                else:
+                    latest = session.scalar(
+                        select(DecisionMessage)
+                        .where(
+                            DecisionMessage.conversation_id
+                            == conversation.conversation_id
+                        )
+                        .order_by(DecisionMessage.sequence.desc())
+                    )
+                    failed = DecisionMessage(
+                        message_id=new_id("dmessage"),
+                        conversation_id=conversation.conversation_id,
+                        task_id=conversation.task_id,
+                        sequence=(latest.sequence + 1 if latest else 1),
+                        role="ASSISTANT",
+                        status="FAILED",
+                        reply_to_message_id=job.conversation_message_id,
+                        attempts=job.attempts,
+                        error_code="conversation_retry_exhausted",
+                        error_message=(
+                            "The conversation worker stopped repeatedly before completion."
+                        ),
+                    )
+                    session.add(failed)
+                    session.flush()
+                    job.status = "FAILED"
+                    job.error_code = failed.error_code
+                    job.error_message = failed.error_message
+                    job.finished_at = datetime.now(timezone.utc)
+                    self._append_conversation_event(
+                        session,
+                        conversation.conversation_id,
+                        "assistant.failed",
+                        {"message": self._decision_message_response(failed)},
+                    )
             return session.scalar(
                 select(Job.job_id)
                 .where(Job.status == "PENDING")
@@ -3558,6 +3642,12 @@ class BackendService:
         return {
             "schema_version": "policy-compliance/1.0.0",
             "disposition": disposition,
+            "recommendation_scope": (
+                "COMPLIANCE_VERIFIED"
+                if counts["COMPLIANT"]
+                else "PROCUREMENT_COMPARISON_ONLY"
+            ),
+            "requires_human_review": counts["REVIEW_REQUIRED"] > 0,
             "counts": counts,
             "assessments": assessments,
         }
@@ -4747,18 +4837,21 @@ class BackendService:
             )
             return response
 
-    def list_decision_conversations(self, task_id: str) -> dict[str, Any]:
+    def list_decision_conversations(
+        self, task_id: str, *, result_id: str | None = None
+    ) -> dict[str, Any]:
         with self.session_factory() as session:
             task = session.get(Task, task_id)
             if task is None or task.owner_id != self.actor_id:
                 raise NotFoundError("task_not_found", "Task was not found.")
+            query = select(DecisionConversation).where(
+                DecisionConversation.task_id == task_id,
+                DecisionConversation.actor_id == self.actor_id,
+            )
+            if result_id is not None:
+                query = query.where(DecisionConversation.base_result_id == result_id)
             rows = session.scalars(
-                select(DecisionConversation)
-                .where(
-                    DecisionConversation.task_id == task_id,
-                    DecisionConversation.actor_id == self.actor_id,
-                )
-                .order_by(DecisionConversation.created_at.desc())
+                query.order_by(DecisionConversation.created_at.desc())
             ).all()
             return {
                 "task_id": task_id,
@@ -4880,6 +4973,81 @@ class BackendService:
             )
             return response
 
+    def _conversation_frozen_references(
+        self,
+        session: Session,
+        *,
+        task: Task,
+        result: WorkflowArtifact,
+        user_message: DecisionMessage,
+    ) -> tuple[dict[str, Any], set[str]]:
+        comparison = dict(result.payload)
+        references: dict[str, Any] = {f"RESULT:{result.artifact_id}": comparison}
+        references[f"REQUEST:{user_message.message_id}"] = {
+            "message_id": user_message.message_id,
+            "content": user_message.content,
+        }
+        supplier_ids: set[str] = set()
+        quotes = session.scalars(
+            select(Quote).where(Quote.task_id == task.task_id, Quote.active.is_(True))
+        ).all()
+        supplier_by_quote = {quote.quote_id: quote.supplier_id for quote in quotes}
+        for row in comparison.get("supplier_results", []):
+            quote_id = row.get("quote_id")
+            if quote_id:
+                references[f"QUOTE:{quote_id}"] = row
+                if quote_id in supplier_by_quote:
+                    supplier_ids.add(supplier_by_quote[quote_id])
+
+        retrievals = self._policy_retrieval_payloads(session, result.artifact_id)
+        references[f"COMPLIANCE:{result.artifact_id}"] = self._policy_compliance_payload(
+            comparison, retrievals
+        )
+        for retrieval in retrievals:
+            for citation in retrieval.get("citations", []):
+                citation_id = citation.get("citation_id")
+                if citation_id:
+                    references[f"POLICY:{citation_id}"] = {
+                        **citation,
+                        "retrieval_id": retrieval.get("retrieval_id"),
+                        "retrieval_status": retrieval.get("status"),
+                        "policy_index_version": retrieval.get("policy_index_version"),
+                    }
+
+        investigation_rows = session.scalars(
+            select(WorkflowArtifact)
+            .where(
+                WorkflowArtifact.task_id == task.task_id,
+                WorkflowArtifact.task_revision == task.current_revision,
+                WorkflowArtifact.graph_run_id == result.graph_run_id,
+                WorkflowArtifact.artifact_type == "INVESTIGATION_CASE",
+            )
+            .order_by(
+                WorkflowArtifact.created_at.desc(),
+                WorkflowArtifact.artifact_id.desc(),
+            )
+        ).all()
+        seen_cases: set[str] = set()
+        for artifact in investigation_rows:
+            case_id = str(artifact.payload.get("case_id", artifact.artifact_id))
+            if case_id in seen_cases:
+                continue
+            seen_cases.add(case_id)
+            references[f"INVESTIGATION:{artifact.artifact_id}"] = {
+                key: artifact.payload.get(key)
+                for key in (
+                    "case_id",
+                    "kind",
+                    "status",
+                    "stop_reason",
+                    "goal",
+                    "unknown_fields",
+                    "clarification",
+                    "observations",
+                )
+            }
+        return references, supplier_ids
+
     def conversation_job_context(self, job_id: str) -> dict[str, Any]:
         with self.session_factory.begin() as session:
             job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
@@ -4938,20 +5106,12 @@ class BackendService:
                 bounded_messages.append(row)
                 remaining_history_characters -= size
             messages = list(reversed(bounded_messages))
-            comparison = dict(result.payload)
-            references = {f"RESULT:{result.artifact_id}": comparison}
-            supplier_ids: set[str] = set()
-            quotes = session.scalars(select(Quote).where(
-                Quote.task_id == task.task_id, Quote.active.is_(True)
-            )).all()
-            supplier_by_quote = {quote.quote_id: quote.supplier_id for quote in quotes}
-            for row in comparison.get("supplier_results", []):
-                quote_id = row.get("quote_id")
-                if quote_id:
-                    reference_id = f"QUOTE:{quote_id}"
-                    references[reference_id] = row
-                    if quote_id in supplier_by_quote:
-                        supplier_ids.add(supplier_by_quote[quote_id])
+            references, supplier_ids = self._conversation_frozen_references(
+                session,
+                task=task,
+                result=result,
+                user_message=user_message,
+            )
             job.status = "RUNNING"
             job.attempts += 1
             job.started_at = datetime.now(timezone.utc)
@@ -5051,13 +5211,17 @@ class BackendService:
                 conversation.status = "STALE"
                 raise ConflictError("conversation_stale", "Conversation inputs changed during generation.")
             result = session.get(WorkflowArtifact, task.current_result_id)
-            allowed_references = {f"RESULT:{task.current_result_id}"}
-            if result is not None:
-                allowed_references.update(
-                    f"QUOTE:{row['quote_id']}"
-                    for row in result.payload.get("supplier_results", [])
-                    if row.get("quote_id")
+            if result is None:
+                raise ConflictError(
+                    "conversation_context_missing", "Conversation facts are missing."
                 )
+            frozen_references, _supplier_ids = self._conversation_frozen_references(
+                session,
+                task=task,
+                result=result,
+                user_message=user_message,
+            )
+            allowed_references = set(frozen_references)
             if set(reference_ids) - allowed_references:
                 raise BackendError(
                     "conversation_model_output_invalid",

@@ -38,6 +38,7 @@ def run_job(job_id: str) -> dict:
         settings.quote_storage_path,
         actor_id=settings.test_user_id,
         quote_dictionary_path=settings.quote_dictionary_path,
+        conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
@@ -152,10 +153,15 @@ def _run_decision_conversation_job(
         )
     except ModelClientError as exc:
         attempts += exc.attempts
+        message = (
+            "回答未通过事实与引用校验，请重试或缩小问题范围。"
+            if exc.error_code == "conversation_model_output_invalid"
+            else str(exc)
+        )
         service.fail_conversation_job(
             job_id,
             code=exc.error_code,
-            message=str(exc),
+            message=message,
             attempts=attempts,
         )
         raise
@@ -190,6 +196,7 @@ def run_loop(
             settings.quote_storage_path,
             actor_id=settings.test_user_id,
             quote_dictionary_path=settings.quote_dictionary_path,
+            conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
         )
     execute = execute_job or run_job
     processed = 0

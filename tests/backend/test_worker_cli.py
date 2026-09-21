@@ -122,3 +122,22 @@ def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> No
             "attempts": 2,
         },
     )
+
+    def fail_validation(_context, _config):
+        raise ModelClientError(
+            "conversation model response failed validation",
+            attempts=1,
+            error_code="conversation_model_output_invalid",
+        )
+
+    monkeypatch.setattr(worker, "generate_conversation_turn", fail_validation)
+    with pytest.raises(ModelClientError):
+        worker._run_decision_conversation_job(service, "job-conversation-invalid")
+    assert service.failed == (
+        "job-conversation-invalid",
+        {
+            "code": "conversation_model_output_invalid",
+            "message": "回答未通过事实与引用校验，请重试或缩小问题范围。",
+            "attempts": 1,
+        },
+    )

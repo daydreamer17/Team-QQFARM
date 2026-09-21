@@ -24,6 +24,7 @@ class BackendSettings(BaseSettings):
     allow_legacy_direct_quote_upload: bool = False
     supplier_agent_enabled: bool = False
     supplier_agent_policy_max_retries: int = Field(default=2, ge=0, le=3)
+    supplier_conversation_job_stale_seconds: int = Field(default=120, ge=30, le=3600)
 
 
 settings = BackendSettings()

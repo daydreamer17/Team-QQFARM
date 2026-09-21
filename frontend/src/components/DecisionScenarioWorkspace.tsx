@@ -69,6 +69,9 @@ function citationTitle(id: string) {
   if (id.startsWith('RESULT:')) return '当前决策结果'
   if (id.startsWith('QUOTE:')) return '供应商报价'
   if (id.startsWith('POLICY:')) return '制度证据'
+  if (id.startsWith('COMPLIANCE:')) return '合规检查状态'
+  if (id.startsWith('INVESTIGATION:')) return 'Agent 调查记录'
+  if (id.startsWith('REQUEST:')) return '本轮用户请求'
   return '来源证据'
 }
 
@@ -115,6 +118,7 @@ function MessageBubble({
   confirmed,
   confirming,
   onConfirm,
+  onOpenCitation,
 }: {
   message: DecisionMessage
   currency: string
@@ -122,6 +126,7 @@ function MessageBubble({
   confirmed: boolean
   confirming: boolean
   onConfirm: (intentId: string) => void
+  onOpenCitation: (referenceId: string) => void
 }) {
   const citation = citationPresentation(message.content ?? '', message.reference_ids)
   return (
@@ -140,8 +145,15 @@ function MessageBubble({
           <ol>
             {citation.citations.map((item) => (
               <li key={item.id}>
-                <span>[{item.number}]</span>
-                <div><small>{citationTitle(item.id)}</small><code>{item.id}</code></div>
+                <button
+                  type="button"
+                  className="chat-citation-link"
+                  aria-label={`查看引用 [${item.number}] ${citationTitle(item.id)}`}
+                  onClick={() => onOpenCitation(item.id)}
+                >
+                  <span>[{item.number}]</span>
+                  <div><small>{citationTitle(item.id)}</small><code>{item.id}</code></div>
+                </button>
               </li>
             ))}
           </ol>
@@ -228,10 +240,12 @@ export function DecisionScenarioWorkspace({
   task,
   result,
   compact = false,
+  onOpenQuoteEvidence,
 }: {
   task: TaskDetail
   result: ComparisonResultResponse
   compact?: boolean
+  onOpenQuoteEvidence?: (quoteId: string) => void
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -249,12 +263,13 @@ export function DecisionScenarioWorkspace({
   const [excludedSuppliers, setExcludedSuppliers] = useState('')
   const [clearExclusions, setClearExclusions] = useState(false)
   const [formError, setFormError] = useState('')
+  const [selectedCitationId, setSelectedCitationId] = useState<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const readOnly = !result.is_current || task.status === 'ABANDONED'
   const conversations = useQuery({
-    queryKey: ['tasks', task.task_id, 'decision-conversations'],
-    queryFn: () => api.listDecisionConversations(task.task_id),
+    queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+    queryFn: () => api.listDecisionConversations(task.task_id, result.result_id),
     refetchInterval: (query) => {
       const pending = query.state.data?.items.some((item) => {
         const last = item.messages.at(-1)
@@ -272,13 +287,27 @@ export function DecisionScenarioWorkspace({
     queryFn: () => api.listDecisionIntents(task.task_id),
   })
 
-  const defaultConversation = conversations.data?.items.find((item) => item.status === 'ACTIVE')
-    ?? conversations.data?.items[0]
+  const resultConversations = conversations.data?.items.filter(
+    (item) => item.base_result_id === result.result_id,
+  ) ?? []
+  const resultScenarios = scenarios.data?.items.filter(
+    (item) => item.base_result_id === result.result_id,
+  ) ?? []
+  const resultIntents = intents.data?.items.filter(
+    (item) => item.base_result_id === result.result_id,
+  ) ?? []
+  const policyCitations = useMemo(
+    () => new Map(result.policy_retrievals.flatMap((retrieval) => (
+      retrieval.citations.map((citation) => [citation.citation_id, citation] as const)
+    ))),
+    [result.policy_retrievals],
+  )
+  const defaultConversation = resultConversations.find((item) => item.status === 'ACTIVE')
+    ?? resultConversations[0]
   const selectedConversationId = activeConversationId || defaultConversation?.conversation_id || ''
 
-  const activeConversation = useMemo(
-    () => conversations.data?.items.find((item) => item.conversation_id === selectedConversationId),
-    [selectedConversationId, conversations.data],
+  const activeConversation = resultConversations.find(
+    (item) => item.conversation_id === selectedConversationId,
   )
   const activeMessageCount = activeConversation?.messages.length ?? 0
   const lastMessage = activeConversation?.messages.at(-1)
@@ -319,7 +348,9 @@ export function DecisionScenarioWorkspace({
       source.close()
       setStreamingText('')
       setQueuedTurn(null)
-      void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-conversations'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+      })
     }
     const failed = (event: Event) => {
       const payload = parse(event)
@@ -328,14 +359,16 @@ export function DecisionScenarioWorkspace({
       source.close()
       setStreamError(assistant.error_message ?? 'AI 回复生成失败。')
       setQueuedTurn(null)
-      void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-conversations'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+      })
     }
     source.addEventListener('assistant.started', started)
     source.addEventListener('assistant.delta', delta)
     source.addEventListener('assistant.completed', completed)
     source.addEventListener('assistant.failed', failed)
     return () => source.close()
-  }, [pendingReplyTo, queryClient, readOnly, selectedConversationId, task.task_id])
+  }, [pendingReplyTo, queryClient, readOnly, result.result_id, selectedConversationId, task.task_id])
 
   const createConversation = useMutation({
     mutationFn: () => api.createDecisionConversation(
@@ -349,7 +382,9 @@ export function DecisionScenarioWorkspace({
       setStreamingText('')
       setStreamError('')
       setQueuedTurn(null)
-      void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-conversations'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+      })
     },
   })
   const sendMessage = useMutation({
@@ -369,7 +404,9 @@ export function DecisionScenarioWorkspace({
         conversationId: response.conversation_id,
         messageId: response.message.message_id,
       })
-      void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-conversations'] })
+      void queryClient.invalidateQueries({
+        queryKey: ['tasks', task.task_id, 'results', result.result_id, 'decision-conversations'],
+      })
     },
   })
   const confirmIntent = useMutation({
@@ -444,10 +481,18 @@ export function DecisionScenarioWorkspace({
     applyScenario.mutate(scenario.decision_scenario_id)
   }
 
+  const openCitation = (referenceId: string) => {
+    if (referenceId.startsWith('QUOTE:') && onOpenQuoteEvidence) {
+      onOpenQuoteEvidence(referenceId.slice('QUOTE:'.length))
+      return
+    }
+    setSelectedCitationId(referenceId)
+  }
+
   const activeTurn = Boolean(pendingReplyTo || sendMessage.isPending)
   const supplierIds = [...new Set(task.quotes.map((quote) => quote.supplier_id))]
   const persistedConfirmedIntents = new Set(
-    intents.data?.items
+    resultIntents
       .filter((intent) => intent.status === 'CONFIRMED')
       .map((intent) => intent.decision_intent_id) ?? [],
   )
@@ -503,7 +548,7 @@ export function DecisionScenarioWorkspace({
               <span>{activeConversation?.status ?? '尚未开始'}</span>
             </div>
             <div>
-              {conversations.data && conversations.data.items.length > 0 && (
+              {resultConversations.length > 0 && (
                 <select
                   aria-label="选择历史对话"
                   value={selectedConversationId}
@@ -514,7 +559,7 @@ export function DecisionScenarioWorkspace({
                     setQueuedTurn(null)
                   }}
                 >
-                  {conversations.data.items.map((item) => (
+                  {resultConversations.map((item) => (
                     <option key={item.conversation_id} value={item.conversation_id}>
                       {item.title} · {item.status}
                     </option>
@@ -557,6 +602,7 @@ export function DecisionScenarioWorkspace({
                 ))}
                 confirming={confirmIntent.isPending}
                 onConfirm={(intentId) => confirmIntent.mutate(intentId)}
+                onOpenCitation={openCitation}
               />
             ))}
             {(streamingText || activeTurn) && (
@@ -600,7 +646,7 @@ export function DecisionScenarioWorkspace({
         </article>
 
         <details className={`decision-scenario-manager${compact ? ' decision-scenario-manager-compact' : ''}`} open={compact ? undefined : true}>
-          <summary>Scenario 管理 · {scenarios.data?.items.length ?? 0} 个</summary>
+          <summary>Scenario 管理 · {resultScenarios.length} 个</summary>
           <aside className="scenario-workbench">
           <details className="scenario-builder">
             <summary>结构化创建 Scenario</summary>
@@ -637,13 +683,13 @@ export function DecisionScenarioWorkspace({
           </details>
 
           <div className="scenario-list-heading">
-            <div><strong>Scenario</strong><span>{scenarios.data?.items.length ?? 0} 个</span></div>
+            <div><strong>Scenario</strong><span>{resultScenarios.length} 个</span></div>
             <button className="text-button" type="button" onClick={() => void scenarios.refetch()}>刷新</button>
           </div>
           <div className="scenario-list">
             {scenarios.isPending && <p className="scenario-empty">正在读取 Scenario…</p>}
             {scenarios.isError && <p className="chat-message-error">{mutationError(scenarios.error)}</p>}
-            {scenarios.data?.items.map((scenario) => (
+            {resultScenarios.map((scenario) => (
               <ScenarioCard
                 key={scenario.decision_scenario_id}
                 scenario={scenario}
@@ -653,13 +699,69 @@ export function DecisionScenarioWorkspace({
                 onApply={requestApply}
               />
             ))}
-            {scenarios.data?.items.length === 0 && (
+            {resultScenarios.length === 0 && (
               <p className="scenario-empty">还没有 Scenario。通过对话提出变更，或使用上方结构化表单。</p>
             )}
           </div>
           </aside>
         </details>
       </div>
+
+      {selectedCitationId && (() => {
+        const policyCitation = selectedCitationId.startsWith('POLICY:')
+          ? policyCitations.get(selectedCitationId.slice('POLICY:'.length))
+          : undefined
+        const dialogLabel = policyCitation ? '制度引用详情' : '引用详情'
+        return (
+          <div className="evidence-drawer-layer" role="presentation">
+            <button
+              className="evidence-drawer-backdrop"
+              type="button"
+              aria-label="关闭引用详情"
+              onClick={() => setSelectedCitationId(null)}
+            />
+            <aside className="evidence-drawer chat-reference-drawer" role="dialog" aria-modal="true" aria-label={dialogLabel}>
+              <header>
+                <div><p className="eyebrow">可核查引用</p><h2>{citationTitle(selectedCitationId)}</h2></div>
+                <button className="drawer-close" type="button" onClick={() => setSelectedCitationId(null)} aria-label="关闭引用详情">×</button>
+              </header>
+              {policyCitation ? (
+                <section className="drawer-fields">
+                  <div className="drawer-section-title"><h3>{policyCitation.section}</h3></div>
+                  <dl>
+                    <div><dt>控制项</dt><dd>{policyCitation.control_code}</dd></div>
+                    <div><dt>制度版本</dt><dd>{policyCitation.policy_set_version}</dd></div>
+                    <div><dt>条款 ID</dt><dd>{policyCitation.clause_id}</dd></div>
+                  </dl>
+                  <blockquote><p>{policyCitation.text}</p></blockquote>
+                  <small>内容哈希：{policyCitation.content_sha256}</small>
+                </section>
+              ) : selectedCitationId.startsWith('RESULT:') ? (
+                <section className="drawer-fields">
+                  <h3>冻结结果</h3>
+                  <p>Result ID：{result.result_id}</p>
+                  <p>Task Revision：{result.task_revision}</p>
+                  <p>生成时间：{result.result.evaluated_at}</p>
+                </section>
+              ) : selectedCitationId.startsWith('COMPLIANCE:') ? (
+                <section className="drawer-fields">
+                  <h3>合规检查状态</h3>
+                  <p>{result.policy_compliance.disposition}</p>
+                  <p>{result.policy_compliance.recommendation_scope === 'COMPLIANCE_VERIFIED'
+                    ? '供应商合规状态已核验。'
+                    : '当前结果仅用于采购比较，仍需人工核验供应商合规。'}</p>
+                </section>
+              ) : (
+                <section className="drawer-fields">
+                  <h3>{citationTitle(selectedCitationId)}</h3>
+                  <p>{selectedCitationId}</p>
+                  <p>可在任务的调查详情或版本记录中核查该来源。</p>
+                </section>
+              )}
+            </aside>
+          </div>
+        )
+      })()}
     </section>
   )
 }

@@ -96,6 +96,11 @@ docker compose up -d worker
 
 `run-job --job-id <job_id>` 仍保留为运维诊断入口，不属于终端用户操作流程。
 
+决策聊天默认复用主模型配置，也可通过 `SUPPLIER_CONVERSATION_MODEL_*` 单独配置。
+`SUPPLIER_CONVERSATION_JOB_STALE_SECONDS` 控制聊天 `RUNNING` job 的中断判定时间，
+默认 120 秒，允许范围为 30–3600 秒。worker 会重新领取仍绑定当前 result/revision 的
+中断 job；累计第三次启动仍未完成时，将其标记为 `conversation_retry_exhausted`。
+
 ## 6. 运行测试
 
 默认测试全部离线，PostgreSQL 跨进程恢复测试默认跳过：
@@ -134,6 +139,6 @@ docker compose up -d --wait api worker
 
 - 支持 PDF 和注册 CSV；主演示使用 V1 原生文本 PDF。
 - OCR 默认关闭，扫描 PDF 应明确返回 `pdf_page_requires_ocr`。
-- React 前端和单后台 worker 已可本地运行；版本化 AI Summary 已接入，正式认证、审批、HTML 报告和任意节点崩溃自动恢复尚未完成。
+- React 前端和单后台 worker 已可本地运行；版本化 AI Summary 与受控决策聊天已接入。聊天 worker 中断可限次恢复，主图任意节点的完整崩溃窗口恢复仍未完成。
 - 本地身份由 `TEST_USER_ID` 固定提供；仅用于开发与演示。
 - 主办方 Lightsail／Claude 接口尚未验收时，只能声明本地后端通过。

@@ -561,9 +561,9 @@ export const api = {
     request<DecisionIntentListResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-intents`,
     ),
-  listDecisionConversations: (taskId: string) =>
+  listDecisionConversations: (taskId: string, resultId?: string) =>
     request<DecisionConversationListResponse>(
-      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations`,
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-conversations${resultId ? `?result_id=${encodeURIComponent(resultId)}` : ''}`,
     ),
   getDecisionConversation: (taskId: string, conversationId: string) =>
     request<DecisionConversation>(
