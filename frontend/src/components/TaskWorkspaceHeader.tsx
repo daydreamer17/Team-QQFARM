@@ -17,6 +17,7 @@ interface TaskWorkspaceHeaderProps {
   progress: TaskDetail['progress']
   reviewBlocked?: boolean
   policyReviewBlocked?: boolean
+  revisionContext?: 'current' | 'historical'
   active: WorkspaceSection
 }
 
@@ -33,6 +34,7 @@ export function TaskWorkspaceHeader({
   revision,
   progress,
   reviewBlocked,
+  revisionContext = 'current',
   active,
 }: TaskWorkspaceHeaderProps) {
   const completedStage = progress.summary_completed
@@ -56,7 +58,7 @@ export function TaskWorkspaceHeader({
         </div>
         <div className="workspace-state-stack">
           <span className="status-pill status-ready">{taskStatusLabel(status)}</span>
-          <span>当前第 {revision} 版</span>
+          <span>{revisionContext === 'historical' ? `历史结果第 ${revision} 版` : `当前第 ${revision} 版`}</span>
         </div>
       </div>
       <div className="task-timeline-shell">

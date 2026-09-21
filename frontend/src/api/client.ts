@@ -470,13 +470,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
     }),
-  getQuoteFields: (taskId: string, quoteId: string) =>
+  getQuoteFields: (taskId: string, quoteId: string, resultId?: string) =>
     request<QuoteFieldsResponse>(
       '/api/v1/tasks/' +
         encodeURIComponent(taskId) +
         '/quotes/' +
       encodeURIComponent(quoteId) +
-      '/fields',
+      '/fields' + queryString({ result_id: resultId }),
     ),
   getReview: (taskId: string) =>
     request<ReviewOverviewResponse>(

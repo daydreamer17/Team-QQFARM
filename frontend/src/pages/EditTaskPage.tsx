@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
@@ -11,6 +11,7 @@ function message(error: unknown) {
 
 function RequirementEditForm({ task }: { task: TaskDetail }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [value, setValue] = useState<RequirementFormValues>({
     ...task.requirement,
     required_quantity: String(task.requirement.required_quantity),
@@ -27,7 +28,10 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
       }
       return api.updateRequirement(task.task_id, task.task_revision, requirement, createIdempotencyKey())
     },
-    onSuccess: () => void navigate(`/tasks/${task.task_id}`, { replace: true }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void navigate(`/tasks/${task.task_id}`, { replace: true })
+    },
   })
   function set<K extends keyof RequirementFormValues>(field: K, next: RequirementFormValues[K]) {
     setValue((current) => ({ ...current, [field]: next }))

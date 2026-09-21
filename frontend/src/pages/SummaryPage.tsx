@@ -128,6 +128,18 @@ export function SummaryPage() {
     && (!current || !current.is_current),
   )
   const suppliers = result.data?.result.supplier_results ?? []
+  const reportRequirement = current?.facts.requirement
+    ?? result.data?.input_snapshot?.requirement
+    ?? (result.data?.is_current ? data.requirement : null)
+  const reportPolicyBinding = current?.facts.policy_binding
+    ?? (result.data?.input_snapshot?.policy_set_version
+      ? {
+          policy_set_version: result.data.input_snapshot.policy_set_version,
+          policy_index_version: result.data.input_snapshot.policy_index_version ?? '',
+          category: result.data.input_snapshot.policy_category ?? '',
+          region: result.data.input_snapshot.policy_region ?? '',
+        }
+      : result.data?.is_current ? data.policy_binding : null)
   const supplierNames = new Map(suppliers.map((item) => [item.quote_id, item.supplier_name]))
   const narrativeText = (value: string) => cleanSummaryText(value, supplierNames)
   const narrative = current?.narrative
@@ -143,7 +155,7 @@ export function SummaryPage() {
   )
   const recommended = suppliers.find((item) => recommendedIds.has(item.quote_id))
   const chartRows = suppliers.filter((item) => item.total_cost !== null)
-  const budget = Number(data.requirement.budget_amount)
+  const budget = Number(reportRequirement?.budget_amount)
   const chartMax = Math.max(
     Number.isFinite(budget) ? budget : 0,
     ...chartRows.map((item) => Number(item.total_cost) || 0),
@@ -153,13 +165,13 @@ export function SummaryPage() {
     narrative?.sections.flatMap((section) => section.reference_ids) ?? [],
   ).size
   const policyCounts = result.data?.policy_compliance.counts
-  const isExportable = current?.status === 'SUCCEEDED' && Boolean(narrative)
+  const isExportable = current?.status === 'SUCCEEDED' && Boolean(narrative && reportRequirement)
   const generatedAt = current ? displayDate(current.updated_at) : '—'
 
   const exportPdf = () => {
     if (!isExportable || !current) return
     const previousTitle = document.title
-    document.title = `${data.scenario_id ?? data.requirement.manufacturer_part_number}_采购总结_第${current.task_revision}版`
+    document.title = `${data.scenario_id ?? reportRequirement?.manufacturer_part_number ?? '采购任务'}_采购总结_第${current.task_revision}版`
     window.addEventListener('afterprint', () => { document.title = previousTitle }, { once: true })
     window.print()
   }
@@ -214,6 +226,9 @@ export function SummaryPage() {
       {(generate.isError || retry.isError) && (
         <div className="form-error" role="alert">{errorMessage(generate.error ?? retry.error)}</div>
       )}
+      {current && !current.is_current && (
+        <div className="run-notice">这是第 {current.task_revision} 版历史采购总结，需求、报价和制度信息均按当时冻结的数据展示。</div>
+      )}
       {current?.status === 'FAILED' && (
         <section className="card error-panel">
           <strong>总结生成失败</strong>
@@ -232,7 +247,14 @@ export function SummaryPage() {
         </section>
       )}
 
-      {narrative && current && (
+      {narrative && current && !reportRequirement && (
+        <section className="card error-panel" role="alert">
+          <strong>历史采购需求不可用</strong>
+          <p>该总结缺少对应版本的冻结需求，系统不会使用当前任务数据替代。</p>
+        </section>
+      )}
+
+      {narrative && current && reportRequirement && (
         <div className="summary-report-layout">
           <nav className="summary-report-outline" aria-label="报告目录">
             <strong>报告目录</strong>
@@ -247,8 +269,8 @@ export function SummaryPage() {
             <header className="summary-report-cover">
               <div>
                 <p>PROCUREMENT BRIEF</p>
-                <h1>{data.requirement.manufacturer_part_number} 采购总结</h1>
-                <span>{data.requirement.required_quantity} {data.requirement.quantity_unit} · {data.requirement.package} · {data.requirement.manufacturer_part_number}</span>
+                <h1>{reportRequirement.manufacturer_part_number} 采购总结</h1>
+                <span>{reportRequirement.required_quantity} {reportRequirement.quantity_unit} · {reportRequirement.package} · {reportRequirement.manufacturer_part_number}</span>
               </div>
               <div className="summary-report-stamp">
                 <strong>{recommended ? '初步推荐已形成' : '采购分析已完成'}</strong>
@@ -263,7 +285,7 @@ export function SummaryPage() {
                 <div>
                   <strong>{recommended ? `建议优先推进 ${recommended.supplier_name}` : '当前不具备明确推荐条件'}</strong>
                   <p>{recommended
-                    ? `确认总成本 ${data.requirement.currency} ${recommended.total_cost ?? '待确认'} · 预计到货 ${recommended.estimated_arrival_date ?? '待确认'}`
+                    ? `确认总成本 ${reportRequirement.currency} ${recommended.total_cost ?? '待确认'} · 预计到货 ${recommended.estimated_arrival_date ?? '待确认'}`
                     : '请先处理待确认信息，再重新生成采购结论。'}</p>
                 </div>
                 <small>初步建议，不代表最终采购批准。</small>
@@ -273,16 +295,16 @@ export function SummaryPage() {
             <ReportSection number="02" title="采购需求" id="summary-requirement">
               <div className="summary-requirement-layout">
                 <p>
-                  本次采购对象为 {data.requirement.manufacturer} 的 {data.requirement.manufacturer_part_number}，
-                  需求数量为 {data.requirement.required_quantity} {data.requirement.quantity_unit}，
-                  预算上限为 {data.requirement.currency} {data.requirement.budget_amount}，
-                  并要求在 {data.requirement.delivery_deadline} 前完成交付。
+                  本次采购对象为 {reportRequirement.manufacturer} 的 {reportRequirement.manufacturer_part_number}，
+                  需求数量为 {reportRequirement.required_quantity} {reportRequirement.quantity_unit}，
+                  预算上限为 {reportRequirement.currency} {reportRequirement.budget_amount}，
+                  并要求在 {reportRequirement.delivery_deadline} 前完成交付。
                 </p>
                 <dl>
-                  <div><dt>数量</dt><dd>{data.requirement.required_quantity} {data.requirement.quantity_unit}</dd></div>
-                  <div><dt>封装</dt><dd>{data.requirement.package}</dd></div>
-                  <div><dt>预算</dt><dd>{data.requirement.currency} {data.requirement.budget_amount}</dd></div>
-                  <div><dt>交付截止</dt><dd>{data.requirement.delivery_deadline}</dd></div>
+                  <div><dt>数量</dt><dd>{reportRequirement.required_quantity} {reportRequirement.quantity_unit}</dd></div>
+                  <div><dt>封装</dt><dd>{reportRequirement.package}</dd></div>
+                  <div><dt>预算</dt><dd>{reportRequirement.currency} {reportRequirement.budget_amount}</dd></div>
+                  <div><dt>交付截止</dt><dd>{reportRequirement.delivery_deadline}</dd></div>
                 </dl>
               </div>
             </ReportSection>
@@ -307,11 +329,11 @@ export function SummaryPage() {
                       <div className="summary-cost-row" key={supplier.quote_id}>
                         <span>{supplier.supplier_name}</span>
                         <div><i style={{ width: `${Math.max(7, ((Number(supplier.total_cost) || 0) / chartMax) * 100)}%` }} /></div>
-                        <strong>{data.requirement.currency} {supplier.total_cost}</strong>
+                        <strong>{reportRequirement.currency} {supplier.total_cost}</strong>
                       </div>
                     ))}
                   </div>
-                  <small>预算上限：{data.requirement.currency} {data.requirement.budget_amount}</small>
+                  <small>预算上限：{reportRequirement.currency} {reportRequirement.budget_amount}</small>
                 </figure>
               </div>
             </ReportSection>
@@ -330,7 +352,7 @@ export function SummaryPage() {
 
             <ReportSection number="05" title="制度与合规" id="summary-policy">
               <p>
-                {data.policy_binding
+                {reportPolicyBinding
                   ? '当前采购任务已绑定制度版本。制度检索与引用用于提示需要核验的控制项，不构成最终合规审批。'
                   : '当前采购任务未绑定制度，正式采购前需要补充适用制度并完成合规核验。'}
               </p>
@@ -367,7 +389,7 @@ export function SummaryPage() {
             <dl>
               <div><dt>状态</dt><dd className={isExportable ? 'report-ready' : ''}>{isExportable ? '可导出' : summaryStatusLabel(current.status)}</dd></div>
               <div><dt>覆盖范围</dt><dd>6 个章节</dd></div>
-              <div><dt>引用证据</dt><dd>{data.quotes.length} 份报价 · {referenceCount} 条引用</dd></div>
+              <div><dt>引用证据</dt><dd>{suppliers.length} 份报价 · {referenceCount} 条引用</dd></div>
               <div><dt>版本</dt><dd>第 {current.task_revision} 版</dd></div>
               <div><dt>生成时间</dt><dd>{generatedAt}</dd></div>
             </dl>

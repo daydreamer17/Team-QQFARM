@@ -763,8 +763,8 @@ def create_app(
         return service.list_issues(task_id)
 
     @app.get("/api/v1/tasks/{task_id}/quotes/{quote_id}/fields")
-    def list_quote_fields(task_id: str, quote_id: str):
-        return service.list_quote_fields(task_id, quote_id)
+    def list_quote_fields(task_id: str, quote_id: str, result_id: str | None = None):
+        return service.list_quote_fields(task_id, quote_id, result_id=result_id)
 
     @app.get("/api/v1/tasks/{task_id}/review")
     def list_review_problems(task_id: str):

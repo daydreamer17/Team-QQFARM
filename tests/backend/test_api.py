@@ -866,6 +866,8 @@ def test_summary_is_bound_to_current_result_and_worker_output(
     assert stale["status"] == "STALE"
     assert stale["is_current"] is False
     assert stale["narrative"]["title"] == "采购摘要"
+    assert stale["facts"]["requirement"]["budget_amount"] == "8000.00"
+    assert stale["facts"]["task_revision"] == 1
     assert http.get(f"/api/v1/tasks/{task['task_id']}").json()["summary_completed"] is False
 
 
@@ -1127,6 +1129,22 @@ def test_second_batch_keeps_previous_human_audit_and_invalidates_old_result(batc
     assert len(result["recommended_quote_ids"]) == 2
     assert len(runner.processor.calls) == 2
     assert not service.list_review_problems(task["task_id"])["review_pending"]
+
+    # Historical evidence must follow the frozen snapshot, never the newest batch.
+    frozen = http.get(
+        f"/api/v1/tasks/{task['task_id']}/quotes/{quote['quote_id']}/fields",
+        params={"result_id": historical["result_id"]},
+    )
+    assert frozen.status_code == 200
+    shipping = next(f for f in frozen.json()["fields"] if f["field_name"] == "shipping_fee_amount")
+    assert shipping["normalized_value"] == "200.00"
+    stored = service.get_result(task["task_id"], historical["result_id"])
+    assert stored["input_snapshot"]["requirement"] == service.get_task(task["task_id"])["requirement"]
+    assert stored["snapshot_id"]
+    assert http.get(
+        f"/api/v1/tasks/{task['task_id']}/quotes/{quote['quote_id']}/fields",
+        params={"result_id": "missing-result"},
+    ).status_code == 404
 
 
 def test_batch_submission_does_not_bypass_semantic_review(batch_review):

@@ -5,6 +5,7 @@ import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { CreateTaskRequest, PolicySetSummary, RequirementDraftResponse } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
+import { backendFieldErrors } from '../lib/apiErrors'
 import { fieldLabel } from '../lib/presentation'
 
 interface FormState extends RequirementFormValues {
@@ -58,28 +59,6 @@ const emptyForm: FormState = {
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) return error.message
   return '任务创建失败，请稍后重试。'
-}
-
-function backendFieldErrors(error: unknown): FieldErrors {
-  if (!(error instanceof ApiClientError)) return {}
-  const output: FieldErrors = {}
-  const detailErrors = error.details.errors
-  if (Array.isArray(detailErrors)) {
-    for (const item of detailErrors) {
-      if (!item || typeof item !== 'object') continue
-      const loc = 'loc' in item && Array.isArray(item.loc) ? item.loc : []
-      const field = String(loc.at(-1) ?? '') as keyof FormState
-      const message = 'msg' in item ? String(item.msg) : '该字段未通过后端校验。'
-      if (field in initialForm) output[field] = message
-    }
-  }
-  const fieldErrors = error.details.field_errors
-  if (fieldErrors && typeof fieldErrors === 'object') {
-    for (const [field, message] of Object.entries(fieldErrors)) {
-      if (field in initialForm) output[field as keyof FormState] = String(message)
-    }
-  }
-  return output
 }
 
 function validateForm(form: FormState): FieldErrors {
@@ -151,7 +130,7 @@ export function NewTaskPage() {
       void navigate(`/tasks/${task.task_id}`, { replace: true })
     },
     onError: (error) => {
-      const errors = backendFieldErrors(error)
+      const errors = backendFieldErrors(error, Object.keys(initialForm)) as FieldErrors
       if (Object.keys(errors).length > 0) setFieldErrors(errors)
     },
   })

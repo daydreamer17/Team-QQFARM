@@ -3440,9 +3440,21 @@ class BackendService:
         artifact: WorkflowArtifact,
     ) -> dict[str, Any]:
         result = dict(artifact.payload)
+        snapshot = session.get(WorkflowArtifact, artifact.parent_artifact_id) if artifact.parent_artifact_id else None
+        if snapshot and (snapshot.task_id != task.task_id or snapshot.artifact_type != "INPUT_SNAPSHOT"):
+            snapshot = None
+        frozen = snapshot.payload if snapshot else {}
+        # Expose only presentation inputs; internal artifact maps stay server-side.
+        input_snapshot = {
+            key: frozen.get(key)
+            for key in ("requirement", "decision_profile", "policy_set_version",
+                        "policy_index_version", "policy_category", "policy_region")
+        } if snapshot else None
         retrievals = self._policy_retrieval_payloads(session, artifact.artifact_id)
         return {
             "result_id": artifact.artifact_id,
+            "snapshot_id": snapshot.artifact_id if snapshot else None,
+            "input_snapshot": input_snapshot,
             "task_revision": artifact.task_revision,
             "graph_run_id": artifact.graph_run_id,
             "is_current": artifact.artifact_id == task.current_result_id,
@@ -3558,7 +3570,7 @@ class BackendService:
         artifact = session.get(WorkflowArtifact, impact_id) if impact_id else None
         return dict(artifact.payload) if artifact is not None else None
 
-    def list_quote_fields(self, task_id: str, quote_id: str) -> dict[str, Any]:
+    def list_quote_fields(self, task_id: str, quote_id: str, result_id: str | None = None) -> dict[str, Any]:
         with self.session_factory() as session:
             task = session.get(Task, task_id)
             quote = session.get(Quote, quote_id)
@@ -3569,22 +3581,42 @@ class BackendService:
                 or quote.task_id != task_id
             ):
                 raise NotFoundError("quote_not_found", "Quote was not found.")
-            batch_artifact = session.scalar(
-                select(WorkflowArtifact)
-                .where(
-                    WorkflowArtifact.task_id == task_id,
-                    WorkflowArtifact.quote_id == quote_id,
-                    WorkflowArtifact.artifact_type == "EXTRACTION_BATCH",
+            frozen_supplier = None
+            frozen_review = None
+            if result_id is not None:
+                result = session.get(WorkflowArtifact, result_id)
+                if not result or result.task_id != task_id or result.artifact_type != "COMPARISON_RESULT":
+                    raise NotFoundError("result_not_found", "Result was not found.")
+                frozen_supplier = next((row for row in result.payload.get("supplier_results", [])
+                                        if row.get("quote_id") == quote_id), None)
+                snapshot = session.get(WorkflowArtifact, result.parent_artifact_id) if result.parent_artifact_id else None
+                if (not frozen_supplier or not snapshot or snapshot.task_id != task_id
+                        or snapshot.artifact_type != "INPUT_SNAPSHOT"):
+                    raise NotFoundError("result_evidence_unavailable", "Frozen evidence is unavailable for this result.")
+                batch_id = snapshot.payload.get("batch_artifact_ids", {}).get(quote_id)
+                review_id = snapshot.payload.get("review_artifact_ids", {}).get(quote_id)
+                batch_artifact = session.get(WorkflowArtifact, batch_id) if batch_id else None
+                frozen_review = session.get(WorkflowArtifact, review_id) if review_id else None
+                for item, kind in ((batch_artifact, "EXTRACTION_BATCH"), (frozen_review, "REVIEW_ENVELOPE")):
+                    if not item or item.task_id != task_id or item.quote_id != quote_id or item.artifact_type != kind:
+                        raise NotFoundError("result_evidence_unavailable", "Frozen evidence is unavailable for this result.")
+            else:
+                batch_artifact = session.scalar(
+                    select(WorkflowArtifact)
+                    .where(
+                        WorkflowArtifact.task_id == task_id,
+                        WorkflowArtifact.quote_id == quote_id,
+                        WorkflowArtifact.artifact_type == "EXTRACTION_BATCH",
+                    )
+                    .order_by(
+                        WorkflowArtifact.task_revision.desc(),
+                        WorkflowArtifact.created_at.desc(),
+                    )
                 )
-                .order_by(
-                    WorkflowArtifact.task_revision.desc(),
-                    WorkflowArtifact.created_at.desc(),
-                )
-            )
             if batch_artifact is None:
                 return {
                     "quote_id": quote_id,
-                    "quote_version": quote.current_version,
+                    "quote_version": frozen_supplier["quote_version"] if frozen_supplier else quote.current_version,
                     "review_status": None,
                     "review_findings": [],
                     "fields": [],
@@ -3626,27 +3658,30 @@ class BackendService:
                     }
                     | {"evidence": evidence}
                 )
-            review_query = select(WorkflowArtifact).where(
-                WorkflowArtifact.task_id == task_id,
-                WorkflowArtifact.quote_id == quote_id,
-                WorkflowArtifact.artifact_type == "REVIEW_ENVELOPE",
-            )
-            review_artifact = session.scalar(
-                review_query.where(
-                    WorkflowArtifact.graph_run_id
-                    == (task.current_graph_run_id or batch_artifact.graph_run_id)
-                ).order_by(
-                    WorkflowArtifact.task_revision.desc(),
-                    WorkflowArtifact.created_at.desc(),
+            if result_id is not None:
+                review_artifact = frozen_review
+            else:
+                review_query = select(WorkflowArtifact).where(
+                    WorkflowArtifact.task_id == task_id,
+                    WorkflowArtifact.quote_id == quote_id,
+                    WorkflowArtifact.artifact_type == "REVIEW_ENVELOPE",
                 )
-            )
-            if review_artifact is None:
                 review_artifact = session.scalar(
-                    review_query.order_by(
+                    review_query.where(
+                        WorkflowArtifact.graph_run_id
+                        == (task.current_graph_run_id or batch_artifact.graph_run_id)
+                    ).order_by(
                         WorkflowArtifact.task_revision.desc(),
                         WorkflowArtifact.created_at.desc(),
                     )
                 )
+                if review_artifact is None:
+                    review_artifact = session.scalar(
+                        review_query.order_by(
+                            WorkflowArtifact.task_revision.desc(),
+                            WorkflowArtifact.created_at.desc(),
+                        )
+                    )
             review_status = (
                 review_artifact.payload.get("review_status")
                 if review_artifact is not None
@@ -3661,7 +3696,7 @@ class BackendService:
                 review_artifact is not None
                 and review_artifact.graph_run_id == task.current_graph_run_id
             )
-            if not review_is_current:
+            if result_id is None and not review_is_current:
                 corrected_fields = {
                     field["field_name"]
                     for field in fields
@@ -3676,7 +3711,7 @@ class BackendService:
                 ]
             return {
                 "quote_id": quote_id,
-                "quote_version": quote.current_version,
+                "quote_version": frozen_supplier["quote_version"] if frozen_supplier else quote.current_version,
                 "review_status": review_status,
                 "batch_artifact_id": batch_artifact.artifact_id,
                 "review_findings": review_findings,
@@ -6736,20 +6771,41 @@ class BackendService:
         }
 
     def _summary_facts(self, session: Session, task: Task, result: WorkflowArtifact) -> dict[str, Any]:
-        requirement = session.scalar(select(RequirementRecord).where(
+        snapshot = (
+            session.get(WorkflowArtifact, result.parent_artifact_id)
+            if result.parent_artifact_id
+            else None
+        )
+        if snapshot is not None and (
+            snapshot.task_id != task.task_id
+            or snapshot.artifact_type != "INPUT_SNAPSHOT"
+        ):
+            snapshot = None
+        frozen = dict(snapshot.payload) if snapshot is not None else {}
+        latest_requirement = session.scalar(select(RequirementRecord).where(
             RequirementRecord.task_id == task.task_id
         ).order_by(RequirementRecord.requirement_version.desc()))
+        requirement_payload = frozen.get("requirement") or (
+            dict(latest_requirement.payload) if latest_requirement is not None else {}
+        )
         requirement_contract = (
-            ProcurementRequirement.model_validate(requirement.payload)
-            if requirement is not None else None
+            ProcurementRequirement.model_validate(requirement_payload)
+            if requirement_payload else None
         )
-        decision_preferences, decision_profile = (
-            self._decision_preferences(
-                session, task, requirement_contract, max_revision=result.task_revision
+        frozen_decision_profile = frozen.get("decision_profile")
+        if frozen_decision_profile is not None:
+            decision_profile_payload = dict(frozen_decision_profile)
+        else:
+            decision_preferences, decision_profile = (
+                self._decision_preferences(
+                    session, task, requirement_contract, max_revision=result.task_revision
+                )
+                if requirement_contract is not None
+                else (DecisionPreferences(), None)
             )
-            if requirement_contract is not None
-            else (DecisionPreferences(), None)
-        )
+            decision_profile_payload = self._decision_profile_response(
+                decision_preferences, decision_profile
+            )
         comparison = dict(result.payload)
         references: dict[str, Any] = {
             f"RESULT:{result.artifact_id}": {
@@ -6761,14 +6817,37 @@ class BackendService:
         }
         for row in comparison.get("supplier_results", []):
             references[f"QUOTE:{row.get('quote_id')}"] = {"type": "QUOTE_RESULT", **row}
-        documents = session.execute(select(Document, Quote).join(
-            Quote, Quote.quote_id == Document.quote_id
-        ).where(
-            Document.task_id == task.task_id,
-            Quote.active.is_(True),
-            Document.quote_version == Quote.current_version,
-        )).all()
-        for document, quote in documents:
+        document_contexts: list[tuple[Document, Quote, WorkflowArtifact | None]] = []
+        for quote_id, batch_id in frozen.get("batch_artifact_ids", {}).items():
+            batch = session.get(WorkflowArtifact, batch_id)
+            document = session.get(Document, batch.document_id) if batch and batch.document_id else None
+            quote = session.get(Quote, quote_id)
+            if (
+                batch is not None
+                and batch.task_id == task.task_id
+                and batch.artifact_type == "EXTRACTION_BATCH"
+                and document is not None
+                and quote is not None
+                and document.task_id == task.task_id
+                and quote.task_id == task.task_id
+            ):
+                document_contexts.append((document, quote, batch))
+        if not document_contexts:
+            documents = session.execute(select(Document, Quote).join(
+                Quote, Quote.quote_id == Document.quote_id
+            ).where(
+                Document.task_id == task.task_id,
+                Quote.active.is_(True),
+                Document.quote_version == Quote.current_version,
+            )).all()
+            for document, quote in documents:
+                execution = session.scalar(select(DocumentExecution).where(
+                    DocumentExecution.graph_run_id == result.graph_run_id,
+                    DocumentExecution.document_id == document.document_id,
+                )) if result.graph_run_id else None
+                batch = session.get(WorkflowArtifact, execution.batch_artifact_id) if execution and execution.batch_artifact_id else None
+                document_contexts.append((document, quote, batch))
+        for document, quote, batch in document_contexts:
             references[f"DOCUMENT:{document.document_id}"] = {
                 "type": "QUOTE_DOCUMENT",
                 "quote_id": quote.quote_id,
@@ -6777,11 +6856,6 @@ class BackendService:
                 "original_filename": document.original_filename,
                 "document_sha256": document.sha256,
             }
-            execution = session.scalar(select(DocumentExecution).where(
-                DocumentExecution.graph_run_id == result.graph_run_id,
-                DocumentExecution.document_id == document.document_id,
-            )) if result.graph_run_id else None
-            batch = session.get(WorkflowArtifact, execution.batch_artifact_id) if execution and execution.batch_artifact_id else None
             for source in (batch.payload.get("parsed_input", {}).get("sources", []) if batch else []):
                 source_id = source.get("source_id")
                 if source_id:
@@ -6796,21 +6870,26 @@ class BackendService:
                 citation_id = citation.get("citation_id")
                 if citation_id:
                     references[f"POLICY:{citation_id}"] = {"type": "POLICY_CITATION", **citation}
+        policy_values = {
+            "policy_set_version": frozen.get("policy_set_version", task.policy_set_version),
+            "policy_index_version": frozen.get("policy_index_version", task.policy_index_version),
+            "category": frozen.get("policy_category", task.policy_category),
+            "region": frozen.get("policy_region", task.policy_region),
+        }
+        policy_binding = policy_values if all(policy_values.values()) else None
         return {
             "schema_version": "summary-facts/1.0.0",
             "task_id": task.task_id,
-            "task_revision": task.current_revision,
+            "task_revision": result.task_revision,
             "result_id": result.artifact_id,
-            "requirement": dict(requirement.payload) if requirement else {},
-            "decision_profile": self._decision_profile_response(
-                decision_preferences, decision_profile
-            ),
+            "requirement": requirement_payload,
+            "decision_profile": decision_profile_payload,
             "disposition": comparison.get("disposition"),
             "final_recommendation_allowed": comparison.get("final_recommendation_allowed", False),
             "recommended_quote_ids": comparison.get("recommended_quote_ids", []),
             "pending_quote_ids": comparison.get("pending_quote_ids", []),
             "comparison_reasons": comparison.get("comparison_reasons", []),
-            "policy_binding": self._policy_binding_response(task),
+            "policy_binding": policy_binding,
             "references": references,
             "scope": "Explanatory summary only; no approval, order, payment, or supplier contact.",
         }

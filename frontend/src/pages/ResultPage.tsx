@@ -262,8 +262,8 @@ export function ResultPage() {
   const suppliers = resultQuery.data?.result.supplier_results ?? []
   const fieldQueries = useQueries({
     queries: suppliers.map((supplier) => ({
-      queryKey: ['tasks', taskId, 'quotes', supplier.quote_id, 'fields'],
-      queryFn: () => api.getQuoteFields(taskId, supplier.quote_id),
+      queryKey: ['tasks', taskId, 'results', resultId, 'quotes', supplier.quote_id, 'fields'],
+      queryFn: () => api.getQuoteFields(taskId, supplier.quote_id, resultId),
     })),
   })
   const selectionGapsQuery = useQuery({
@@ -301,11 +301,15 @@ export function ResultPage() {
   const task = taskQuery.data
   const selectedSupplier = selectedSupplierIndex === null ? null : suppliers[selectedSupplierIndex]
   const selectedFieldsQuery = selectedSupplierIndex === null ? null : fieldQueries[selectedSupplierIndex]
-  const currency = task?.requirement.currency
+  const frozenRequirement = resultQuery.data.input_snapshot?.requirement
+    ?? (resultQuery.data.is_current ? task?.requirement : undefined)
+  const frozenDecisionProfile = resultQuery.data.input_snapshot?.decision_profile
+    ?? (resultQuery.data.is_current ? task?.decision_profile : undefined)
+  const currency = frozenRequirement?.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
   const policyReviewCount = resultQuery.data.policy_compliance.counts.REVIEW_REQUIRED ?? 0
-  const currentRanking = task?.decision_profile.preferences.ranking_mode
-    ?? task?.requirement.ranking_preference
+  const currentRanking = frozenDecisionProfile?.preferences.ranking_mode
+    ?? frozenRequirement?.ranking_preference
   const suppliersByQuote = new Map(suppliers.map((supplier) => [supplier.quote_id, supplier]))
   const quoteImpactsByQuote = new Map(decisionImpact?.quote_impacts.map((impact) => [impact.quote_id, impact]) ?? [])
   const selectionGapsByQuote = new Map(selectionGapsQuery.data?.gaps.map((gap) => [gap.quote_id, gap]) ?? [])
@@ -324,10 +328,10 @@ export function ResultPage() {
   let policyState = '未绑定制度'
   if (taskQuery.isPending) policyState = '正在读取制度绑定'
   else if (taskQuery.isError) policyState = '制度绑定读取失败'
-  else if (task?.policy_binding && policyRetrievals.length === 0) policyState = '未执行制度检索'
-  else if (task?.policy_binding && successfulPolicyRetrievals === policyRetrievals.length) {
+  else if (resultQuery.data.input_snapshot?.policy_set_version && policyRetrievals.length === 0) policyState = '未执行制度检索'
+  else if (resultQuery.data.input_snapshot?.policy_set_version && successfulPolicyRetrievals === policyRetrievals.length) {
     policyState = `${successfulPolicyRetrievals} / ${policyRetrievals.length} 找到证据`
-  } else if (task?.policy_binding) {
+  } else if (resultQuery.data.input_snapshot?.policy_set_version) {
     policyState = `${policyRetrievals.length - successfulPolicyRetrievals} 项需复核`
   }
 
@@ -337,10 +341,13 @@ export function ResultPage() {
         <TaskWorkspaceHeader
           taskId={task.task_id}
           scenarioId={task.scenario_id}
-          title={task.requirement.manufacturer_part_number}
-          subtitle={`${task.requirement.required_quantity} ${task.requirement.quantity_unit} · ${task.requirement.currency} · 最晚交付 ${task.requirement.delivery_deadline}`}
+          title={frozenRequirement?.manufacturer_part_number ?? '历史采购结果'}
+          subtitle={frozenRequirement
+            ? `${frozenRequirement.required_quantity} ${frozenRequirement.quantity_unit} · ${frozenRequirement.currency} · 最晚交付 ${frozenRequirement.delivery_deadline}`
+            : '该历史结果缺少可展示的冻结采购需求'}
           status={task.status}
-          revision={task.task_revision}
+          revision={resultQuery.data.task_revision}
+          revisionContext={resultQuery.data.is_current ? 'current' : 'historical'}
           resultId={task.current_result_id}
           quoteCount={task.quotes.length}
           summaryComplete={task.summary_completed}
@@ -384,11 +391,11 @@ export function ResultPage() {
                 <p>
                   {recommendationNarrative(primaryRecommendation, suppliers, currency, currentRanking)}
                 </p>
-                {task && (
+                {frozenRequirement && (
                   <div className="decision-hero-context">
                     <span>{rankingLabels[currentRanking ?? ''] ?? currentRanking}</span>
-                    <span>截止 {task.requirement.delivery_deadline}</span>
-                    <span>{task.requirement.allow_substitutes ? '允许替代料' : '禁止替代料'}</span>
+                    <span>截止 {frozenRequirement.delivery_deadline}</span>
+                    <span>{frozenRequirement.allow_substitutes ? '允许替代料' : '禁止替代料'}</span>
                   </div>
                 )}
               </div>
@@ -402,14 +409,14 @@ export function ResultPage() {
                 </div>
                 <dl>
                   <div><dt>排序</dt><dd>{rankingLabels[currentRanking ?? ''] ?? currentRanking ?? '未设置'}</dd></div>
-                  <div><dt>成本容差</dt><dd>{!task || task.decision_profile.preferences.cost_tolerance_amount === null ? '未设置' : moneyText(currency, task.decision_profile.preferences.cost_tolerance_amount)}</dd></div>
-                  <div><dt>排除供应商</dt><dd>{task?.decision_profile.preferences.excluded_supplier_ids.join('、') || '无'}</dd></div>
+                  <div><dt>成本容差</dt><dd>{!frozenDecisionProfile || frozenDecisionProfile.preferences.cost_tolerance_amount === null ? '未设置' : moneyText(currency, frozenDecisionProfile.preferences.cost_tolerance_amount)}</dd></div>
+                  <div><dt>排除供应商</dt><dd>{frozenDecisionProfile?.preferences.excluded_supplier_ids.join('、') || '无'}</dd></div>
                 </dl>
               </article>
               <article>
                 <div><strong>制度证据</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
                 <p>{policyState}；{policyReviewCount > 0 ? `${policyReviewCount} 家供应商仍需人工核验。` : '仍不等同于最终合规审批。'}</p>
-                {task && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
+                {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
               </article>
             </aside>
           </section>
@@ -440,7 +447,7 @@ export function ResultPage() {
                 <tbody>
                   <tr><th>已确认总成本</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{moneyText(currency, supplier.total_cost)}{recommended.has(supplier.quote_id) && <span className="matrix-tag">推荐</span>}</td>)}</tr>
                   <tr><th>预计到货</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{valueText(supplier.estimated_arrival_date)}</td>)}</tr>
-                  <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, task?.requirement.quantity_unit)}</td>)}</tr>
+                  <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, frozenRequirement?.quantity_unit)}</td>)}</tr>
                   <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>
                   <tr><th>字段证据</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? '读取中…' : `查看 ${evidenceCount(fieldQueries[index]?.data)} 个来源`}</button></td>)}</tr>
                   <tr><th>选择结论</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><div className="matrix-cell-summary"><strong>{supplierConclusion(supplier, recommended.has(supplier.quote_id))}</strong><small>{recommended.has(supplier.quote_id) ? '当前排序下优先' : supplier.status === 'FEASIBLE' ? '满足要求，可作为备选' : '未进入当前推荐'}</small></div></td>)}</tr>

@@ -143,6 +143,9 @@ export interface SummaryReportResponse {
   is_current: boolean
   input_sha256: string
   facts: Record<string, unknown> & {
+    requirement?: ProcurementRequirement
+    decision_profile?: DecisionProfile
+    policy_binding?: PolicyBinding | null
     final_recommendation_allowed?: boolean
     recommended_quote_ids?: string[]
     pending_quote_ids?: string[]
@@ -571,6 +574,15 @@ export interface ComparisonPayload {
 
 export interface ComparisonResultResponse {
   result_id: string
+  snapshot_id: string | null
+  input_snapshot: {
+    requirement: ProcurementRequirement | null
+    decision_profile: DecisionProfile | null
+    policy_set_version: string | null
+    policy_index_version: string | null
+    policy_category: string | null
+    policy_region: string | null
+  } | null
   task_revision: number
   graph_run_id: string
   is_current: boolean

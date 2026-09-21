@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
 import type { PolicyCitation, PolicyComplianceSupplierAssessment, PolicyRetrievalResult, SupplierComparisonResult } from '../api/types'
 import { IssuePanel } from '../components/IssuePanel'
@@ -94,14 +94,30 @@ function SupplierPolicyRow({
 
 export function CompliancePage() {
   const { taskId = '' } = useParams()
-  const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
-  const results = useQuery({ queryKey: ['tasks', taskId, 'results'], queryFn: () => api.listResults(taskId), enabled: Boolean(taskId) })
+  const task = useQuery({
+    queryKey: ['tasks', taskId],
+    queryFn: () => api.getTask(taskId),
+    enabled: Boolean(taskId),
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data && (
+        ['QUEUED', 'RUNNING'].includes(data.status)
+        || ['PENDING', 'RUNNING'].includes(data.current_job?.job_status ?? '')
+      ) ? 1_500 : false
+    },
+  })
+  const currentResultId = task.data?.current_result_id
+  const currentResult = useQuery({
+    queryKey: ['tasks', taskId, 'results', currentResultId],
+    queryFn: () => api.getResult(taskId, currentResultId!),
+    enabled: Boolean(taskId && currentResultId),
+  })
 
   if (task.isPending) return <section className="card loading-panel">正在读取制度检查…</section>
   if (task.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error)}</section>
 
   const data = task.data
-  const latestResult = results.data?.find((item) => item.is_current) ?? results.data?.[0]
+  const latestResult = currentResult.data?.is_current ? currentResult.data : undefined
   const retrievals = latestResult?.policy_retrievals ?? []
   const suppliers = latestResult?.result.supplier_results ?? []
   const policyIssue = data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'
@@ -130,10 +146,29 @@ export function CompliancePage() {
             <div><span>已有依据</span><strong>{okCount} 项</strong></div>
           </section>
 
-          {policyIssue && <IssuePanel task={data} onRefresh={() => void Promise.all([task.refetch(), results.refetch()])} />}
-          {results.isPending && <section className="card loading-panel">正在整理逐供应商制度结论…</section>}
-          {results.isError && <section className="card error-panel" role="alert">{errorMessage(results.error)}</section>}
-          {!results.isPending && !latestResult && <section className="card compliance-empty compact"><div><h2>尚未生成决策结果</h2><p>完成报价分析后，这里会显示逐供应商状态和制度依据。</p></div></section>}
+          {policyIssue && <IssuePanel task={data} onRefresh={() => {
+            void task.refetch()
+            if (currentResultId) void currentResult.refetch()
+          }} />}
+          {currentResultId && currentResult.isPending && <section className="card loading-panel">正在整理逐供应商制度结论…</section>}
+          {currentResult.isError && <section className="card error-panel" role="alert">{errorMessage(currentResult.error)}</section>}
+          {!currentResultId && (
+            <section className="card compliance-empty compact">
+              <div>
+                <h2>{['QUEUED', 'RUNNING'].includes(data.status) ? '正在生成当前版本结果' : '当前版本没有有效决策结果'}</h2>
+                <p>历史结果不会作为当前制度结论显示。完成本次分析后，这里会自动更新。</p>
+                <Link to={`/tasks/${taskId}/audit`}>查看历史结果</Link>
+              </div>
+            </section>
+          )}
+          {currentResultId && !currentResult.isPending && !currentResult.isError && !latestResult && (
+            <section className="card compliance-empty compact">
+              <div>
+                <h2>当前结果已经失效</h2>
+                <p>页面不会继续展示该历史结果，正在等待任务状态刷新。</p>
+              </div>
+            </section>
+          )}
 
           {suppliers.length > 0 && (
             <section className="supplier-policy-section">
