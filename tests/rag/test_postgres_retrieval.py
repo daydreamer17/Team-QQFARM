@@ -144,3 +144,62 @@ def test_postgres_exact_vector_retrieval_trace_and_new_session_recovery(tmp_path
                 delete(PolicyImportRun).where(PolicyImportRun.policy_set_version == version)
             )
         cleanup_engine.dispose()
+
+
+
+def test_publication_lock_releases_after_process_exit_and_publishing_resumes(tmp_path):
+    import hashlib
+    import subprocess
+    import sys
+    from io import BytesIO
+    from supplier_comparison.backend.models import IdempotencyRecord
+    from supplier_comparison.backend.service import ConflictError
+    from supplier_comparison.rag.models import PolicyFileImport
+    from supplier_comparison.rag.uploads import PolicyFileImportService, PolicyFileImportMetadata, PolicyDraftClauseInput
+    database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
+    engine = create_engine(database_url)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    version = "recovery-" + uuid4().hex
+    body = "Suppliers must provide current RoHS evidence."
+    embedding = FixedEmbeddingClient({body: [0.2] * 1024}, model_id="fixed", dimension=1024)
+    importer = PolicyImporter(sessions, embedding, allowed_root=tmp_path, provider="fixed")
+    service = PolicyFileImportService(sessions, tmp_path / "files", importer, actor_id=version)
+    child = None
+    try:
+        draft = service.upload_stream(metadata=PolicyFileImportMetadata(title="Recovery test",
+            policy_set_id=version, policy_set_version=version, effective_from="2026-01-01T00:00:00Z",
+            categories=["Electronics"], regions=["SG"]), original_filename="policy.txt",
+            media_type="text/plain", stream=BytesIO(body.encode()), idempotency_key="upload")
+        ident = draft["policy_import_id"]
+        service.replace_clauses(ident, expected_revision=1, idempotency_key="review", clauses=[
+            PolicyDraftClauseInput(clause_id="R1", title="RoHS", text=body, control_code="ROHS_COMPLIANCE")])
+        with sessions.begin() as session:
+            session.get(PolicyFileImport, ident).status = "PUBLISHING"
+        key = int.from_bytes(hashlib.sha256(("policy-publish:" + ident).encode()).digest()[:8], "big", signed=True)
+        code = ("import os,sys; from sqlalchemy import create_engine,text; "
+                "engine=create_engine(os.environ['TEST_PUBLICATION_DATABASE_URL']); "
+                "conn=engine.connect().execution_options(isolation_level='AUTOCOMMIT'); "
+                "conn.execute(text('SELECT pg_advisory_lock(:key)'),{'key':int(sys.argv[1])}); "
+                "print('LOCKED',flush=True); sys.stdin.readline(); os._exit(0)")
+        child = subprocess.Popen([sys.executable, "-c", code, str(key)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            env={**os.environ, "TEST_PUBLICATION_DATABASE_URL": database_url})
+        assert child.stdout.readline().strip() == "LOCKED"
+        with pytest.raises(ConflictError) as busy:
+            service.publish(ident, expected_revision=2, idempotency_key="busy")
+        assert busy.value.code == "policy_publish_in_progress"
+        child.communicate("exit\n", timeout=15)
+        restored = service.publish(ident, expected_revision=2, idempotency_key="restore")
+        assert restored["status"] == "PUBLISHED"
+        assert service.publish(ident, expected_revision=2, idempotency_key="restore") == restored
+    finally:
+        if child is not None and child.poll() is None:
+            child.kill(); child.wait(timeout=10)
+        with sessions.begin() as session:
+            session.execute(delete(PolicyFileImport).where(PolicyFileImport.actor_id == version))
+            session.execute(delete(IdempotencyRecord).where(IdempotencyRecord.actor_id == version))
+            policy_set = session.scalar(select(PolicySet).where(PolicySet.policy_set_version == version))
+            if policy_set is not None:
+                session.delete(policy_set)
+            session.execute(delete(PolicyImportRun).where(PolicyImportRun.policy_set_version == version))
+        engine.dispose()

@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from contextlib import contextmanager
+from threading import Lock
+from weakref import WeakValueDictionary
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -10,7 +13,7 @@ from uuid import uuid4
 
 import pdfplumber
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text as sql_text
 from sqlalchemy.orm import Session, sessionmaker
 
 from supplier_comparison.backend.models import IdempotencyRecord, utc_now
@@ -35,6 +38,8 @@ from .models import (
 
 _CLAUSE_HEADING = re.compile(r"^## \[([^\]]+)\]\s+(.+?)\s*$", re.MULTILINE)
 _SUPPORTED_MEDIA = {"application/pdf": ".pdf", "text/plain": ".txt"}
+_LOCAL_PUBLISH_LOCKS: WeakValueDictionary = WeakValueDictionary()
+_LOCAL_PUBLISH_GUARD = Lock()
 
 
 class UploadModel(BaseModel):
@@ -511,7 +516,44 @@ class PolicyFileImportService:
             )
             return response
 
-    def publish(
+    @contextmanager
+    def _publication_lock(self, policy_import_id: str):
+        with self._sessions() as session:
+            self._owned_record(session, policy_import_id, lock=False)
+            engine = session.get_bind()
+        if engine.dialect.name == "postgresql":
+            # Session locks survive importer commits, but are released when a
+            # killed process loses its connection. No stale lease can hide a
+            # still-running publisher or allow a second importer to overtake it.
+            key = int.from_bytes(hashlib.sha256(("policy-publish:" + policy_import_id).encode()).digest()[:8], "big", signed=True)
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+                if not connection.scalar(sql_text("SELECT pg_try_advisory_lock(:key)"), {"key": key}):
+                    raise ConflictError("policy_publish_in_progress", "Policy publication is already running; retry after it finishes or the interrupted process exits.")
+                try:
+                    yield
+                finally:
+                    try:
+                        connection.execute(sql_text("SELECT pg_advisory_unlock(:key)"), {"key": key})
+                    except Exception:
+                        connection.invalidate()
+                        raise
+        else:
+            # SQLite is used only by the single-process test/local adapter.
+            key = (id(engine), policy_import_id)
+            with _LOCAL_PUBLISH_GUARD:
+                lock = _LOCAL_PUBLISH_LOCKS.setdefault(key, Lock())
+            if not lock.acquire(blocking=False):
+                raise ConflictError("policy_publish_in_progress", "Policy publication is already running.")
+            try:
+                yield
+            finally:
+                lock.release()
+
+    def publish(self, policy_import_id: str, *, expected_revision: int, idempotency_key: str) -> dict[str, Any]:
+        with self._publication_lock(policy_import_id):
+            return self._publish_locked(policy_import_id, expected_revision=expected_revision, idempotency_key=idempotency_key)
+
+    def _publish_locked(
         self,
         policy_import_id: str,
         *,

@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { api, ApiClientError } from '../src/api/client'
 import type { ComparisonResultResponse, ProcurementRequirement, TaskDetail } from '../src/api/types'
+import { PolicyImportPage } from '../src/pages/PolicyImportPage'
+import type { PolicyImportResponse } from '../src/api/types'
 import { CompliancePage } from '../src/pages/CompliancePage'
 import { DecisionPage } from '../src/pages/DecisionPage'
 import { EditTaskPage } from '../src/pages/EditTaskPage'
@@ -676,4 +678,53 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByLabelText('币种')).toHaveValue('')
     expect(screen.getByLabelText('预算包含运费')).not.toBeChecked()
   })
+})
+
+
+function policyFixture(status = 'REVIEW_REQUIRED'): PolicyImportResponse {
+  return { policy_import_id: 'policy-test', title: 'Test policy', policy_id: 'P', document_id: 'D',
+    document_version: '1', policy_set_id: 'S', policy_set_version: '1', revision: 2, status,
+    categories: ['Electronics'], regions: ['SG'], effective_from: '2026-01-01', effective_to: null,
+    original_filename: 'test.txt', size_bytes: 100, media_type: 'text/plain', source_sha256: 'a'.repeat(64),
+    extracted_text: 'Original', extraction_metadata: { parser: 'txt', page_count: null },
+    policy_index_version: null, published_import_run_id: null,
+    clauses: [{ clause_id: 'C1', title: 'Clause', text: 'Saved text', control_code: 'AMOUNT_APPROVAL', rule_parameters: {}, position: 0 }],
+  }
+}
+function renderPolicy() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/policy/policy-test']}>
+    <Routes><Route path="/policy/:policyImportId" element={<PolicyImportPage />} /></Routes>
+  </MemoryRouter></QueryClientProvider>)
+  return client
+}
+test('policy editor locks fields during save and permits editing after completion', async () => {
+  vi.restoreAllMocks()
+  const data = policyFixture()
+  vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
+  let finish!: (value: PolicyImportResponse) => void
+  vi.spyOn(api, 'reviewPolicyClauses').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  const client = renderPolicy()
+  const field = await screen.findByRole('textbox', { name: /条款正文/ })
+  const user = userEvent.setup()
+  await user.clear(field); await user.type(field, 'Submitted')
+  await user.click(screen.getByRole('button', { name: '保存条款审核' }))
+  expect(field).toBeDisabled()
+  expect(screen.getByRole('button', { name: '删除' })).toBeDisabled()
+  await user.type(field, 'Must not append')
+  await act(async () => finish({ ...data, revision: 3, status: 'READY_TO_PUBLISH', clauses: [{ ...data.clauses[0], text: 'Submitted' }] }))
+  expect(field).toHaveValue('Submitted')
+  expect(field).not.toBeDisabled()
+  client.clear()
+})
+test('interrupted policy publication can be retried after reopening the page', async () => {
+  vi.restoreAllMocks()
+  const data = policyFixture('PUBLISHING')
+  vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
+  const publish = vi.spyOn(api, 'publishPolicy').mockResolvedValue({ ...data, revision: 3, status: 'PUBLISHED', policy_index_version: 'pidx-restored' })
+  const client = renderPolicy()
+  await userEvent.click(await screen.findByRole('button', { name: '重试恢复发布' }))
+  expect(await screen.findByText('制度索引已发布')).toBeInTheDocument()
+  expect(publish).toHaveBeenCalledWith('policy-test', 2, expect.any(String))
+  client.clear()
 })

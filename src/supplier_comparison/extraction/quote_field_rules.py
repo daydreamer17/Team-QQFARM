@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from enum import StrEnum
 from typing import Iterable
 
@@ -156,12 +157,17 @@ class UnitPriceObservation:
     amount: Decimal
     version_status: UnitPriceVersionStatus
     source_ids: tuple[str, ...]
+    currency: str | None = None
+    basis_quantity: Decimal | None = None
+    basis_unit: str | None = None
 
     def __post_init__(self) -> None:
         if not self.amount.is_finite() or self.amount < 0:
             raise ValueError("unit-price observation must be finite and non-negative")
         if not self.source_ids:
             raise ValueError("unit-price observation must retain at least one source ID")
+        if self.basis_quantity is not None and (not self.basis_quantity.is_finite() or self.basis_quantity <= 0):
+            raise ValueError("price basis must be positive and finite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +181,24 @@ class UnitPriceSelection:
     @property
     def has_conflict(self) -> bool:
         return self.conflict_code is not None
+
+    def matches(self, amount: Decimal | None, currency: str | None, quantity: Decimal | None, unit: str | None) -> bool:
+        """Match an extracted price without changing its stated monetary basis."""
+        if amount is None:
+            return False
+        status = (UnitPriceVersionStatus.CURRENT if any(item.version_status == UnitPriceVersionStatus.CURRENT for item in self.observations)
+                  else UnitPriceVersionStatus.UNVERSIONED)
+        chosen = [item for item in self.observations if item.version_status == status
+                  and any(s in self.selected_source_ids for s in item.source_ids)]
+        for item in chosen:
+            if item.currency and currency and item.currency != currency.upper():
+                continue
+            if item.basis_quantity is not None and item.basis_unit and quantity is not None and unit:
+                if quantity > 0 and _price_key(item) == (item.currency, _price_unit(unit), Fraction(amount) / Fraction(quantity)):
+                    return True
+            elif item.amount == amount:
+                return True
+        return False
 
 
 def select_current_unit_price(
@@ -208,10 +232,10 @@ def select_current_unit_price(
             conflict_code="MULTIPLE_CURRENT_UNIT_PRICES",
         )
     if len(current_values) == 1:
-        selected = current_values[0]
+        selected = current[0].amount
         return UnitPriceSelection(
             selected_value=selected,
-            selected_source_ids=_source_ids_for_value(current, selected),
+            selected_source_ids=tuple(dict.fromkeys(s for item in current for s in item.source_ids)),
             observations=items,
             audit_observations=audit,
         )
@@ -231,10 +255,10 @@ def select_current_unit_price(
             conflict_code="MULTIPLE_UNVERSIONED_UNIT_PRICES",
         )
     if len(unversioned_values) == 1:
-        selected = unversioned_values[0]
+        selected = unversioned[0].amount
         return UnitPriceSelection(
             selected_value=selected,
-            selected_source_ids=_source_ids_for_value(unversioned, selected),
+            selected_source_ids=tuple(dict.fromkeys(s for item in unversioned for s in item.source_ids)),
             observations=items,
             audit_observations=audit,
         )
@@ -254,22 +278,29 @@ def select_current_unit_price(
     )
 
 
-def _distinct_amounts(observations: Iterable[UnitPriceObservation]) -> tuple[Decimal, ...]:
-    return tuple(sorted({item.amount for item in observations}))
+def _price_unit(unit: str) -> str:
+    unit = unit.lower().replace("(s)", "s")
+    return "piece" if unit in {"piece", "pieces", "pc", "pcs", "ea", "each"} else unit
 
 
-def _source_ids_for_value(
-    observations: Iterable[UnitPriceObservation],
-    value: Decimal,
-) -> tuple[str, ...]:
-    return tuple(
-        dict.fromkeys(
-            source_id
-            for item in observations
-            if item.amount == value
-            for source_id in item.source_ids
-        )
-    )
+def _price_key(item: UnitPriceObservation) -> tuple:
+    if item.basis_quantity is not None and item.basis_unit:
+        return (item.currency, _price_unit(item.basis_unit), Fraction(item.amount) / Fraction(item.basis_quantity))
+    return (item.currency, item.basis_unit, item.basis_quantity, item.amount)
+
+
+def _distinct_amounts(observations: Iterable[UnitPriceObservation]) -> tuple:
+    return tuple(dict.fromkeys(_price_key(item) for item in observations))
+
+
+def _price_metadata(value: str) -> dict:
+    currency = re.search(r"(?:S\$|SGD|USD|EUR|GBP|MYR)\s*[0-9]", value, re.IGNORECASE)
+    code = re.match(r"S\$|[A-Z]+", currency.group(), re.IGNORECASE).group().upper() if currency else None
+    basis = re.search(r"(?:\bper\b|/)\s*(?:(\d+(?:\.\d+)?)\s*)?([A-Za-z]+(?:\(s\))?)", value, re.IGNORECASE)
+    quantity = Decimal(basis.group(1) or "1") if basis else None
+    return {"currency": "SGD" if code == "S$" else code,
+            "basis_quantity": quantity if quantity is not None and quantity > 0 else None,
+            "basis_unit": _price_unit(basis.group(2)) if basis else None}
 
 
 UNIT_PRICE_LABEL_PATTERN = re.compile(
@@ -344,6 +375,7 @@ def extract_document_unit_price_observations(
             UnitPriceObservation(
                 amount=amount,
                 version_status=status,
+                **_price_metadata(price_source.raw_text + " " + headers[price_columns[0]].raw_text),
                 source_ids=tuple(
                     dict.fromkeys(
                         [headers[price_columns[0]].source_id, price_source.source_id]
@@ -375,6 +407,7 @@ def extract_document_unit_price_observations(
             UnitPriceObservation(
                 amount=amount,
                 version_status=_status_from_text(combined_text),
+                **_price_metadata(value_source.raw_text + " " + " ".join(s.raw_text for s in labels)),
                 source_ids=tuple(
                     dict.fromkeys(
                         [source.source_id for source in labels] + [value_source.source_id]
@@ -395,6 +428,7 @@ def extract_document_unit_price_observations(
                 amount=amount,
                 version_status=_status_from_text(source.raw_text),
                 source_ids=(source.source_id,),
+                **_price_metadata(source.raw_text),
             ))
     return tuple(observations)
 

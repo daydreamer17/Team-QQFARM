@@ -218,3 +218,49 @@ def test_negative_unit_price_observation_is_rejected() -> None:
             version_status=UnitPriceVersionStatus.CURRENT,
             source_ids=("src-negative",),
         )
+
+
+@pytest.mark.parametrize("second,currency,expected_conflict", [
+    ("680.00", "SGD", False),
+    ("6.80", "SGD", True),
+    ("680.00", "USD", True),
+])
+def test_native_pdf_price_conflicts_compare_currency_and_basis(tmp_path, second, currency, expected_conflict):
+    from reportlab.pdfgen.canvas import Canvas
+    path = tmp_path / "basis.pdf"
+    canvas = Canvas(str(path))
+    lines = ["Supplier: Synthetic Components", "Manufacturer part number: MCU-TEST-123",
+             "Package: QFN-32; revision R1; condition NEW",
+             "CURRENT unit price SGD 6.80 per 1 piece",
+             f"CURRENT unit price {currency} {second} per 100 pieces",
+             "Minimum order quantity: 100 pieces", "Freight: SGD 200.00 per order",
+             "Delivery: 10 calendar days after order date", "Payment: Net 30 from invoice",
+             "Quote valid until 2026-12-31"]
+    for index, line in enumerate(lines):
+        canvas.drawString(50, 750 - 25 * index, line)
+    canvas.save()
+    parsed = PdfQuoteParser().parse(path, DocumentContext(task_id="T", task_revision=1,
+        quote_id="Q", quote_version=1, document_id="D", document_version=1))
+    selected = select_document_unit_price(parsed)
+    assert selected.has_conflict == expected_conflict
+    if not expected_conflict:
+        assert selected.selected_value == Decimal("6.80")
+        assert selected.matches(Decimal("680"), "SGD", Decimal("100"), "piece")
+        assert selected.matches(Decimal("6.8"), "SGD", Decimal("1"), "pcs")
+        assert not selected.matches(Decimal("6.8"), "SGD", Decimal("100"), "piece")
+        assert not selected.matches(Decimal("680"), "USD", Decimal("100"), "piece")
+
+
+def test_equal_price_amounts_with_incompatible_units_are_not_equivalent():
+    rows = [UnitPriceObservation(Decimal("10"), UnitPriceVersionStatus.CURRENT, (unit,),
+                                 "SGD", Decimal("1"), unit) for unit in ("piece", "pack")]
+    assert select_current_unit_price(rows).has_conflict
+
+
+def test_shared_table_header_does_not_make_superseded_price_match_current():
+    selected = select_current_unit_price([
+        UnitPriceObservation(Decimal("10"), UnitPriceVersionStatus.SUPERSEDED, ("header", "old")),
+        UnitPriceObservation(Decimal("12"), UnitPriceVersionStatus.CURRENT, ("header", "new")),
+    ])
+    assert selected.matches(Decimal("12"), None, None, None)
+    assert not selected.matches(Decimal("10"), None, None, None)

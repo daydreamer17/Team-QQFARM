@@ -345,6 +345,16 @@ export function PolicyImportPage() {
       )}
 
       <form className="policy-clause-editor" onSubmit={saveReview}>
+        <fieldset className="policy-clause-editor" disabled={review.isPending || publish.isPending} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
+        {data.status === 'PUBLISHING' && (
+          <div className="policy-conflict-notice" role="status">
+            <p>制度正在发布。如果此前发布进程已中断，可重试恢复；仍在运行的发布会由服务端阻止重复执行。</p>
+            <button className="button button-secondary" type="button" onClick={() => {
+              if (lastPublish) publish.mutate(lastPublish)
+              else startPublish()
+            }}>重试恢复发布</button>
+          </div>
+        )}
         <div className="section-heading">
           <div><p className="eyebrow">REVIEWED CLAUSES</p><h2>条款审核</h2></div>
           {!readonly && <button className="button button-secondary" type="button" onClick={addClause}>＋ 添加条款</button>}
@@ -401,6 +411,7 @@ export function PolicyImportPage() {
             )}
           </div>
         )}
+        </fieldset>
       </form>
     </div>
   )

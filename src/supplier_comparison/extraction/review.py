@@ -1392,8 +1392,12 @@ def _review_cross_field(
         unit_price is not None
         and isinstance(_usable_value(unit_price), str)
         and document_unit_price.selected_value is not None
-        and _decimal_value(_usable_value(unit_price))
-        != document_unit_price.selected_value
+        and not document_unit_price.matches(
+            _decimal_value(_usable_value(unit_price)),
+            str(_usable_value(by_name["currency"])) if by_name.get("currency") else None,
+            _decimal_value(_usable_value(by_name["price_basis_quantity"])) if by_name.get("price_basis_quantity") and _usable_value(by_name["price_basis_quantity"]) is not None else None,
+            str(_usable_value(by_name["price_basis_unit"])) if by_name.get("price_basis_unit") else None,
+        )
     ):
         findings.append(
             _candidate_problem(

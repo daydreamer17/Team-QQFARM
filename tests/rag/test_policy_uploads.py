@@ -392,3 +392,30 @@ def test_same_reviewed_file_version_reuploaded_as_new_draft_reuses_published_ind
 
     assert published_indexes[0] == published_indexes[1]
     assert len(embedding.calls) == 1
+
+
+
+def test_interrupted_publishing_can_resume_and_active_publisher_cannot_be_duplicated(sessions, tmp_path, monkeypatch):
+    text = "Suppliers must provide current RoHS evidence."
+    service, embedding = _service(sessions, tmp_path, {text: [0.2] * 1024})
+    uploaded = service.upload_stream(metadata=_metadata(), original_filename="policy.txt",
+        media_type="text/plain", stream=BytesIO(text.encode()), idempotency_key="recovery-upload")
+    ident = uploaded["policy_import_id"]
+    service.replace_clauses(ident, expected_revision=1, clauses=[PolicyDraftClauseInput(
+        clause_id="R1", title="RoHS", text=text, control_code="ROHS_COMPLIANCE")], idempotency_key="review")
+    original = service._importer.import_loaded
+    def interrupt(*args, **kwargs):
+        with pytest.raises(ConflictError) as active:
+            service.publish(ident, expected_revision=2, idempotency_key="duplicate")
+        assert active.value.code == "policy_publish_in_progress"
+        raise KeyboardInterrupt("simulate terminated publication process")
+    monkeypatch.setattr(service._importer, "import_loaded", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        service.publish(ident, expected_revision=2, idempotency_key="first-attempt")
+    with sessions() as session:
+        assert session.get(PolicyFileImport, ident).status == "PUBLISHING"
+    monkeypatch.setattr(service._importer, "import_loaded", original)
+    published = service.publish(ident, expected_revision=2, idempotency_key="resume")
+    assert published["status"] == "PUBLISHED"
+    assert published["revision"] == 3
+    assert service.publish(ident, expected_revision=2, idempotency_key="resume") == published

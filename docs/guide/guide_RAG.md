@@ -130,6 +130,12 @@ development-conflict: pidx-52ce651d9380fd20330899a7
 上传并提取 → REVIEW_REQUIRED → 替换审核后条款 → READY_TO_PUBLISH → 发布 → PUBLISHED
 ```
 
+保存审核或发出发布请求期间，条款表单暂时锁定，响应完成后再允许编辑，避免旧响应覆盖新输入。
+若发布进程中断，重新打开 `PUBLISHING` 记录后可点击“重试恢复发布”，复用原修订和现有发布接口。
+PostgreSQL 会对同一导入记录持有会话级发布锁：仍在执行的请求返回 `policy_publish_in_progress`；
+进程退出且连接断开后锁自动释放，再次发布复用已完成索引或继续导入。没有新增数据库迁移或自动重试调度。
+SQLite 仅提供单进程互斥，用于本地测试；多进程部署使用 PostgreSQL。
+
 接口如下：
 
 | 方法 | 路径 | 作用 |
