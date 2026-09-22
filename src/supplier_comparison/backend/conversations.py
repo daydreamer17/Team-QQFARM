@@ -32,7 +32,8 @@ _MONEY_PATTERNS = (
 _POSITIVE_COMPLIANCE = re.compile(
     r"(?:已经?|已完成|已正式)?通过(?:全部|所有)?(?:合规|审批)"
     r"|(?:符合|满足)(?:全部|所有)?(?:合规|RoHS)"
-    r"|(?:属于|是)(?:已)?批准供应商",
+    r"|(?:属于|是)(?:已)?批准供应商"
+    r"|(?:已获得|已取得|已通过|通过了?)\s*RoHS\s*(?:认证|检查|审核)?",
     re.IGNORECASE,
 )
 _REFERENCE_TOKEN = re.compile(
@@ -51,7 +52,7 @@ _PAYMENT_DAYS = re.compile(
 )
 _FACTUAL_LANGUAGE = re.compile(
     r"推荐|建议优先|可行|不可行|待确认|合规|RoHS|审批|最快|次快|最早|更快|较快|"
-    r"最便宜|最低成本|成本最低|更便宜|较便宜|更贵|较贵|兼顾价格|到货|交付|MOQ|数量|付款|"
+    r"最便宜|最低成本|成本最低|更便宜|较便宜|更贵|较贵|兼顾价格|到货|交付|交期|MOQ|数量|付款|"
     r"当前结果|冻结事实",
     re.IGNORECASE,
 )
@@ -84,7 +85,7 @@ CLARIFICATION_TEXT = {
     "UNSUPPORTED": "此助手只能解释采购事实或模拟支持的需求与排序变更，不能批准采购、下单、付款、修改报价事实或设置指标权重。请改为询问当前结果，或指定主次排序指标。",
     "EXACT_DELIVERY_DAY": "系统目前只能设置最晚到货日，允许提前到货，不能保证恰好当天送达。您是否接受将要求改为最晚到货日？若只能当天收货，需要人工确认配送安排。",
     "COST_LIMIT": "请说明可接受的预算上限，或相对最低价最多可以增加多少费用。",
-    "CHANGE_DETAILS": "请说明希望调整的排序偏好、预算或最晚到货日。",
+    "CHANGE_DETAILS": "请说明希望调整的排序偏好、预算或最晚到货日；排序最多支持一个主指标和一个次指标。",
 }
 
 
@@ -606,7 +607,9 @@ def _sentences(text: str) -> tuple[str, ...]:
 
 
 def _supplier_names(payloads: list[Any]) -> set[str]:
-    return {
+    direct = {str(payload["supplier_name"]).strip() for payload in payloads
+              if isinstance(payload, dict) and payload.get("supplier_name")}
+    return direct | {
         str(row.get("supplier_name", "")).strip()
         for payload in payloads
         if isinstance(payload, dict)
@@ -700,6 +703,16 @@ def _validate_delivery_deadline_semantics(
 
 
 def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
+    # Validate separately attributed clauses against the full frozen comparison,
+    # retaining all rows as the baseline for superlatives and price differences.
+    names = sorted(_supplier_names(cited_payloads), key=len, reverse=True)
+    if names:
+        boundary = r"[，,；;]\s*(?=(?:" + "|".join(re.escape(name) for name in names) + r"))"
+        clauses = re.split(boundary, text, flags=re.IGNORECASE)
+        if len(clauses) > 1:
+            for clause in clauses:
+                _validate_comparison_claims(clause, cited_payloads)
+            return
     direct_rows = [
         payload
         for payload in cited_payloads
@@ -778,11 +791,19 @@ def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
         allowed_money = {
             Decimal(str(row[field]))
             for row in mentioned_rows
-            for field in ("total_cost", "goods_cost", "known_cost_subtotal")
+            for field in ("total_cost", "goods_cost", "known_cost_subtotal", "shipping_cost", "other_fees_cost")
             if row.get(field) is not None
         }
         if _money_values(absolute_price_text) - allowed_money:
             raise ValueError("monetary claim is attributed to the wrong supplier")
+        for label, field in (("总成本", "total_cost"), ("运费", "shipping_cost"),
+                             ("货款", "goods_cost"), ("其他费用", "other_fees_cost")):
+            claims = {Decimal(value.replace(",", "")) for value in re.findall(
+                label + r"\s*(?:为|是|[:：])?\s*(?:SGD|S\$)?\s*([0-9][0-9,]*(?:\.[0-9]+)?)",
+                absolute_price_text, re.IGNORECASE)}
+            allowed = {Decimal(str(row[field])) for row in mentioned_rows if row.get(field) is not None}
+            if claims - allowed:
+                raise ValueError("monetary claim uses the wrong cost field")
         allowed_dates = {
             str(row["estimated_arrival_date"])
             for row in mentioned_rows
@@ -795,8 +816,6 @@ def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
             for row in mentioned_rows
             if row.get("actual_quantity") is not None
         }
-        if _quantity_values(text) - allowed_quantities:
-            raise ValueError("quantity claim is attributed to the wrong supplier")
         claimed_moq = {int(value.replace(",", "")) for value in _MOQ.findall(text)}
         allowed_moq = {
             int(fields["moq_quantity"])
@@ -806,6 +825,17 @@ def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
         }
         if claimed_moq - allowed_moq:
             raise ValueError("MOQ claim is attributed to the wrong supplier")
+        if _quantity_values(text) - allowed_quantities - (claimed_moq & allowed_moq):
+            raise ValueError("quantity claim is attributed to the wrong supplier")
+        lead_days = {int(value) for value in re.findall(r"(?:交期|交货期|lead time)\s*(?:为|是|[:：])?\s*(\d+)\s*(?:天|days?)", text, re.IGNORECASE)}
+        allowed_lead_days = {
+            int(fields["lead_time_days"])
+            for row in mentioned_rows
+            for fields in [row.get("confirmed_quote_fields", {})]
+            if fields.get("lead_time_days") is not None
+        }
+        if lead_days - allowed_lead_days:
+            raise ValueError("unsupported lead-time claim")
         claimed_payment_days = {int(value) for value in _PAYMENT_DAYS.findall(text)}
         allowed_payment_days = {
             int(payment["net_days"])

@@ -22,6 +22,8 @@ function taskStage(task: TaskListItem) {
       return '已完成'
     case 'FAILED':
       return '执行失败'
+    case 'ABANDONED':
+      return '已废弃'
     default:
       return task.task_revision > 1 ? '报价已登记' : '需求已创建'
   }

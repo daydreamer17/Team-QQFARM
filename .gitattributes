@@ -1,4 +1,13 @@
 *.pdf binary
+data/purchase_orders.csv text eol=lf
+data/generated/supplier_history/**/*.json text eol=lf
+data/generated/inputs/development/full_flow_demo3/** text eol=lf
+data/generated/inputs/development/full_flow_demo3/**/*.pdf binary
+data/generated/inputs/development/full_flow_demo4/** text eol=lf
+data/generated/inputs/development/full_flow_demo4/**/*.pdf binary
+data/generated/inputs/development/preference_demo/** text eol=lf
+data/generated/inputs/development/full_flow_demo3/**/*.csv text eol=crlf
+data/generated/inputs/development/preference_demo/**/*.csv text eol=crlf
 data/generated/inputs/development/quote_V3/*.csv text eol=lf
 data/generated/inputs/development/quote_V4/*.csv text eol=lf
 data/generated/inputs/development/quote_V5/*.csv text eol=lf

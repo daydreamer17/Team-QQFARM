@@ -24,6 +24,18 @@ const tasks: TaskListItem[] = Array.from({ length: 9 }, (_, index) => ({
 describe('AppShell 历史任务分页', () => {
   beforeEach(() => vi.restoreAllMocks())
 
+  test('废弃任务不会显示为报价已登记', async () => {
+    vi.spyOn(api, 'listTasks').mockResolvedValue({
+      items: [{ ...tasks[0], status: 'ABANDONED', task_revision: 2 }],
+      total: 1, limit: 8, offset: 0, status_counts: { ABANDONED: 1 },
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter><AppShell /></MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText('已废弃')).toBeInTheDocument()
+    expect(screen.queryByText('报价已登记')).not.toBeInTheDocument()
+    client.clear()
+  })
+
   test('每页请求八条并使用 offset 翻页', async () => {
     const listTasks = vi.spyOn(api, 'listTasks').mockImplementation(async (values = 8) => {
       const limit = typeof values === 'number' ? values : values.limit ?? 8

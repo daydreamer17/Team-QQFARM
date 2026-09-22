@@ -94,7 +94,7 @@ def test_manifest_exact_inventory_and_no_oracle_leak():
     assert len(manifest["primary_quotes"]) == 4
     assert len(manifest["variants"]) == 13
     assert {entry["path"] for entry in manifest["files"]} == {
-        str(p.relative_to(DATA)) for p in DATA.rglob("*") if p.is_file() and p.name != "manifest.json"}
+        p.relative_to(DATA).as_posix() for p in DATA.rglob("*") if p.is_file() and p.name != "manifest.json"}
     for entry in manifest["files"]:
         path = DATA / entry["path"]
         assert DATA in path.resolve().parents
@@ -457,7 +457,11 @@ def test_generator_is_reproducible_and_keeps_reference_separate(tmp_path):
     actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob("*") if p.is_file()}
     assert actual == expected
     assert not list(output.rglob("reference_answers.json"))
-    frozen = ROOT / "data/generated/inputs/holdout/full_flow_demo4"
+    # Private holdout files are deliberately absent on a clean checkout.
+    # Reproduce them in pytest's temporary directory, never require local data.
+    frozen = tmp_path / "repeat-holdout"
+    subprocess.run([sys.executable, str(ROOT / "data/generate_full_flow_demo4.py"),
+                    "--output-dir", str(tmp_path / "repeat-development"), "--holdout-dir", str(frozen)], check=True, cwd=ROOT)
     assert {str(p.relative_to(holdout)): p.read_bytes() for p in holdout.rglob("*") if p.is_file()} == {
         str(p.relative_to(frozen)): p.read_bytes() for p in frozen.rglob("*") if p.is_file()}
 
@@ -478,9 +482,9 @@ def test_live_baseline_conversation_scripts(service):
     """Paid opt-in: REAL narration on deterministic CSV + simulated human review.
 
     Reference expectations are used only after the model returns. Context passed
-    to generate_conversation_turn comes exclusively from the service's frozen DB.
+    to process_conversation_turn comes exclusively from the service's frozen DB.
     """
-    from supplier_comparison.backend.conversations import ConversationModelConfig, generate_conversation_turn
+    from supplier_comparison.backend.conversations import ConversationModelConfig, process_conversation_turn
     from datetime import timezone
     from uuid import uuid4
     config = ConversationModelConfig.from_env()
@@ -505,7 +509,7 @@ def test_live_baseline_conversation_scripts(service):
                   "model_received_reference_answers": False, "prompt": case["prompt"], "model_id": config.model_id,
                   "provider": config.provider, "job_id": job_id}
         try:
-            turn, attempts = generate_conversation_turn(context, config)
+            turn, attempts = process_conversation_turn(context, config)
             record.update(turn=turn, attempts=attempts)
             complete = service.complete_conversation_job(job_id, turn=turn, attempts=attempts, provider=config.provider, model_id=config.model_id)
             assert complete["job_status"] == "SUCCEEDED"
@@ -535,7 +539,6 @@ def test_live_baseline_conversation_scripts(service):
     assert all(r["status"] == "AUTOMATED_CHECKS_PASSED" for r in records), str(directory)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="FF4-BUG-002: PDF source extraction drops the last product-table value cell")
 def test_pdf_parser_retains_visible_combined_spec_cell():
     path = DATA / "quotes/pdf/great_wall_quote.pdf"
     with pdfplumber.open(path) as pdf:
@@ -545,7 +548,6 @@ def test_pdf_parser_retains_visible_combined_spec_cell():
     assert any("QFN-32 / R1 / NEW" in s.raw_text for s in parsed.sources)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="FF4-BUG-003: two current per-100 prices are not flagged by deterministic price review")
 def test_two_current_per100_prices_are_not_silently_selected():
     from supplier_comparison.extraction.quote_field_rules import select_document_unit_price
     path = DATA / "variants/conflicting_prices/sterling_quote.pdf"
@@ -555,7 +557,6 @@ def test_two_current_per100_prices_are_not_silently_selected():
     assert selection.has_conflict
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="FF4-BUG-004: correct citations do not reject a false cost-tolerance relationship")
 def test_false_premium_claim_is_rejected(service):
     from supplier_comparison.backend.conversations import validate_conversation_turn
     task, _ = completed_task(service)
@@ -566,9 +567,10 @@ def test_false_premium_claim_is_rejected(service):
     ref = f"RESULT:{context['result_id']}"
     turn = {"assistant_text": f"最低总成本报价为Great Wall Components的6500.00 SGD（{ref}）。在最多比最低价贵200 SGD的约束下，可考虑Redwood Components（总成本6700.00 SGD）或Schwarzwald Circuits（总成本6900.00 SGD），两者均比最低价贵不超过200 SGD（{ref}）。",
             "reference_ids": [ref], "changes": {"secondary_criterion": "FASTEST_CONFIRMED_DELIVERY", "cost_tolerance_amount": "200.00"}}
-    rejected = False
-    try:
-        validate_conversation_turn(turn, context)
-    except ValueError:
-        rejected = True
-    assert rejected, "False premium relationship passed validated citations"
+    # Typed proposals discard model narration; only the deterministic simulation
+    # may supply their displayed recommendation. Check what is actually stored.
+    normalized = validate_conversation_turn(turn, context)
+    assert normalized.assistant_text == ""
+    assert normalized.reference_ids == []
+    with pytest.raises(ValueError):
+        validate_conversation_turn({**turn, "changes": None}, context)

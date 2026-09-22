@@ -142,3 +142,15 @@ docker compose up -d --wait api worker
 - React 前端和单后台 worker 已可本地运行；版本化 AI Summary 与受控决策聊天已接入。聊天 worker 中断可限次恢复，主图任意节点的完整崩溃窗口恢复仍未完成。
 - 本地身份由 `TEST_USER_ID` 固定提供；仅用于开发与演示。
 - 主办方 Lightsail／Claude 接口尚未验收时，只能声明本地后端通过。
+
+## 9. Integration update (2026-09-22)
+
+2026-09-22 集成修复：本地数据库已升级到 `d52f7b19c3a4`，新增的
+`task_history_bindings` 表由现有 Alembic 迁移创建。更新代码后必须重建
+API 和 worker 镜像；镜像已包含 `data/generated/supplier_history/mcu9/`
+运行数据。只看 `/health/ready` 成功不足以证明任务创建可用，部署后还应创建一条
+测试任务，确认历史数据哈希及绑定正常，再将该测试任务废弃。
+
+Windows 下请保留 `.gitattributes` 规定的换行格式：历史 JSON 和源 CSV 使用 LF，
+demo3、preference_demo 的报价 CSV 按原生成器使用 CRLF。不要通过重写 manifest
+哈希来掩盖文件字节变化。

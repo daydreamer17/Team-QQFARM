@@ -471,7 +471,7 @@ requirement/revisions/procurement_requirement_rev2.txt
 - 再次推进 Task Revision 并全量重算。
 - 历史记录仍可查看，但不能覆盖新结果。
 - SUP-029 虽然交付满足，但仍因预算不可行。
-- 最终只有 SUP-030 可行并被推荐。
+- 若已执行 7.7 的报价修订，SUP-023（SGD 9832.50、2026-10-16）与 SUP-030 均可行；SUP-030 成本更低并被推荐。若跳过 7.7，原版 SUP-023 不满足收紧后的交期，只有 SUP-030 可行。
 
 ## 8. 负向与安全测试
 

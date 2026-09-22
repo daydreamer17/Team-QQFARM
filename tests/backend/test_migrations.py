@@ -31,12 +31,17 @@ BUSINESS_TABLES = {
 }
 
 
-def test_initial_migration_supports_upgrade_downgrade_upgrade(tmp_path: Path) -> None:
+def test_initial_migration_supports_upgrade_downgrade_upgrade(tmp_path: Path, monkeypatch) -> None:
     database_path = tmp_path / "migration.sqlite3"
     config = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{database_path.as_posix()}")
+    database_url = f"sqlite+pysqlite:///{database_path.as_posix()}"
+    config.set_main_option("sqlalchemy.url", database_url)
+    # env.py intentionally gives DATABASE_URL precedence for deployment. Never
+    # let a developer's .env redirect this destructive round-trip to their DB.
+    monkeypatch.setenv("DATABASE_URL", database_url)
 
     command.upgrade(config, "head")
+    assert config.get_main_option("sqlalchemy.url") == database_url
     engine = create_engine(config.get_main_option("sqlalchemy.url"))
     assert BUSINESS_TABLES.issubset(set(inspect(engine).get_table_names()))
     assert {

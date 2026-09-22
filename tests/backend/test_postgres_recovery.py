@@ -196,7 +196,9 @@ def test_decision_scenario_and_profile_jsonb_round_trip_on_postgres(tmp_path: Pa
             ))
         recovered = service.get_task(task["task_id"])
         assert recovered["decision_profile"]["preferences"] == {
-            "ranking_mode": "FASTEST_CONFIRMED_DELIVERY",
+            "schema_version": "decision-preferences/2.0",
+            "primary_criterion": "FASTEST_CONFIRMED_DELIVERY",
+            "secondary_criterion": None,
             "excluded_supplier_ids": ["SUP-OLD"],
             "cost_tolerance_amount": None,
         }

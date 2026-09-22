@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -17,7 +18,7 @@ from supplier_comparison.rules import RequirementChanges, DecisionPreferences
 
 DECISION_INTENT_PROMPT_VERSION = "decision-intent/2.0.0"
 
-CONVERSATION_INTENT_VERSION = "conversation-intent/1.1.0"
+CONVERSATION_INTENT_VERSION = "conversation-intent/1.2.0"
 
 
 class ConversationIntent(BaseModel):
@@ -49,10 +50,21 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
                               sleeper: Callable[[float], None] = time.sleep,
                               ) -> tuple[ConversationIntent, int]:
     """Use the shared provider adapter, without supplying old recommendation prose."""
-    from .conversations import _call_conversation_model
+    from .conversations import _EXACT_DELIVERY_REQUEST, _call_conversation_model
 
     user_turns = [row["content"] for row in context.get("recent_messages", [])
                   if str(row.get("role", "")).upper() == "USER" and row.get("content")]
+    latest = user_turns[-1] if user_turns else ""
+    if _EXACT_DELIVERY_REQUEST.search(latest):
+        return ConversationIntent(route="CLARIFY", clarification="EXACT_DELIVERY_DAY"), 0
+    # The schema has only two criteria. An explicit larger request must not be
+    # silently truncated to fit that schema, even if the model returns valid JSON.
+    if re.search(
+        r"(?:三|四|五|六|七|八|九|十|[3-9]|\d{2,})\s*(?:个|项|种)?\s*"
+        r"(?:排序指标|排序条件|排序优先级)|(?:three|four|[3-9])\s+(?:ranking\s+)?criteria",
+        latest, re.IGNORECASE,
+    ):
+        return ConversationIntent(route="CLARIFY", clarification="CHANGE_DETAILS"), 0
     minimal_context = {
         "latest_request": user_turns[-1] if user_turns else "",
         "recent_user_intents": user_turns[-5:-1],
@@ -79,6 +91,8 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         "(vague affordable/not too expensive without a numeric limit), or CHANGE_DETAILS (ambiguous change or identity). "
         "UNSUPPORTED means approval, ordering, payment, modifying quotation facts, or unsupported ranking weights. "
         "Other routes have changes=null; only CLARIFY has a non-null clarification. "
+        "At most TWO ranking criteria are supported. If the user requests three or more, route CLARIFY "
+        "with CHANGE_DETAILS; never silently omit their third criterion. "
         "Allowed changes: budget_amount, delivery_deadline, primary_criterion, secondary_criterion, "
         "excluded_supplier_ids, cost_tolerance_amount. Decimal strings for money; ISO dates. Criteria: "
         "LOWEST_CONFIRMED_TOTAL_COST, FASTEST_CONFIRMED_DELIVERY, LONGEST_CONFIRMED_PAYMENT_TERM, "

@@ -12,7 +12,7 @@ from .errors import ContractError
 from .files import stable_id
 
 
-LAYOUT_POLICY_VERSION = "pdf-native-layout/1.1.0"
+LAYOUT_POLICY_VERSION = "pdf-native-layout/1.1.1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +123,12 @@ def extract_page_layout(
     atoms.extend(ruled_atoms)
     contexts.extend(ruled_contexts)
     for segment in segments:
-        if any(_bbox_center_inside(segment.bbox, table_bbox) for table_bbox in ruled_boxes):
+        # A detected table may cover only the label column. Do not discard a
+        # text segment that extends into an undetected value column.
+        if any(_bbox_center_inside(segment.bbox, table_bbox)
+               and segment.bbox[0] >= table_bbox[0] - 1
+               and segment.bbox[2] <= table_bbox[2] + 1
+               for table_bbox in ruled_boxes):
             consumed_segment_ids.add(segment.segment_id)
 
     remaining = [
@@ -253,6 +258,15 @@ def _extract_ruled_tables(
         if len(extracted_rows) < 2:
             continue
         table_bbox = tuple(float(value) for value in table.bbox)
+        # Some templates draw only the label column. Treat these as ordinary
+        # row pairs when value words exist alongside that column; a genuine
+        # one-column table with all text inside its border remains unchanged.
+        if max(len(row) for row in extracted_rows) == 1 and any(
+            float(word["x0"]) >= table_bbox[2]
+            and table_bbox[1] <= float(word["top"]) < table_bbox[3]
+            for word in page.extract_words()
+        ):
+            continue
         table_boxes.append(table_bbox)
         header_texts = [
             _normalize_text(value or "") for value in extracted_rows[0]

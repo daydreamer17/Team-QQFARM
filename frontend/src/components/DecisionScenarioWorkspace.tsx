@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   api,
   ApiClientError,
@@ -249,8 +249,11 @@ export function DecisionScenarioWorkspace({
   reanalyzing?: boolean
 }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
-  const [activeConversationId, setActiveConversationId] = useState('')
+  const [activeConversationId, setActiveConversationId] = useState(() => (
+    typeof location.state?.conversationId === 'string' ? location.state.conversationId : ''
+  ))
   const [message, setMessage] = useState('')
   const [streamingText, setStreamingText] = useState('')
   const [streamError, setStreamError] = useState('')
@@ -313,7 +316,8 @@ export function DecisionScenarioWorkspace({
   const defaultConversation = resultConversations.find((item) => item.status === 'ACTIVE')
     ?? resultConversations[0]
     ?? allConversations[0]
-  const selectedConversationId = activeConversationId || defaultConversation?.conversation_id || ''
+  const selectedConversationId = allConversations.some((item) => item.conversation_id === activeConversationId)
+    ? activeConversationId : defaultConversation?.conversation_id || ''
 
   const activeConversation = allConversations.find(
     (item) => item.conversation_id === selectedConversationId,
@@ -323,7 +327,7 @@ export function DecisionScenarioWorkspace({
     || activeConversation.base_result_id !== result.result_id
   const activeMessageCount = activeConversation?.messages.length ?? 0
   const lastMessage = activeConversation?.messages.at(-1)
-  const pendingReplyTo = queuedTurn?.conversationId === selectedConversationId
+  const pendingReplyTo = queuedTurn && queuedTurn.conversationId === selectedConversationId
     ? queuedTurn.messageId
     : lastMessage?.role === 'USER' ? lastMessage.message_id : null
 

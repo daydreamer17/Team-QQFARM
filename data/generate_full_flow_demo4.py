@@ -82,7 +82,7 @@ VARIANTS = {
 
 def write_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(value, encoding="utf-8")
+    path.write_text(value, encoding="utf-8", newline="\n")
 
 
 def write_json(path: Path, value: object) -> None:
@@ -222,8 +222,8 @@ def policy_files(out: Path) -> None:
 
 
 def inventory(out: Path) -> list[dict]:
-    return [{"path": str(p.relative_to(out)), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-             "size_bytes": p.stat().st_size} for p in sorted(out.rglob("*")) if p.is_file() and p.name != "manifest.json"]
+    return [{"path": p.relative_to(out).as_posix(), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+             "size_bytes": p.stat().st_size} for p in sorted(out.rglob("*"), key=lambda p: p.relative_to(out).as_posix()) if p.is_file() and p.name != "manifest.json"]
 
 
 def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:

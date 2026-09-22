@@ -713,6 +713,37 @@ def test_citation_after_punctuation_still_binds_to_its_sentence():
         }, context)
 
 
+@pytest.mark.parametrize("text,valid", [
+    ("Alpha交期为3天", False),
+    ("Alpha交期为10天", True),
+    ("Alpha已获得RoHS认证", False),
+    ("Alpha运费为200元", True),
+    ("Alpha运费为6800元", False),
+    ("Alpha MOQ为500件", True),
+    ("Alpha可行，Beta不可行", True),
+    ("Alpha总成本为8000元，Beta总成本为7000元", False),
+    ("Alpha总成本为7000元，Beta总成本为8000元", True),
+])
+@pytest.mark.parametrize("reference_kind", ["RESULT", "QUOTE"])
+def test_supplier_claims_are_validated_per_attributed_clause(text, valid, reference_kind):
+    rows = [
+        {"quote_id": "qa", "supplier_name": "Alpha", "status": "FEASIBLE",
+         "total_cost": "7000", "goods_cost": "6800", "shipping_cost": "200",
+         "actual_quantity": 1000, "confirmed_quote_fields": {"moq_quantity": 500, "lead_time_days": 10}},
+        {"quote_id": "qb", "supplier_name": "Beta", "status": "INFEASIBLE",
+         "total_cost": "8000", "actual_quantity": 2000},
+    ]
+    refs = ({"RESULT:demo": {"supplier_results": rows}} if reference_kind == "RESULT"
+            else {f"QUOTE:{row['quote_id']}": row for row in rows})
+    context = {"allowed_reference_ids": list(refs), "frozen_references": refs}
+    turn = {"assistant_text": text + "（" + ",".join(refs) + "）。", "reference_ids": list(refs), "changes": None}
+    if valid:
+        conversations.validate_conversation_turn(turn, context)
+    else:
+        with pytest.raises(ValueError):
+            conversations.validate_conversation_turn(turn, context)
+
+
 def test_user_proposal_does_not_exempt_uncited_supplier_fact():
     output = conversations.validate_conversation_turn({
             "assistant_text": "按您的要求Demo Alpha到货日调整为2026-10-18。",

@@ -1,0 +1,43 @@
+{
+  "runtime_access": "FORBIDDEN",
+  "provenance": "Independent arithmetic from the published demo4 testing guide; never a runtime input.",
+  "evaluated_at": "2026-11-02T00:00:00Z",
+  "baseline": {
+    "SUP-029": {"actual_quantity": 1000, "goods_cost": "6200.00", "total_cost": "6500.00", "delivery_date": "2026-11-12", "payment_days": 15},
+    "SUP-022": {"actual_quantity": 1000, "goods_cost": "6500.00", "total_cost": "6700.00", "delivery_date": "2026-11-10", "payment_days": 60},
+    "SUP-023": {"actual_quantity": 1000, "goods_cost": "6600.00", "total_cost": "6900.00", "delivery_date": "2026-11-07", "payment_days": 45},
+    "SUP-024": {"actual_quantity": 1000, "goods_cost": "6800.00", "total_cost": "7100.00", "delivery_date": "2026-11-09", "payment_days": 30}
+  },
+  "decision_cases": [
+    {"id": "cost", "changes": {}, "winner_ids": ["SUP-029"]},
+    {"id": "delivery", "changes": {"primary_criterion": "FASTEST_CONFIRMED_DELIVERY"}, "winner_ids": ["SUP-023"]},
+    {"id": "payment", "changes": {"primary_criterion": "LONGEST_CONFIRMED_PAYMENT_TERM"}, "winner_ids": ["SUP-022"]},
+    {"id": "premium200", "changes": {"secondary_criterion": "FASTEST_CONFIRMED_DELIVERY", "cost_tolerance_amount": "200"}, "winner_ids": ["SUP-022"]},
+    {"id": "premium199", "changes": {"secondary_criterion": "FASTEST_CONFIRMED_DELIVERY", "cost_tolerance_amount": "199.99"}, "winner_ids": ["SUP-029"]},
+    {"id": "premium400", "changes": {"secondary_criterion": "FASTEST_CONFIRMED_DELIVERY", "cost_tolerance_amount": "400"}, "winner_ids": ["SUP-023"]},
+    {"id": "exclude_fastest", "changes": {"primary_criterion": "FASTEST_CONFIRMED_DELIVERY", "excluded_supplier_ids": ["SUP-023"]}, "winner_ids": ["SUP-024"]},
+    {"id": "deadline8", "changes": {"delivery_deadline": "2026-11-08"}, "winner_ids": ["SUP-023"], "feasible_ids": ["SUP-023"]},
+    {"id": "deadline6", "changes": {"delivery_deadline": "2026-11-06"}, "winner_ids": [], "feasible_ids": []},
+    {"id": "budget6500", "changes": {"budget_amount": "6500"}, "winner_ids": ["SUP-029"], "feasible_ids": ["SUP-029"]},
+    {"id": "budget6499", "changes": {"budget_amount": "6499.99"}, "winner_ids": [], "feasible_ids": []}
+  ],
+  "variant_expectations": {
+    "pack_moq": {"supplier_id": "SUP-029", "actual_quantity": 1250, "total_cost": "8050.00", "feasibility": "INFEASIBLE", "winner_ids": ["SUP-022"]},
+    "freight_included": {"supplier_id": "SUP-029", "total_cost": "6300.00", "winner_ids": ["SUP-029"]},
+    "freight_free": {"supplier_id": "SUP-029", "total_cost": "6300.00", "winner_ids": ["SUP-029"]},
+    "fee_wording": {"supplier_id": "SUP-022", "total_cost": "6700.00", "winner_ids": ["SUP-029"]},
+    "tie": {"supplier_id": "SUP-022", "total_cost": "6500.00", "winner_ids": ["SUP-022", "SUP-029"]},
+    "wrong_part": {"supplier_id": "SUP-022", "feasibility": "INFEASIBLE", "winner_ids": ["SUP-029"]},
+    "dominated": {"supplier_id": "SUP-024", "total_cost": "7100.00", "winner_ids": ["SUP-029"]},
+    "missing_freight": {"human_answers": [
+      {"amount": "200", "winner_ids": ["SUP-029"]},
+      {"amount": "400", "winner_ids": ["SUP-022", "SUP-029"]},
+      {"amount": "500", "winner_ids": ["SUP-022"]}
+    ]}
+  },
+  "history": {"with_binding_winners": {
+    "HIGHEST_SUPPLIER_PERFORMANCE": ["SUP-024"],
+    "HIGHEST_HISTORICAL_ON_TIME_RATE": ["SUP-023"],
+    "LOWEST_HISTORICAL_REJECTED_LINE_RATE": ["SUP-024"]
+  }}
+}

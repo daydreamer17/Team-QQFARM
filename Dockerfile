@@ -42,6 +42,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
 
 COPY alembic.ini ./
 COPY migrations ./migrations
+COPY data/generated/supplier_history/mcu9 ./data/generated/supplier_history/mcu9
 
 RUN useradd --create-home --uid 10001 supplier \
     && mkdir -p /var/lib/supplier-comparison/quotes /var/lib/supplier-comparison/policy-uploads \

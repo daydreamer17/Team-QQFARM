@@ -1,0 +1,13 @@
+{
+  "runtime_access": "FORBIDDEN",
+  "cases": [
+    {"id": "baseline", "prompt": "只解释当前正式结果：推荐供应商的已确认总成本是多少？不要改变条件。"},
+    {"id": "delivery", "prompt": "改成最快到货优先。", "changes": {"primary_criterion": "FASTEST_CONFIRMED_DELIVERY"}},
+    {"id": "payment", "prompt": "账期最长优先，如果并列再选总成本最低的。", "changes": {"primary_criterion": "LONGEST_CONFIRMED_PAYMENT_TERM", "secondary_criterion": "LOWEST_CONFIRMED_TOTAL_COST"}},
+    {"id": "premium200", "prompt": "成本最低优先，最多比最低总成本贵200新币，在范围内选择最快到货的。", "changes": {"secondary_criterion": "FASTEST_CONFIRMED_DELIVERY", "cost_tolerance_amount": "200"}},
+    {"id": "premium400", "after": "premium200", "prompt": "把刚才的成本容差改为400新币，其余不变。", "changes": {"cost_tolerance_amount": "400"}},
+    {"id": "exact_day", "prompt": "我只能在2026年11月8日当天收货，不能提前，也不能延后。"},
+    {"id": "vague", "prompt": "想要快点到货，但别太贵。"},
+    {"id": "three_metrics", "prompt": "设置三个排序指标：先成本最低，再最快到货，再最长账期。"}
+  ]
+}

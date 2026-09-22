@@ -1,0 +1,21 @@
+{
+  "runtime_access": "FORBIDDEN",
+  "provenance": "Independent transcription of the four published synthetic quotations, not generated from model output.",
+  "baseline_fields": {
+    "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO",
+    "package": "QFN-32", "revision": "R1", "condition": "NEW", "currency": "SGD",
+    "price_basis_quantity": 1, "price_basis_unit": "piece", "packaging_type": "tray",
+    "units_per_pack": 100, "order_multiple_units": 100, "moq_quantity": 100, "moq_unit": "piece",
+    "shipping_fee_status": "KNOWN_AMOUNT", "shipping_fee_amount": "200.00",
+    "other_fees_status": "KNOWN_AMOUNT", "other_fees_amount": "100.00", "fees_complete": true,
+    "tax_mode": "EXCLUDED", "day_basis": "CALENDAR_DAYS", "delivery_semantics": "ARRIVAL",
+    "start_event": "ORDER_DATE", "start_date": "2026-11-02", "delivery_location": "SG-DEMO-04",
+    "quote_date": "2026-10-28", "valid_until": "2026-11-30"
+  },
+  "suppliers": {
+    "SUP-029": {"supplier_name": "Great Wall Components", "unit_price": "6.20", "lead_time_days": 10, "payment_terms": "Net 15 from invoice"},
+    "SUP-022": {"supplier_name": "Redwood Components", "unit_price": "6.50", "shipping_fee_amount": "150.00", "other_fees_amount": "50.00", "lead_time_days": 8, "payment_terms": "Net 60 from invoice"},
+    "SUP-023": {"supplier_name": "Schwarzwald Circuits", "unit_price": "6.60", "lead_time_days": 5, "payment_terms": "Net 45 from invoice"},
+    "SUP-024": {"supplier_name": "Sterling Components", "unit_price": "680.00", "price_basis_quantity": 100, "lead_time_days": 7, "payment_terms": "Net 30 from invoice"}
+  }
+}

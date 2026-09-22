@@ -47,6 +47,34 @@ def test_simulation_routes_without_fact_narration(monkeypatch):
     assert "old result must not enter routing" not in str(captured)
 
 
+@pytest.mark.parametrize('prompt', [
+    '设置三个排序指标：先成本最低，再最快到货，再最长账期。',
+    'Use three ranking criteria: cost, delivery, payment terms.',
+])
+def test_more_than_two_requested_criteria_are_not_silently_dropped(monkeypatch, prompt):
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError('Explicit unsupported criterion count needs no model call')
+    monkeypatch.setattr(conversations, '_call_conversation_model', unexpected_call)
+    ctx = context()
+    ctx['recent_messages'] = [{'role': 'USER', 'content': prompt}]
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+    assert calls == 0
+    assert turn['changes'] is None
+    assert turn['clarification'] == 'CHANGE_DETAILS'
+
+
+def test_exact_day_request_is_clarified_before_model_can_turn_it_into_deadline(monkeypatch):
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError('Exact-day request must be clarified before model routing')
+    monkeypatch.setattr(conversations, '_call_conversation_model', unexpected_call)
+    ctx = context()
+    ctx['recent_messages'] = [{'role': 'USER', 'content': '我只能在2026年11月8日当天收货，不能提前，也不能延后。'}]
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+    assert calls == 0
+    assert turn['changes'] is None
+    assert turn['clarification'] == 'EXACT_DELIVERY_DAY'
+
+
 @pytest.mark.parametrize("value", [
     {"route": "SIMULATE", "changes": None},
     {"route": "EXPLAIN", "changes": {"budget_amount": "1"}},

@@ -197,6 +197,24 @@ describe('DecisionScenarioWorkspace', () => {
     expect(screen.getByText('本次条件的确定性模拟（未应用）')).toBeInTheDocument()
   })
 
+  test('restores the conversation selected by a historical citation link', async () => {
+    const response = await api.listDecisionConversations('task-1')
+    const original = response.items[0]
+    response.items.push({ ...original, conversation_id: 'linked-conversation',
+      messages: [{ ...original.messages[0], message_id: 'linked-message', content: '历史引用对应的对话。' }],
+    })
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[{ pathname: '/', state: { conversationId: 'linked-conversation' } }]}>
+        <DecisionScenarioWorkspace task={task} result={result} compact />
+      </MemoryRouter>
+    </QueryClientProvider>)
+    expect(await screen.findByText('历史引用对应的对话。')).toBeInTheDocument()
+    expect(screen.queryByText('可以生成一个提前交付的情景。')).not.toBeInTheDocument()
+    queryClient.clear()
+  })
+
   test('shows progress for the matching pending reply and ignores other turns', async () => {
     const handlers: Record<string, (event: Event) => void> = {}
     vi.stubGlobal('EventSource', class {

@@ -384,6 +384,18 @@ def extract_document_unit_price_observations(
         )
         consumed_price_source_ids.add(value_source.source_id)
 
+    # Inline prose is also evidence: a second current price need not be in a
+    # table or a key/value pair. Keep its source for the ordinary conflict gate.
+    for source in parsed_input.sources:
+        if source.source_id in consumed_price_source_ids or not _is_unit_price_label(source.raw_text):
+            continue
+        amount = _single_currency_amount(source.raw_text)
+        if amount is not None:
+            observations.append(UnitPriceObservation(
+                amount=amount,
+                version_status=_status_from_text(source.raw_text),
+                source_ids=(source.source_id,),
+            ))
     return tuple(observations)
 
 
