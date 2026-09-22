@@ -212,3 +212,14 @@ Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进
 - 第二周完成 8 个开发问题和边界测试，最终周运行 4 个留出问题；两阶段模型分别报告引用支持、失败、延迟与用量。小样本结果不表示真实采购制度泛化效果；留出集用于调试后必须另备未使用问题并披露。
 
 以上为交付目标，当前文档修改不表示制度文件、索引、代码或评测结果已经制作完成。
+## V2 供应商历史发布与偏好演示数据
+
+供应商历史表现的运行时发布位于
+`data/generated/supplier_history/mcu9/{dataset_version}/`。当前发布
+`2026-08-06-v1` 由 `data/purchase_orders.csv` 中 1,185 条 MCU-9 合成采购记录确定性生成，
+包含内容哈希、manifest 哈希、as-of、统计期间、scope、样本门槛、评级方法版本和合成数据标识。
+任务通过 `task_history_bindings` 固定具体发布；旧结果只能读取其冻结快照，不能读取最新发布补齐。
+
+`data/generated/inputs/development/preference_demo/` 是独立的六指标演示包，不替代
+`full_flow_demo` 的硬约束回归场景。其四家供应商、报价、器件和历史均为合成数据，且统一使用
+`EXCLUDED` 税费比较口径。生成器为 `data/generate_preference_demo.py`，日期只能通过显式参数整体平移。

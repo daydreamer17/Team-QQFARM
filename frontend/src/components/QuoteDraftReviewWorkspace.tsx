@@ -36,7 +36,7 @@ const optionLabels: Record<string, string> = {
   FREE: '免费',
   INCLUDED: '已包含在报价中',
   NOT_APPLICABLE: '不适用',
-  UNKNOWN: '未知（不能满足必填）',
+  UNKNOWN: '未知，待补充',
   CALENDAR_DAYS: '自然日',
   BUSINESS_DAYS: '工作日',
   ARRIVAL: '到货',
@@ -97,7 +97,8 @@ function backendValidationIssues(error: unknown): QuoteReviewValidationIssue[] {
         : []
       const code = 'code' in entry && typeof entry.code === 'string' ? entry.code : 'BACKEND_REVIEW_FAILED'
       const groupId = 'group_id' in entry && typeof entry.group_id === 'string' ? entry.group_id : 'backend'
-      if (message) issues.push({ code, fieldNames: fields, groupId, message })
+      const nextAction = 'next_action' in entry && typeof entry.next_action === 'string' ? entry.next_action : ''
+      if (message) issues.push({ code, fieldNames: fields, groupId, message: `${message}${nextAction ? ` ${nextAction}` : ''}` })
     }
   }
   if (issues.length === 0 && typeof details.message === 'string') {
@@ -112,10 +113,6 @@ function backendIssueMessages(error: unknown): string[] {
       ? `${current.fieldNames.join('、')}：${current.message}`
       : current.message
   )))]
-}
-
-function fieldInputType(definition: QuoteFieldSchemaDefinition): 'date' | 'text' {
-  return definition.value_type.toLowerCase().includes('date') ? 'date' : 'text'
 }
 
 function fieldInputMode(definition: QuoteFieldSchemaDefinition): 'decimal' | 'numeric' | 'text' {
@@ -151,6 +148,10 @@ function QuoteFieldEditor({
   value,
   errors,
   findings,
+  adopted,
+  onAdopt,
+  disabled,
+  canAdopt,
   onChange,
 }: {
   definition: QuoteFieldSchemaDefinition
@@ -158,6 +159,10 @@ function QuoteFieldEditor({
   value: string
   errors: string[]
   findings: QuoteDraftResponse['review_findings']
+  adopted: boolean
+  onAdopt: () => void
+  disabled: boolean
+  canAdopt: boolean
   onChange: (value: string) => void
 }) {
   const unresolved = findings.filter((finding) => (
@@ -166,13 +171,15 @@ function QuoteFieldEditor({
     !finding.accepted_for_calculation
   ))
   const hasValue = value.trim().length > 0
-  const hasConflict = field.validation_status === 'CONFLICT'
+  const changed = value !== quoteValueAsText(field.normalized_value)
+  const handled = adopted || changed
+  const confirmed = field.review_state === 'CONFIRMED' || field.review_state === 'CORRECTED'
+  const hasConflict = field.validation_status === 'CONFLICT' && !handled
   const needsAttention = errors.length > 0 || hasConflict
+  const hasInterpretationDoubt = hasConflict || canAdopt
   const requiresResolvedFeeStatus = definition.field_name === 'shipping_fee_status' || definition.field_name === 'other_fees_status'
-  const selectableOptions = definition.allowed_values?.filter((option) => (
-    !requiresResolvedFeeStatus || option !== 'UNKNOWN'
-  )) ?? []
-  const displayedValue = requiresResolvedFeeStatus && value === 'UNKNOWN' ? '' : value
+  const selectableOptions = definition.allowed_values ?? []
+  const displayedValue = value
   return (
     <article
       className={`quote-review-field${needsAttention ? ' has-error' : ''}`}
@@ -185,21 +192,31 @@ function QuoteFieldEditor({
         {needsAttention && (
           <div className="quote-field-badges">
             <span className="badge-review-state state-needs-attention">
-            {hasConflict ? '字段冲突' : errors.length > 0 ? (hasValue ? '格式错误' : '请补充') : hasValue ? '已自动填写' : '允许留空'}
+            {hasInterpretationDoubt && !handled ? '待人工核对' : errors.length > 0 ? (hasValue ? '提交前需处理' : '待补充，可先保存') : '待核对'}
             </span>
           </div>
         )}
       </header>
 
-      {unresolved.length > 0 && (
+      {handled && <p className="quote-field-note">{adopted ? '已核对当前值，待保存确认。' : '已修改，待保存确认。'}</p>}
+      {!handled && confirmed && <p className="quote-field-note">人工已确认{errors.length > 0 ? '；仍需处理下方数据问题。' : '。'}</p>}
+      {!handled && unresolved.length > 0 && (
         <div className="quote-field-note">
           {unresolved.map((finding) => <p key={finding.finding_id}>{findingMessage(finding)}</p>)}
         </div>
       )}
 
+      {hasValue && !handled && hasInterpretationDoubt && (
+        <button type="button" className="button button-secondary" disabled={disabled} onClick={onAdopt}>已核对，采用此值</button>
+      )}
+      {hasValue && (hasConflict || unresolved.length > 0) && (
+        <button type="button" className="button button-secondary" disabled={disabled} onClick={() => onChange(requiresResolvedFeeStatus ? 'UNKNOWN' : '')}>暂不确定，标记未知</button>
+      )}
+
       <label className="field quote-review-input">
         {definition.allowed_values && definition.allowed_values.length > 0 ? (
           <select
+            disabled={disabled}
             aria-label={definition.label}
             aria-invalid={errors.length > 0}
             value={displayedValue}
@@ -214,9 +231,11 @@ function QuoteFieldEditor({
           </select>
         ) : (
           <input
+            disabled={disabled}
             aria-label={definition.label}
             aria-invalid={errors.length > 0}
-            type={fieldInputType(definition)}
+            type="text"
+            placeholder={definition.value_type.toLowerCase().includes('date') ? 'YYYY-MM-DD' : undefined}
             inputMode={fieldInputMode(definition)}
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -230,7 +249,14 @@ function QuoteFieldEditor({
         <p>原文：{displayValue(field.raw_value)}{field.unit ? ` ${field.unit}` : ''}</p>
         <p>字段：{definition.field_name} · 状态：{field.validation_status}</p>
         <EvidenceList field={field} />
+        {Boolean(field.review_evidence?.length) && <>
+          <p>其他原文线索（可能包含历史价，请核对适用版本；不代表支持当前值）</p>
+          <EvidenceList field={{ ...field, evidence: field.review_evidence! }} />
+        </>}
         <p>{definition.normalization_rule}</p>
+        {findings.filter((finding) => finding.decision !== 'PASS').map((finding) => (
+          <p key={finding.finding_id}>{finding.resolved ? '已人工处理：' : '原始预检：'}{findingMessage(finding)}</p>
+        ))}
       </details>
     </article>
   )
@@ -253,14 +279,23 @@ export function QuoteDraftReviewWorkspace({
     for (const field of draft.fields) {
       if (field.validation_status === 'CONFLICT') result.add(field.field_name)
     }
+    for (const issue of draft.review_errors ?? []) {
+      if (issue.code !== 'FULL_FIELD_REVIEW_REQUIRED') issue.field_names.forEach((name) => result.add(name))
+    }
     return result
   })
   const [otherFieldsOpen, setOtherFieldsOpen] = useState(() => priorityFieldNames.size === 0)
-  const [validationIssues, setValidationIssues] = useState<ReturnType<typeof validateQuoteReview>>([])
+  const [validationIssues, setValidationIssues] = useState<ReturnType<typeof validateQuoteReview>>(() => (
+    (draft.review_errors ?? []).filter((issue) => issue.code !== 'FULL_FIELD_REVIEW_REQUIRED').map((issue) => ({
+      code: issue.code, fieldNames: issue.field_names, groupId: issue.group_id ?? 'field',
+      message: `${issue.message}${issue.next_action ? ` ${issue.next_action}` : ''}`,
+    }))
+  ))
   const [reviewKey, setReviewKey] = useState<string | null>(null)
   const [submitKey, setSubmitKey] = useState<string | null>(null)
   const [discardKey, setDiscardKey] = useState<string | null>(null)
   const [isDirty, setIsDirty] = useState(false)
+  const [adoptedFields, setAdoptedFields] = useState<Set<string>>(new Set())
 
   const fieldsByName = useMemo(
     () => new Map(draft.fields.map((field) => [field.field_name, field])),
@@ -291,14 +326,15 @@ export function QuoteDraftReviewWorkspace({
   const conflictIssues = useMemo<QuoteReviewValidationIssue[]>(() => {
     const labels = new Map(schema.fields.map((definition) => [definition.field_name, definition.label]))
     return draft.fields
-      .filter((field) => field.validation_status === 'CONFLICT')
+      .filter((field) => field.validation_status === 'CONFLICT' && !adoptedFields.has(field.field_name)
+        && (values[field.field_name] ?? '') === quoteValueAsText(field.normalized_value))
       .map((field) => ({
         code: 'FIELD_VALUE_CONFLICT',
         fieldNames: [field.field_name],
         groupId: schema.fields.find((definition) => definition.field_name === field.field_name)?.group_id ?? 'field',
         message: `“${labels.get(field.field_name) ?? field.field_name}”存在冲突，请核对后选择正确内容。`,
       }))
-  }, [draft.fields, schema.fields])
+  }, [draft.fields, schema.fields, values, adoptedFields])
   const activeValidationIssues = useMemo(() => {
     const seen = new Set<string>()
     return [...liveValidationIssues, ...conflictIssues, ...validationIssues].filter((current) => {
@@ -339,6 +375,7 @@ export function QuoteDraftReviewWorkspace({
       submitKey: string
       actions: ReturnType<typeof buildQuoteReviewActions>
       submitOnly: boolean
+      saveOnly?: boolean
     }) => {
       let reviewedDraftRevision = draft.draft_revision
       if (!submission.submitOnly) {
@@ -350,9 +387,7 @@ export function QuoteDraftReviewWorkspace({
           submission.actions,
           submission.reviewKey,
         )
-        if (!reviewedDraft.human_review_complete || !reviewedDraft.submission_ready) {
-          throw new Error('系统复核未通过，请根据页面提示修改后重试。')
-        }
+        if (submission.saveOnly || !reviewedDraft.submission_ready) return reviewedDraft
         reviewedDraftRevision = reviewedDraft.draft_revision
       }
       return api.submitQuoteDraft(
@@ -380,6 +415,11 @@ export function QuoteDraftReviewWorkspace({
   })
 
   function changeValue(fieldName: string, nextValue: string) {
+    setAdoptedFields((current) => {
+      const next = new Set(current)
+      next.delete(fieldName)
+      return next
+    })
     const nextValues = { ...values, [fieldName]: nextValue }
     setValues(nextValues)
     const nextIssues = validateQuoteReview(draft, schema, nextValues)
@@ -403,7 +443,7 @@ export function QuoteDraftReviewWorkspace({
       return
     }
     try {
-      const actions = canSubmitWithoutReview ? [] : buildQuoteReviewActions(draft, schema, values)
+      const actions = canSubmitWithoutReview ? [] : buildQuoteReviewActions(draft, schema, values, adoptedFields)
       const nextReviewKey = reviewKey ?? createIdempotencyKey()
       const nextSubmitKey = submitKey ?? createIdempotencyKey()
       setReviewKey(nextReviewKey)
@@ -451,6 +491,16 @@ export function QuoteDraftReviewWorkspace({
         value={values[definition.field_name] ?? ''}
         errors={[...new Set((allFieldIssues[definition.field_name] ?? []).map((item) => item.message))]}
         findings={findingsByName.get(definition.field_name) ?? []}
+        adopted={adoptedFields.has(definition.field_name)}
+        disabled={finalize.isPending}
+        canAdopt={(draft.review_errors ?? []).some((issue) => issue.field_names.includes(definition.field_name) && issue.actions?.includes('CONFIRM_VALUE'))}
+        onAdopt={() => {
+          setAdoptedFields((current) => new Set([...current, definition.field_name]))
+          setValidationIssues((current) => current.filter((item) => !item.fieldNames.includes(definition.field_name)))
+          setIsDirty(true)
+          setReviewKey(null)
+          finalize.reset()
+        }}
         onChange={(nextValue) => changeValue(definition.field_name, nextValue)}
       />
     )
@@ -486,7 +536,7 @@ export function QuoteDraftReviewWorkspace({
           {activeValidationIssues.length > 0 && (
             <div className="quote-review-error-summary" role="alert">
               <strong>还有 {activeValidationIssues.length} 个问题需要处理</strong>
-              <p>请补充下方标红内容，其余项目不用重新输入。</p>
+              <p>可以先保存。识别疑问请核对并采用当前值或修改；数据不合法的项目需修正后才能正式提交。</p>
               <details>
                 <summary>查看问题清单</summary>
                 <ul>
@@ -533,10 +583,21 @@ export function QuoteDraftReviewWorkspace({
           </div>
 
           <div className="quote-review-confirm-bar">
+            <button className="button button-secondary" type="button" disabled={finalize.isPending || draft.status === 'PROCESSING'} onClick={() => {
+              try {
+                const key = reviewKey ?? createIdempotencyKey()
+                setReviewKey(key)
+                finalize.mutate({ reviewKey: key, submitKey: createIdempotencyKey(),
+                  actions: buildQuoteReviewActions(draft, schema, values, adoptedFields), submitOnly: false, saveOnly: true })
+              } catch (error) {
+                setValidationIssues([{ code: 'REVIEW_ACTION_BUILD_FAILED', fieldNames: [], groupId: 'schema', message: error instanceof Error ? error.message : '请刷新字段版本后重试。' }])
+              }
+            }}>保存并确认审核</button>
             <button className="button button-submit" type="submit" disabled={finalize.isPending || draft.status === 'PROCESSING' || activeValidationIssues.length > 0}>
               {finalize.isPending ? '正在检查并提交…' : '确认并提交报价'}
             </button>
           </div>
+          {draft.human_review_complete && !isDirty && <p role="status">人工审核已保存。{draft.submission_ready ? '可以正式提交报价。' : '仍有待补充或需修正的信息，请处理后再提交；未知值不会按零计算。'}</p>}
         </form>
       )}
 
@@ -553,6 +614,9 @@ export function QuoteDraftReviewWorkspace({
             <strong>操作未完成</strong>
             <p>{apiErrorMessage(mutationError)}</p>
             {backendMessages.length > 0 && <ul>{backendMessages.map((message) => <li key={message}>{message}</li>)}</ul>}
+            {mutationError instanceof ApiClientError && mutationError.status === 409 && (
+              <button type="button" className="button button-secondary" onClick={onChanged}>重新加载最新草稿（替换当前表单）</button>
+            )}
           </div>
         </div>
       )}

@@ -25,6 +25,10 @@ class BackendSettings(BaseSettings):
     supplier_agent_enabled: bool = False
     supplier_agent_policy_max_retries: int = Field(default=2, ge=0, le=3)
     supplier_conversation_job_stale_seconds: int = Field(default=120, ge=30, le=3600)
+    supplier_worker_heartbeat_interval_seconds: float = Field(default=5, gt=0, le=60)
+    supplier_worker_heartbeat_stale_seconds: float = Field(default=20, gt=1, le=300)
+    supplier_history_root: Path = Path("data/generated/supplier_history/mcu9")
+    supplier_history_dataset_version: str = "2026-08-06-v1"
 
 
 settings = BackendSettings()

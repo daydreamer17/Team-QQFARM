@@ -191,7 +191,7 @@ def test_altered_display_quote_is_rejected(quote_dictionary) -> None:
     assert len(raised.value.details["rejected_model_payload_sha256"]) == 64
 
 
-def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
+def test_fee_status_outside_contract_reaches_human_review(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         quote_path("c"),
         context_for("c"),
@@ -212,17 +212,20 @@ def test_fee_status_outside_contract_is_rejected(quote_dictionary) -> None:
         "source_refs": [{"source_id": source.source_id, "quoted_text": source.raw_text}],
     }
 
-    with pytest.raises(EvidenceValidationError) as raised:
-        extract_quote_candidates(
+    batch = extract_quote_candidates(
             parsed,
             quote_dictionary,
             FixedOutputAdapter({parsed.context.document_id: payload}),
             ModelCallBudget(graph_run_id="GRAPH-INVALID-ENUM"),
             "EXTRACT-INVALID-ENUM",
         )
-    assert raised.value.code == "candidate_enum_invalid"
-    assert "normalized_value" in raised.value.details["evidence_detail_keys"]
-    assert "normalized_value" not in raised.value.details
+    from supplier_comparison.extraction.review import review_extraction_batch
+    from supplier_comparison.extraction.criticality import CriticalityContext
+    envelope = review_extraction_batch(batch, quote_dictionary, CriticalityContext(required_revision='R1', base_unit='piece'), input_is_synthetic=True)
+    assert not envelope.submission_ready
+    assert not envelope.downstream_ready
+    assert any('NORMALIZED_ENUM_INVALID' in finding.codes for finding in envelope.review.findings)
+    assert next(c for c in batch.candidates if c.field_name == 'shipping_fee_status').normalized_value == 'PAID'
 
 
 def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { RankingCriterionSelect } from './RankingCriterionSelect'
 
 export interface RequirementFormValues {
   manufacturer: string
@@ -41,6 +42,7 @@ export function RequirementFields({
   materialPrefix,
   deferAdvancedFields = false,
 }: RequirementFieldsProps) {
+  const historyApplicable = value.manufacturer_part_number.trim() === 'QW-MCU9-DEMO'
   const fieldClass = (field: RequirementField, extra = '') => [
     'field',
     extra,
@@ -85,8 +87,8 @@ export function RequirementFields({
         <label className={fieldClass('planned_order_date')}><span>计划下单日期 <small>可选</small></span><input type="date" value={value.planned_order_date} onChange={(event) => onChange('planned_order_date', event.target.value)} />{error('planned_order_date')}</label>
         <label className={fieldClass('delivery_deadline')}><span>交付截止日期</span><input required aria-invalid={Boolean(errors.delivery_deadline)} type="date" value={value.delivery_deadline} onChange={(event) => onChange('delivery_deadline', event.target.value)} />{error('delivery_deadline')}</label>
         <label className={fieldClass('delivery_location', 'field-wide')}><span>交付地点</span><input required aria-invalid={Boolean(errors.delivery_location)} value={value.delivery_location} onChange={(event) => onChange('delivery_location', event.target.value)} />{error('delivery_location')}</label>
-        <label className={fieldClass('ranking_preference')}><span>主要排序偏好</span><select required aria-invalid={Boolean(errors.ranking_preference)} value={value.ranking_preference} onChange={(event) => onChange('ranking_preference', event.target.value)}><option value="">请选择主要排序偏好</option><option value="LOWEST_CONFIRMED_TOTAL_COST">最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY">最快已确认交付</option></select>{error('ranking_preference')}</label>
-        {!deferAdvancedFields && <label className={fieldClass('secondary_preference')}><span>次要偏好 <small>可选</small></span><select aria-invalid={Boolean(errors.secondary_preference)} value={value.secondary_preference} onChange={(event) => onChange('secondary_preference', event.target.value)}><option value="">无</option><option value="LOWEST_CONFIRMED_TOTAL_COST" disabled={value.ranking_preference === 'LOWEST_CONFIRMED_TOTAL_COST'}>最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY" disabled={value.ranking_preference === 'FASTEST_CONFIRMED_DELIVERY'}>最快已确认交付</option></select>{error('secondary_preference')}</label>}
+        <label className={fieldClass('ranking_preference')}><span>主要排序偏好</span><RankingCriterionSelect required historyApplicable={historyApplicable} invalid={Boolean(errors.ranking_preference)} value={value.ranking_preference} exclude={value.secondary_preference} onChange={(next) => onChange('ranking_preference', next)} />{error('ranking_preference')}</label>
+        <label className={fieldClass('secondary_preference')}><span>次要偏好 <small>可选，仅在主指标并列时使用</small></span><RankingCriterionSelect allowEmpty historyApplicable={historyApplicable} invalid={Boolean(errors.secondary_preference)} value={value.secondary_preference} exclude={value.ranking_preference} onChange={(next) => onChange('secondary_preference', next)} />{error('secondary_preference')}</label>
       </div>
     </fieldset>
 
@@ -95,7 +97,6 @@ export function RequirementFields({
       <div className="form-grid">
         {materialPrefix}
         <label className={fieldClass('base_unit')}><span>基础单位</span><input required aria-invalid={Boolean(errors.base_unit)} value={value.base_unit} onChange={(event) => onChange('base_unit', event.target.value)} />{error('base_unit')}</label>
-        <label className={fieldClass('secondary_preference')}><span>次要偏好 <small>可选</small></span><select aria-invalid={Boolean(errors.secondary_preference)} value={value.secondary_preference} onChange={(event) => onChange('secondary_preference', event.target.value)}><option value="">无</option><option value="LOWEST_CONFIRMED_TOTAL_COST" disabled={value.ranking_preference === 'LOWEST_CONFIRMED_TOTAL_COST'}>最低已确认总成本</option><option value="FASTEST_CONFIRMED_DELIVERY" disabled={value.ranking_preference === 'FASTEST_CONFIRMED_DELIVERY'}>最快已确认交付</option></select>{error('secondary_preference')}</label>
       </div>
     </details>}
   </>

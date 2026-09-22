@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -10,11 +11,13 @@ from pathlib import Path
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from .backend.checkpoints import checkpoint_connection_string
-from .backend.conversations import ConversationModelConfig, generate_conversation_turn
+from .backend.conversations import CONVERSATION_PROMPT_VERSION, ConversationModelConfig, process_conversation_turn
+from .backend.decision_intents import CONVERSATION_INTENT_VERSION
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
+from .backend.worker_health import write_worker_heartbeat
 from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
 from .backend.intake import RequirementModelConfig, extract_requirement_candidates, parse_requirement_document
 from .backend.summaries import SummaryModelConfig, generate_summary_narrative
@@ -39,6 +42,8 @@ def run_job(job_id: str) -> dict:
         actor_id=settings.test_user_id,
         quote_dictionary_path=settings.quote_dictionary_path,
         conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
+        supplier_history_root=settings.supplier_history_root,
+        supplier_history_dataset_version=settings.supplier_history_dataset_version,
     )
     dictionary = QuoteDictionary.load(settings.quote_dictionary_path)
     processor = DefaultQuoteProcessor(dictionary)
@@ -135,6 +140,8 @@ def _run_decision_conversation_job(
 ) -> dict:
     context = service.conversation_job_context(job_id)
     attempts = 0
+    started_at = time.monotonic()
+    stage = "intent"
     try:
         config = ConversationModelConfig.from_env()
         if config is None:
@@ -143,26 +150,51 @@ def _run_decision_conversation_job(
                 attempts=0,
                 error_code="conversation_model_unconfigured",
             )
-        turn, attempts = generate_conversation_turn(context, config)
+        def record_stage(next_stage: str, calls: int) -> None:
+            nonlocal stage
+            stage = next_stage
+            service.record_conversation_stage(
+                job_id, stage=stage, calls_used=calls, elapsed_seconds=time.monotonic() - started_at,
+                provider=config.provider, model_id=config.model_id,
+                prompt_version=f"{CONVERSATION_INTENT_VERSION}+{CONVERSATION_PROMPT_VERSION}",
+            )
+
+        turn, attempts = process_conversation_turn(context, config, on_stage=record_stage)
         return service.complete_conversation_job(
             job_id,
             turn=turn,
             attempts=attempts,
             provider=config.provider,
             model_id=config.model_id,
+            prompt_version=f"{CONVERSATION_INTENT_VERSION}+{CONVERSATION_PROMPT_VERSION}",
         )
     except ModelClientError as exc:
         attempts += exc.attempts
-        message = (
-            "回答未通过事实与引用校验，请重试或缩小问题范围。"
-            if exc.error_code == "conversation_model_output_invalid"
-            else str(exc)
-        )
+        message = {
+            "conversation_model_output_invalid": "本次说明未通过事实与引用核验，未更改正式结果。可以重试生成说明。",
+            "conversation_intent_invalid": "未能可靠识别本次请求，尚未生成模拟。请明确主次排序指标、容差或供应商名称后重试。",
+            "conversation_intent_mismatch": "回答与已识别的请求不一致，本次未保存，也未更改正式结果。请重试。",
+        }.get(exc.error_code, str(exc))
         service.fail_conversation_job(
             job_id,
             code=exc.error_code,
             message=message,
             attempts=attempts,
+            diagnostic=f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; {str(exc)}"[:1000],
+        )
+        raise
+    except BackendError as exc:
+        messages = {
+            "selection_review_required": "参与本次模拟的报价仍有待审核字段。请到“待处理事项／集中审核”确认这些字段，重新分析后再生成模拟；已排除报价重新纳入时也需要通过审核。",
+            "conversation_stale": "当前对话依据的结果已过期。请打开最新决策结果后重新提出模拟请求。",
+            "selection_input_stale": "计算期间任务版本发生变化，本次未保存。请刷新最新结果后重试。",
+            "conversation_model_output_invalid": "本次回复在保存前校验失败，未更改正式结果。请重试；若持续失败，请提供任务编号。",
+        }
+        service.fail_conversation_job(
+            job_id, code=exc.code,
+            message=messages.get(exc.code, "本次模拟或保存未完成。请核对当前版本与待审核字段，再重试。"),
+            attempts=attempts,
+            diagnostic=f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; code={exc.code}; {str(exc)}"[:1000],
         )
         raise
     except Exception as exc:
@@ -197,9 +229,25 @@ def run_loop(
             actor_id=settings.test_user_id,
             quote_dictionary_path=settings.quote_dictionary_path,
             conversation_job_stale_seconds=settings.supplier_conversation_job_stale_seconds,
+            supplier_history_root=settings.supplier_history_root,
+            supplier_history_dataset_version=settings.supplier_history_dataset_version,
         )
     execute = execute_job or run_job
     processed = 0
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
+    if owned_engine is not None:
+        def heartbeat_loop() -> None:
+            while not heartbeat_stop.is_set():
+                write_worker_heartbeat(settings.quote_storage_path)
+                heartbeat_stop.wait(settings.supplier_worker_heartbeat_interval_seconds)
+
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_loop,
+            name="supplier-worker-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
     try:
         while True:
             job_id = service.next_pending_job_id()
@@ -218,15 +266,25 @@ def run_loop(
     except KeyboardInterrupt:
         return {"status": "STOPPED", "processed_jobs": processed}
     finally:
+        heartbeat_stop.set()
+        if heartbeat_thread is not None:
+            heartbeat_thread.join(timeout=2)
         if owned_engine is not None:
             owned_engine.dispose()
 
 
 def _error_payload(job_id: str, exc: Exception) -> dict:
-    known_error = isinstance(exc, (BackendError, ExtractionError))
+    known_error = isinstance(exc, (BackendError, ExtractionError, ModelClientError))
+    code = (
+        exc.error_code
+        if isinstance(exc, ModelClientError)
+        else exc.code
+        if isinstance(exc, (BackendError, ExtractionError))
+        else "worker_failed"
+    )
     return {
         "error": {
-            "code": exc.code if known_error else "worker_failed",
+            "code": code,
             "message": str(exc) if known_error else "Workflow execution failed.",
         },
         "job_id": job_id,

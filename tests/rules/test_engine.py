@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 
 from supplier_comparison.extraction.contracts import (
     CandidateProducer,
@@ -474,17 +475,8 @@ def test_empty_comparison_scope_is_explicit() -> None:
 
 
 def test_unsupported_ranking_preference_requires_input() -> None:
-    result = compare_suppliers(
-        _request(
-            _supplier_c(),
-            requirement=_requirement(ranking_preference="HIGHEST_RATING"),
-        )
-    )
-
-    assert result.disposition == ComparisonDisposition.PENDING_INPUT
-    assert [issue.code for issue in result.comparison_reasons] == [
-        "RANKING_PREFERENCE_UNSUPPORTED"
-    ]
+    with pytest.raises(ValidationError):
+        _requirement(ranking_preference="HIGHEST_RATING")
 
 
 def _impact_example(*, pending_price: str = "9.80", task_revision: int = 1):

@@ -69,6 +69,23 @@ npm run dev -- --host 127.0.0.1
 
 后端检查：http://127.0.0.1:8000/health/ready
 
+Worker 检查：http://127.0.0.1:8000/health/worker
+
+如果需要同时确认数据库和 Worker：
+
+```bash
+curl 'http://127.0.0.1:8000/health/ready?require_worker=true'
+```
+
+使用原生 AWS Bedrock Converse 作为决策助手时，先安装 AWS 可选依赖：
+
+```bash
+cd /Users/lc/Desktop/hackson/Team-QQFARM
+.venv/bin/python -m pip install -e '.[aws]'
+```
+
+然后在 `.env` 中设置 `SUPPLIER_CONVERSATION_MODEL_PROVIDER=bedrock-converse`、模型 ID 和 AWS Region；认证沿用 AWS 标准凭据链。
+
 ## 停止
 
 三个终端分别按 `Ctrl+C`，然后停止数据库：

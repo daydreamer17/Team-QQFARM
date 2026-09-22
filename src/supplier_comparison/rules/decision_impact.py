@@ -16,6 +16,7 @@ from .contracts import (
     FeasibilityStatus,
     FrozenModel,
     ProcurementRequirement,
+    RankingCriterion,
     SupplierEvaluation,
     ranking_pair,
 )
@@ -202,20 +203,26 @@ def decision_comparison_request(
 
     selected = preferences or request.decision_preferences
     requirement = request.comparison.requirement
-    if selected.ranking_mode is not None:
+    primary = selected.primary_criterion
+    secondary = selected.secondary_criterion
+    if primary is None and selected.ranking_mode is not None:
         primary, secondary = ranking_pair(selected.ranking_mode)
+    if primary is not None:
         requirement = requirement.model_copy(update={
             "ranking_preference": primary,
             "secondary_preference": secondary,
         })
     excluded = set(selected.excluded_supplier_ids)
-    quotes = tuple(
-        quote for quote in request.comparison.quotes
-        if request.supplier_bindings.get(quote.quote_id) not in excluded
+    excluded_quote_ids = tuple(
+        quote.quote_id for quote in request.comparison.quotes
+        if request.supplier_bindings.get(quote.quote_id) in excluded
     )
     return ComparisonRequest(
         requirement=requirement,
-        quotes=quotes,
+        quotes=request.comparison.quotes,
         evaluated_at=request.comparison.evaluated_at,
         cost_tolerance_amount=selected.cost_tolerance_amount,
+        excluded_quote_ids=excluded_quote_ids,
+        supplier_history_snapshots=request.comparison.supplier_history_snapshots,
+        history_dataset_context=request.comparison.history_dataset_context,
     )

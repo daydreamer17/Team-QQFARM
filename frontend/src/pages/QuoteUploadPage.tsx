@@ -6,6 +6,8 @@ import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePre
 import { IssuePanel } from '../components/IssuePanel'
 import { QuoteDraftReviewWorkspace } from '../components/QuoteDraftReviewWorkspace'
 import { ReviewPanel } from '../components/ReviewPanel'
+import { TablePagination } from '../components/TablePagination'
+import { useTablePagination } from '../hooks/useTablePagination'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024
@@ -51,6 +53,29 @@ function errorMessage(error: unknown) {
   return '操作失败，请稍后重试。'
 }
 
+function uploadFailureNotice(error: unknown, localMessage?: string) {
+  if (localMessage) {
+    return { title: '文件不符合要求', message: localMessage }
+  }
+  if (error instanceof ApiClientError) {
+    if (error.code === 'duplicate_quote_uploaded') {
+      return { title: '无需重复上传', message: errorMessage(error) }
+    }
+    if (
+      error.code.startsWith('csv_') ||
+      ['unsupported_media_type', 'unsupported_pdf', 'unsupported_csv', 'empty_file', 'file_empty', 'file_too_large', 'pdf_size_limit_exceeded', 'pdf_page_limit_exceeded', 'blank_pdf', 'pdf_text_quality_insufficient', 'encrypted_pdf_unsupported', 'corrupted_pdf'].includes(error.code)
+    ) {
+      return {
+        title: '文件不符合要求',
+        message: error.code === 'csv_header_unregistered'
+          ? 'CSV 表头与支持的报价模板不一致。'
+          : '请检查文件格式后重新上传。',
+      }
+    }
+  }
+  return { title: '上传失败', message: '请重新上传。' }
+}
+
 export function QuoteUploadPage() {
   const { taskId = '' } = useParams()
   const queryClient = useQueryClient()
@@ -59,7 +84,6 @@ export function QuoteUploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
-  const [lastSubmission, setLastSubmission] = useState<UploadSubmission | null>(null)
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
   const quoteHistory = useQuery({ queryKey: ['tasks', taskId, 'quotes'], queryFn: () => api.listQuotes(taskId), enabled: Boolean(taskId) })
   const drafts = useQuery({ queryKey: ['tasks', taskId, 'quote-drafts'], queryFn: () => api.listQuoteDrafts(taskId), enabled: Boolean(taskId), refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PROCESSING') ? 1_500 : false })
@@ -78,7 +102,7 @@ export function QuoteUploadPage() {
   })
   const activeDraft = activeDraftDetail.data ?? activeDraftSummary
   const refreshAll = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['tasks', taskId] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quotes'] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quote-drafts'] })]) }
-  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); setSelectedFile(null); setLastSubmission(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
+  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); setSelectedFile(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
   const revise = useMutation({
     mutationFn: (quoteId: string) => {
       if (!task.data) throw new Error('任务尚未加载。')
@@ -101,7 +125,6 @@ export function QuoteUploadPage() {
     onSuccess: async () => {
       upload.reset()
       setSelectedFile(null)
-      setLastSubmission(null)
       if (fileInput.current) fileInput.current.value = ''
       await refreshAll()
     },
@@ -116,7 +139,7 @@ export function QuoteUploadPage() {
     event.preventDefault(); setLocalError('')
     if (!task.data || !selectedFile || !supplierId.trim()) return setLocalError('请填写供应商编号并选择报价文件。')
     const submission = { expectedTaskRevision: task.data.task_revision, supplierId: supplierId.trim(), isSynthetic: import.meta.env.DEV, file: selectedFile, idempotencyKey: createIdempotencyKey() }
-    setLastSubmission(submission); upload.mutate(submission)
+    upload.mutate(submission)
   }
   function confirmDeactivate(quoteId: string) {
     if (!window.confirm('停用后，该报价不再参与比较，但历史文件会保留。确定停用？')) return
@@ -125,13 +148,64 @@ export function QuoteUploadPage() {
   const legacyFieldReview = task.data && task.data.status === 'FAILED' && task.data.current_job?.error_code === 'review_required'
   const batchReview = task.data?.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
   const legacyIssueReview = task.data?.current_issue && !['POLICY_EVIDENCE_REVIEW', 'BATCH_FIELD_REVIEW'].includes(task.data.current_issue.issue_type)
-  const duplicateUpload = upload.error instanceof ApiClientError && upload.error.code === 'duplicate_quote_uploaded'
+  const currentUploadNotice = localError || upload.isError
+    ? uploadFailureNotice(upload.error, localError || undefined)
+    : null
+  const latestDraft = drafts.data?.items[0]
+  const latestDraftFailureNotice = latestDraft?.status === 'FAILED'
+    ? uploadFailureNotice(new ApiClientError(400, latestDraft.error_code ?? 'quote_draft_failed', latestDraft.error_message ?? ''))
+    : null
+  const submittedQuotes = quoteHistory.data?.items ?? []
+  const submittedQuotePage = useTablePagination(submittedQuotes)
+
+  function openVersion(version: (typeof submittedQuotes)[number]['versions'][number]) {
+    setPreview({
+      name: version.original_filename,
+      mediaType: version.media_type,
+      sizeBytes: version.size_bytes,
+      remoteUrl: documentContentUrl(taskId, version.document_id),
+      downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment'),
+    })
+  }
+
+  function submittedQuoteTable(readOnly = false) {
+    if (submittedQuotes.length === 0) return <div className="card empty-upload-list">尚无已提交报价。</div>
+    return <>
+      <div className="audit-table-wrap quote-management-table-wrap">
+        <table className="audit-table quote-management-table">
+          <thead><tr><th>状态</th><th>供应商</th><th>当前文件</th><th>版本</th><th aria-label="操作">操作</th></tr></thead>
+          <tbody>
+            {submittedQuotePage.pageItems.map((quote) => {
+              const currentVersion = quote.versions.find((version) => version.is_current) ?? quote.versions[0]
+              const historyVersions = quote.versions.filter((version) => version.document_id !== currentVersion.document_id)
+              return <tr key={quote.quote_id}>
+                <td><span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>{quote.active ? '当前有效' : '已停用'}</span></td>
+                <td><strong>{quote.supplier_id}</strong></td>
+                <td>
+                  <strong className="quote-table-filename" title={currentVersion.original_filename}>{currentVersion.original_filename}</strong>
+                  {historyVersions.length > 0 && <details className="quote-table-history"><summary>历史文件（{historyVersions.length}）</summary><div>{historyVersions.map((version) => <p key={version.document_id}><span>第 {version.quote_version} 版 · {version.original_filename}</span><button className="quote-preview-action" type="button" onClick={() => openVersion(version)}>查看</button></p>)}</div></details>}
+                </td>
+                <td>第 {currentVersion.quote_version} 版{quote.versions.length > 1 && <small>共 {quote.versions.length} 版</small>}</td>
+                <td>
+                  <div className="quote-table-actions">
+                    <button className="quote-preview-action" type="button" onClick={() => openVersion(currentVersion)}>查看原件</button>
+                    {!readOnly && (quote.active ? <><button type="button" disabled={Boolean(activeDraft) || revise.isPending} onClick={() => revise.mutate(quote.quote_id)}>修改</button><button type="button" disabled={Boolean(activeDraft) || deactivate.isPending} onClick={() => confirmDeactivate(quote.quote_id)}>停用</button></> : <button type="button" disabled={Boolean(activeDraft) || reactivate.isPending} onClick={() => reactivate.mutate({ quoteId: quote.quote_id, idempotencyKey: createIdempotencyKey() })}>重新启用</button>)}
+                  </div>
+                </td>
+              </tr>
+            })}
+          </tbody>
+        </table>
+      </div>
+      <TablePagination page={submittedQuotePage.page} pageSize={submittedQuotePage.pageSize} pageCount={submittedQuotePage.pageCount} total={submittedQuotes.length} onPageChange={submittedQuotePage.setPage} />
+    </>
+  }
 
   if (task.data?.status === 'ABANDONED') {
     return <div className="page-stack quote-review-page">
       <TaskWorkspaceHeader taskId={task.data.task_id} scenarioId={task.data.scenario_id} title={task.data.requirement.manufacturer_part_number} subtitle="任务已废弃；报价与原件保持只读" status={task.data.status} revision={task.data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={task.data.progress} active="quotes" />
       <section className="card run-notice"><strong>该任务已软废弃</strong><p>不能上传、修正或提交报价；历史文件仍可预览和下载。</p></section>
-      <div className="uploaded-list">{quoteHistory.data?.items.flatMap((quote) => quote.versions.map((version) => <article className="card uploaded-quote" key={version.document_id}><div><strong>{quote.supplier_id} · 第 {version.quote_version} 版</strong><p>{version.original_filename}</p></div><button className="button button-secondary" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>查看原件</button></article>))}</div>
+      <section>{quoteHistory.isPending ? <div className="card empty-upload-list">正在加载报价历史…</div> : submittedQuoteTable(true)}</section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   }
@@ -157,7 +231,8 @@ export function QuoteUploadPage() {
               <button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>预览文件</button>
             </div>
           )}
-          {(localError || upload.isError) && <div className="form-error compact-error"><div><strong>{duplicateUpload ? '无需重复上传' : '上传失败'}</strong><p>{localError || errorMessage(upload.error)}</p></div>{lastSubmission && !duplicateUpload && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>重试</button>}</div>}
+          {currentUploadNotice && <div className="form-error compact-error"><div><strong>{currentUploadNotice.title}</strong><p>{currentUploadNotice.message}</p></div></div>}
+          {!currentUploadNotice && latestDraftFailureNotice && latestDraft && <div className="form-error compact-error"><div><strong>{latestDraftFailureNotice.title}</strong><p>{latestDraft.original_filename}：{latestDraftFailureNotice.message}</p></div></div>}
           <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? '正在上传…' : '上传并开始审核'}</button>
         </form>
       )}
@@ -186,18 +261,7 @@ export function QuoteUploadPage() {
         {(revise.isError || deactivate.isError || reactivate.isError) && <div className="form-error compact-error"><div><strong>操作失败</strong><p>{errorMessage(revise.error ?? deactivate.error ?? reactivate.error)}</p></div></div>}
         {quoteHistory.isPending ? <div className="card empty-upload-list">正在加载报价历史…</div>
           : quoteHistory.isError ? <div className="card empty-upload-list">报价历史加载失败。</div>
-            : quoteHistory.data.items.length === 0 ? <div className="card empty-upload-list">尚无已提交报价。</div>
-              : <div className="uploaded-list">{quoteHistory.data.items.map((quote) => {
-                const currentVersion = quote.versions.find((version) => version.is_current) ?? quote.versions[0]
-                const historyVersions = quote.versions.filter((version) => version.document_id !== currentVersion.document_id)
-                return <article className="card uploaded-quote submitted-quote" key={quote.quote_id}>
-                  <div className="submitted-quote-heading"><div><span className={`status-pill ${quote.active ? 'status-ready' : 'status-muted'}`}>{quote.active ? '当前有效' : '已停用'}</span><h3>{quote.supplier_id}</h3></div><div className="submitted-quote-actions">{quote.active ? <><button type="button" disabled={Boolean(activeDraft) || revise.isPending} onClick={() => revise.mutate(quote.quote_id)}>修改报价</button><button type="button" disabled={Boolean(activeDraft) || deactivate.isPending} onClick={() => confirmDeactivate(quote.quote_id)}>停用报价</button></> : <button type="button" disabled={Boolean(activeDraft) || reactivate.isPending} onClick={() => reactivate.mutate({ quoteId: quote.quote_id, idempotencyKey: createIdempotencyKey() })}>重新启用</button>}</div></div>
-                  <div className="quote-version-list">
-                    <div className="quote-version-row"><div><strong>{currentVersion.original_filename}</strong>{quote.versions.length > 1 && <span>第 {currentVersion.quote_version} 版</span>}</div><div>{quote.versions.length > 1 && <span>{quote.active ? '当前版本' : '停用前版本'}</span>}<button className="quote-preview-action" type="button" onClick={() => setPreview({ name: currentVersion.original_filename, mediaType: currentVersion.media_type, sizeBytes: currentVersion.size_bytes, remoteUrl: documentContentUrl(taskId, currentVersion.document_id), downloadUrl: documentContentUrl(taskId, currentVersion.document_id, 'attachment') })}>查看原件</button></div></div>
-                    {historyVersions.length > 0 && <details className="quote-history"><summary>查看历史版本（{historyVersions.length}）</summary><div className="quote-history-list">{historyVersions.map((version) => <div className="quote-version-row" key={version.document_id}><div><strong>{version.original_filename}</strong><span>第 {version.quote_version} 版</span></div><div><button className="quote-preview-action" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>查看原件</button></div></div>)}</div></details>}
-                  </div>
-                </article>
-              })}</div>}
+            : submittedQuoteTable()}
       </section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>

@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { CreateTaskRequest, PolicySetSummary, RequirementDraftResponse } from '../api/types'
+import type { CreateTaskRequest, PolicySetSummary, RankingCriterion, RequirementDraftResponse } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
 import { backendFieldErrors } from '../lib/apiErrors'
@@ -17,6 +17,24 @@ type FieldErrors = Partial<Record<keyof FormState, string>>
 interface Submission {
   body: CreateTaskRequest
   idempotencyKey: string
+}
+
+interface RequirementFileMetadata {
+  name: string
+  mediaType: string
+  sizeBytes: number
+}
+
+interface PersistedNewTaskState {
+  version: 1
+  form: FormState
+  requirementDraft: RequirementDraftResponse | null
+  requirementFileMetadata: RequirementFileMetadata | null
+  autoFilledFields: (keyof RequirementFormValues)[]
+  bindPolicy: boolean
+  selectedPolicyKey: string
+  policyCategory: string
+  policyRegion: string
 }
 
 const initialForm: FormState = {
@@ -40,6 +58,60 @@ const initialForm: FormState = {
   delivery_location: '',
   ranking_preference: '',
   secondary_preference: '',
+}
+
+const NEW_TASK_STORAGE_KEY = 'quotewise.new-task.v1'
+let inMemoryRequirementFile: File | null = null
+
+function readPersistedNewTask(): PersistedNewTaskState | null {
+  try {
+    const raw = window.sessionStorage.getItem(NEW_TASK_STORAGE_KEY)
+    if (!raw) return null
+    const value = JSON.parse(raw) as Partial<PersistedNewTaskState>
+    if (value.version !== 1 || !value.form || typeof value.form !== 'object') return null
+    return {
+      version: 1,
+      form: { ...initialForm, ...value.form },
+      requirementDraft: value.requirementDraft ?? null,
+      requirementFileMetadata: value.requirementFileMetadata ?? null,
+      autoFilledFields: Array.isArray(value.autoFilledFields) ? value.autoFilledFields : [],
+      bindPolicy: Boolean(value.bindPolicy),
+      selectedPolicyKey: typeof value.selectedPolicyKey === 'string' ? value.selectedPolicyKey : '',
+      policyCategory: typeof value.policyCategory === 'string' ? value.policyCategory : '',
+      policyRegion: typeof value.policyRegion === 'string' ? value.policyRegion : '',
+    }
+  } catch {
+    window.sessionStorage.removeItem(NEW_TASK_STORAGE_KEY)
+    return null
+  }
+}
+
+function hasFormProgress(form: FormState) {
+  return (Object.keys(initialForm) as (keyof FormState)[]).some((field) => form[field] !== initialForm[field])
+}
+
+function persistNewTask(state: PersistedNewTaskState) {
+  const hasProgress = hasFormProgress(state.form)
+    || Boolean(state.requirementDraft)
+    || Boolean(state.requirementFileMetadata)
+    || state.bindPolicy
+  if (!hasProgress) {
+    window.sessionStorage.removeItem(NEW_TASK_STORAGE_KEY)
+    return
+  }
+  const requirementDraft = state.requirementDraft
+    ? { ...state.requirementDraft, parsed: null }
+    : null
+  try {
+    window.sessionStorage.setItem(NEW_TASK_STORAGE_KEY, JSON.stringify({ ...state, requirementDraft }))
+  } catch {
+    // Storage can be unavailable in restricted browser contexts; the page remains usable in memory.
+  }
+}
+
+function clearPersistedNewTask() {
+  inMemoryRequirementFile = null
+  window.sessionStorage.removeItem(NEW_TASK_STORAGE_KEY)
 }
 
 function errorMessage(error: unknown) {
@@ -89,19 +161,58 @@ function policyKey(policy: PolicySetSummary) {
 export function NewTaskPage() {
   const navigate = useNavigate()
   const fileInput = useRef<HTMLInputElement>(null)
-  const [form, setForm] = useState(initialForm)
+  const [restoredState] = useState(readPersistedNewTask)
+  const [form, setForm] = useState<FormState>(() => restoredState?.form ?? initialForm)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [localError, setLocalError] = useState('')
   const [lastSubmission, setLastSubmission] = useState<Submission | null>(null)
-  const [requirementFile, setRequirementFile] = useState<File | null>(null)
-  const [requirementDraft, setRequirementDraft] = useState<RequirementDraftResponse | null>(null)
+  const [requirementFile, setRequirementFile] = useState<File | null>(() => inMemoryRequirementFile)
+  const [requirementFileMetadata, setRequirementFileMetadata] = useState<RequirementFileMetadata | null>(() => (
+    inMemoryRequirementFile
+      ? { name: inMemoryRequirementFile.name, mediaType: inMemoryRequirementFile.type, sizeBytes: inMemoryRequirementFile.size }
+      : restoredState?.requirementFileMetadata ?? null
+  ))
+  const [requirementDraft, setRequirementDraft] = useState<RequirementDraftResponse | null>(() => restoredState?.requirementDraft ?? null)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
-  const [extractionNotice, setExtractionNotice] = useState('')
-  const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof RequirementFormValues>>(new Set())
-  const [bindPolicy, setBindPolicy] = useState(false)
-  const [selectedPolicyKey, setSelectedPolicyKey] = useState('')
-  const [policyCategory, setPolicyCategory] = useState('')
-  const [policyRegion, setPolicyRegion] = useState('')
+  const [extractionNotice, setExtractionNotice] = useState(() => restoredState ? '已恢复未提交的采购任务，请继续检查或创建任务。' : '')
+  const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof RequirementFormValues>>(() => new Set(restoredState?.autoFilledFields ?? []))
+  const [bindPolicy, setBindPolicy] = useState(() => restoredState?.bindPolicy ?? false)
+  const [selectedPolicyKey, setSelectedPolicyKey] = useState(() => restoredState?.selectedPolicyKey ?? '')
+  const [policyCategory, setPolicyCategory] = useState(() => restoredState?.policyCategory ?? '')
+  const [policyRegion, setPolicyRegion] = useState(() => restoredState?.policyRegion ?? '')
+
+  useEffect(() => {
+    persistNewTask({
+      version: 1,
+      form,
+      requirementDraft,
+      requirementFileMetadata,
+      autoFilledFields: [...autoFilledFields],
+      bindPolicy,
+      selectedPolicyKey,
+      policyCategory,
+      policyRegion,
+    })
+  }, [autoFilledFields, bindPolicy, form, policyCategory, policyRegion, requirementDraft, requirementFileMetadata, selectedPolicyKey])
+
+  useEffect(() => {
+    const draftId = restoredState?.requirementDraft?.requirement_draft_id
+    if (!draftId) return
+    let cancelled = false
+    void api.getRequirementDraft(draftId).then((draft) => {
+      if (cancelled) return
+      if (draft.status === 'DISCARDED' || draft.status === 'USED') {
+        setRequirementDraft(null)
+        setRequirementFileMetadata(null)
+        setExtractionNotice('此前的需求草稿已失效，表单内容仍已保留；如需文件证据请重新上传。')
+        return
+      }
+      setRequirementDraft(draft)
+    }).catch(() => {
+      if (!cancelled) setExtractionNotice('已恢复表单内容，但暂时无法向后端校验需求草稿。')
+    })
+    return () => { cancelled = true }
+  }, [restoredState])
 
   const policySets = useQuery({
     queryKey: ['policy-sets', 'list', 'new-task'],
@@ -114,6 +225,7 @@ export function NewTaskPage() {
   const createTask = useMutation({
     mutationFn: ({ body, idempotencyKey }: Submission) => api.createTask(body, idempotencyKey),
     onSuccess: (task) => {
+      clearPersistedNewTask()
       void navigate(`/tasks/${task.task_id}`, { replace: true })
     },
     onError: (error) => {
@@ -125,6 +237,7 @@ export function NewTaskPage() {
   const requirementExtraction = useMutation({
     mutationFn: async (file: File) => {
       let draft = await api.uploadRequirementDraft(file, createIdempotencyKey())
+      setRequirementDraft(draft)
       while (draft.status === 'PROCESSING') {
         await new Promise((resolve) => window.setTimeout(resolve, 1_000))
         draft = await api.getRequirementDraft(draft.requirement_draft_id)
@@ -209,25 +322,43 @@ export function NewTaskPage() {
     setExtractionNotice('')
     setLocalError('')
     if (!file) {
+      inMemoryRequirementFile = null
       setRequirementFile(null)
+      setRequirementFileMetadata(null)
       setRequirementDraft(null)
       return
     }
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (!['pdf', 'md', 'txt'].includes(extension ?? '')) {
-      setRequirementFile(null)
       setLocalError('采购需求附件仅支持 PDF、Markdown 或 TXT。')
       if (fileInput.current) fileInput.current.value = ''
       return
     }
     if (file.size > 10 * 1024 * 1024) {
-      setRequirementFile(null)
       setLocalError('采购需求附件不能超过 10 MiB。')
       if (fileInput.current) fileInput.current.value = ''
       return
     }
+    inMemoryRequirementFile = file
     setRequirementFile(file)
+    setRequirementFileMetadata({ name: file.name, mediaType: file.type, sizeBytes: file.size })
     setRequirementDraft(null)
+  }
+
+  function clearForm() {
+    clearPersistedNewTask()
+    setForm(initialForm)
+    setFieldErrors({})
+    setAutoFilledFields(new Set())
+    setExtractionNotice('')
+    setRequirementFile(null)
+    setRequirementFileMetadata(null)
+    setRequirementDraft(null)
+    setBindPolicy(false)
+    setSelectedPolicyKey('')
+    setPolicyCategory('')
+    setPolicyRegion('')
+    if (fileInput.current) fileInput.current.value = ''
   }
 
   function runRequirementExtraction() {
@@ -299,8 +430,8 @@ export function NewTaskPage() {
           planned_order_date: form.planned_order_date || null,
           delivery_deadline: form.delivery_deadline,
           delivery_location: form.delivery_location.trim(),
-          ranking_preference: form.ranking_preference,
-          secondary_preference: form.secondary_preference.trim() || null,
+          ranking_preference: form.ranking_preference as RankingCriterion,
+          secondary_preference: (form.secondary_preference.trim() || null) as RankingCriterion | null,
         },
       },
     }
@@ -335,17 +466,21 @@ export function NewTaskPage() {
         <div className="requirement-source-actions">
           <label className="source-file-picker">
             <span aria-hidden="true">↑</span>
-            <strong>{requirementFile ? '更换需求文件' : '选择需求文件'}</strong>
+            <strong>{requirementFileMetadata ? '更换需求文件' : '选择需求文件'}</strong>
             <small>PDF / MD / TXT · 最大 10 MiB</small>
             <input ref={fileInput} type="file" accept=".pdf,.md,.txt,application/pdf,text/markdown,text/plain" onChange={(event) => handleRequirementFile(event.target.files?.[0] ?? null)} />
           </label>
 
-          {requirementFile ? (
+          {requirementFileMetadata ? (
             <div className="source-file-selected">
               <span className="source-file-icon">DOC</span>
-              <div><strong>{requirementFile.name}</strong><small>{formatBytes(requirementFile.size)} · 等待解析</small></div>
-              <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>预览</button>
-              <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '解析并填入'}</button>
+              <div><strong>{requirementFileMetadata.name}</strong><small>{formatBytes(requirementFileMetadata.sizeBytes)} · {requirementDraft?.status === 'READY' ? '已解析' : requirementDraft?.status === 'PROCESSING' ? '正在解析' : '等待解析'}</small></div>
+              {requirementFile && <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>预览</button>}
+              {requirementDraft?.status === 'READY'
+                ? <span className="status-pill status-ready">解析完成</span>
+                : requirementFile
+                  ? <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '解析并填入'}</button>
+                  : <small>如需重新解析或预览，请重新选择原文件。</small>}
             </div>
           ) : null}
         </div>
@@ -358,7 +493,7 @@ export function NewTaskPage() {
       <form className="requirement-form" noValidate onSubmit={handleSubmit}>
         <div className="form-title-row">
           <div><span className="source-step">02</span><div><h2>采购需求</h2></div></div>
-          <button className="button button-secondary" type="button" onClick={() => { setForm(initialForm); setFieldErrors({}); setAutoFilledFields(new Set()); setExtractionNotice('') }}>清空表单</button>
+          <button className="button button-secondary" type="button" onClick={clearForm}>清空表单</button>
         </div>
 
         <RequirementFields

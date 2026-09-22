@@ -29,6 +29,25 @@ def test_worker_cli_sanitizes_unexpected_exception(monkeypatch, capsys) -> None:
     }
 
 
+def test_worker_cli_reports_sanitized_model_error_code() -> None:
+    payload = worker._error_payload(
+        "job_model",
+        ModelClientError(
+            "conversation validation failed: missing reference",
+            attempts=2,
+            error_code="conversation_model_output_invalid",
+        ),
+    )
+
+    assert payload == {
+        "error": {
+            "code": "conversation_model_output_invalid",
+            "message": "conversation validation failed: missing reference",
+        },
+        "job_id": "job_model",
+    }
+
+
 def test_worker_loop_processes_pending_jobs_until_idle() -> None:
     class FakeService:
         def __init__(self) -> None:
@@ -70,8 +89,8 @@ def test_conversation_worker_completes_validated_turn(monkeypatch) -> None:
     monkeypatch.setattr(worker.ConversationModelConfig, "from_env", lambda: config)
     monkeypatch.setattr(
         worker,
-        "generate_conversation_turn",
-        lambda context, actual: (
+        "process_conversation_turn",
+        lambda context, actual, **kwargs: (
             {
                 "assistant_text": "当前结果来自冻结事实。",
                 "reference_ids": ["RESULT:1"],
@@ -106,14 +125,17 @@ def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> No
     config = SimpleNamespace(provider="fixed-test", model_id="fixed-conversation")
     monkeypatch.setattr(worker.ConversationModelConfig, "from_env", lambda: config)
 
-    def fail(_context, _config):
+    def fail(_context, _config, **kwargs):
         raise ModelClientError(
             "sanitized transport failure", attempts=2, error_code="model_transport_error"
         )
 
-    monkeypatch.setattr(worker, "generate_conversation_turn", fail)
+    monkeypatch.setattr(worker, "process_conversation_turn", fail)
     with pytest.raises(ModelClientError):
         worker._run_decision_conversation_job(service, "job-conversation-failed")
+    diagnostic = service.failed[1].pop("diagnostic")
+    assert diagnostic.startswith("stage=intent;")
+    assert "sanitized transport failure" in diagnostic
     assert service.failed == (
         "job-conversation-failed",
         {
@@ -123,21 +145,55 @@ def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> No
         },
     )
 
-    def fail_validation(_context, _config):
+    def fail_validation(_context, _config, **kwargs):
         raise ModelClientError(
             "conversation model response failed validation",
             attempts=1,
             error_code="conversation_model_output_invalid",
         )
 
-    monkeypatch.setattr(worker, "generate_conversation_turn", fail_validation)
+    monkeypatch.setattr(worker, "process_conversation_turn", fail_validation)
     with pytest.raises(ModelClientError):
         worker._run_decision_conversation_job(service, "job-conversation-invalid")
+    diagnostic = service.failed[1].pop("diagnostic")
+    assert "conversation model response failed validation" in diagnostic
     assert service.failed == (
         "job-conversation-invalid",
         {
             "code": "conversation_model_output_invalid",
-            "message": "回答未通过事实与引用校验，请重试或缩小问题范围。",
+            "message": "本次说明未通过事实与引用核验，未更改正式结果。可以重试生成说明。",
             "attempts": 1,
         },
     )
+
+
+def test_conversation_review_gate_explains_next_step_and_preserves_call_count(monkeypatch):
+    class FakeService:
+        failed = None
+
+        def conversation_job_context(self, job_id):
+            return {'job_id': job_id}
+
+        def record_conversation_stage(self, *args, **kwargs):
+            pass
+
+        def complete_conversation_job(self, *args, **kwargs):
+            raise worker.BackendError('selection_review_required', 'review required')
+
+        def fail_conversation_job(self, job_id, **kwargs):
+            self.failed = kwargs
+
+    service = FakeService()
+    monkeypatch.setattr(worker.ConversationModelConfig, 'from_env',
+                        lambda: SimpleNamespace(provider='fixed-test', model_id='fixed-model'))
+    def simulated_turn(context, config, *, on_stage):
+        on_stage('simulation', 1)
+        return {'assistant_text': '', 'reference_ids': [], 'changes': {'excluded_supplier_ids': []}}, 1
+    monkeypatch.setattr(worker, 'process_conversation_turn', simulated_turn)
+    with pytest.raises(worker.BackendError, match='review required'):
+        worker._run_decision_conversation_job(service, 'job-review-required')
+    assert service.failed['code'] == 'selection_review_required'
+    assert service.failed['attempts'] == 1
+    assert '集中审核' in service.failed['message']
+    assert '重新分析后再生成模拟' in service.failed['message']
+    assert service.failed['diagnostic'].startswith('stage=simulation;')

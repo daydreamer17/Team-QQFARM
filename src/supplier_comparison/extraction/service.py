@@ -66,7 +66,10 @@ def extract_quote_candidates(
     )
     evidence_started = time.perf_counter()
     try:
-        validate_candidates(parsed_input, candidates, dictionary)
+        # Invalid business enums belong in the human review form, not a failed
+        # model job. Review still blocks invalid values from calculation; source
+        # identity and citation integrity remain strict at this boundary.
+        validate_candidates(parsed_input, candidates, dictionary, validate_normalized_values=False)
     except EvidenceValidationError as exc:
         rejected_payload = result.model_payload_before_grounding or result.payload
         raw_payload = rejected_payload.model_dump_json()

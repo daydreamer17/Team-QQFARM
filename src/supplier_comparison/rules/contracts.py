@@ -9,14 +9,14 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from supplier_comparison.extraction.contracts import QuoteFieldCandidate
 
 
-RULE_VERSION = "supplier-comparison/1.2.0"
+RULE_VERSION = "supplier-comparison/2.0.0"
 
 
 class FrozenModel(BaseModel):
@@ -47,12 +47,72 @@ class RankingMode(StrEnum):
     FASTEST_DELIVERY_THEN_LOWEST_COST = "FASTEST_DELIVERY_THEN_LOWEST_COST"
 
 
+class RankingCriterion(StrEnum):
+    LOWEST_CONFIRMED_TOTAL_COST = "LOWEST_CONFIRMED_TOTAL_COST"
+    FASTEST_CONFIRMED_DELIVERY = "FASTEST_CONFIRMED_DELIVERY"
+    LONGEST_CONFIRMED_PAYMENT_TERM = "LONGEST_CONFIRMED_PAYMENT_TERM"
+    HIGHEST_SUPPLIER_PERFORMANCE = "HIGHEST_SUPPLIER_PERFORMANCE"
+    HIGHEST_HISTORICAL_ON_TIME_RATE = "HIGHEST_HISTORICAL_ON_TIME_RATE"
+    LOWEST_HISTORICAL_REJECTED_LINE_RATE = "LOWEST_HISTORICAL_REJECTED_LINE_RATE"
+
+
+class CriterionStatus(StrEnum):
+    COMPARABLE = "COMPARABLE"
+    MISSING = "MISSING"
+    INCOMPARABLE = "INCOMPARABLE"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class CriterionDirection(StrEnum):
+    ASCENDING = "ASCENDING"
+    DESCENDING = "DESCENDING"
+
+
+class IdentityMatchStatus(StrEnum):
+    MATCHED = "MATCHED"
+    REVIEW_REQUIRED = "REVIEW_REQUIRED"
+    CONFLICT = "CONFLICT"
+
+
+class HistoryAvailabilityStatus(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
+    NO_DATA = "NO_DATA"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+
+
+class PaymentParseStatus(StrEnum):
+    COMPARABLE = "COMPARABLE"
+    MISSING = "MISSING"
+    INCOMPARABLE = "INCOMPARABLE"
+
+
 class DecisionPreferences(FrozenModel):
     """Decision-only settings; separate from the buyer's hard requirement."""
 
-    ranking_mode: RankingMode | None = None
+    schema_version: Literal["decision-preferences/2.0"] = "decision-preferences/2.0"
+    primary_criterion: RankingCriterion | None = None
+    secondary_criterion: RankingCriterion | None = None
+    # Accepted only at the compatibility boundary. It is deliberately excluded
+    # from new serialized payloads so V2 is single-write while remaining dual-read.
+    ranking_mode: RankingMode | None = Field(default=None, exclude=True)
     excluded_supplier_ids: tuple[str, ...] = ()
     cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def translate_legacy_ranking_mode(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or not value.get("ranking_mode"):
+            return value
+        payload = dict(value)
+        primary, secondary = ranking_pair(RankingMode(payload["ranking_mode"]))
+        if payload.get("primary_criterion") not in (None, primary):
+            raise ValueError("legacy and V2 primary ranking fields conflict")
+        if payload.get("secondary_criterion") not in (None, secondary):
+            raise ValueError("legacy and V2 secondary ranking fields conflict")
+        payload["primary_criterion"] = primary
+        payload["secondary_criterion"] = secondary
+        return payload
 
     @field_validator("cost_tolerance_amount", mode="before")
     @classmethod
@@ -70,6 +130,23 @@ class DecisionPreferences(FrozenModel):
         if len(normalized) != len(set(normalized)):
             raise ValueError("excluded supplier IDs must be unique")
         return normalized
+
+    @model_validator(mode="after")
+    def preferences_are_consistent(self) -> "DecisionPreferences":
+        if (
+            self.primary_criterion is not None
+            and self.secondary_criterion == self.primary_criterion
+        ):
+            raise ValueError("primary and secondary criteria must differ")
+        if self.secondary_criterion is not None and self.primary_criterion is None:
+            raise ValueError("secondary criterion requires a primary criterion")
+        if (
+            self.cost_tolerance_amount is not None
+            and self.primary_criterion
+            != RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST
+        ):
+            raise ValueError("cost tolerance requires cost-primary ranking")
+        return self
 
 
 class ProcurementRequirement(FrozenModel):
@@ -92,8 +169,8 @@ class ProcurementRequirement(FrozenModel):
     planned_order_date: date | None = None
     delivery_deadline: date
     delivery_location: str = Field(min_length=1)
-    ranking_preference: str = Field(min_length=1)
-    secondary_preference: str | None = None
+    ranking_preference: RankingCriterion
+    secondary_preference: RankingCriterion | None = None
 
     @field_validator("budget_amount", mode="before")
     @classmethod
@@ -109,21 +186,29 @@ class ProcurementRequirement(FrozenModel):
             and self.delivery_deadline < self.planned_order_date
         ):
             raise ValueError("delivery_deadline cannot precede planned_order_date")
+        if self.secondary_preference == self.ranking_preference:
+            raise ValueError("primary and secondary criteria must differ")
         return self
 
 
-def ranking_pair(mode: RankingMode) -> tuple[str, str | None]:
+def ranking_pair(mode: RankingMode) -> tuple[RankingCriterion, RankingCriterion | None]:
     if mode == RankingMode.LOWEST_CONFIRMED_TOTAL_COST:
-        return "LOWEST_CONFIRMED_TOTAL_COST", None
+        return RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST, None
     if mode == RankingMode.FASTEST_CONFIRMED_DELIVERY:
-        return "FASTEST_CONFIRMED_DELIVERY", None
+        return RankingCriterion.FASTEST_CONFIRMED_DELIVERY, None
     if mode == RankingMode.LOWEST_COST_THEN_FASTEST_DELIVERY:
-        return "LOWEST_CONFIRMED_TOTAL_COST", "FASTEST_CONFIRMED_DELIVERY"
-    return "FASTEST_CONFIRMED_DELIVERY", "LOWEST_CONFIRMED_TOTAL_COST"
+        return (
+            RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST,
+            RankingCriterion.FASTEST_CONFIRMED_DELIVERY,
+        )
+    return (
+        RankingCriterion.FASTEST_CONFIRMED_DELIVERY,
+        RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST,
+    )
 
 
 def ranking_mode_for(requirement: ProcurementRequirement) -> RankingMode | None:
-    pair = (requirement.ranking_preference, requirement.secondary_preference)
+    pair = (requirement.ranking_preference.value, requirement.secondary_preference.value if requirement.secondary_preference else None)
     return {
         ("LOWEST_CONFIRMED_TOTAL_COST", None): RankingMode.LOWEST_CONFIRMED_TOTAL_COST,
         ("FASTEST_CONFIRMED_DELIVERY", None): RankingMode.FASTEST_CONFIRMED_DELIVERY,
@@ -139,10 +224,22 @@ class QuoteInput(FrozenModel):
 
     quote_id: str = Field(min_length=1)
     quote_version: int = Field(ge=1)
+    supplier_id: str | None = None
+    payment_start_event_override: str | None = None
+    payment_start_event_evidence_ref: str | None = None
     candidates: tuple[QuoteFieldCandidate, ...]
+
+    @field_validator("payment_start_event_override")
+    @classmethod
+    def supported_payment_start_event(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"INVOICE_DATE"}:
+            raise ValueError("unsupported payment start event")
+        return value
 
     @model_validator(mode="after")
     def candidates_match_quote_and_are_unique(self) -> "QuoteInput":
+        if self.payment_start_event_override and not self.payment_start_event_evidence_ref:
+            raise ValueError("payment start event override requires an audit evidence reference")
         seen: set[str] = set()
         for candidate in self.candidates:
             if (
@@ -163,6 +260,9 @@ class ComparisonRequest(FrozenModel):
     quotes: tuple[QuoteInput, ...]
     evaluated_at: datetime
     cost_tolerance_amount: Decimal | None = Field(default=None, ge=0)
+    excluded_quote_ids: tuple[str, ...] = ()
+    supplier_history_snapshots: tuple["SupplierHistorySnapshot", ...] = ()
+    history_dataset_context: "SupplierHistoryDatasetContext | None" = None
 
     @field_validator("cost_tolerance_amount", mode="before")
     @classmethod
@@ -178,7 +278,113 @@ class ComparisonRequest(FrozenModel):
             raise ValueError("comparison scope must contain one active version per quote")
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("evaluated_at must be timezone-aware")
+        if not set(self.excluded_quote_ids).issubset(set(quote_ids)):
+            raise ValueError("excluded_quote_ids references a quote outside the scope")
+        snapshot_ids = [item.quote_id for item in self.supplier_history_snapshots]
+        if len(snapshot_ids) != len(set(snapshot_ids)):
+            raise ValueError("history snapshots must be unique by quote ID")
+        if not set(snapshot_ids).issubset(set(quote_ids)):
+            raise ValueError("history snapshot references a quote outside the scope")
         return self
+
+
+class RateMetric(FrozenModel):
+    numerator: int = Field(ge=0)
+    denominator: int = Field(ge=0)
+    rate: Decimal | None = Field(default=None, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def rate_matches_counts(self) -> "RateMetric":
+        expected = Decimal(self.numerator) / Decimal(self.denominator) if self.denominator else None
+        if self.numerator > self.denominator or self.rate != expected:
+            raise ValueError("rate must exactly match numerator / denominator")
+        return self
+
+
+class SupplierHistoryDatasetContext(FrozenModel):
+    dataset_id: str
+    dataset_version: str
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    rating_method_version: str
+    scope: dict[str, Any]
+    as_of_date: date
+    period_start: date
+    period_end: date
+    is_synthetic: bool
+
+
+class SupplierHistorySnapshot(FrozenModel):
+    quote_id: str
+    supplier_id: str | None = None
+    supplier_name: str | None = None
+    identity_match_status: IdentityMatchStatus
+    history_availability_status: HistoryAvailabilityStatus
+    overall_grade: str | None = None
+    on_time: RateMetric | None = None
+    rejected_lines: RateMetric | None = None
+    evidence_refs: tuple[str, ...] = ()
+
+    @field_validator("overall_grade")
+    @classmethod
+    def valid_grade(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"A", "B", "C", "D", "N"}:
+            raise ValueError("unsupported supplier history grade")
+        return value
+
+
+class PaymentTermEvaluation(FrozenModel):
+    raw_text: str | None = None
+    normalized_text: str | None = None
+    payment_type: str | None = None
+    net_days: int | None = Field(default=None, ge=0)
+    payment_start_event: str | None = None
+    parse_status: PaymentParseStatus
+    reason_codes: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+    validation_status: str | None = None
+    normalization_rule_version: str = "payment-term-evaluation/1.0.0"
+
+
+CriterionExactValue = Decimal | int | date | str | None
+
+
+class CriterionEvaluation(FrozenModel):
+    criterion: RankingCriterion
+    status: CriterionStatus
+    exact_value: CriterionExactValue = None
+    display_value: str | None = None
+    direction: CriterionDirection
+    reason_codes: tuple[str, ...] = ()
+    evidence_refs: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def comparable_has_a_value(self) -> "CriterionEvaluation":
+        if self.status == CriterionStatus.COMPARABLE and self.exact_value is None:
+            raise ValueError("comparable criterion requires an exact value")
+        return self
+
+
+class RankingRound(FrozenModel):
+    criterion: RankingCriterion
+    candidate_quote_ids_before: tuple[str, ...]
+    candidate_quote_ids_after: tuple[str, ...]
+    applied: bool
+    reason_codes: tuple[str, ...] = ()
+
+
+class RankingTrace(FrozenModel):
+    ordered_criteria: tuple[RankingCriterion, ...]
+    criterion_directions: dict[str, CriterionDirection]
+    candidate_values: dict[str, dict[str, Any]]
+    rounds: tuple[RankingRound, ...]
+    cost_tolerance_applied: bool = False
+    secondary_applied: bool = False
+    tie_group: tuple[str, ...] = ()
+    blocker_reason_codes: tuple[str, ...] = ()
+    comparison_disposition: ComparisonDisposition
+    original_scope_count: int = Field(ge=0)
+    excluded_quote_ids: tuple[str, ...] = ()
 
 
 class RuleIssue(FrozenModel):
@@ -279,6 +485,9 @@ class SupplierEvaluation(FrozenModel):
     known_cost_subtotal: Decimal | None = Field(default=None, ge=0)
     total_cost: Decimal | None = Field(default=None, ge=0)
     estimated_arrival_date: date | None = None
+    payment_term: PaymentTermEvaluation | None = None
+    history_snapshot: SupplierHistorySnapshot | None = None
+    criterion_evaluations: tuple[CriterionEvaluation, ...] = ()
     failed_reasons: tuple[RuleIssue, ...] = ()
     pending_reasons: tuple[RuleIssue, ...] = ()
 
@@ -314,6 +523,7 @@ class ComparisonResult(FrozenModel):
     blocking_pending_quote_ids: tuple[str, ...] = ()
     comparison_reasons: tuple[RuleIssue, ...] = ()
     final_recommendation_allowed: bool
+    ranking_trace: RankingTrace | None = None
 
     @model_validator(mode="after")
     def recommendation_matches_disposition(self) -> "ComparisonResult":

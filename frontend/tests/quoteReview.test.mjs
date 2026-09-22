@@ -240,13 +240,13 @@ test('FREE and NOT_APPLICABLE accept a missing fee amount without inventing zero
   assert.equal(formValues.other_fees_amount, '')
 })
 
-test('UNKNOWN blocks review while KNOWN_AMOUNT requires an amount', () => {
+test('UNKNOWN can be reviewed while KNOWN_AMOUNT requires an amount', () => {
   const schema = makeSchema()
   const draft = makeDraft()
   const formValues = initializeQuoteReviewValues(draft, schema)
 
   formValues.shipping_fee_status = 'UNKNOWN'
-  assert.ok(validateQuoteReview(draft, schema, formValues).some((current) => current.code === 'FEE_STATUS_UNKNOWN'))
+  assert.ok(!validateQuoteReview(draft, schema, formValues).some((current) => current.code === 'FEE_STATUS_UNKNOWN'))
 
   formValues.shipping_fee_status = 'KNOWN_AMOUNT'
   assert.ok(validateQuoteReview(draft, schema, formValues).some((current) => current.code === 'FEE_AMOUNT_REQUIRED'))

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from supplier_comparison.rules import (
     DecisionPreferences,
     ProcurementRequirement,
+    RankingCriterion,
     RankingMode,
     RequirementChanges,
     analyze_decision_impact,
@@ -40,9 +41,13 @@ from supplier_comparison.extraction import (
 )
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.files import stable_id
+from supplier_comparison.extraction.review import HUMAN_RESOLVABLE_CODES, IDENTITY_CODES
+from supplier_comparison.extraction.quote_field_rules import select_document_unit_price
 from supplier_comparison.extraction.review_contracts import (
     CandidateValueSnapshot,
     EffectiveCriticality,
+    FieldReviewDecision,
+    ReviewStatus,
     REVIEW_POLICY_VERSION,
     REVIEW_SCHEMA_VERSION,
 )
@@ -67,17 +72,29 @@ from .models import (
     RequirementRecord,
     SummaryReport,
     Task,
+    TaskHistoryBinding,
     TaskRevision,
     WorkflowArtifact,
 )
-from .conversations import CONVERSATION_PROMPT_VERSION, narrative_chunks
+from .conversations import (
+    CONVERSATION_PROMPT_VERSION,
+    decision_fact_catalog,
+    normalize_conversation_turn,
+    render_conversation_turn,
+    validate_conversation_turn,
+)
 from .decision_intents import DecisionIntentParser, confirmation_text
 from .quote_review_schema import (
     GROUP_IDS,
     QUOTE_REVIEW_SCHEMA_VERSION,
     build_quote_field_schema,
 )
+from .supplier_history import history_inputs
 from supplier_comparison.rag.clients import ModelClientError
+from supplier_comparison.supplier_history import (
+    SupplierHistoryLoader,
+    SupplierHistoryLoadError,
+)
 
 
 def new_id(prefix: str) -> str:
@@ -90,6 +107,27 @@ def canonical_json(value: Any) -> str:
 
 def content_hash(value: Any) -> str:
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+HISTORY_RANKING_CRITERIA = {
+    RankingCriterion.HIGHEST_SUPPLIER_PERFORMANCE,
+    RankingCriterion.HIGHEST_HISTORICAL_ON_TIME_RATE,
+    RankingCriterion.LOWEST_HISTORICAL_REJECTED_LINE_RATE,
+}
+
+
+def _requires_history(requirement: ProcurementRequirement) -> bool:
+    return bool(
+        {requirement.ranking_preference, requirement.secondary_preference}
+        & HISTORY_RANKING_CRITERIA
+    )
+
+
+def _preferences_require_history(preferences: DecisionPreferences) -> bool:
+    return bool(
+        {preferences.primary_criterion, preferences.secondary_criterion}
+        & HISTORY_RANKING_CRITERIA
+    )
 
 
 QUOTE_REVIEW_ERROR_MESSAGES = {
@@ -119,7 +157,7 @@ QUOTE_REVIEW_ERROR_MESSAGES = {
     "LEAD_TIME_GROUP_INCOMPLETE": "交期天数、日历口径、交付语义和起算事件必须同时填写。",
     "QUOTE_DATE_AFTER_VALID_UNTIL": "报价日期不能晚于有效截止日。",
     "SOURCE_IDENTITY_MISMATCH": "证据不属于当前报价文件或版本，请重新解析。",
-    "SOURCE_QUOTE_MISMATCH": "证据引用了其他报价，请重新解析。",
+    "SOURCE_QUOTE_MISMATCH": "引用片段不在绑定的原文中，请重新解析后核对。",
     "SOURCE_REF_UNKNOWN": "字段引用了当前文件中不存在的证据。",
     "SOURCE_SEMANTIC_MISMATCH": "证据原文不能支持该字段含义，请人工核对。",
     "START_EVENT_DOCUMENT_CONFLICT": "原件存在多个交期起算事件，请确认最终适用条件。",
@@ -188,6 +226,8 @@ class BackendService:
         actor_id: str,
         quote_dictionary_path: str | Path = "data/contracts/quote_data_field.csv",
         conversation_job_stale_seconds: int = 120,
+        supplier_history_root: str | Path = "data/generated/supplier_history/mcu9",
+        supplier_history_dataset_version: str = "2026-08-06-v1",
     ) -> None:
         self.session_factory = session_factory
         self.storage_root = Path(storage_root)
@@ -195,6 +235,124 @@ class BackendService:
         self.quote_dictionary_path = Path(quote_dictionary_path)
         self.quote_dictionary = QuoteDictionary.load(self.quote_dictionary_path)
         self.conversation_job_stale_seconds = conversation_job_stale_seconds
+        self.supplier_history_root = Path(supplier_history_root)
+        self.supplier_history_dataset_version = supplier_history_dataset_version
+
+    def _published_history_release(
+        self, dataset_version: str
+    ) -> tuple[Any, Any, str]:
+        try:
+            return SupplierHistoryLoader(self.supplier_history_root).load(
+                dataset_version=dataset_version
+            )
+        except SupplierHistoryLoadError as exc:
+            raise BackendError(
+                exc.code,
+                "Supplier history dataset could not be loaded safely.",
+                dataset_version=dataset_version,
+            ) from exc
+
+    @staticmethod
+    def _history_binding_response(
+        binding: TaskHistoryBinding | None,
+    ) -> dict[str, Any] | None:
+        if binding is None:
+            return None
+        return {
+            "history_binding_id": binding.history_binding_id,
+            "task_revision": binding.task_revision,
+            "binding_status": binding.binding_status,
+            "dataset_id": binding.dataset_id,
+            "dataset_version": binding.dataset_version,
+            "content_sha256": binding.content_sha256,
+            "manifest_sha256": binding.manifest_sha256,
+            "rating_method_version": binding.rating_method_version,
+            "identity_matcher_version": binding.identity_matcher_version,
+            "alias_allowlist_sha256": binding.alias_allowlist_sha256,
+            "scope": binding.scope,
+            "as_of_date": binding.as_of_date,
+            "is_synthetic": bool(binding.payload.get("is_synthetic", False)),
+        }
+
+    def _new_history_binding(
+        self,
+        *,
+        task_id: str,
+        task_revision: int,
+        requirement: ProcurementRequirement,
+        dataset_version: str | None = None,
+    ) -> TaskHistoryBinding:
+        dataset, manifest, manifest_sha256 = self._published_history_release(
+            dataset_version or self.supplier_history_dataset_version
+        )
+        mapping = requirement.manufacturer_part_number
+        applicable = mapping in dataset.context.scope.task_product_mappings
+        payload = {
+            "dataset_context": dataset.context.model_dump(mode="json"),
+            "binding_status": "AVAILABLE" if applicable else "OUT_OF_SCOPE",
+            "task_product_mapping": mapping,
+            "is_synthetic": dataset.context.is_synthetic,
+        }
+        return TaskHistoryBinding(
+            history_binding_id=new_id("history_binding"),
+            task_id=task_id,
+            task_revision=task_revision,
+            binding_status=payload["binding_status"],
+            dataset_id=manifest.dataset_id,
+            dataset_version=manifest.dataset_version,
+            content_sha256=manifest.content_sha256,
+            manifest_sha256=manifest_sha256,
+            rating_method_version=dataset.context.rating_method_version,
+            identity_matcher_version=dataset.context.identity_matcher_version,
+            alias_allowlist_sha256=manifest.alias_allowlist_sha256,
+            scope=dataset.context.scope.model_dump(mode="json"),
+            as_of_date=dataset.context.as_of_date.isoformat(),
+            payload=payload,
+        )
+
+    @staticmethod
+    def _binding_at_revision(
+        session: Session, task_id: str, revision: int
+    ) -> TaskHistoryBinding | None:
+        return session.scalar(
+            select(TaskHistoryBinding)
+            .where(
+                TaskHistoryBinding.task_id == task_id,
+                TaskHistoryBinding.task_revision <= revision,
+            )
+            .order_by(TaskHistoryBinding.task_revision.desc())
+        )
+
+    @classmethod
+    def _copy_history_binding(
+        cls,
+        session: Session,
+        *,
+        task_id: str,
+        from_revision: int,
+        to_revision: int,
+    ) -> TaskHistoryBinding | None:
+        source = cls._binding_at_revision(session, task_id, from_revision)
+        if source is None:
+            return None
+        copied = TaskHistoryBinding(
+            history_binding_id=new_id("history_binding"),
+            task_id=task_id,
+            task_revision=to_revision,
+            binding_status=source.binding_status,
+            dataset_id=source.dataset_id,
+            dataset_version=source.dataset_version,
+            content_sha256=source.content_sha256,
+            manifest_sha256=source.manifest_sha256,
+            rating_method_version=source.rating_method_version,
+            identity_matcher_version=source.identity_matcher_version,
+            alias_allowlist_sha256=source.alias_allowlist_sha256,
+            scope=dict(source.scope),
+            as_of_date=source.as_of_date,
+            payload=dict(source.payload),
+        )
+        session.add(copied)
+        return copied
 
     def quote_field_schema(self) -> dict[str, Any]:
         """Return the versioned, backend-owned quote review form contract."""
@@ -526,6 +684,17 @@ class BackendService:
                     source_artifact_id=source_artifact_id,
                 )
             )
+            history_binding = self._new_history_binding(
+                task_id=task_id,
+                task_revision=1,
+                requirement=requirement,
+            )
+            if history_binding.binding_status != "AVAILABLE" and _requires_history(requirement):
+                raise BackendError(
+                    "ranking_criterion_not_applicable",
+                    "Historical ranking criteria are not applicable to this requirement scope.",
+                )
+            session.add(history_binding)
             response = {
                 "task_id": task_id,
                 "task_revision": 1,
@@ -533,6 +702,9 @@ class BackendService:
                 "policy_binding": self._policy_binding_response(task),
                 "decision_profile": self._decision_profile_response(
                     DecisionPreferences(ranking_mode=ranking_mode_for(requirement)), None
+                ),
+                "supplier_history_binding": self._history_binding_response(
+                    history_binding
                 ),
             }
             self._save_idempotent(
@@ -755,6 +927,9 @@ class BackendService:
                 "decision_completed": task.current_result_id is not None,
                 "summary_completed": summary_completed,
             }
+            history_binding = self._binding_at_revision(
+                session, task.task_id, task.current_revision
+            )
             return {
                 "task_id": task.task_id,
                 "scenario_id": task.scenario_id,
@@ -768,6 +943,9 @@ class BackendService:
                 "policy_binding": self._policy_binding_response(task),
                 "decision_profile": self._decision_profile_response(
                     decision_preferences, decision_profile
+                ),
+                "supplier_history_binding": self._history_binding_response(
+                    history_binding
                 ),
                 "current_issue": self._issue_response(issue) if issue is not None else None,
                 "current_job": (
@@ -924,6 +1102,12 @@ class BackendService:
             quote.active = False
             next_revision = task.current_revision + 1
             task.current_revision = next_revision
+            history_binding = self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=next_revision - 1,
+                to_revision=next_revision,
+            )
             task.status = "DRAFT"
             session.add(
                 TaskRevision(
@@ -1006,6 +1190,12 @@ class BackendService:
             quote.active = True
             next_revision = task.current_revision + 1
             task.current_revision = next_revision
+            history_binding = self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=next_revision - 1,
+                to_revision=next_revision,
+            )
             task.status = "DRAFT"
             session.add(
                 TaskRevision(
@@ -1245,6 +1435,29 @@ class BackendService:
             return None
         source_batch = ExtractionBatch.model_validate(batch_artifact.payload)
         source_review = ReviewEnvelope.model_validate(review_artifact.payload)
+        # Same-file edits must retain answers supplied after initial submission.
+        executions = session.scalars(select(DocumentExecution).join(
+            GraphRun, GraphRun.graph_run_id == DocumentExecution.graph_run_id
+        ).where(
+            DocumentExecution.document_id == document.document_id,
+            DocumentExecution.batch_artifact_id.is_not(None),
+            GraphRun.task_id == task.task_id,
+        ).order_by(GraphRun.effective_revision.desc(), GraphRun.created_at.desc()))
+        for execution in executions:
+            latest = session.get(WorkflowArtifact, execution.batch_artifact_id)
+            if latest is None:
+                continue
+            candidate_batch = ExtractionBatch.model_validate(latest.payload)
+            if candidate_batch.parsed_input.context.document_id != document.document_id:
+                continue
+            source_batch = candidate_batch
+            source_review = source_review.model_copy(update={
+                "batch": source_batch,
+                "corrections": tuple(CorrectionEvent.model_validate(p) for p in
+                                     self.correction_event_payloads_for_batch(latest.artifact_id)),
+                "review_events": self.review_confirmations_for_batch(latest.artifact_id),
+            })
+            break
         if (
             source_batch.parsed_input.document_sha256 != document.sha256
             or not _quote_draft_submission_ready(source_review)
@@ -1433,6 +1646,12 @@ class BackendService:
             CriticalityContext(
                 required_revision=requirement.revision,
                 base_unit=requirement.base_unit,
+                payment_terms_required=(
+                    requirement.ranking_preference
+                    == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    or requirement.secondary_preference
+                    == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                ),
             ),
             input_is_synthetic=document.is_synthetic,
             reviewed_at=now,
@@ -2184,23 +2403,6 @@ class BackendService:
                 }:
                     deferred_confirmations.append(item)
                     continue
-                definition = self.quote_dictionary.fields[field_name]
-                allowed_values = definition.allowed_normalized_values
-                if (
-                    action == "SET_VALUE"
-                    and allowed_values is not None
-                    and item.get("normalized_value") not in allowed_values
-                ):
-                    action_errors.append(
-                        {
-                            "code": "NORMALIZED_ENUM_INVALID",
-                            "field_names": [field_name],
-                            "group_id": self._quote_field_group_id(field_name),
-                            "message": QUOTE_REVIEW_ERROR_MESSAGES["NORMALIZED_ENUM_INVALID"],
-                            "allowed_values": list(allowed_values),
-                        }
-                    )
-                    continue
                 try:
                     if action == "SET_VALUE":
                         correction_action = (
@@ -2309,13 +2511,21 @@ class BackendService:
                 CriticalityContext(
                     required_revision=requirement.revision,
                     base_unit=requirement.base_unit,
+                    payment_terms_required=(
+                        requirement.ranking_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                        or requirement.secondary_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    ),
                 ),
                 input_is_synthetic=draft.is_synthetic,
                 reviewed_at=reviewed_at,
                 review_events=tuple(review_events),
                 corrections=corrections,
             )
-            if not reviewed.submission_ready:
+            # Invalid provenance/authority still rejects the operation. Ordinary
+            # field issues must not roll back the user's review progress.
+            if reviewed.review_status == ReviewStatus.REJECTED:
                 raise BackendError(
                     "quote_draft_review_failed",
                     "Quote draft did not pass authoritative backend review.",
@@ -2389,7 +2599,7 @@ class BackendService:
             )
             session.add(next_review_artifact)
             draft.review_artifact_id = next_review_artifact.artifact_id
-            draft.status = "READY_TO_SUBMIT"
+            draft.status = "READY_TO_SUBMIT" if reviewed.submission_ready else "REVIEW_REQUIRED"
             draft.revision += 1
             draft.error_code = None
             draft.error_message = None
@@ -2576,7 +2786,16 @@ class BackendService:
             reviewed = review_extraction_batch(
                 batch,
                 self.quote_dictionary,
-                CriticalityContext(required_revision=requirement.revision, base_unit=requirement.base_unit),
+                CriticalityContext(
+                    required_revision=requirement.revision,
+                    base_unit=requirement.base_unit,
+                    payment_terms_required=(
+                        requirement.ranking_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                        or requirement.secondary_preference
+                        == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                    ),
+                ),
                 input_is_synthetic=draft.is_synthetic,
                 reviewed_at=reviewed_at,
                 corrections=prior_events + tuple(events),
@@ -2721,6 +2940,12 @@ class BackendService:
                     CriticalityContext(
                         required_revision=requirement.revision,
                         base_unit=requirement.base_unit,
+                        payment_terms_required=(
+                            requirement.ranking_preference
+                            == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                            or requirement.secondary_preference
+                            == "LONGEST_CONFIRMED_PAYMENT_TERM"
+                        ),
                     ),
                     input_is_synthetic=draft.is_synthetic,
                     reviewed_at=datetime.now(timezone.utc),
@@ -2869,6 +3094,12 @@ class BackendService:
                     )
                 )
                 task.current_revision += 1
+                self._copy_history_binding(
+                    session,
+                    task_id=task_id,
+                    from_revision=task.current_revision - 1,
+                    to_revision=task.current_revision,
+                )
                 task.status = "DRAFT"
                 draft.status = "SUBMITTED"
                 draft.revision += 1
@@ -3320,6 +3551,19 @@ class BackendService:
                 payload=payload, content_sha256=content_hash(payload), source_artifact_id=None,
             ))
             task.current_revision = next_revision
+            previous_binding = self._binding_at_revision(session, task_id, next_revision - 1)
+            history_binding = self._new_history_binding(
+                task_id=task_id,
+                task_revision=next_revision,
+                requirement=requirement,
+                dataset_version=(previous_binding.dataset_version if previous_binding else None),
+            )
+            if history_binding.binding_status != "AVAILABLE" and _requires_history(requirement):
+                raise BackendError(
+                    "ranking_criterion_not_applicable",
+                    "Historical ranking criteria are not applicable to this requirement scope.",
+                )
+            session.add(history_binding)
             active_documents = session.scalars(select(Document).join(
                 Quote, Quote.quote_id == Document.quote_id
             ).where(Document.task_id == task_id, Quote.active.is_(True), Document.quote_version == Quote.current_version)).all()
@@ -3329,17 +3573,25 @@ class BackendService:
                 session.add(GraphRun(
                     graph_run_id=graph_run_id, task_id=task_id, thread_id=graph_run_id,
                     started_revision=next_revision, effective_revision=next_revision, status="PENDING",
+                    history_binding_id=(history_binding.history_binding_id if history_binding else None),
                     provider=provider, model_id=model_id, environment=environment, prompt_version=prompt_version,
                 ))
                 session.flush()
                 session.add(Job(
                     job_id=job_id, task_id=task_id, graph_run_id=graph_run_id,
                     job_type="START", status="PENDING", task_revision=next_revision,
+                    history_binding_id=(history_binding.history_binding_id if history_binding else None),
                 ))
                 task.current_graph_run_id = graph_run_id
                 task.status = "QUEUED"
             else:
                 task.status = "DRAFT"
+            if graph_run_id:
+                self._seed_submitted_extractions(
+                    session, task_id=task_id, graph_run_id=graph_run_id,
+                    provider=provider, model_id=model_id, environment=environment,
+                    prompt_version=prompt_version,
+                )
             response = {
                 "task_id": task_id,
                 "task_revision": next_revision,
@@ -3392,6 +3644,12 @@ class BackendService:
                 request_sha256=request_sha, details={"reason": reason.strip()},
             ))
             task.current_revision = next_revision
+            self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=next_revision - 1,
+                to_revision=next_revision,
+            )
             task.status = "ABANDONED"
             task.abandoned_at = datetime.now(timezone.utc)
             response = {"task_id": task_id, "task_revision": next_revision, "status": "ABANDONED", "reason": reason.strip()}
@@ -3699,9 +3957,57 @@ class BackendService:
             documents = session.execute(
                 select(Document, Quote)
                 .join(Quote, Quote.quote_id == Document.quote_id)
-                .where(Document.task_id == task.task_id, Quote.active.is_(True))
+                .where(Document.task_id == task.task_id, Quote.active.is_(True),
+                       Document.quote_version == Quote.current_version)
                 .order_by(Quote.quote_id)
             ).all()
+            history_binding = (
+                session.get(TaskHistoryBinding, graph.history_binding_id)
+                if graph.history_binding_id
+                else self._binding_at_revision(
+                    session, task.task_id, graph.effective_revision
+                )
+            )
+            history_dataset_payload = None
+            if history_binding is not None:
+                if history_binding.task_id != task.task_id:
+                    raise ConflictError(
+                        "history_binding_task_mismatch",
+                        "Graph history binding belongs to another task.",
+                    )
+                # Exact hashes make a mutable or replaced release fail closed.
+                try:
+                    dataset, _manifest, _manifest_hash = SupplierHistoryLoader(
+                        self.supplier_history_root
+                    ).load(
+                        dataset_version=history_binding.dataset_version,
+                        expected_content_sha256=history_binding.content_sha256,
+                        expected_manifest_sha256=history_binding.manifest_sha256,
+                    )
+                except SupplierHistoryLoadError as exc:
+                    raise BackendError(
+                        exc.code,
+                        "Bound supplier history dataset failed validation.",
+                        history_binding_id=history_binding.history_binding_id,
+                    ) from exc
+                history_dataset_payload = dataset.model_dump(mode="json")
+            payment_supplements = {
+                issue.quote_id: {
+                    "payment_start_event": issue.answer_payload.get("payment_start_event"),
+                    "evidence_ref": f"ISSUE:{issue.issue_id}",
+                    "note": issue.answer_payload.get("note"),
+                    "source_type": issue.answer_payload.get("source_type"),
+                    "source_refs": issue.answer_payload.get("source_refs", []),
+                }
+                for issue in session.scalars(
+                    select(Issue).where(
+                        Issue.graph_run_id == graph_run_id,
+                        Issue.issue_type == "PAYMENT_INFORMATION",
+                        Issue.status == "RESOLVED",
+                    )
+                ).all()
+                if issue.quote_id and issue.answer_payload
+            }
             return {
                 "task_id": task.task_id,
                 "scenario_id": task.scenario_id,
@@ -3718,6 +4024,11 @@ class BackendService:
                 "decision_profile": self._decision_profile_response(
                     decision_preferences, decision_profile
                 ),
+                "supplier_history_binding": self._history_binding_response(
+                    history_binding
+                ),
+                "supplier_history_dataset": history_dataset_payload,
+                "payment_supplements": payment_supplements,
                 "documents": [
                     {
                         "document_id": document.document_id,
@@ -4025,6 +4336,265 @@ class BackendService:
                 raise NotFoundError("result_not_found", "Result was not found.")
             return self._comparison_result_response(session, task, artifact)
 
+    def supplier_information(
+        self, task_id: str, *, result_id: str | None = None
+    ) -> dict[str, Any]:
+        """Return a task-scoped, read-only supplier view without live historical fallback."""
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+
+            selected_result_id = result_id or task.current_result_id
+            if selected_result_id is None:
+                quotes = session.scalars(
+                    select(Quote).where(Quote.task_id == task_id, Quote.active.is_(True))
+                    .order_by(Quote.quote_id)
+                ).all()
+                documents = {
+                    row.quote_id: row
+                    for row in session.scalars(
+                        select(Document).join(
+                            Quote, Document.quote_id == Quote.quote_id
+                        ).where(
+                            Document.task_id == task_id,
+                            Quote.active.is_(True),
+                            Document.quote_version == Quote.current_version,
+                        )
+                    ).all()
+                }
+                binding = self._binding_at_revision(session, task_id, task.current_revision)
+                history_context = None
+                snapshots_by_quote: dict[str, dict[str, Any]] = {}
+                if binding is not None and documents:
+                    try:
+                        dataset, _manifest, _manifest_sha = SupplierHistoryLoader(
+                            self.supplier_history_root
+                        ).load(
+                            dataset_version=binding.dataset_version,
+                            expected_content_sha256=binding.content_sha256,
+                            expected_manifest_sha256=binding.manifest_sha256,
+                        )
+                    except SupplierHistoryLoadError as exc:
+                        raise BackendError(
+                            exc.code,
+                            "Supplier history dataset could not be loaded safely.",
+                            dataset_version=binding.dataset_version,
+                        ) from exc
+                    submitted_drafts = session.scalars(
+                        select(QuoteDraft)
+                        .where(
+                            QuoteDraft.task_id == task_id,
+                            QuoteDraft.status == "SUBMITTED",
+                            QuoteDraft.proposed_document_id.in_(
+                                [document.document_id for document in documents.values()]
+                            ),
+                            QuoteDraft.review_artifact_id.is_not(None),
+                        )
+                        .order_by(
+                            QuoteDraft.submitted_at.desc(),
+                            QuoteDraft.created_at.desc(),
+                        )
+                    ).all()
+                    envelopes: list[ReviewEnvelope] = []
+                    seen_documents: set[str] = set()
+                    for draft in submitted_drafts:
+                        if draft.proposed_document_id in seen_documents:
+                            continue
+                        artifact = session.get(WorkflowArtifact, draft.review_artifact_id)
+                        if artifact is None or artifact.task_id != task_id:
+                            continue
+                        try:
+                            envelopes.append(ReviewEnvelope.model_validate(artifact.payload))
+                        except ValidationError as exc:
+                            raise BackendError(
+                                "supplier_history_review_invalid",
+                                "Submitted quote review could not be matched safely.",
+                            ) from exc
+                        seen_documents.add(draft.proposed_document_id)
+                    history_context_model, snapshots = history_inputs(
+                        {
+                            "supplier_history_binding": self._history_binding_response(binding),
+                            "supplier_history_dataset": dataset.model_dump(mode="json"),
+                        },
+                        tuple(envelopes),
+                    )
+                    history_context = (
+                        history_context_model.model_dump(mode="json")
+                        if history_context_model is not None else None
+                    )
+                    snapshots_by_quote = {
+                        item.quote_id: item.model_dump(mode="json") for item in snapshots
+                    }
+
+                grouped: dict[str, dict[str, Any]] = {}
+                unresolved: list[dict[str, Any]] = []
+                for quote in quotes:
+                    document = documents.get(quote.quote_id)
+                    history = snapshots_by_quote.get(quote.quote_id)
+                    identity_status = (history or {}).get(
+                        "identity_match_status", "NOT_RECORDED"
+                    )
+                    supplier_id = (history or {}).get("supplier_id") or quote.supplier_id
+                    display_name = (history or {}).get("supplier_name") or supplier_id
+                    quote_view = {
+                        "quote_id": quote.quote_id,
+                        "quote_version": quote.current_version,
+                        "active": True,
+                        "in_scope_at_result": None,
+                        "document_id": document.document_id if document else None,
+                        "document_sha256": document.sha256 if document else None,
+                        "is_synthetic": document.is_synthetic if document else None,
+                        "evaluation": None,
+                        "policy_assessment": None,
+                        "decision_impact": None,
+                    }
+                    if identity_status == "MATCHED" and supplier_id:
+                        group = grouped.setdefault(supplier_id, {
+                            "supplier_identity_id": supplier_id,
+                            "display_name": display_name,
+                            "supplier_id": supplier_id,
+                            "identity_match_status": identity_status,
+                            "history_availability_status": (history or {}).get(
+                                "history_availability_status", "NOT_RECORDED"
+                            ),
+                            "history_snapshot": history,
+                            "quotes": [],
+                        })
+                        group["quotes"].append(quote_view)
+                    else:
+                        unresolved.append(quote_view | {
+                            "supplier_id": supplier_id,
+                            "display_name": display_name or "身份待核验候选",
+                            "identity_match_status": identity_status,
+                            "history_availability_status": (history or {}).get(
+                                "history_availability_status", "NOT_RECORDED"
+                            ),
+                            "history_snapshot": history,
+                        })
+                payload = {
+                    "schema_version": "supplier-information/1.0.0",
+                    "task_id": task_id,
+                    "snapshot_revision": task.current_revision,
+                    "result_id": None,
+                    "snapshot_id": None,
+                    "view_state": "QUOTE_ONLY",
+                    "is_current": True,
+                    "data_availability": "DETERMINISTIC_COMPARISON_NOT_RUN",
+                    "dataset_status": binding.binding_status if binding else "NOT_RECORDED",
+                    "history_dataset_context": history_context or (
+                        binding.payload.get("dataset_context") if binding else None
+                    ),
+                    "history_binding": self._history_binding_response(binding),
+                    "effective_preferences": None,
+                    "ranking_trace": None,
+                    "quote_count": len(quotes),
+                    "matched_supplier_count": len(grouped),
+                    "unresolved_identity_quote_count": len(unresolved),
+                    "draft_count": len(session.scalars(select(QuoteDraft).where(
+                        QuoteDraft.task_id == task_id,
+                        QuoteDraft.status.notin_(("SUBMITTED", "DISCARDED")),
+                    )).all()),
+                    "inactive_quote_count": len(session.scalars(select(Quote).where(
+                        Quote.task_id == task_id, Quote.active.is_(False),
+                    )).all()),
+                    "suppliers": list(grouped.values()),
+                    "unresolved_identity_quotes": unresolved,
+                }
+                payload["context_sha256"] = content_hash(payload)
+                return payload
+
+            artifact = session.get(WorkflowArtifact, selected_result_id)
+            if (
+                artifact is None
+                or artifact.task_id != task_id
+                or artifact.artifact_type != "COMPARISON_RESULT"
+            ):
+                raise NotFoundError("result_not_found", "Result was not found.")
+            snapshot = (
+                session.get(WorkflowArtifact, artifact.parent_artifact_id)
+                if artifact.parent_artifact_id else None
+            )
+            frozen = snapshot.payload if snapshot and snapshot.artifact_type == "INPUT_SNAPSHOT" else {}
+            result = dict(artifact.payload)
+            docs = {row.get("quote_id"): row for row in frozen.get("documents", [])}
+            impact = self._decision_impact_payload(session, artifact.artifact_id) or {}
+            impacts = {row.get("quote_id"): row for row in impact.get("quote_impacts", [])}
+            compliance = self._policy_compliance_payload(
+                result, self._policy_retrieval_payloads(session, artifact.artifact_id)
+            )
+            policies = {row.get("quote_id"): row for row in compliance.get("assessments", [])}
+            excluded = set((result.get("ranking_trace") or {}).get("excluded_quote_ids", []))
+            grouped: dict[str, dict[str, Any]] = {}
+            unresolved: list[dict[str, Any]] = []
+            for evaluation in result.get("supplier_results", []):
+                quote_id = evaluation["quote_id"]
+                history = evaluation.get("history_snapshot")
+                identity_status = (history or {}).get("identity_match_status", "NOT_RECORDED")
+                supplier_id = (history or {}).get("supplier_id") or docs.get(quote_id, {}).get("supplier_id")
+                quote_view = {
+                    "quote_id": quote_id,
+                    "quote_version": evaluation.get("quote_version"),
+                    "active": None,
+                    "in_scope_at_result": quote_id not in excluded,
+                    "document_id": docs.get(quote_id, {}).get("document_id"),
+                    "document_sha256": docs.get(quote_id, {}).get("document_sha256"),
+                    "is_synthetic": docs.get(quote_id, {}).get("is_synthetic"),
+                    "evaluation": evaluation,
+                    "policy_assessment": policies.get(quote_id),
+                    "decision_impact": impacts.get(quote_id),
+                }
+                if identity_status == "MATCHED" and supplier_id:
+                    group = grouped.setdefault(supplier_id, {
+                        "supplier_identity_id": supplier_id,
+                        "display_name": evaluation.get("supplier_name") or supplier_id,
+                        "supplier_id": supplier_id,
+                        "identity_match_status": identity_status,
+                        "history_availability_status": (history or {}).get(
+                            "history_availability_status", "NOT_RECORDED"
+                        ),
+                        "history_snapshot": history,
+                        "quotes": [],
+                    })
+                    group["quotes"].append(quote_view)
+                else:
+                    unresolved.append(quote_view | {
+                        "supplier_id": supplier_id,
+                        "display_name": evaluation.get("supplier_name") or supplier_id or "身份待核验候选",
+                        "identity_match_status": identity_status,
+                        "history_availability_status": (history or {}).get(
+                            "history_availability_status", "NOT_RECORDED"
+                        ),
+                        "history_snapshot": history,
+                    })
+            is_current = artifact.artifact_id == task.current_result_id
+            payload = {
+                "schema_version": "supplier-information/1.0.0",
+                "task_id": task_id,
+                "snapshot_revision": artifact.task_revision,
+                "result_id": artifact.artifact_id,
+                "snapshot_id": snapshot.artifact_id if snapshot else None,
+                "view_state": "CURRENT_RESULT" if is_current else "HISTORICAL_RESULT",
+                "is_current": is_current,
+                "data_availability": "RECORDED",
+                "dataset_status": (
+                    (frozen.get("supplier_history_binding") or {}).get("binding_status", "NOT_RECORDED")
+                ),
+                "history_dataset_context": frozen.get("supplier_history_dataset_context"),
+                "history_binding": frozen.get("supplier_history_binding"),
+                "effective_preferences": (frozen.get("decision_profile") or {}).get("preferences"),
+                "ranking_trace": result.get("ranking_trace"),
+                "quote_count": len(result.get("supplier_results", [])),
+                "matched_supplier_count": len(grouped),
+                "unresolved_identity_quote_count": len(unresolved),
+                "draft_count": None,
+                "inactive_quote_count": None,
+                "suppliers": list(grouped.values()),
+                "unresolved_identity_quotes": unresolved,
+            }
+            payload["context_sha256"] = content_hash(payload)
+            return payload
+
     def _comparison_result_response(
         self,
         session: Session,
@@ -4039,8 +4609,12 @@ class BackendService:
         # Expose only presentation inputs; internal artifact maps stay server-side.
         input_snapshot = {
             key: frozen.get(key)
-            for key in ("requirement", "decision_profile", "policy_set_version",
-                        "policy_index_version", "policy_category", "policy_region")
+            for key in (
+                "requirement", "decision_profile", "policy_set_version",
+                "policy_index_version", "policy_category", "policy_region",
+                "supplier_history_binding", "supplier_history_dataset_context",
+                "supplier_history_snapshots", "documents", "evaluated_at",
+            )
         } if snapshot else None
         retrievals = self._policy_retrieval_payloads(session, artifact.artifact_id)
         return {
@@ -4402,6 +4976,9 @@ class BackendService:
                             continue
                         candidate = candidates.get(field_name, {})
                         correctable_fact = issue["code"] in COMPARISON_FACT_CORRECTION_CODES
+                        needs_field_resolution = (
+                            quote.quote_id not in nonblocking and correctable_fact
+                        )
                         problems.append({
                             "finding_id": f"comparison:{quote.quote_id}:{field_name}:{issue['code']}",
                             "field_name": field_name, "codes": [issue["code"]],
@@ -4412,7 +4989,10 @@ class BackendService:
                             "raw_value": candidate.get("raw_value"),
                             "normalized_value": candidate.get("normalized_value"), "unit": candidate.get("unit"),
                             "document_id": report["document_id"], "original_filename": report["original_filename"],
-                            "needs_resolution": quote.quote_id not in nonblocking,
+                            # Valid commercial terms that the current calculator
+                            # cannot evaluate must remain visible as PENDING, but
+                            # they are not quote fields the operator must rewrite.
+                            "needs_resolution": needs_field_resolution,
                             "resolution": (
                                 "FIELD_CORRECTION"
                                 if candidate and correctable_fact
@@ -4431,11 +5011,12 @@ class BackendService:
             }
 
     def selection_analysis_input(self, task_id: str, *, expected_task_revision: int,
-                                 evaluated_at: datetime | None = None):
+                                 evaluated_at: datetime | None = None,
+                                 changes: RequirementChanges | None = None):
         """Current audited quote scope only; never turn form values into reviewed facts."""
         from supplier_comparison.extraction import ReviewEnvelope
         from supplier_comparison.extraction.errors import DownstreamNotReadyError
-        from supplier_comparison.rules import ComparisonRequest, DecisionImpactRequest, quote_input_for_decision_impact
+        from supplier_comparison.rules.integration import reviewed_decision_impact_request
 
         task = self.get_task(task_id)
         review = self.list_review_problems(task_id)
@@ -4464,7 +5045,6 @@ class BackendService:
                 envelopes.append(envelope)
             if set(documents) != {r['quote_id'] for r in review['quotes']}:
                 raise ConflictError('selection_input_stale', 'Analysis must cover every active quote.')
-            quotes = tuple(quote_input_for_decision_impact(e) for e in envelopes)
         except DownstreamNotReadyError as exc:
             raise ConflictError('selection_review_required', 'Resolve unsafe review findings before analysis.') from exc
         # Freeze the workflow evaluation instant instead of silently changing quote validity.
@@ -4480,30 +5060,52 @@ class BackendService:
             if not stamp:
                 raise ConflictError('selection_review_required', 'A frozen preliminary comparison is required.')
             evaluated_at = datetime.fromisoformat(stamp)
-        result = DecisionImpactRequest(
-            task_id=task_id, task_revision=expected_task_revision,
-            comparison=ComparisonRequest(requirement=ProcurementRequirement.model_validate(task['requirement']),
-                                         quotes=quotes, evaluated_at=evaluated_at),
-            policy_binding={key: context[key] for key in (
-                'policy_set_version', 'policy_index_version', 'policy_category', 'policy_region')},
-            review_bindings={e.batch.parsed_input.context.quote_id:
-                            e.batch.parsed_input.document_sha256 + ':' + e.review.review_run_id for e in envelopes},
-            supplier_bindings={row['quote_id']: row['supplier_id'] for row in review['quotes']},
-            decision_preferences=DecisionPreferences.model_validate(
-                task['decision_profile']['preferences']
-            ),
-        )
+        history_context, history_snapshots = history_inputs(context, tuple(envelopes))
+        preferences = DecisionPreferences.model_validate(task['decision_profile']['preferences'])
+        scope_preferences = preferences
+        if changes is not None and 'excluded_supplier_ids' in changes.model_fields_set:
+            requested = set(changes.excluded_supplier_ids or ())
+            available = {row['supplier_id'] for row in review['quotes']}
+            if requested - available:
+                raise BackendError('simulation_change_invalid', 'Excluded supplier is not in this task.')
+            # Re-included suppliers must pass the same authoritative review again.
+            # Keep currently included suppliers available for simulation exclusion.
+            scope_preferences = preferences.model_copy(update={
+                'excluded_supplier_ids': tuple(sorted(set(preferences.excluded_supplier_ids) & requested)),
+            })
+        try:
+            result = reviewed_decision_impact_request(
+                ProcurementRequirement.model_validate(task['requirement']), tuple(envelopes),
+                task_id=task_id, task_revision=expected_task_revision,
+                evaluated_at=evaluated_at,
+                supplier_history_snapshots=history_snapshots,
+                history_dataset_context=history_context,
+                payment_supplements=context.get('payment_supplements', {}),
+                policy_binding={key: context[key] for key in (
+                    'policy_set_version', 'policy_index_version', 'policy_category', 'policy_region')},
+                decision_preferences=scope_preferences,
+            ).model_copy(update={'decision_preferences': preferences})
+        except DownstreamNotReadyError as exc:
+            raise ConflictError(
+                'selection_review_required',
+                '参与本次比较的报价仍有待审核字段，请到集中审核确认后重新分析。',
+            ) from exc
         latest = self.get_task(task_id)
         if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != task['current_graph_run_id']:
             raise ConflictError('selection_input_stale', 'Input changed during analysis.')
         return result
 
-    def selection_gaps(self, task_id: str, *, expected_task_revision: int):
+    def selection_gaps(self, task_id: str, *, expected_task_revision: int,
+                       expected_result_id: str | None = None):
         from supplier_comparison.rules import analyze_selection_gap, draft_clarification
         before = self.get_task(task_id)
+        if expected_result_id is not None and before['current_result_id'] != expected_result_id:
+            raise ConflictError('selection_input_stale', '当前结果已更新，请刷新决策页面后重试。')
         result = analyze_selection_gap(self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision))
         latest = self.get_task(task_id)
-        if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != before['current_graph_run_id']:
+        if (latest['task_revision'] != expected_task_revision
+                or latest['current_graph_run_id'] != before['current_graph_run_id']
+                or latest['current_result_id'] != before['current_result_id']):
             raise ConflictError('selection_input_stale', 'Input changed during analysis.')
         return result.model_dump(mode='json') | {'clarification_drafts': [draft_clarification(gap) for gap in result.gaps]}
 
@@ -4511,11 +5113,19 @@ class BackendService:
         before = self.get_task(task_id)
         if before["status"] == "ABANDONED":
             raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
-        request = self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision)
+        request = self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision, changes=changes)
         try:
             result = simulate_requirement_change(request, changes, user_authorized=user_authorized)
         except ValueError as exc:
             raise BackendError('simulation_change_invalid', 'Authorized changes must satisfy the requirement contract.') from exc
+        if (
+            _preferences_require_history(result.decision_preferences)
+            and (before.get("supplier_history_binding") or {}).get("binding_status") != "AVAILABLE"
+        ):
+            raise BackendError(
+                "ranking_criterion_not_applicable",
+                "Historical ranking criteria are not applicable to this task scope.",
+            )
         latest = self.get_task(task_id)
         if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != before['current_graph_run_id']:
             raise ConflictError('selection_input_stale', 'Input changed during simulation.')
@@ -4526,6 +5136,9 @@ class BackendService:
     def _scenario_delta(baseline: dict[str, Any], simulated: dict[str, Any]) -> dict[str, Any]:
         before = {row["quote_id"]: row for row in baseline.get("supplier_results", [])}
         after = {row["quote_id"]: row for row in simulated.get("supplier_results", [])}
+        excluded_ids = set(
+            (simulated.get("ranking_trace") or {}).get("excluded_quote_ids", [])
+        )
         rows = []
         for quote_id in sorted(set(before) | set(after)):
             old = before.get(quote_id)
@@ -4545,7 +5158,7 @@ class BackendService:
                 "total_cost_delta": cost_delta,
                 "baseline_arrival_date": old.get("estimated_arrival_date") if old else None,
                 "simulated_arrival_date": new.get("estimated_arrival_date") if new else None,
-                "excluded": old is not None and new is None,
+                "excluded": quote_id in excluded_ids,
             })
         baseline_ids = tuple(baseline.get("recommended_quote_ids", []))
         simulated_ids = tuple(simulated.get("recommended_quote_ids", []))
@@ -4589,11 +5202,22 @@ class BackendService:
             task_id, task_view["current_result_id"]
         )["result"]
         if baseline != frozen_baseline:
+            changed_sections = sorted(
+                key
+                for key in set(baseline) | set(frozen_baseline)
+                if baseline.get(key) != frozen_baseline.get(key)
+            )
             raise ConflictError(
                 "scenario_baseline_stale",
-                "The frozen result no longer matches the current deterministic rule version; rerun first.",
+                "冻结结果与当前确定性计算不一致，请先按当前代码重新分析。",
+                frozen_rule_version=frozen_baseline.get("rule_version"),
+                current_rule_version=baseline.get("rule_version"),
+                changed_sections=changed_sections,
             )
         try:
+            analysis_input = self.selection_analysis_input(
+                task_id, expected_task_revision=expected_task_revision, changes=changes
+            )
             trial = simulate_requirement_change(
                 analysis_input, changes, user_authorized=True
             )
@@ -4602,6 +5226,14 @@ class BackendService:
                 "simulation_change_invalid",
                 "Authorized changes must satisfy the requirement and decision contracts.",
             ) from exc
+        if (
+            _preferences_require_history(trial.decision_preferences)
+            and (task_view.get("supplier_history_binding") or {}).get("binding_status") != "AVAILABLE"
+        ):
+            raise BackendError(
+                "ranking_criterion_not_applicable",
+                "Historical ranking criteria are not applicable to this task scope.",
+            )
         hard_change = any(
             field in changes.model_fields_set
             and getattr(changes, field) != getattr(analysis_input.comparison.requirement, field)
@@ -4811,6 +5443,12 @@ class BackendService:
                     source_scenario_id=scenario_id,
                 ))
             task.current_revision = next_revision
+            history_binding = self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=next_revision - 1,
+                to_revision=next_revision,
+            )
             active_documents = session.scalars(select(Document).join(
                 Quote, Quote.quote_id == Document.quote_id
             ).where(
@@ -4824,18 +5462,27 @@ class BackendService:
                 session.add(GraphRun(
                     graph_run_id=graph_run_id, task_id=task_id, thread_id=graph_run_id,
                     started_revision=next_revision, effective_revision=next_revision,
-                    status="PENDING", provider=provider, model_id=model_id,
+                    status="PENDING",
+                    history_binding_id=(history_binding.history_binding_id if history_binding else None),
+                    provider=provider, model_id=model_id,
                     environment=environment, prompt_version=prompt_version,
                 ))
                 session.flush()
                 session.add(Job(
                     job_id=job_id, task_id=task_id, graph_run_id=graph_run_id,
                     job_type="START", status="PENDING", task_revision=next_revision,
+                    history_binding_id=(history_binding.history_binding_id if history_binding else None),
                 ))
                 task.current_graph_run_id = graph_run_id
                 task.status = "QUEUED"
             else:
                 task.status = "DRAFT"
+            if graph_run_id:
+                self._seed_submitted_extractions(
+                    session, task_id=task_id, graph_run_id=graph_run_id,
+                    provider=provider, model_id=model_id, environment=environment,
+                    prompt_version=prompt_version,
+                )
             scenario.status = "APPLIED"
             scenario.applied_task_revision = next_revision
             response = {
@@ -4954,7 +5601,7 @@ class BackendService:
                 mode="json"
             ),
             "available_supplier_ids": sorted(set(analysis_input.supplier_bindings.values())),
-            "allowed_ranking_modes": [mode.value for mode in RankingMode],
+            "allowed_ranking_criteria": [criterion.value for criterion in RankingCriterion],
         }
         intent_id = new_id("dintent")
         with self.session_factory.begin() as session:
@@ -5494,23 +6141,54 @@ class BackendService:
         *,
         task: Task,
         result: WorkflowArtifact,
-        user_message: DecisionMessage,
     ) -> tuple[dict[str, Any], set[str]]:
         comparison = dict(result.payload)
+        comparison["decision_fact_catalog"] = decision_fact_catalog(comparison)
         references: dict[str, Any] = {f"RESULT:{result.artifact_id}": comparison}
-        references[f"REQUEST:{user_message.message_id}"] = {
-            "message_id": user_message.message_id,
-            "content": user_message.content,
-        }
-        supplier_ids: set[str] = set()
         quotes = session.scalars(
             select(Quote).where(Quote.task_id == task.task_id, Quote.active.is_(True))
         ).all()
+        # Identity scope includes excluded active quotes so users can re-include
+        # them. This does not grant those quotes factual or review authority.
+        supplier_ids: set[str] = {quote.supplier_id for quote in quotes}
         supplier_by_quote = {quote.quote_id: quote.supplier_id for quote in quotes}
+        confirmed_fields_by_quote: dict[str, dict[str, Any]] = {}
+        snapshot = (
+            session.get(WorkflowArtifact, result.parent_artifact_id)
+            if result.parent_artifact_id
+            else None
+        )
+        if snapshot is not None and snapshot.artifact_type == "INPUT_SNAPSHOT":
+            references[f"REQUIREMENT:{snapshot.artifact_id}"] = {
+                "requirement": snapshot.payload.get("requirement", {}),
+                "decision_profile": snapshot.payload.get("decision_profile", {}),
+            }
+            for quote_id, artifact_id in dict(
+                snapshot.payload.get("review_artifact_ids", {})
+            ).items():
+                artifact = session.get(WorkflowArtifact, artifact_id)
+                if artifact is None or artifact.task_id != task.task_id:
+                    continue
+                try:
+                    envelope = ReviewEnvelope.model_validate(artifact.payload)
+                except ValidationError:
+                    continue
+                if not envelope.submission_ready or envelope.batch is None:
+                    continue
+                confirmed_fields_by_quote[str(quote_id)] = {
+                    candidate.field_name: candidate.normalized_value
+                    for candidate in envelope.batch.candidates
+                    if candidate.validation_status == ValidationStatus.VERIFIED
+                }
         for row in comparison.get("supplier_results", []):
             quote_id = row.get("quote_id")
             if quote_id:
-                references[f"QUOTE:{quote_id}"] = row
+                references[f"QUOTE:{quote_id}"] = {
+                    **row,
+                    "confirmed_quote_fields": confirmed_fields_by_quote.get(
+                        str(quote_id), {}
+                    ),
+                }
                 if quote_id in supplier_by_quote:
                     supplier_ids.add(supplier_by_quote[quote_id])
 
@@ -5621,12 +6299,61 @@ class BackendService:
                 bounded_messages.append(row)
                 remaining_history_characters -= size
             messages = list(reversed(bounded_messages))
+            prior_user_messages = list(
+                session.scalars(
+                    select(DecisionMessage)
+                    .join(
+                        DecisionConversation,
+                        DecisionMessage.conversation_id
+                        == DecisionConversation.conversation_id,
+                    )
+                    .where(
+                        DecisionConversation.task_id == task.task_id,
+                        DecisionConversation.actor_id == self.actor_id,
+                        DecisionConversation.conversation_id
+                        != conversation.conversation_id,
+                        DecisionConversation.created_at < conversation.created_at,
+                        DecisionMessage.role == "USER",
+                        DecisionMessage.status == "SUCCEEDED",
+                    )
+                    .order_by(DecisionMessage.created_at.desc())
+                    .limit(8)
+                ).all()
+            )
+            prior_user_messages.reverse()
             references, supplier_ids = self._conversation_frozen_references(
                 session,
                 task=task,
                 result=result,
-                user_message=user_message,
             )
+            supplier_directory = []
+            names_by_id = {
+                str(row.get("history_snapshot", {}).get("supplier_id")): row.get("supplier_name")
+                for row in result.payload.get("supplier_results", [])
+                if isinstance(row.get("history_snapshot"), dict)
+            }
+            snapshot = session.get(WorkflowArtifact, result.parent_artifact_id) if result.parent_artifact_id else None
+            quote_ids = {q.quote_id: q.supplier_id for q in session.scalars(
+                select(Quote).where(Quote.task_id == task.task_id, Quote.active.is_(True))
+            ).all()}
+            if snapshot is not None and snapshot.artifact_type == "INPUT_SNAPSHOT":
+                for quote_id, review_id in snapshot.payload.get("review_artifact_ids", {}).items():
+                    review = session.get(WorkflowArtifact, review_id)
+                    if review is None or review.task_id != task.task_id or quote_id not in quote_ids:
+                        continue
+                    try:
+                        envelope = ReviewEnvelope.model_validate(review.payload)
+                    except ValidationError:
+                        continue
+                    if envelope.batch:
+                        for candidate in envelope.batch.candidates:
+                            if (candidate.field_name == "supplier_name"
+                                and candidate.validation_status == ValidationStatus.VERIFIED
+                                and isinstance(candidate.normalized_value, str)):
+                                names_by_id[quote_ids[quote_id]] = candidate.normalized_value
+            for supplier_id in sorted(supplier_ids):
+                supplier_directory.append({"supplier_id": supplier_id,
+                                           "name": names_by_id.get(supplier_id) or supplier_id})
             job.status = "RUNNING"
             job.attempts += 1
             job.started_at = datetime.now(timezone.utc)
@@ -5646,6 +6373,15 @@ class BackendService:
                 "frozen_references": references,
                 "allowed_reference_ids": sorted(references),
                 "available_supplier_ids": sorted(supplier_ids),
+                "supplier_directory": supplier_directory,
+                "prior_user_context": [
+                    {
+                        "content": row.content,
+                        "trust": "UNTRUSTED_USER_INTENT_ONLY",
+                    }
+                    for row in prior_user_messages
+                    if row.content
+                ],
                 "recent_messages": [
                     {
                         "role": row.role,
@@ -5667,9 +6403,16 @@ class BackendService:
         model_id: str,
         prompt_version: str = CONVERSATION_PROMPT_VERSION,
     ) -> dict[str, Any]:
+        try:
+            turn = normalize_conversation_turn(turn).model_dump(mode="json", exclude_unset=True)
+        except (ValidationError, ValueError, TypeError) as exc:
+            raise BackendError(
+                "conversation_model_output_invalid",
+                "Conversation proposal does not satisfy the output contract.",
+            ) from exc
         text = str(turn["assistant_text"])
         reference_ids = list(turn.get("reference_ids", []))
-        if not text.strip() or not re.search(r"[\u4e00-\u9fff]", text):
+        if text.strip() and not re.search(r"[\u4e00-\u9fff]", text):
             raise BackendError(
                 "conversation_model_output_invalid",
                 "Conversation output must contain validated Chinese narration.",
@@ -5688,9 +6431,10 @@ class BackendService:
             task_id = job_view.task_id
             task_revision = job_view.task_revision
         trial = analysis_input = None
+        no_effect = False
         if changes is not None:
             analysis_input = self.selection_analysis_input(
-                task_id, expected_task_revision=task_revision
+                task_id, expected_task_revision=task_revision, changes=changes
             )
             trial = simulate_requirement_change(
                 analysis_input, changes, user_authorized=True
@@ -5702,10 +6446,7 @@ class BackendService:
                 for field in ("budget_amount", "delivery_deadline")
             )
             if not hard_change and trial.decision_preferences == analysis_input.decision_preferences:
-                raise BackendError(
-                    "conversation_change_no_effect",
-                    "The proposed conversation change has no effect.",
-                )
+                no_effect = True
         with self.session_factory.begin() as session:
             job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
             conversation = session.scalar(
@@ -5734,13 +6475,63 @@ class BackendService:
                 session,
                 task=task,
                 result=result,
-                user_message=user_message,
             )
             allowed_references = set(frozen_references)
             if set(reference_ids) - allowed_references:
                 raise BackendError(
                     "conversation_model_output_invalid",
                     "Conversation output contains references outside the frozen result.",
+                )
+            try:
+                validated_turn = validate_conversation_turn(
+                    turn,
+                    {
+                        "frozen_references": frozen_references,
+                        "allowed_reference_ids": sorted(allowed_references),
+                        "available_supplier_ids": sorted(_supplier_ids),
+                        "recent_messages": [{"role": "USER", "content": user_message.content}],
+                    },
+                )
+            except (ValidationError, ValueError, TypeError) as exc:
+                raise BackendError(
+                    "conversation_model_output_invalid",
+                    "Conversation output failed persistence validation: "
+                    + str(exc)[:500],
+                ) from exc
+            text = render_conversation_turn(validated_turn)
+            if no_effect:
+                changes = None
+                text = "\n\n".join(part for part in (
+                    validated_turn.assistant_text.strip(),
+                    "这项偏好与当前设置一致，无需生成新的模拟情景。您可以继续调整其他条件。",
+                ) if part)
+            reference_ids = list(validated_turn.reference_ids)
+            if changes is not None and not no_effect:
+                from .decision_narrative import render_decision_preview
+
+                preview_id = new_id("artifact")
+                preview_payload = {
+                    "base_result_id": task.current_result_id,
+                    "base_task_revision": task.current_revision,
+                    "changes": changes.model_dump(mode="json", exclude_unset=True),
+                    "simulation": trial.model_dump(mode="json"),
+                    "supplier_bindings": analysis_input.supplier_bindings,
+                    "source": "DETERMINISTIC_SIMULATION",
+                }
+                session.add(WorkflowArtifact(
+                    artifact_id=preview_id, task_id=task.task_id,
+                    task_revision=task.current_revision,
+                    artifact_type="DECISION_PREVIEW",
+                    parent_artifact_id=task.current_result_id,
+                    payload=preview_payload, content_sha256=content_hash(preview_payload),
+                ))
+                # This is a derived hypothetical reference, not evidence that the
+                # current frozen recommendation has already changed.
+                reference_ids = ["SIMULATION:" + preview_id]
+                text = render_decision_preview(
+                    trial, currency=analysis_input.comparison.requirement.currency,
+                    supplier_bindings=analysis_input.supplier_bindings,
+                    reference=reference_ids[0],
                 )
             intent_id = None
             confirmation = None
@@ -5789,11 +6580,6 @@ class BackendService:
             )
             session.add(assistant)
             session.flush()
-            for chunk in narrative_chunks(text):
-                self._append_conversation_event(
-                    session, conversation.conversation_id, "assistant.delta",
-                    {"message_id": assistant.message_id, "delta": chunk},
-                )
             response = self._decision_message_response(assistant)
             if confirmation:
                 response["confirmation_text"] = confirmation
@@ -5810,8 +6596,33 @@ class BackendService:
                 "job_status": job.status,
             }
 
+    def record_conversation_stage(
+        self, job_id: str, *, stage: str, calls_used: int, elapsed_seconds: float,
+        provider: str, model_id: str, prompt_version: str,
+    ) -> None:
+        """Persist bounded diagnostics without holding a transaction during model calls."""
+        if stage not in {"intent", "simulation", "narration", "persist"}:
+            raise ValueError("unknown conversation stage")
+        with self.session_factory.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None or job.status != "RUNNING" or not job.conversation_id:
+                return
+            conversation = session.scalar(select(DecisionConversation).where(
+                DecisionConversation.conversation_id == job.conversation_id
+            ).with_for_update())
+            if conversation is None:
+                return
+            self._append_conversation_event(session, conversation.conversation_id, "assistant.stage", {
+                "job_id": job_id, "reply_to_message_id": job.conversation_message_id,
+                "stage": stage, "calls_used": calls_used,
+                "elapsed_seconds": round(elapsed_seconds, 3),
+                "task_revision": job.task_revision, "result_id": conversation.base_result_id,
+                "provider": provider, "model_id": model_id, "prompt_version": prompt_version,
+            })
+
     def fail_conversation_job(
-        self, job_id: str, *, code: str, message: str, attempts: int
+        self, job_id: str, *, code: str, message: str, attempts: int,
+        diagnostic: str | None = None,
     ) -> None:
         with self.session_factory.begin() as session:
             job = session.scalar(select(Job).where(Job.job_id == job_id).with_for_update())
@@ -5843,7 +6654,7 @@ class BackendService:
             session.add(failed)
             job.status = "FAILED"
             job.error_code = code
-            job.error_message = message[:1000]
+            job.error_message = (diagnostic or message)[:1000]
             job.finished_at = datetime.now(timezone.utc)
             session.flush()
             self._append_conversation_event(
@@ -5974,9 +6785,42 @@ class BackendService:
                 }
             return list(records.values())
 
+    def review_confirmations_for_batch(self, batch_artifact_id: str):
+        """Recover human decisions for these exact candidate versions, including
+        confirmations embedded in carried review envelopes. Artifact columns in
+        older correction runs can be null; the typed payload owns the identity.
+        """
+        from supplier_comparison.extraction.review_contracts import ReviewEvent
+        from supplier_comparison.extraction.submission import _review_event_matches_current
+
+        with self.session_factory() as session:
+            artifact = session.get(WorkflowArtifact, batch_artifact_id)
+            if artifact is None or artifact.artifact_type != "EXTRACTION_BATCH":
+                return ()
+            batch = ExtractionBatch.model_validate(artifact.payload)
+            candidates = {c.field_name: c for c in batch.candidates}
+            records = session.scalars(select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == artifact.task_id,
+                WorkflowArtifact.quote_id == artifact.quote_id,
+                WorkflowArtifact.artifact_type.in_(("REVIEW_EVENT", "REVIEW_ENVELOPE")),
+            ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc()))
+            matched = {}
+            for record in records:
+                payloads = ([record.payload] if record.artifact_type == "REVIEW_EVENT"
+                            else record.payload.get("review_events", []))
+                for payload in payloads:
+                    event = ReviewEvent.model_validate(payload)
+                    candidate = candidates.get(event.field_name)
+                    if (candidate is not None and event.field_name not in matched
+                            and _review_event_matches_current(batch, candidate, event)):
+                        matched[event.field_name] = event
+            return tuple(matched.values())
+
     def correction_event_payloads_for_batch(
         self, batch_artifact_id: str
     ) -> list[dict[str, Any]]:
+        from supplier_comparison.extraction.submission import _correction_matches_current
+
         with self.session_factory() as session:
             batch_artifact = session.get(WorkflowArtifact, batch_artifact_id)
             if batch_artifact is None or batch_artifact.artifact_type != "EXTRACTION_BATCH":
@@ -5984,84 +6828,31 @@ class BackendService:
                     "extraction_batch_artifact_not_found",
                     "Extraction batch artifact was not found.",
                 )
+            batch = ExtractionBatch.model_validate(batch_artifact.payload)
+            candidates = {c.field_name: c for c in batch.candidates}
             artifacts = session.scalars(
                 select(WorkflowArtifact)
                 .where(
                     WorkflowArtifact.task_id == batch_artifact.task_id,
-                    WorkflowArtifact.graph_run_id == batch_artifact.graph_run_id,
-                    WorkflowArtifact.task_revision == batch_artifact.task_revision,
                     WorkflowArtifact.quote_id == batch_artifact.quote_id,
-                    WorkflowArtifact.document_id == batch_artifact.document_id,
-                    WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
+                    WorkflowArtifact.artifact_type.in_(("CORRECTION_EVENT", "REVIEW_ENVELOPE")),
                 )
-                .order_by(WorkflowArtifact.created_at, WorkflowArtifact.artifact_id)
+                .order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())
             ).all()
-            payloads = [dict(artifact.payload) for artifact in artifacts]
-            # A second submission must retain audit events for previously
-            # corrected fields. Follow immutable ancestry, never another quote.
-            candidates = {c["field_name"]: c for c in batch_artifact.payload.get("candidates", [])}
-            seen_fields = {payload["field_name"] for payload in payloads}
-            visited = {batch_artifact.artifact_id}
-            parent_id = batch_artifact.parent_artifact_id
-            while parent_id and parent_id not in visited:
-                visited.add(parent_id)
-                parent = session.get(WorkflowArtifact, parent_id)
-                if (
-                    parent is None
-                    or parent.task_id != batch_artifact.task_id
-                    or parent.quote_id != batch_artifact.quote_id
-                    or parent.document_id != batch_artifact.document_id
-                ):
-                    break
-                historical = [parent] if parent.artifact_type == "CORRECTION_EVENT" else []
-                if parent.artifact_type == "EXTRACTION_BATCH":
-                    historical = session.scalars(select(WorkflowArtifact).where(
-                        WorkflowArtifact.graph_run_id == parent.graph_run_id,
-                        WorkflowArtifact.task_revision == parent.task_revision,
-                        WorkflowArtifact.quote_id == parent.quote_id,
-                        WorkflowArtifact.document_id == parent.document_id,
-                        WorkflowArtifact.artifact_type == "CORRECTION_EVENT",
-                    ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())).all()
-                for event in historical:
-                    payload = event.payload
-                    candidate = candidates.get(payload.get("field_name"), {})
-                    if payload["field_name"] not in seen_fields and payload.get("after", {}).get("field_id") == candidate.get("field_id"):
-                        payloads.append(dict(payload))
-                        seen_fields.add(payload["field_name"])
-                parent_id = parent.parent_artifact_id
-
-            # Older replacement drafts stored carried corrections only inside
-            # their immutable review envelope.  Recover those audit records so
-            # an already-created quote version does not become impossible to
-            # review after the stricter correction-audit check is introduced.
-            review_artifacts = session.scalars(
-                select(WorkflowArtifact)
-                .where(
-                    WorkflowArtifact.task_id == batch_artifact.task_id,
-                    WorkflowArtifact.task_revision == batch_artifact.task_revision,
-                    WorkflowArtifact.quote_id == batch_artifact.quote_id,
-                    WorkflowArtifact.document_id == batch_artifact.document_id,
-                    WorkflowArtifact.artifact_type == "REVIEW_ENVELOPE",
-                )
-                .order_by(
-                    WorkflowArtifact.created_at.desc(),
-                    WorkflowArtifact.artifact_id.desc(),
-                )
-            ).all()
-            for review_artifact in review_artifacts:
-                envelope = ReviewEnvelope.model_validate(review_artifact.payload)
-                for correction in reversed(envelope.corrections):
-                    payload = correction.model_dump(mode="json")
-                    field_name = payload["field_name"]
-                    candidate = candidates.get(field_name, {})
-                    if (
-                        field_name not in seen_fields
-                        and payload.get("after", {}).get("field_id")
-                        == candidate.get("field_id")
-                    ):
-                        payloads.append(payload)
-                        seen_fields.add(field_name)
-            return payloads
+            matched = {}
+            # Graph/task revisions can change without changing a quotation.
+            # Match the complete immutable field/source identity, not nullable
+            # artifact columns or only the most recent graph's audit records.
+            for artifact in artifacts:
+                payloads = ([artifact.payload] if artifact.artifact_type == 'CORRECTION_EVENT'
+                            else artifact.payload.get('corrections', []))
+                for payload in payloads:
+                    event = CorrectionEvent.model_validate(payload)
+                    candidate = candidates.get(event.field_name)
+                    if (candidate is not None and event.field_name not in matched
+                            and _correction_matches_current(batch, candidate, event)):
+                        matched[event.field_name] = event.model_dump(mode='json')
+            return list(matched.values())
 
     def correct_field(self, *, task_id: str, quote_id: str, field_name: str,
                       expected_task_revision: int, raw_value: str,
@@ -6117,6 +6908,7 @@ class BackendService:
                 return repeated
             self._require_revision(task, expected_task_revision)
             latest_batches = {}
+            current_documents = {}
             active_quotes = session.scalars(
                 select(Quote).where(Quote.task_id == task_id, Quote.active.is_(True))
             ).all()
@@ -6170,6 +6962,7 @@ class BackendService:
                 ):
                     raise ConflictError("extraction_batch_stale", "Re-extract the current quote before correction.", quote_id=active_quote.quote_id)
                 latest_batches[active_quote.quote_id] = artifact
+                current_documents[active_quote.quote_id] = document
             reviewed_at = utc_now()
             corrected_batches = {}
             events = []
@@ -6227,6 +7020,10 @@ class BackendService:
                 ),
             )
             session.add(graph)
+            # PostgreSQL enforces the DocumentExecution -> GraphRun foreign key
+            # immediately. Persist the parent before a later query-triggered
+            # autoflush attempts to insert the carried document executions.
+            session.flush()
             parents = {qid: artifact.artifact_id for qid, artifact in latest_batches.items()}
             for quote_id, correction in events:
                 payload = correction.model_dump(mode="json")
@@ -6245,11 +7042,12 @@ class BackendService:
                     payload=payload, content_sha256=content_hash(payload))
                 session.add(artifact)
                 latest_batches[quote_id] = artifact
-            documents = session.scalars(
-                select(Document).where(Document.task_id == task_id, Document.quote_id.in_(latest_batches))
-            ).all()
-            for document in documents:
-                selected_batch = latest_batches[document.quote_id]
+            # Carry only the document version that produced each current batch.
+            # Binding every historical document for a quote to the new graph makes
+            # the next review read stale quote versions and can create duplicate,
+            # contradictory review cards.
+            for quote_id, document in current_documents.items():
+                selected_batch = latest_batches[quote_id]
                 session.add(
                     DocumentExecution(
                         document_execution_id=new_id("docexec"),
@@ -6262,6 +7060,20 @@ class BackendService:
                     )
                 )
             task.current_revision = next_revision
+            history_binding = self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=next_revision - 1,
+                to_revision=next_revision,
+            )
+            # This binding is referenced by both the persisted graph and the
+            # queued job. Flush it first so strict FK databases never attempt
+            # the graph update before inserting its new parent row.
+            if history_binding is not None:
+                session.flush()
+            graph.history_binding_id = (
+                history_binding.history_binding_id if history_binding else None
+            )
             task.current_graph_run_id = graph_run_id
             task.current_snapshot_id = None
             task.current_result_id = None
@@ -6284,6 +7096,9 @@ class BackendService:
                     job_type="START",
                     status="PENDING",
                     task_revision=next_revision,
+                    history_binding_id=(
+                        history_binding.history_binding_id if history_binding else None
+                    ),
                 )
             )
             response = {
@@ -6468,6 +7283,12 @@ class BackendService:
                     )
                 )
                 task.current_revision += 1
+                self._copy_history_binding(
+                    session,
+                    task_id=task_id,
+                    from_revision=task.current_revision - 1,
+                    to_revision=task.current_revision,
+                )
                 task.status = "DRAFT"
                 session.add(
                     TaskRevision(
@@ -6559,6 +7380,226 @@ class BackendService:
             )
         return {"artifact_id": artifact_id, "content_sha256": payload_sha}
 
+    def refresh_supplier_history(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        dataset_version: str,
+        idempotency_key: str,
+        provider: str | None = None,
+        model_id: str | None = None,
+        environment: str | None = None,
+        prompt_version: str | None = None,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "dataset_version": dataset_version,
+        }
+        request_sha = content_hash(request)
+        operation = f"refresh_supplier_history:{task_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(
+                select(Task).where(Task.task_id == task_id).with_for_update()
+            )
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            if task.status == "ABANDONED":
+                raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
+            self._require_revision(task, expected_task_revision)
+            requirement_record = session.scalar(
+                select(RequirementRecord)
+                .where(RequirementRecord.task_id == task_id)
+                .order_by(RequirementRecord.requirement_version.desc())
+            )
+            if requirement_record is None:
+                raise ConflictError(
+                    "requirement_missing", "The task has no procurement requirement."
+                )
+            old_binding = self._binding_at_revision(
+                session, task_id, task.current_revision
+            )
+            next_revision = task.current_revision + 1
+            new_binding = self._new_history_binding(
+                task_id=task_id,
+                task_revision=next_revision,
+                requirement=ProcurementRequirement.model_validate(
+                    requirement_record.payload
+                ),
+                dataset_version=dataset_version,
+            )
+            if (
+                old_binding is not None
+                and old_binding.dataset_version == new_binding.dataset_version
+                and old_binding.content_sha256 == new_binding.content_sha256
+                and old_binding.manifest_sha256 == new_binding.manifest_sha256
+            ):
+                raise BackendError(
+                    "supplier_history_unchanged",
+                    "The requested supplier history version is already bound.",
+                )
+            self._supersede_current_graph(session, task)
+            session.add(new_binding)
+            session.add(
+                TaskRevision(
+                    revision_id=new_id("rev"),
+                    task_id=task_id,
+                    revision=next_revision,
+                    change_type="SUPPLIER_HISTORY_REFRESHED",
+                    actor_id=self.actor_id,
+                    request_sha256=request_sha,
+                    details={
+                        "old_dataset_version": (
+                            old_binding.dataset_version if old_binding else None
+                        ),
+                        "old_content_sha256": (
+                            old_binding.content_sha256 if old_binding else None
+                        ),
+                        "new_dataset_version": new_binding.dataset_version,
+                        "new_content_sha256": new_binding.content_sha256,
+                        "new_manifest_sha256": new_binding.manifest_sha256,
+                    },
+                )
+            )
+            task.current_revision = next_revision
+            active_documents = session.scalars(
+                select(Document)
+                .join(Quote, Quote.quote_id == Document.quote_id)
+                .where(
+                    Document.task_id == task_id,
+                    Quote.active.is_(True),
+                    Document.quote_version == Quote.current_version,
+                )
+            ).all()
+            graph_run_id = job_id = None
+            if active_documents:
+                graph_run_id, job_id = new_id("graph"), new_id("job")
+                session.add(
+                    GraphRun(
+                        graph_run_id=graph_run_id,
+                        task_id=task_id,
+                        thread_id=graph_run_id,
+                        started_revision=next_revision,
+                        effective_revision=next_revision,
+                        history_binding_id=new_binding.history_binding_id,
+                        status="PENDING",
+                        provider=provider,
+                        model_id=model_id,
+                        environment=environment,
+                        prompt_version=prompt_version,
+                    )
+                )
+                session.flush()
+                session.add(
+                    Job(
+                        job_id=job_id,
+                        task_id=task_id,
+                        graph_run_id=graph_run_id,
+                        job_type="START",
+                        status="PENDING",
+                        task_revision=next_revision,
+                        history_binding_id=new_binding.history_binding_id,
+                    )
+                )
+                task.current_graph_run_id = graph_run_id
+                task.status = "QUEUED"
+            else:
+                task.status = "DRAFT"
+            response = {
+                "task_id": task_id,
+                "task_revision": next_revision,
+                "status": task.status,
+                "supplier_history_binding": self._history_binding_response(
+                    new_binding
+                ),
+                "graph_run_id": graph_run_id,
+                "job_id": job_id,
+                "job_status": "PENDING" if job_id else None,
+            }
+            self._save_idempotent(
+                session,
+                operation=operation,
+                key=idempotency_key,
+                request_sha256=request_sha,
+                response_status=202,
+                response=response,
+            )
+            return response
+
+    def _seed_submitted_extractions(
+        self, session, *, task_id, graph_run_id, provider, model_id,
+        environment, prompt_version,
+    ) -> None:
+        """Reuse immutable submitted input; re-review with current corrections and rules.
+
+        Both scenario application and explicit reruns must use this same boundary.
+        Never reuse model sessions across provider/configuration or file changes.
+        """
+        dictionary_sha = hashlib.sha256(self.quote_dictionary_path.read_bytes()).hexdigest()
+        dictionary_version = QuoteDictionary.load(self.quote_dictionary_path).version
+        documents = session.scalars(select(Document).join(
+            Quote, Quote.quote_id == Document.quote_id
+        ).where(
+            Document.task_id == task_id, Quote.active.is_(True),
+            Document.quote_version == Quote.current_version,
+        )).all()
+        for document in documents:
+            # Prefer the most recent reviewed workflow batch, which may contain
+            # centralized human corrections made after the original submission.
+            prior = session.scalar(select(DocumentExecution).join(
+                GraphRun, GraphRun.graph_run_id == DocumentExecution.graph_run_id
+            ).where(
+                DocumentExecution.document_id == document.document_id,
+                DocumentExecution.graph_run_id != graph_run_id,
+                DocumentExecution.status == "REVIEWED",
+                DocumentExecution.batch_artifact_id.is_not(None),
+                GraphRun.task_id == task_id,
+                GraphRun.provider == provider, GraphRun.model_id == model_id,
+                GraphRun.environment == environment, GraphRun.prompt_version == prompt_version,
+            ).order_by(GraphRun.effective_revision.desc(), GraphRun.created_at.desc()))
+            if prior is not None:
+                artifact = session.get(WorkflowArtifact, prior.batch_artifact_id)
+                batch = ExtractionBatch.model_validate(artifact.payload) if artifact else None
+                if (batch is not None and batch.dictionary_version == dictionary_version
+                        and batch.parsed_input.document_sha256 == document.sha256
+                        and batch.parsed_input.context.document_id == document.document_id):
+                    session.add(DocumentExecution(
+                        document_execution_id=new_id("docexec"), graph_run_id=graph_run_id,
+                        document_id=document.document_id, status="EXTRACTED",
+                        calls_used=prior.calls_used, max_calls=prior.max_calls,
+                        parsed_artifact_id=prior.parsed_artifact_id,
+                        batch_artifact_id=prior.batch_artifact_id,
+                    ))
+                    continue
+            draft = session.scalar(select(QuoteDraft).where(
+                QuoteDraft.task_id == task_id,
+                QuoteDraft.proposed_document_id == document.document_id,
+                QuoteDraft.status == "SUBMITTED",
+                QuoteDraft.sha256 == document.sha256,
+                QuoteDraft.provider == provider, QuoteDraft.model_id == model_id,
+                QuoteDraft.environment == environment,
+                QuoteDraft.prompt_version == prompt_version,
+                QuoteDraft.dictionary_sha256 == dictionary_sha,
+                QuoteDraft.batch_artifact_id.is_not(None),
+            ))
+            if draft is not None:
+                session.add(DocumentExecution(
+                    document_execution_id=new_id("docexec"),
+                    graph_run_id=graph_run_id, document_id=document.document_id,
+                    status="EXTRACTED", calls_used=draft.calls_used,
+                    max_calls=draft.max_calls, parsed_artifact_id=draft.parsed_artifact_id,
+                    batch_artifact_id=draft.batch_artifact_id, review_artifact_id=None,
+                ))
+
     def start_run(
         self,
         task_id: str,
@@ -6617,6 +7658,27 @@ class BackendService:
                     # explicit rerun to replace it so updated rules or source data can
                     # clear an obsolete review interruption.
                     self._supersede_current_graph(session, task)
+            history_binding = self._binding_at_revision(
+                session, task_id, task.current_revision
+            )
+            if history_binding is None:
+                requirement_record = session.scalar(
+                    select(RequirementRecord)
+                    .where(RequirementRecord.task_id == task_id)
+                    .order_by(RequirementRecord.requirement_version.desc())
+                )
+                if requirement_record is None:
+                    raise ConflictError(
+                        "requirement_missing", "The task has no procurement requirement."
+                    )
+                history_binding = self._new_history_binding(
+                    task_id=task_id,
+                    task_revision=task.current_revision,
+                    requirement=ProcurementRequirement.model_validate(
+                        requirement_record.payload
+                    ),
+                )
+                session.add(history_binding)
             graph_run_id = new_id("graph")
             job_id = new_id("job")
             session.add(
@@ -6626,6 +7688,7 @@ class BackendService:
                     thread_id=graph_run_id,
                     started_revision=task.current_revision,
                     effective_revision=task.current_revision,
+                    history_binding_id=history_binding.history_binding_id,
                     status="PENDING",
                     provider=provider,
                     model_id=model_id,
@@ -6634,39 +7697,11 @@ class BackendService:
                 )
             )
             session.flush()
-            dictionary_sha = hashlib.sha256(self.quote_dictionary_path.read_bytes()).hexdigest()
-            documents = session.scalars(
-                select(Document).where(Document.task_id == task_id)
-            ).all()
-            for document in documents:
-                reviewed_draft = session.scalar(
-                    select(QuoteDraft).where(
-                        QuoteDraft.task_id == task_id,
-                        QuoteDraft.proposed_document_id == document.document_id,
-                        QuoteDraft.status == "SUBMITTED",
-                        QuoteDraft.sha256 == document.sha256,
-                        QuoteDraft.provider == provider,
-                        QuoteDraft.model_id == model_id,
-                        QuoteDraft.environment == environment,
-                        QuoteDraft.prompt_version == prompt_version,
-                        QuoteDraft.dictionary_sha256 == dictionary_sha,
-                        QuoteDraft.batch_artifact_id.is_not(None),
-                    )
-                )
-                if reviewed_draft is not None:
-                    session.add(
-                        DocumentExecution(
-                            document_execution_id=new_id("docexec"),
-                            graph_run_id=graph_run_id,
-                            document_id=document.document_id,
-                            status="EXTRACTED",
-                            calls_used=reviewed_draft.calls_used,
-                            max_calls=reviewed_draft.max_calls,
-                            parsed_artifact_id=reviewed_draft.parsed_artifact_id,
-                            batch_artifact_id=reviewed_draft.batch_artifact_id,
-                            review_artifact_id=None,
-                        )
-                    )
+            self._seed_submitted_extractions(
+                session, task_id=task_id, graph_run_id=graph_run_id,
+                provider=provider, model_id=model_id, environment=environment,
+                prompt_version=prompt_version,
+            )
             session.add(
                 Job(
                     job_id=job_id,
@@ -6675,6 +7710,7 @@ class BackendService:
                     job_type="START",
                     status="PENDING",
                     task_revision=task.current_revision,
+                    history_binding_id=history_binding.history_binding_id,
                 )
             )
             task.current_graph_run_id = graph_run_id
@@ -6974,16 +8010,40 @@ class BackendService:
                     expected=expected_currency,
                     actual=answer.get("currency"),
                 )
+            if expected_answer_type == "PAYMENT_INFORMATION":
+                if answer.get("payment_start_event") not in {"INVOICE_DATE"}:
+                    raise BackendError(
+                        "payment_start_event_invalid",
+                        "Payment start event is outside the supported deterministic contract.",
+                    )
+                if not str(answer.get("note") or "").strip() or answer.get("source_type") not in {
+                    "SUPPLIER_CONFIRMATION", "DOCUMENT_CLARIFICATION", "USER_INPUT"
+                }:
+                    raise BackendError(
+                        "payment_information_invalid",
+                        "Payment information requires an audited note and source type.",
+                    )
             graph = session.get(GraphRun, issue.graph_run_id)
             if graph is None or task.current_graph_run_id != graph.graph_run_id:
                 raise ConflictError(
                     "graph_run_superseded", "The issue belongs to a superseded graph run."
                 )
             task.current_revision += 1
+            history_binding = self._copy_history_binding(
+                session,
+                task_id=task_id,
+                from_revision=task.current_revision - 1,
+                to_revision=task.current_revision,
+            )
             task.status = "QUEUED"
             task.current_snapshot_id = None
             task.current_result_id = None
             graph.effective_revision = task.current_revision
+            if history_binding is not None:
+                session.flush([history_binding])
+            graph.history_binding_id = (
+                history_binding.history_binding_id if history_binding else None
+            )
             graph.status = "PENDING"
             graph.current_interrupt_issue_id = None
             issue.status = "RESOLVED"
@@ -7013,6 +8073,9 @@ class BackendService:
                     job_type="RESUME",
                     status="PENDING",
                     task_revision=task.current_revision,
+                    history_binding_id=(
+                        history_binding.history_binding_id if history_binding else None
+                    ),
                 )
             )
             response = {
@@ -7064,7 +8127,7 @@ class BackendService:
         represented: set[str] = set()
         if envelope.review is not None:
             for finding in envelope.review.findings:
-                if finding.resolved or (
+                if finding.resolved or finding.decision == FieldReviewDecision.PASS or (
                     finding.severity != ReviewSeverity.BLOCKING
                     and finding.field_name not in envelope.submission_blocking_fields
                 ):
@@ -7132,6 +8195,26 @@ class BackendService:
                     "message": "正式提交前必须核对全部 30 个报价字段。",
                 }
             )
+        for error in errors:
+            code = error["code"]
+            if code in IDENTITY_CODES:
+                category, actions = "SOURCE_OR_VERSION_ERROR", ["RELOAD_OR_REPARSE"]
+                next_action = "请刷新草稿版本；若仍提示文件或引用身份不一致，请重新解析原件。"
+            elif code in HUMAN_RESOLVABLE_CODES:
+                category, actions = "NEEDS_CONFIRMATION", ["VIEW_SOURCE", "CONFIRM_VALUE", "EDIT_VALUE", "MARK_UNKNOWN"]
+                next_action = "请查看原文，核对后可直接采用当前值，也可修改或标记未知，再保存审核。"
+            elif code in {"FEE_STATUS_UNKNOWN", "CRITICAL_FIELD_MISSING", "REQUIRED_FIELD_UNAVAILABLE", "NORMALIZED_VALUE_REQUIRED"}:
+                category, actions = "MISSING_INFORMATION", ["EDIT_VALUE", "SAVE_REVIEW"]
+                next_action = "可先保存。请依据原文或供应商确认补充；未知信息不会按零计算，相关比较暂不能完成。"
+            elif code == "FULL_FIELD_REVIEW_REQUIRED":
+                category, actions = "NEEDS_CONFIRMATION", ["SAVE_REVIEW"]
+                next_action = "核对表单后点击保存并确认审核；有疑问的值请修改或标记未知。"
+            else:
+                category, actions = "INVALID_INPUT", ["EDIT_VALUE", "SAVE_REVIEW"]
+                next_action = QUOTE_REVIEW_ERROR_MESSAGES.get(code, "请按字段格式和关联条件修正当前值。") + " 可以先保存，修正后再正式提交。"
+            if code == "FEE_STATUS_AMOUNT_CONFLICT":
+                next_action = "另有明确金额时请填写非负金额；已包含时请清空金额，避免重复计费；免费/不适用时请留空或填写 0；未知时请清空金额。可先保存。"
+            error.update(category=category, next_action=next_action, actions=actions)
         return errors
 
     def _quote_draft_response(self, session: Session, draft: QuoteDraft) -> dict[str, Any]:
@@ -7220,6 +8303,11 @@ class BackendService:
 
         fields: list[dict[str, Any]] = []
         reviewed_states: list[str] = []
+        price_observation_ids = {
+            source_id
+            for observation in (select_document_unit_price(batch.parsed_input).observations if batch else ())
+            for source_id in observation.source_ids
+        }
         for candidate in batch_payload.get("candidates", []):
             field_name = str(candidate.get("field_name", ""))
             evidence = []
@@ -7237,6 +8325,24 @@ class BackendService:
                         "coordinate_space": source.get("coordinate_space"),
                     }
                 )
+            # Related source text is context for human review, not new evidence
+            # asserted to support the selected value (e.g. superseded prices).
+            cited_ids = {item["source_id"] for item in evidence}
+            related_ids = {
+                source_id for finding in findings_by_field.get(field_name, [])
+                for source_id in finding.source_ids
+            }
+            if field_name == "unit_price":
+                related_ids.update(price_observation_ids)
+            review_evidence = [
+                {
+                    "source_id": source_id, "quoted_text": sources[source_id].get("raw_text"),
+                    **{key: sources[source_id].get(key) for key in (
+                        "kind", "page_number", "row_number", "column_name", "bbox", "coordinate_space"
+                    )},
+                }
+                for source_id in sorted(related_ids - cited_ids) if source_id in sources
+            ]
             if field_name in always_fields:
                 criticality = EffectiveCriticality.ALWAYS.value
                 applicable = True
@@ -7331,6 +8437,7 @@ class BackendService:
                         for finding in candidate_findings
                     ],
                     "evidence": evidence,
+                    "review_evidence": review_evidence,
                 }
             )
         job = session.scalar(
@@ -7618,7 +8725,7 @@ class BackendService:
         }
         policy_binding = policy_values if all(policy_values.values()) else None
         return {
-            "schema_version": "summary-facts/1.0.0",
+            "schema_version": "summary-facts/1.1.0",
             "task_id": task.task_id,
             "task_revision": result.task_revision,
             "result_id": result.artifact_id,
@@ -7629,6 +8736,9 @@ class BackendService:
             "recommended_quote_ids": comparison.get("recommended_quote_ids", []),
             "pending_quote_ids": comparison.get("pending_quote_ids", []),
             "comparison_reasons": comparison.get("comparison_reasons", []),
+            "ranking_trace": comparison.get("ranking_trace"),
+            "supplier_history_binding": frozen.get("supplier_history_binding"),
+            "supplier_history_dataset_context": frozen.get("supplier_history_dataset_context"),
             "policy_binding": policy_binding,
             "references": references,
             "scope": "Explanatory summary only; no approval, order, payment, or supplier contact.",

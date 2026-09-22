@@ -30,12 +30,13 @@ def evaluate_submission_gate(
     A current, version-bound human disposition is required for every field. A
     matching correction is itself a disposition; unchanged candidates require
     a ``ReviewEvent``. Required fields additionally need a usable value, and an
-    ``UNKNOWN`` fee status is deliberately not usable. Stale events are ignored
+    ``UNKNOWN`` fee status can be submitted as pending, never priced as zero. Stale events are ignored
     rather than accidentally confirming a newer candidate version.
 
     ``deterministic_blocking_fields`` is supplied by the deterministic review
-    gate so contract, evidence, semantic, and cross-field failures cannot be
-    bypassed by human confirmation.
+    gate after applying audited human resolutions of interpretation doubts.
+    Contract, source identity, and calculation input failures cannot be bypassed
+    by human confirmation. Saving review progress does not require this gate.
     """
 
     candidates = tuple(batch.candidates)
@@ -85,7 +86,10 @@ def evaluate_submission_gate(
     return SubmissionGate(
         human_review_complete=human_review_complete,
         submission_ready=submission_ready,
-        calculation_ready=submission_ready,
+        calculation_ready=submission_ready and not any(
+            candidate.field_name in {"shipping_fee_status", "other_fees_status"}
+            and candidate.normalized_value == "UNKNOWN" for candidate in candidates
+        ),
         submission_blocking_fields=blocking_fields,
         unconfirmed_fields=unconfirmed_fields,
     )
@@ -158,6 +162,4 @@ def _candidate_has_submission_value(candidate: QuoteFieldCandidate) -> bool:
         return False
     if candidate.normalized_value is None:
         return False
-    if candidate.field_name in {"shipping_fee_status", "other_fees_status"}:
-        return candidate.normalized_value != "UNKNOWN"
     return True

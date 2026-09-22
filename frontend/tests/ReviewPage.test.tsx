@@ -3,9 +3,10 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
-import { api } from '../src/api/client'
+import { api, ApiClientError } from '../src/api/client'
 import type { ReviewOverviewResponse, TaskDetail } from '../src/api/types'
 import { ReviewPage } from '../src/pages/ReviewPage'
+import { TaskWorkspaceHeader } from '../src/components/TaskWorkspaceHeader'
 import { makeQuoteFieldSchema } from './quoteReviewFixtures'
 
 function makeTask(): TaskDetail {
@@ -147,6 +148,80 @@ function renderPage() {
 describe('ReviewPage', () => {
   beforeEach(() => vi.restoreAllMocks())
 
+  test('collects a previously missing freight amount with KNOWN_AMOUNT in one submission', async () => {
+    const report = makeReview()
+    report.quotes[0].fields.push({ ...report.quotes[0].fields[0], field_name: 'shipping_fee_amount',
+      raw_value: null, normalized_value: null, unit: 'SGD', validation_status: 'MISSING' })
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getReview').mockResolvedValue(report)
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+    const correct = vi.spyOn(api, 'correctQuoteFields').mockResolvedValue({ task_id: 'task-1', task_revision: 4,
+      graph_run_id: 'run-2', job_id: 'job-1', job_type: 'REVIEW', job_status: 'PENDING', correction_count: 2 })
+    renderPage()
+    await userEvent.selectOptions(await screen.findByLabelText('运费状态确认值'), 'KNOWN_AMOUNT')
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('运费金额确认值'), '320')
+    await userEvent.click(screen.getByRole('button', { name: '保存确认并重新计算' }))
+    await waitFor(() => expect(correct).toHaveBeenCalledOnce())
+    expect(correct.mock.calls[0][2]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fieldName: 'shipping_fee_status', normalizedValue: 'KNOWN_AMOUNT' }),
+      expect.objectContaining({ fieldName: 'shipping_fee_amount', normalizedValue: '320', unit: 'SGD' }),
+    ]))
+  })
+
+  test('places review statistics next to the title without a duplicate pending badge', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+    renderPage()
+    const heading = await screen.findByRole('heading', { name: '集中审核' })
+    const row = heading.parentElement!
+    const stats = within(row).getByLabelText('审核统计')
+    expect(within(stats).getByText('有效报价')).toBeInTheDocument()
+    expect(within(stats).getByText('待处理字段')).toBeInTheDocument()
+    expect(within(stats).getByText('仅保留记录')).toBeInTheDocument()
+    expect(screen.queryByText(/项待处理$/)).not.toBeInTheDocument()
+  })
+
+  test('shows unsupported business days as a pending system limitation, not an editable field', async () => {
+    const report = makeReview()
+    report.problems = [{
+      ...report.problems[0],
+      field_name: 'day_basis',
+      raw_value: 'BUSINESS_DAYS',
+      normalized_value: 'BUSINESS_DAYS',
+      codes: ['DAY_BASIS_UNSUPPORTED'],
+      message: 'MVP cannot infer arrival from non-calendar-day lead time.',
+      needs_resolution: false,
+      resolution: 'ADDITIONAL_INFORMATION_REQUIRED',
+    }]
+    report.blocking_problem_count = 0
+    report.problem_count = 1
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getReview').mockResolvedValue(report)
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+
+    renderPage()
+
+    expect(await screen.findByText('系统暂不能计算，报价保持 PENDING')).toBeInTheDocument()
+    expect(screen.getByText(/“工作日”已正确保留，不会被换成自然日/)).toBeInTheDocument()
+    const stats = screen.getByLabelText('审核统计')
+    expect(within(stats).getByText('PENDING 限制')).toBeInTheDocument()
+    expect(within(stats).getByText('待处理字段')).toBeInTheDocument()
+    expect(within(stats).getAllByText('0')).toHaveLength(2)
+    expect(screen.queryByLabelText('交期计算方式确认值')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存确认并重新计算' })).not.toBeInTheDocument()
+  })
+
+  test('completed decision pages keep the review navigation without a blocking issue', () => {
+    const task = makeTask()
+    render(<MemoryRouter><TaskWorkspaceHeader taskId="task-1" scenarioId={null}
+      title="任务" subtitle="测试" status="COMPLETED" revision={3} resultId="result-1"
+      quoteCount={1} summaryComplete={false} progress={task.progress}
+      reviewBlocked={false} active="decision" /></MemoryRouter>)
+    expect(screen.getByRole('link', { name: '待处理事项' })).toHaveAttribute('href', '/tasks/task-1/review')
+  })
+
   test('merges duplicate findings and derives technical correction fields from one business value', async () => {
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
     vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
@@ -168,9 +243,11 @@ describe('ReviewPage', () => {
     expect(screen.queryByText('核对后的原始表达')).not.toBeInTheDocument()
     expect(screen.queryByText('标准化值')).not.toBeInTheDocument()
     expect(screen.queryByText('修正理由')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '已核对，采用此值' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeDisabled()
 
     await userEvent.selectOptions(screen.getByLabelText('运费状态确认值'), 'FREE')
-    await userEvent.click(screen.getByRole('button', { name: '确认并重新计算' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存确认并重新计算' }))
 
     await waitFor(() => expect(correct).toHaveBeenCalled())
     expect(correct.mock.calls[0][2]).toEqual([{
@@ -233,9 +310,9 @@ describe('ReviewPage', () => {
     renderPage()
 
     await userEvent.selectOptions(await screen.findByLabelText('运费状态确认值'), 'FREE')
-    expect(screen.getByRole('button', { name: '确认并重新计算' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeEnabled()
     expect(screen.queryByText(/部分报价仍在审核/)).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '确认并重新计算' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存确认并重新计算' }))
     await waitFor(() => expect(correct).toHaveBeenCalledOnce())
   })
 
@@ -275,11 +352,42 @@ describe('ReviewPage', () => {
     expect(screen.queryByText('税费比较口径')).not.toBeInTheDocument()
     expect(screen.queryByText('报价税费方式不符合采购要求。')).not.toBeInTheDocument()
     expect(screen.queryByText('采购要求：')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: '已核对，采用此值' }))
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeEnabled()
     const details = screen.getByText('查看报价原文').closest('details')!
     await userEvent.click(screen.getByText('查看报价原文'))
     expect(within(details).getByText('Not applicable for this synthetic scenario')).toBeInTheDocument()
     expect(within(details).queryByText('当前报价值')).not.toBeInTheDocument()
     expect(within(details).queryByText('采购要求')).not.toBeInTheDocument()
+  })
+
+  test('keeps a deferred field pending and explains an unexpected save failure with a request id', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+    const correct = vi.spyOn(api, 'correctQuoteFields').mockRejectedValue(new ApiClientError(
+      500,
+      'internal_server_error',
+      'An unexpected server error occurred.',
+      {},
+      'request-review-500',
+    ))
+
+    renderPage()
+
+    await screen.findByLabelText('运费状态确认值')
+    await userEvent.click(screen.getByRole('button', { name: '暂不确定，保留待处理' }))
+    expect(screen.getByText('已保留待补充')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存确认并重新计算' })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole('button', { name: '继续处理' }))
+    await userEvent.selectOptions(screen.getByLabelText('运费状态确认值'), 'FREE')
+    await userEvent.click(screen.getByRole('button', { name: '保存确认并重新计算' }))
+
+    await waitFor(() => expect(correct).toHaveBeenCalledOnce())
+    expect(await screen.findByRole('alert')).toHaveTextContent('请求编号：request-review-500')
+    expect(screen.getByRole('alert')).toHaveTextContent('本次不会视为已提交')
   })
 
   test('does not ask users to rewrite a valid quote fact for a comparison limitation', async () => {
@@ -304,10 +412,10 @@ describe('ReviewPage', () => {
 
     expect(await screen.findByText(/报价原值已保留/)).toBeInTheDocument()
     expect(screen.queryByLabelText('税费方式确认值')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '确认并重新计算' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存确认并重新计算' })).not.toBeInTheDocument()
   })
 
-  test('returns to decision results after review completes without pending fields', async () => {
+  test('keeps the review page accessible after completion with no pending fields', async () => {
     const task = makeTask()
     task.status = 'COMPLETED'
     task.current_result_id = 'result-1'
@@ -315,7 +423,7 @@ describe('ReviewPage', () => {
     task.progress.decision_completed = true
     const review = makeReview()
     review.task_status = 'COMPLETED'
-    review.review_pending = true
+    review.review_pending = false
     review.problems = []
     review.problem_count = 0
     review.blocking_problem_count = 0
@@ -325,6 +433,33 @@ describe('ReviewPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('decision-page')).toBeInTheDocument()
+    expect(await screen.findByText('当前没有需要补充的字段。')).toBeInTheDocument()
+    expect(screen.queryByText('decision-page')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '待处理事项' })).toHaveAttribute('href', '/tasks/task-1/review')
+  })
+
+  test('exposes excluded supplier findings for manual correction without changing exclusions', async () => {
+    const task = makeTask()
+    task.status = 'COMPLETED'
+    task.current_result_id = 'result-1'
+    task.decision_profile.preferences.excluded_supplier_ids = ['SUP-001']
+    const review = makeReview()
+    review.problems = review.problems.map((problem) => ({ ...problem, needs_resolution: false }))
+    review.blocking_problem_count = 0
+    vi.spyOn(api, 'getTask').mockResolvedValue(task)
+    vi.spyOn(api, 'getReview').mockResolvedValue(review)
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+    const correct = vi.spyOn(api, 'correctQuoteFields').mockResolvedValue({
+      task_id: 'task-1', task_revision: 4, graph_run_id: 'run-2', job_id: 'job-1',
+      job_status: 'PENDING', corrected_fields: [],
+    })
+    renderPage()
+    expect(await screen.findByText('已排除供应商 · 重新纳入前审核')).toBeInTheDocument()
+    expect(screen.queryByText('当前没有需要补充的字段。')).not.toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.selectOptions(screen.getByRole('combobox'), 'FREE')
+    await user.click(screen.getByRole('button', { name: '保存确认并重新计算' }))
+    await waitFor(() => expect(correct).toHaveBeenCalled())
+    expect(task.decision_profile.preferences.excluded_supplier_ids).toEqual(['SUP-001'])
   })
 })

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { ProcurementRequirement, TaskDetail } from '../api/types'
+import type { ProcurementRequirement, RankingCriterion, TaskDetail } from '../api/types'
 import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
 
 function message(error: unknown) {
@@ -24,7 +24,8 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
         ...value,
         required_quantity: Number(value.required_quantity),
         planned_order_date: value.planned_order_date || null,
-        secondary_preference: value.secondary_preference || null,
+        ranking_preference: value.ranking_preference as RankingCriterion,
+        secondary_preference: (value.secondary_preference || null) as RankingCriterion | null,
       }
       return api.updateRequirement(task.task_id, task.task_revision, requirement, createIdempotencyKey())
     },

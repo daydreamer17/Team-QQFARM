@@ -505,6 +505,45 @@ def test_dominated_unknown_shipping_does_not_interrupt_or_fabricate_review(tmp_p
         outsider.get_result(task["task_id"], outcome["result_id"])
 
 
+def test_unsupported_business_days_publish_pending_result_without_field_rewrite(tmp_path):
+    service, _sessions, task, started, runner = _run_impact_quotes(
+        tmp_path,
+        overrides={
+            "SUP-023": {
+                "shipping_fee_status": "FREE",
+                "shipping_fee_amount": "",
+            },
+            "SUP-024": {"day_basis": "BUSINESS_DAYS"},
+        },
+    )
+
+    outcome = runner.run_job(started["job_id"])
+
+    assert outcome["status"] == "SUCCEEDED"
+    comparison = service.get_result(task["task_id"], outcome["result_id"])["result"]
+    assert comparison["disposition"] == "PENDING_INPUT"
+    assert comparison["final_recommendation_allowed"] is False
+    pending = next(
+        row for row in comparison["supplier_results"]
+        if row["supplier_name"] == "Sterling Components"
+    )
+    assert pending["status"] == "PENDING"
+    assert pending["estimated_arrival_date"] is None
+    assert [reason["code"] for reason in pending["pending_reasons"]] == [
+        "DAY_BASIS_UNSUPPORTED"
+    ]
+
+    review = service.list_review_problems(task["task_id"])
+    problem = next(
+        item for item in review["problems"]
+        if item["quote_id"] == pending["quote_id"]
+        and "DAY_BASIS_UNSUPPORTED" in item["codes"]
+    )
+    assert review["blocking_problem_count"] == 0
+    assert problem["needs_resolution"] is False
+    assert problem["resolution"] == "ADDITIONAL_INFORMATION_REQUIRED"
+
+
 def test_document_hash_mismatch_cannot_enter_impact_scope(tmp_path):
     service, _sessions, task, started, runner = _run_impact_quotes(tmp_path)
 

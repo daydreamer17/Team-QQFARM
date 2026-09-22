@@ -80,6 +80,8 @@ def validate_candidates(
     parsed_input: ParsedInput,
     candidates: tuple[QuoteFieldCandidate, ...],
     dictionary: QuoteDictionary,
+    *,
+    validate_normalized_values: bool = True,
 ) -> None:
     expected_fields = {definition.field_name for definition in dictionary.extractable_fields}
     actual_fields = [candidate.field_name for candidate in candidates]
@@ -125,7 +127,8 @@ def validate_candidates(
             and candidate.normalized_value is None
         )
         if (
-            allowed_values is not None
+            validate_normalized_values
+            and allowed_values is not None
             and not conflict_without_resolved_value
             and candidate.normalized_value not in allowed_values
         ):

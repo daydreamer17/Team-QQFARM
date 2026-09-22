@@ -1,0 +1,272 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter, useLocation } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { api } from '../src/api/client'
+import type { ComparisonResultResponse, DecisionScenario, TaskDetail } from '../src/api/types'
+import { DecisionScenarioWorkspace } from '../src/components/DecisionScenarioWorkspace'
+
+afterEach(() => vi.unstubAllGlobals())
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{location.pathname}{location.search}:{location.state?.expectedRevision}</output>
+}
+
+const comparison = {
+  disposition: 'FINAL',
+  evaluated_at: '2026-09-22T00:00:00Z',
+  rule_version: 'rules/1',
+  ranked_quote_ids: ['quote-1'],
+  supplier_results: [{
+    status: 'FEASIBLE',
+    quote_id: 'quote-1',
+    quote_version: 1,
+    supplier_name: 'Supplier One',
+    goods_cost: '7000.00',
+    known_cost_subtotal: '7000.00',
+    total_cost: '7000.00',
+    actual_quantity: 1000,
+    estimated_arrival_date: '2026-09-19',
+    failed_reasons: [],
+    pending_reasons: [],
+  }],
+  pending_quote_ids: [],
+  comparison_reasons: [],
+  recommended_quote_ids: ['quote-1'],
+  blocking_pending_quote_ids: [],
+  final_recommendation_allowed: true,
+}
+
+const task = {
+  task_id: 'task-1',
+  task_revision: 6,
+  status: 'COMPLETED',
+  scenario_id: 'SCENARIO-1',
+  current_result_id: 'result-1',
+  quotes: [{
+    quote_id: 'quote-1',
+    quote_version: 1,
+    supplier_id: 'SUP-1',
+    document_id: 'document-1',
+    document_version: 1,
+    original_filename: 'quote.pdf',
+  }],
+  requirement: {
+    currency: 'SGD',
+    ranking_preference: 'LOWEST_CONFIRMED_TOTAL_COST',
+  },
+} as TaskDetail
+
+const result = {
+  result_id: 'result-1',
+  task_revision: 6,
+  is_current: true,
+  input_snapshot: null,
+  result: comparison,
+  policy_retrievals: [],
+} as ComparisonResultResponse
+
+const generatedScenario = {
+  decision_scenario_id: 'decision-scenario-1',
+  task_id: 'task-1',
+  base_task_revision: 6,
+  base_result_id: 'result-1',
+  input_sha256: 'abc',
+  status: 'READY',
+  is_current: true,
+  changes: { delivery_deadline: '2026-09-18' },
+  baseline: comparison,
+  simulated: {
+    hypothetical: true,
+    formal_recommendation_allowed: false,
+    policy_assessment_performed: false,
+    changes: { delivery_deadline: '2026-09-18' },
+    decision_preferences: {
+      schema_version: 'decision-preferences/1',
+      primary_criterion: 'LOWEST_CONFIRMED_TOTAL_COST',
+      secondary_criterion: null,
+      excluded_supplier_ids: [],
+      cost_tolerance_amount: null,
+    },
+    excluded_quote_ids: [],
+    assumptions: [],
+    comparison,
+  },
+  delta: {
+    recommendation_changed: false,
+    baseline_disposition: 'FINAL',
+    simulated_disposition: 'FINAL',
+    baseline_recommended_quote_ids: ['quote-1'],
+    simulated_recommended_quote_ids: ['quote-1'],
+    added_recommended_quote_ids: [],
+    removed_recommended_quote_ids: [],
+    supplier_deltas: [],
+  },
+  applied_task_revision: null,
+  created_at: '2026-09-22T00:00:00Z',
+  updated_at: '2026-09-22T00:00:00Z',
+} as DecisionScenario
+
+describe('DecisionScenarioWorkspace', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({
+      task_id: 'task-1',
+      task_revision: 6,
+      items: [{
+        conversation_id: 'conversation-1',
+        task_id: 'task-1',
+        base_task_revision: 6,
+        base_result_id: 'result-1',
+        status: 'ACTIVE',
+        title: '决策讨论',
+        messages: [{
+          message_id: 'message-1',
+          sequence: 1,
+          role: 'ASSISTANT',
+          status: 'SUCCEEDED',
+          content: '可以生成一个提前交付的情景。',
+          reference_ids: ['RESULT:result-1'],
+          proposed_changes: { delivery_deadline: '2026-09-18' },
+          decision_intent_id: 'intent-1',
+          reply_to_message_id: null,
+          provider: 'fixed',
+          model_id: 'fixed',
+          prompt_version: 'conversation/1',
+          attempts: 1,
+          error_code: null,
+          error_message: null,
+          created_at: '2026-09-22T00:00:00Z',
+        }],
+        created_at: '2026-09-22T00:00:00Z',
+        updated_at: '2026-09-22T00:00:00Z',
+      }],
+    })
+    vi.spyOn(api, 'listDecisionScenarios').mockResolvedValue({
+      task_id: 'task-1', task_revision: 6, items: [],
+    })
+    vi.spyOn(api, 'listDecisionIntents').mockResolvedValue({
+      task_id: 'task-1', task_revision: 6, items: [],
+    })
+  })
+
+  test('opens Scenario management after confirming an intent and still allows collapse', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'confirmDecisionIntent').mockResolvedValue({
+      decision_intent_id: 'intent-1',
+      status: 'CONFIRMED',
+      scenario: generatedScenario,
+    })
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <DecisionScenarioWorkspace task={task} result={result} compact />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await screen.findByText('可以生成一个提前交付的情景。')
+    const summary = screen.getByText('Scenario 管理 · 0 个')
+    const manager = summary.closest('details')
+    expect(manager).not.toHaveAttribute('open')
+
+    await user.click(screen.getByRole('button', { name: '确认并生成 Scenario' }))
+    await waitFor(() => expect(manager).toHaveAttribute('open'))
+
+    await user.click(summary)
+    await waitFor(() => expect(manager).not.toHaveAttribute('open'))
+  })
+
+  test('renders a simulated recommendation as emphasis with a distinct hypothetical citation', async () => {
+    const response = await api.listDecisionConversations('task-1')
+    response.items[0].messages[0].content = '建议选择 **Sterling Semitech（SUP-030）**。（SIMULATION:preview-1）'
+    response.items[0].messages[0].reference_ids = ['SIMULATION:preview-1']
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+    const winner = await screen.findByText('Sterling Semitech（SUP-030）')
+    expect(winner.tagName).toBe('STRONG')
+    expect(screen.getByText('本次条件的确定性模拟（未应用）')).toBeInTheDocument()
+  })
+
+  test('shows progress for the matching pending reply and ignores other turns', async () => {
+    const handlers: Record<string, (event: Event) => void> = {}
+    vi.stubGlobal('EventSource', class {
+      addEventListener(name: string, callback: (event: Event) => void) { handlers[name] = callback }
+      close() {}
+    })
+    const response = await api.listDecisionConversations('task-1')
+    response.items[0].messages[0].role = 'USER'
+    response.items[0].messages[0].content = '请模拟'
+    response.items[0].messages[0].decision_intent_id = null
+    response.items[0].messages[0].proposed_changes = null
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+    await waitFor(() => expect(handlers['assistant.stage']).toBeDefined())
+    act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
+      data: JSON.stringify({ reply_to_message_id: 'other', stage: 'narration' }),
+    })))
+    expect(screen.queryByText('正在生成事实说明并核验引用')).not.toBeInTheDocument()
+    act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
+      data: JSON.stringify({ reply_to_message_id: 'message-1', stage: 'simulation' }),
+    })))
+    expect(await screen.findByText('正在按新条件进行确定性模拟，不会修改正式结果')).toBeInTheDocument()
+    queryClient.clear()
+  })
+
+  test('review-required failures provide a direct review link', async () => {
+    const response = await api.listDecisionConversations('task-1')
+    const message = response.items[0].messages[0]
+    message.status = 'FAILED'
+    message.content = null
+    message.error_code = 'selection_review_required'
+    message.error_message = '请先审核重新纳入的供应商。'
+    message.decision_intent_id = null
+    message.proposed_changes = null
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByRole('link', { name: '前往集中审核' }))
+      .toHaveAttribute('href', '/tasks/task-1/review#excluded-review')
+  })
+
+  test('applying a scenario opens the latest decision route and clears the old result cache', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(api.listDecisionScenarios).mockResolvedValue({
+      task_id: 'task-1', task_revision: 6, items: [generatedScenario],
+    })
+    vi.spyOn(api, 'applyDecisionScenario').mockResolvedValue({
+      task_id: 'task-1', task_revision: 7, status: 'QUEUED',
+      decision_scenario_id: generatedScenario.decision_scenario_id,
+      decision_profile_id: 'profile-7', changed_requirement_fields: ['delivery_deadline'],
+      changed_decision_preference_fields: [], graph_run_id: 'graph-7', job_id: 'job-7', job_status: 'PENDING',
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    queryClient.setQueryData(['tasks', 'task-1'], task)
+    render(<QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/tasks/task-1/decision?result_id=result-1']}>
+        <DecisionScenarioWorkspace task={task} result={result} compact />
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>)
+    await user.click(await screen.findByText('Scenario 管理 · 1 个'))
+    await user.click(screen.getByRole('button', { name: '应用并全量重算' }))
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-1/decision:7'))
+    expect(queryClient.getQueryData<TaskDetail>(['tasks', 'task-1'])?.current_result_id).toBeNull()
+    expect(queryClient.getQueryData<TaskDetail>(['tasks', 'task-1'])?.task_revision).toBe(7)
+  })
+})

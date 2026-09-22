@@ -151,7 +151,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
 
     expect(document.querySelector('#quote-field-manufacturer')).toHaveClass('has-error')
-    expect(screen.getByText('字段冲突')).toBeInTheDocument()
+    expect(screen.getByText('待人工核对')).toBeInTheDocument()
   })
 
   test('submits an already reviewed draft without repeating the review call', async () => {
@@ -280,11 +280,12 @@ describe('QuoteDraftReviewWorkspace', () => {
     expect(screen.queryByText(/费用免费或不适用时/)).not.toBeInTheDocument()
   })
 
-  test('shows UNKNOWN as a non-selectable fee placeholder and blocks submission', async () => {
+  test('keeps UNKNOWN selectable and allows saving review progress', async () => {
     const user = userEvent.setup()
     const schema = makeQuoteFieldSchema()
     const draft = makeQuoteDraft({ shipping_fee_status: 'UNKNOWN', shipping_fee_amount: null })
-    const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft')
+    const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft').mockResolvedValue({ ...draft, draft_revision: 2, human_review_complete: true, submission_ready: false })
+    const submitSpy = vi.spyOn(api, 'submitQuoteDraft')
 
     renderWorkspace(
       <QuoteDraftReviewWorkspace
@@ -297,14 +298,66 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
 
     const shippingStatus = within(document.querySelector('#quote-field-shipping_fee_status')!).getByRole('combobox')
-    expect(shippingStatus).toHaveValue('')
+    expect(shippingStatus).toHaveValue('UNKNOWN')
     expect(within(shippingStatus).getByRole('option', { name: '请选择费用状态' })).toBeDisabled()
-    expect(within(shippingStatus).queryByRole('option', { name: /UNKNOWN/ })).not.toBeInTheDocument()
+    expect(within(shippingStatus).getByRole('option', { name: /UNKNOWN/ })).toBeEnabled()
     expect(within(document.querySelector('#quote-field-shipping_fee_amount')!).getByRole('textbox')).toHaveValue('')
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
+    expect(submitSpy).not.toHaveBeenCalled()
+  })
 
-    expect(reviewSpy).not.toHaveBeenCalled()
-    expect(screen.getAllByText(/不能保持“未知”/).length).toBeGreaterThan(0)
+  test('saves an invalid amount and another edit without trying to submit', async () => {
+    const user = userEvent.setup()
+    const draft = makeQuoteDraft()
+    const onChanged = vi.fn()
+    const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft').mockResolvedValue({ ...draft, draft_revision: 2, submission_ready: false })
+    const submitSpy = vi.spyOn(api, 'submitQuoteDraft')
+    renderWorkspace(<QuoteDraftReviewWorkspace draft={draft} schema={makeQuoteFieldSchema()} taskRevision={1} onChanged={onChanged} onPreview={vi.fn()} />)
+    const price = within(document.querySelector('#quote-field-unit_price')!).getByRole('textbox')
+    await user.clear(price)
+    await user.type(price, 'abc')
+    const manufacturer = within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')
+    await user.clear(manufacturer)
+    await user.type(manufacturer, 'Manually corrected maker')
+    expect(screen.getByRole('button', { name: '确认并提交报价' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+    const actions = reviewSpy.mock.calls[0][4]
+    expect(actions.find((action) => action.fieldName === 'unit_price')).toMatchObject({ action: 'SET_VALUE', normalizedValue: 'abc' })
+    expect(actions.find((action) => action.fieldName === 'manufacturer')).toMatchObject({ action: 'SET_VALUE', normalizedValue: 'Manually corrected maker' })
+    expect(submitSpy).not.toHaveBeenCalled()
+  })
+
+  test('shows resolved automatic doubts only in collapsed audit details', () => {
+    const draft = makeQuoteDraft()
+    draft.fields.find((field) => field.field_name === 'unit_price')!.review_state = 'CONFIRMED'
+    draft.review_findings = [{ finding_id: 'resolved-price', field_name: 'unit_price',
+      criticality: 'ALWAYS', applicable: true, decision: 'REVIEW_REQUIRED', severity: 'BLOCKING',
+      review_reason: 'EVIDENCE_ERROR', codes: ['NORMALIZED_PRICE_NOT_IN_EVIDENCE'], message: 'old automatic doubt',
+      source_ids: [], accepted_for_calculation: true, resolved: true }]
+    renderWorkspace(<QuoteDraftReviewWorkspace draft={draft} schema={makeQuoteFieldSchema()} taskRevision={1} onChanged={vi.fn()} onPreview={vi.fn()} />)
+    const card = document.querySelector('#quote-field-unit_price')!
+    expect(card).not.toHaveClass('has-error')
+    expect(within(card).getByText('人工已确认。')).toBeInTheDocument()
+    expect(within(card).getByText(/已人工处理：/).closest('details')).not.toHaveAttribute('open')
+    expect(within(card).queryByRole('button', { name: '已核对，采用此值' })).not.toBeInTheDocument()
+  })
+
+  test('explicitly adopts an unchanged conflicting value and saves its correction', async () => {
+    const user = userEvent.setup()
+    const draft = makeQuoteDraft()
+    draft.fields.find((field) => field.field_name === 'unit_price')!.validation_status = 'CONFLICT'
+    const reviewSpy = vi.spyOn(api, 'reviewQuoteDraft').mockResolvedValue({ ...draft, draft_revision: 2 })
+    renderWorkspace(<QuoteDraftReviewWorkspace draft={draft} schema={makeQuoteFieldSchema()} taskRevision={1} onChanged={vi.fn()} onPreview={vi.fn()} />)
+    const card = document.querySelector('#quote-field-unit_price')!
+    const originalValue = within(card).getByRole('textbox').getAttribute('value')
+    await user.click(within(card).getByRole('button', { name: '已核对，采用此值' }))
+    expect(card).not.toHaveClass('has-error')
+    expect(within(card).getByText('已核对当前值，待保存确认。')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
+    expect(reviewSpy.mock.calls[0][4].find((action) => action.fieldName === 'unit_price')).toMatchObject({ action: 'SET_VALUE', normalizedValue: originalValue })
   })
 
   test('keeps related fields expanded while the user finishes typing a valid value', async () => {
@@ -323,7 +376,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
 
     const otherFields = document.querySelector('.quote-review-ready-fields') as HTMLDetailsElement
-    expect(otherFields.open).toBe(false)
+    expect(otherFields.open).toBe(true)
 
     await user.selectOptions(
       within(document.querySelector('#quote-field-shipping_fee_status')!).getByRole('combobox'),
