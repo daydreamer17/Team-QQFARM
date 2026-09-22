@@ -91,6 +91,11 @@
   },
   "files": [
     {
+      "path": "data/generated/inputs/development/full_flow_demo3/.gitattributes",
+      "size_bytes": 85,
+      "sha256": "e46a0ebca17fa341a5f5234533b510182f7452e393f06477695e8babd026a7e1"
+    },
+    {
       "path": "data/generated/inputs/development/full_flow_demo3/README.md",
       "size_bytes": 3667,
       "sha256": "00f74be56db2e71d827f37c4df38c1d3c37cca70a6c07e698da846bda1d568c7"
