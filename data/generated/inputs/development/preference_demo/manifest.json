@@ -12,7 +12,7 @@
     "manifest": "supplier_history/2026-08-06-v1/manifest.json"
   },
   "files": {
-    ".gitattributes": "e46a0ebca17fa341a5f5234533b510182f7452e393f06477695e8babd026a7e1",
+    ".gitattributes": "da1fc3a89069ed942a745936471069b777d5c379613cc794881d4319300d1ad1",
     "README.md": "470728c36affc2930fbdf606225adfb621c100df13efc9c2cabe5fb7c56b1fbd",
     "quotes/sup-023_quote.csv": "7435645bbcaf7f22c8c1d93561315ea78d71e5754d5587dc69eb67e029d1a80c",
     "quotes/sup-028_quote.csv": "3afea43619fdf7cf6aac6db71ce575302c1762419ddd65ffa3da08598d7b453a",
