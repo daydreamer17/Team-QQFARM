@@ -1,0 +1,43 @@
+{
+  "alias_allowlist_sha256": "74155aeaa6e8e11d2a0530317312b9f76d20b58f7df23ba5cea6d036ae08f7d4",
+  "content_sha256": "40147bcbfc278ca9ca27d893ab16056234aed1878a25c3a47f2ed1b6267d8c34",
+  "dataset_context": {
+    "as_of_date": "2026-08-06",
+    "dataset_id": "synthetic-mcu9-supplier-performance",
+    "dataset_version": "2026-08-06-v1",
+    "identity_matcher_version": "exact-supplier-directory/1.0.0",
+    "is_synthetic": true,
+    "lookback": "ALL_COMPLETED_HISTORY",
+    "period_end": "2026-06-29",
+    "period_start": "2023-01-02",
+    "rating_method_version": "mcu9-demo-rating/1.0.0",
+    "schema_version": "supplier-history/1.0.0",
+    "scope": {
+      "category": "Electronics",
+      "item": "Microcontroller MCU-9",
+      "task_product_mappings": [
+        "QW-MCU9-DEMO"
+      ]
+    },
+    "source_license": "MIT",
+    "source_project": "dytcoke23/procurement-spend-analysis-dashboard",
+    "thresholds": {
+      "grade_a_on_time_min": "0.90",
+      "grade_a_rejected_max": "0.02",
+      "grade_b_on_time_min": "0.80",
+      "grade_b_rejected_max": "0.05",
+      "grade_c_on_time_min": "0.70",
+      "grade_c_rejected_max": "0.10",
+      "min_sample_size": 10
+    }
+  },
+  "dataset_id": "synthetic-mcu9-supplier-performance",
+  "dataset_version": "2026-08-06-v1",
+  "filtered_record_count": 1185,
+  "generated_at": "2026-08-07T00:00:00Z",
+  "generator_version": "supplier-history-generator/1.0.0",
+  "schema_version": "supplier-history/1.0.0",
+  "source_path": "data/purchase_orders.csv",
+  "source_record_count": 47128,
+  "source_sha256": "fba22a467e5dd800a0af960930d2ca5e2ecbd9d2bc747e37304867d8d031ae21"
+}

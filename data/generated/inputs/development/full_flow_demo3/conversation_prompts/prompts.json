@@ -1,15 +1,15 @@
 {
-  "schema_version": "full-flow-demo3-prompts/1.0",
+  "schema_version": "full-flow-demo3-prompts/2.0",
   "instructions": "Paste one prompt at a time. Confirm parsed changes before applying them.",
   "prompts": [
     {
       "id": "tolerance_then_delivery",
-      "text": "总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。",
+      "text": "总价最低优先；如果比最低价最多贵 25 新币，就在这个范围内选最快到货的。",
       "feature": "cost tolerance plus secondary criterion"
     },
     {
       "id": "exclude_similar_name_and_history",
-      "text": "先排除 Sterling Semitech，再按历史准时率排序。不要把它和 Sterling Components 当成同一家。",
+      "text": "先排除 Pacific Rim Semitech，再按历史准时率排序。不要把它和 Pacific Rim Circuits 当成同一家。",
       "feature": "supplier exclusion, exact identity, history ranking"
     },
     {
@@ -24,7 +24,7 @@
     },
     {
       "id": "explanation_only",
-      "text": "为什么单价最低的 Great Wall Components 没有入选？只解释，不要修改当前设置。",
+      "text": "为什么单价最低的 Golden Dragon Circuits 没有入选？只解释，不要修改当前设置。",
       "feature": "grounded explanation without mutation"
     },
     {

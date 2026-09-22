@@ -1,16 +1,25 @@
 {
   "dataset_id": "preference_demo",
-  "schema_version": "preference-demo/1.0.0",
-  "generated_at": "2026-09-21T00:00:00+00:00",
+  "schema_version": "preference-demo/2.0.0",
+  "scenario_id": "PREFERENCE-SWITCHBOARD-002",
+  "generated_at": "2026-09-22T00:00:00+00:00",
   "is_synthetic": true,
-  "planned_order_date": "2026-10-10",
+  "planned_order_date": "2026-11-02",
+  "supplier_history": {
+    "dataset_id": "synthetic-mcu9-supplier-performance",
+    "dataset_version": "2026-08-06-v1",
+    "root": "data/generated/inputs/development/preference_demo/supplier_history",
+    "manifest": "supplier_history/2026-08-06-v1/manifest.json"
+  },
   "files": {
-    "README.md": "cc3b7bb52366c8b3018ea6729046f746d034717fbf0b0423342bf8a1ab5d2fd6",
-    "quotes/sup-022_quote.csv": "ea764bd9b26ea2801264f79f874df503abab2b0a34cde49e653f63bd51e64ff0",
-    "quotes/sup-023_quote.csv": "d6d013dd867d08ae7381833a2b8d0dba35e1d3c05a41644c718721bd5598d3d6",
-    "quotes/sup-024_quote.csv": "129bb533007ec8ed18c1de64178a458de525f59711fb8361ff1b3c37b6e06a4a",
-    "quotes/sup-029_quote.csv": "c1be599d6c6f2a9ac35ba5a24cba413a7f8182088479ce15f62c09610a90c59d",
-    "requirement/confirmed_requirement.json": "c736a1fca0ebf5cbc76cba13156196b67092c1090077e65fb1bccdf82e407ef0",
-    "requirement/procurement_requirement.txt": "bc3a6212a8d26a9b6cfae56bde12f9e9fc2aacb88633b7f6bba0bf91835cfa79"
+    "README.md": "470728c36affc2930fbdf606225adfb621c100df13efc9c2cabe5fb7c56b1fbd",
+    "quotes/sup-023_quote.csv": "7435645bbcaf7f22c8c1d93561315ea78d71e5754d5587dc69eb67e029d1a80c",
+    "quotes/sup-028_quote.csv": "3afea43619fdf7cf6aac6db71ce575302c1762419ddd65ffa3da08598d7b453a",
+    "quotes/sup-032_quote.csv": "2d2a8922bc9f829dc60d5bb03fd196682f372b3ddabe17a7f359a49f652ed04c",
+    "quotes/sup-033_quote.csv": "52c2dceb20d18287bbbb4dda3d4cbcf8e1a202bd860cf1fcf21f50d90e38e2f1",
+    "quotes/sup-036_quote.csv": "ad1588653084f66f78ee834fc2192235fddac5c44e99ee4cb855f49a30499559",
+    "requirement/confirmed_requirement.json": "3b1385be2877ad8a9a57822f6f0d33ebecc52f9ec82581842b82c8ba6a3fe068",
+    "requirement/procurement_requirement.txt": "025eef1cc28522d7872030d8e38ca4a9e27bec207e00e0fdb5e296e4af196fc5",
+    "supplier_history/2026-08-06-v1/supplier_performance.json": "40147bcbfc278ca9ca27d893ab16056234aed1878a25c3a47f2ed1b6267d8c34"
   }
 }

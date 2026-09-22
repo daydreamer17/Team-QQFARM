@@ -1,48 +1,48 @@
 {
   "clauses": [
     {
-      "clause_id": "ASL-301",
-      "title": "Current registry evidence",
-      "text": "An electronics supplier may enter comparison only when a current registry record identifies the exact supplier ID. Similar legal or trading names are not evidence of the same supplier.",
+      "clause_id": "ASL-411",
+      "title": "Exact supplier identity",
+      "text": "A quotation may enter comparison only when the current supplier directory identifies the exact supplier ID. Similar names, shared words, and related trading styles do not establish identity.",
       "control_code": "APPROVED_SUPPLIER",
       "rule_parameters": {}
     },
     {
-      "clause_id": "ASL-302",
-      "title": "Identity ambiguity",
-      "text": "A supplier-name collision, alias mismatch, or missing supplier identifier requires human review and must not be resolved by fuzzy similarity alone.",
+      "clause_id": "ASL-412",
+      "title": "Near-name collision",
+      "text": "A near-name collision, alias mismatch, or missing supplier identifier requires human review. The system must not merge Pacific Rim Circuits with Pacific Rim Semitech by fuzzy similarity.",
       "control_code": "APPROVED_SUPPLIER",
       "rule_parameters": {}
     },
     {
-      "clause_id": "ROHS-301",
-      "title": "Part-level RoHS evidence",
-      "text": "Current RoHS evidence must match the confirmed supplier ID and the requested manufacturer part number. Evidence for a related part or similarly named supplier is insufficient.",
+      "clause_id": "ROHS-411",
+      "title": "Part and revision evidence",
+      "text": "Current RoHS evidence must match the confirmed supplier ID, manufacturer part number QW-MCU9-DEMO, and revision R3. Evidence for another revision or a similarly named supplier is insufficient.",
       "control_code": "ROHS_COMPLIANCE",
       "rule_parameters": {}
     },
     {
-      "clause_id": "ROHS-302",
-      "title": "Unknown compliance",
-      "text": "Missing, expired, or conflicting compliance evidence remains review required; it must not be inferred from quotation language.",
+      "clause_id": "ROHS-412",
+      "title": "Conflicting compliance evidence",
+      "text": "Missing, expired, or conflicting compliance evidence remains review required. Quotation language and supplier history must not be used to infer compliance.",
       "control_code": "ROHS_COMPLIANCE",
       "rule_parameters": {}
     },
     {
-      "clause_id": "APR-301",
-      "title": "Manager approval threshold",
-      "text": "A proposed award with confirmed landed cost of SGD 9,500.00 or more requires recorded manager approval before publication.",
+      "clause_id": "APR-411",
+      "title": "Boundary approval threshold",
+      "text": "A proposed award with confirmed landed cost of SGD 19,980.00 or more requires recorded manager approval before publication.",
       "control_code": "AMOUNT_APPROVAL",
       "rule_parameters": {
         "currency": "SGD",
-        "threshold": "9500.00",
+        "threshold": "19980.00",
         "operator": ">="
       }
     },
     {
-      "clause_id": "APR-302",
-      "title": "Approval evidence",
-      "text": "Approval evidence must identify the approving actor, approved amount, timestamp, and exact task revision. A prior-revision approval is stale.",
+      "clause_id": "APR-412",
+      "title": "Revision-bound approval evidence",
+      "text": "Approval evidence must identify the approving actor, approved amount, timestamp, recommended supplier ID, and exact task revision. A prior-revision or different-supplier approval is stale.",
       "control_code": "AMOUNT_APPROVAL",
       "rule_parameters": {}
     }

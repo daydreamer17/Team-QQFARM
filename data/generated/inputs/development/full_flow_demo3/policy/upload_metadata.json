@@ -1,11 +1,11 @@
 {
-  "policy_set_id": "full-flow-demo3-electronics",
-  "policy_set_version": "2026.10.1-demo",
-  "policy_id": "POL-DEMO3-EDGE-GATES",
-  "document_id": "DOC-DEMO3-EDGE-GATES",
+  "policy_set_id": "full-flow-demo3-faultline",
+  "policy_set_version": "2026.11.2-demo",
+  "policy_id": "POL-DEMO3-FAULTLINE-GATES",
+  "document_id": "DOC-DEMO3-FAULTLINE-GATES",
   "document_version": "1.0.0",
-  "title": "Fictional Electronics Evidence and Decision Policy",
-  "effective_from": "2026-01-01T00:00:00Z",
+  "title": "Fictional MCU Evidence, Identity, and Approval Policy",
+  "effective_from": "2026-10-01T00:00:00Z",
   "effective_to": null,
   "categories": [
     "Electronics"

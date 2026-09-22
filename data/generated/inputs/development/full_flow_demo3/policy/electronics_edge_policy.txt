@@ -1,21 +1,21 @@
-# Fictional Electronics Evidence and Decision Policy
+# Fictional MCU Evidence, Identity, and Approval Policy
 
 Synthetic policy for QuoteWise QA. It is not a real procurement policy.
 
-## [ASL-301] Current registry evidence
-An electronics supplier may enter comparison only when a current registry record identifies the exact supplier ID. Similar legal or trading names are not evidence of the same supplier.
+## [ASL-411] Exact supplier identity
+A quotation may enter comparison only when the current supplier directory identifies the exact supplier ID. Similar names, shared words, and related trading styles do not establish identity.
 
-## [ASL-302] Identity ambiguity
-A supplier-name collision, alias mismatch, or missing supplier identifier requires human review and must not be resolved by fuzzy similarity alone.
+## [ASL-412] Near-name collision
+A near-name collision, alias mismatch, or missing supplier identifier requires human review. The system must not merge Pacific Rim Circuits with Pacific Rim Semitech by fuzzy similarity.
 
-## [ROHS-301] Part-level RoHS evidence
-Current RoHS evidence must match the confirmed supplier ID and the requested manufacturer part number. Evidence for a related part or similarly named supplier is insufficient.
+## [ROHS-411] Part and revision evidence
+Current RoHS evidence must match the confirmed supplier ID, manufacturer part number QW-MCU9-DEMO, and revision R3. Evidence for another revision or a similarly named supplier is insufficient.
 
-## [ROHS-302] Unknown compliance
-Missing, expired, or conflicting compliance evidence remains review required; it must not be inferred from quotation language.
+## [ROHS-412] Conflicting compliance evidence
+Missing, expired, or conflicting compliance evidence remains review required. Quotation language and supplier history must not be used to infer compliance.
 
-## [APR-301] Manager approval threshold
-A proposed award with confirmed landed cost of SGD 9,500.00 or more requires recorded manager approval before publication.
+## [APR-411] Boundary approval threshold
+A proposed award with confirmed landed cost of SGD 19,980.00 or more requires recorded manager approval before publication.
 
-## [APR-302] Approval evidence
-Approval evidence must identify the approving actor, approved amount, timestamp, and exact task revision. A prior-revision approval is stale.
+## [APR-412] Revision-bound approval evidence
+Approval evidence must identify the approving actor, approved amount, timestamp, recommended supplier ID, and exact task revision. A prior-revision or different-supplier approval is stale.

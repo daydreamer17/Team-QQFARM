@@ -1,7 +1,7 @@
 {
-  "schema_version": "full-flow-demo3/1.0.0",
+  "schema_version": "full-flow-demo3/2.0.0",
   "dataset_id": "full_flow_demo3",
-  "scenario_id": "MCU-FULL-FLOW-EDGE-003",
+  "scenario_id": "MCU-FULL-FLOW-FAULTLINE-004",
   "is_synthetic": true,
   "runtime_safe": true,
   "primary_quote_limit": 5,
@@ -14,38 +14,38 @@
   "primary_quotes": [
     {
       "order": 1,
-      "supplier_id": "SUP-024",
-      "supplier_name": "Sterling Components",
-      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_quote.pdf",
-      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_quote.csv"
+      "supplier_id": "SUP-025",
+      "supplier_name": "Cascade Semitech",
+      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/cascade_quote.pdf",
+      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/cascade_quote.csv"
     },
     {
       "order": 2,
-      "supplier_id": "SUP-022",
-      "supplier_name": "Redwood Components",
-      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/redwood_quote.pdf",
-      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/redwood_quote.csv"
+      "supplier_id": "SUP-032",
+      "supplier_name": "Lotus Components",
+      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/lotus_quote.pdf",
+      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/lotus_quote.csv"
     },
     {
       "order": 3,
-      "supplier_id": "SUP-023",
-      "supplier_name": "Schwarzwald Circuits",
-      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/schwarzwald_quote.csv",
-      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/schwarzwald_quote.csv"
+      "supplier_id": "SUP-034",
+      "supplier_name": "Pacific Rim Circuits",
+      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_circuits_quote.csv",
+      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_circuits_quote.csv"
     },
     {
       "order": 4,
-      "supplier_id": "SUP-029",
-      "supplier_name": "Great Wall Components",
-      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/great_wall_quote.pdf",
-      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/great_wall_quote.csv"
+      "supplier_id": "SUP-027",
+      "supplier_name": "Golden Dragon Circuits",
+      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/golden_dragon_quote.pdf",
+      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/golden_dragon_quote.csv"
     },
     {
       "order": 5,
-      "supplier_id": "SUP-030",
-      "supplier_name": "Sterling Semitech",
-      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_semitech_quote.pdf",
-      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_semitech_quote.csv"
+      "supplier_id": "SUP-035",
+      "supplier_name": "Pacific Rim Semitech",
+      "recommended_upload": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_semitech_quote.pdf",
+      "csv_fallback": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_semitech_quote.csv"
     }
   ],
   "policy": {
@@ -58,8 +58,8 @@
       "AMOUNT_APPROVAL"
     ],
     "binding": {
-      "policy_set_id": "full-flow-demo3-electronics",
-      "policy_set_version": "2026.10.1-demo",
+      "policy_set_id": "full-flow-demo3-faultline",
+      "policy_set_version": "2026.11.2-demo",
       "policy_index_version": "SELECT_FROM_PUBLISHED_POLICY",
       "category": "Electronics",
       "region": "SG"
@@ -68,11 +68,12 @@
   "supplier_history": {
     "dataset_id": "synthetic-mcu9-supplier-performance",
     "dataset_version": "2026-08-06-v1",
-    "manifest": "data/generated/supplier_history/mcu9/2026-08-06-v1/manifest.json",
+    "root": "data/generated/inputs/development/full_flow_demo3/supplier_history",
+    "manifest": "data/generated/inputs/development/full_flow_demo3/supplier_history/2026-08-06-v1/manifest.json",
     "scope_part": "QW-MCU9-DEMO"
   },
   "staged_updates": [
-    "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-023_quote_revision_2.csv",
+    "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-032_quote_revision_2.csv",
     "data/generated/inputs/development/full_flow_demo3/requirement/revisions/procurement_requirement_rev2.txt"
   ],
   "operator_prompts": "data/generated/inputs/development/full_flow_demo3/conversation_prompts/prompts.json",
@@ -91,138 +92,148 @@
   "files": [
     {
       "path": "data/generated/inputs/development/full_flow_demo3/README.md",
-      "size_bytes": 3257,
-      "sha256": "9ab3ce81bf8a3ba5827fec0e96304d9ea1c21d285b9acb979f7684ba1fd3bb0f"
+      "size_bytes": 3667,
+      "sha256": "00f74be56db2e71d827f37c4df38c1d3c37cca70a6c07e698da846bda1d568c7"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/conversation_prompts/prompts.json",
-      "size_bytes": 1536,
-      "sha256": "9dbd927c1f149eaf3724969279618a8129d30415561a5774d3f7b6c068fc3675"
+      "size_bytes": 1541,
+      "sha256": "bc3da6b88c761de5034cbbba840a9959cdd88145db493043b0ae2d822c053c4c"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/ambiguous_current_prices.pdf",
-      "size_bytes": 3042,
-      "sha256": "9f583dc0efa758911f9361e6f9a9b6d588961b0dd70bccbaf83d08af5457391c"
+      "size_bytes": 3031,
+      "sha256": "1fd9fd2f52e87a11702a0e4513cc229c10916677131223392ce05c02d3c39471"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/invalid_header_quote.csv",
-      "size_bytes": 961,
-      "sha256": "c6425fa0c38589c1ea07cf1018254333783e1a5ddf83a92c280e96489bf4b0e4"
+      "size_bytes": 958,
+      "sha256": "add6347ff7681c2cd4b3c86e5723fc623e6ea8bdbfc684aa9510bd583e1291de"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/prompt_injection_quote.pdf",
-      "size_bytes": 2863,
-      "sha256": "169f6fe8189df46ebee0c5e62bfdca8d78f154d215ee18a44dbcd0f4b7c4ef22"
+      "size_bytes": 2855,
+      "sha256": "0c499b3d2a85220aa32a3b4a3bad2c77a03b6b3c4864c2b292670ab3591578a6"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/scan_only_quote.pdf",
-      "size_bytes": 1623,
-      "sha256": "20cd624743562b6d7cc65f3592a6ab137884479090c306988bd7a739a79f2036"
+      "size_bytes": 1599,
+      "sha256": "9a7ec2a53018de047a82ff192f686425e41f5c5cce05bf34fd255cfc4d361acb"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/unsupported_business_days.csv",
       "size_bytes": 954,
-      "sha256": "eb3a04258984195a1892bb6a04d33bc39f7f0bac88de7c663836a17e0838d85a"
+      "sha256": "c923902b10a6736dc18eda886869f0a868445d4896282c4562ade34d86ea7641"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/negative_controls/wrong_part_quote.csv",
-      "size_bytes": 941,
-      "sha256": "09832d58cf1bbd2a12410a64d0357c68d36bb387ccf7029dc99ab382b4b56cd5"
+      "size_bytes": 945,
+      "sha256": "dfc20b8d56c8ba829ee6d47e0de03baa08fb7780cc52ce1a83b5b8a870816773"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/policy/electronics_edge_policy.txt",
-      "size_bytes": 1247,
-      "sha256": "b082ff84c24d2e3894b237f0f5b8603e3875216c1edd2343e157543f73f630c6"
+      "size_bytes": 1419,
+      "sha256": "a09c9f3baa3ff9c298a7aba33fdb8641071d6b7b9cc2f77d48bc0df3dc7493ea"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/policy/reviewed_clauses.json",
-      "size_bytes": 2036,
-      "sha256": "42e3cb8bdf62fc2421a7ab505511d641a2db227222cae0d47e5b440202dea13b"
+      "size_bytes": 2206,
+      "sha256": "65b3eff92130a1f3210c3e2a73be4afbc0546e89e8dcd075e769c12db6a997bd"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/policy/upload_metadata.json",
-      "size_bytes": 409,
-      "sha256": "d5bed7ee076d4f6e99ecbe450dcf6cd08c445285dc167406a78aaafae16cad6a"
+      "size_bytes": 420,
+      "sha256": "5a8ce43bca6e9021a3e5d19efd34e953ecf3890cccfd4ecdc4e7ed77cf663c09"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/great_wall_quote.csv",
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/cascade_quote.csv",
+      "size_bytes": 917,
+      "sha256": "adc01437f10b66c550ac6f541b3b20b26b0d0412e516e20ae7a8cedf9e273eca"
+    },
+    {
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/cascade_quote.pdf",
+      "size_bytes": 2970,
+      "sha256": "1d699dee165b69fd3617512271b5350a000fbf6085a7c7cdf43781405ed10d4c"
+    },
+    {
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/golden_dragon_quote.csv",
       "size_bytes": 957,
-      "sha256": "b827fc1fd912865a329114dd13c4e96522dc51730e619492063cc84fdb0c32bb"
+      "sha256": "8953a0960124113b097ebf9a2a1c885abbc28097dd1555de9c4fbd1b4c153999"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/great_wall_quote.pdf",
-      "size_bytes": 2998,
-      "sha256": "2c09e4268e4652e7a46d02210e425dfbc57114039c72e0a02176a218d4280284"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/golden_dragon_quote.pdf",
+      "size_bytes": 3018,
+      "sha256": "4a7e274d6d41b36345569487a1cdc39c7feca5612346a1fdedd6afb4f45b25ec"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/redwood_quote.csv",
-      "size_bytes": 931,
-      "sha256": "20c8a7cc6453b42ef8689414ce8c2ebbd2092604bf81be8359cd274874572105"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/lotus_quote.csv",
+      "size_bytes": 932,
+      "sha256": "126d8f0af8bf1faf2fd42a1d4e3e00520ccbff4ef6c839e6c9308707ca91db32"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/redwood_quote.pdf",
-      "size_bytes": 4127,
-      "sha256": "eb6dbb6e4a6213400794e5beba66088962e41accbb5debb11cea26e3c0987404"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/lotus_quote.pdf",
+      "size_bytes": 4154,
+      "sha256": "78d42a57513d34a7916f8d2a8628472d05ec0456e7d1c2beb4d1992a58cc9440"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/schwarzwald_quote.csv",
-      "size_bytes": 943,
-      "sha256": "62c226b4337c8d23388718a83b99130020c7057fbe59b3fdbc210a3d2547030a"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_circuits_quote.csv",
+      "size_bytes": 933,
+      "sha256": "0c03ebe5fad3516ccaf283c432c09b0f4d5237e7a90f781a20436c4b45cb837a"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_quote.csv",
-      "size_bytes": 920,
-      "sha256": "f6436aab177ecc7ac6a4b5475fa1a25c9ed93b2f4268e56e1f4e860ebb1449fb"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_semitech_quote.csv",
+      "size_bytes": 933,
+      "sha256": "ccbfcb21a81d916020fe12353c8c42752b0fb413ebde596e46ee2ef9979abad0"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_quote.pdf",
-      "size_bytes": 2981,
-      "sha256": "1d3b3bc3ab80be0ca7059dc8b4c3aa4a86a9e10de265e0f77e68f23fb46a25c5"
-    },
-    {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_semitech_quote.csv",
-      "size_bytes": 920,
-      "sha256": "fed97a9a2d07caaad033cf076413cb95782898350aa8f16667b67eef657410d4"
-    },
-    {
-      "path": "data/generated/inputs/development/full_flow_demo3/quotes/sterling_semitech_quote.pdf",
-      "size_bytes": 3210,
-      "sha256": "6cbed98f9aa0388037ee432d10f72c87a1c5fd4bd6777ab3fc029aa2c5dacd99"
+      "path": "data/generated/inputs/development/full_flow_demo3/quotes/pacific_rim_semitech_quote.pdf",
+      "size_bytes": 3220,
+      "sha256": "7b77326e769f424956d58c6aedeff820770efda74c588035b6ef15492a8ba52b"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/confirmed_requirement.json",
-      "size_bytes": 631,
-      "sha256": "4b49afd4736ef3d7b90017108265659a7fd7094310b1a394feb4993ce4e70a90"
+      "size_bytes": 627,
+      "sha256": "87c9b7247f544894a8894d6039aae38a3dd8cac1be5980a360ab475fe6c81ca8"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/procurement_requirement.md",
-      "size_bytes": 616,
-      "sha256": "f0c3514fa3457ab854779ccc92adfda1d6fc3144589f6f4b19f2f346367657cd"
+      "size_bytes": 612,
+      "sha256": "f4109b08a8e83e5d6a2ba03fda5b73da2528161052bce863176ac1df93e2524b"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/procurement_requirement.pdf",
-      "size_bytes": 3115,
-      "sha256": "cfb2953a370dadbdefa67cde267cc0d115a74f62d7cf5ac06bd29ee9e32b0455"
+      "size_bytes": 3128,
+      "sha256": "f3bf058188f465ccad09c1aee4f2ce3e7668d757ef5c577b82bb515f3a917b37"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/procurement_requirement.txt",
-      "size_bytes": 561,
-      "sha256": "3a31c9911aa911bae2197d9c924370d590e3dd25ee09fbd4abd6e1ad88419d96"
+      "size_bytes": 557,
+      "sha256": "dba0054d7fbd19dae6d519e9cf1e5a19392e65b85b5c1bb4014d45460b645a83"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/revisions/confirmed_requirement_rev2.json",
-      "size_bytes": 631,
-      "sha256": "3ae10c330627b711627cd6dd13e36ff35da0346dd9b0efc221787d33caa603a0"
+      "size_bytes": 627,
+      "sha256": "34082088508df133d73aad7bb3e8e278cfa29cdf190ada56f2e688d7a1778e9f"
     },
     {
       "path": "data/generated/inputs/development/full_flow_demo3/requirement/revisions/procurement_requirement_rev2.txt",
-      "size_bytes": 561,
-      "sha256": "0119af869a537d2097e8c5bb3a8848bb5f6cf129498724b101a434a86d7d0bc5"
+      "size_bytes": 557,
+      "sha256": "fd6dd30096c4360b3a007425bd31d1a673c8e3fcef87e91335135255d3889862"
     },
     {
-      "path": "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-023_quote_revision_2.csv",
-      "size_bytes": 943,
-      "sha256": "553fb012cef2194fabd71636629d85758997d36d17a7ff4b008d43aef354ee37"
+      "path": "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-032_quote_revision_2.csv",
+      "size_bytes": 941,
+      "sha256": "8314c1e982c08e853ba757b5ee2a674ecb216fb2e0f1e210015a33f19f372a5f"
+    },
+    {
+      "path": "data/generated/inputs/development/full_flow_demo3/supplier_history/2026-08-06-v1/manifest.json",
+      "size_bytes": 1621,
+      "sha256": "81f789ac72e2516720405b22260c04f6825916a1a313ce9a999b1c4919949078"
+    },
+    {
+      "path": "data/generated/inputs/development/full_flow_demo3/supplier_history/2026-08-06-v1/supplier_performance.json",
+      "size_bytes": 8015,
+      "sha256": "40147bcbfc278ca9ca27d893ab16056234aed1878a25c3a47f2ed1b6267d8c34"
     }
   ]
 }

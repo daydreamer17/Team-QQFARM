@@ -1,19 +1,19 @@
 SYNTHETIC PROCUREMENT REQUIREMENT
-Manufacturer: QQ Demo Components
+Manufacturer: Northstar Logic
 Part: QW-MCU9-DEMO
-Package: QFN-32
-Revision: R1
+Package: QFN-48
+Revision: R3
 Condition: NEW
 Base unit: piece
-Quantity: 1000 pieces
+Quantity: 2400 pieces
 Quantity unit: piece
-Budget: SGD 8000.00 before tax
+Budget: SGD 22000.00 before tax
 Currency: SGD
 Budget includes shipping: yes
 Other fees must be confirmed: yes
-Planned order: 2026-10-10
-Required arrival: 2026-10-20
-Delivery location: SG-DEMO-01
+Planned order: 2026-11-02
+Required arrival: 2026-11-14
+Delivery location: SG-PREFERENCE-LAB-02
 Substitutes: not allowed
 Primary ranking preference: LOWEST_CONFIRMED_TOTAL_COST
 Secondary ranking preference: none
