@@ -2037,6 +2037,17 @@
   color: var(--muted);
 }
 
+.review-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.review-card-actions .button {
+  min-height: 38px;
+  padding: 0.55rem 0.8rem;
+}
+
 .review-rule-details,
 .review-records {
   color: var(--muted);
@@ -2380,6 +2391,7 @@
 .supplier-context-heading { min-width: 250px; margin-right: auto; }
 .supplier-context h2 { margin: 0 0 3px; }
 .supplier-context p { margin: 0; color: #53617a; font-size: 13px; }
+.supplier-context .supplier-scope-copy { margin-top: 4px; color: #2f5f9f; font-weight: 700; }
 .supplier-context-tags { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .supplier-context-tags span, .signal-badge { border-radius: 999px; background: #eaf2ff; color: #2159ca; padding: 6px 11px; font-size: 12px; font-weight: 700; }
 .supplier-kpis { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }

@@ -239,7 +239,7 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
     ):
         raise ValueError("cost tolerance requires cost-primary ranking")
     requested_suppliers = set(effective_preferences.excluded_supplier_ids)
-    available_suppliers = set(request.supplier_bindings.values())
+    available_suppliers = set(request.supplier_bindings.values()) | set(base_preferences.excluded_supplier_ids)
     explicitly_requested = (
         set(changes.excluded_supplier_ids or ())
         if "excluded_supplier_ids" in changes.model_fields_set else set()

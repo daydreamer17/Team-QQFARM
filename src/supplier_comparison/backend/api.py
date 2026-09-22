@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -43,6 +44,9 @@ from .service import BackendError, BackendService, ConflictError, NotFoundError
 from .settings import settings
 from .summaries import SUMMARY_PROMPT_VERSION, SummaryModelConfig
 from .worker_health import worker_heartbeat_status
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 IdempotencyKey = Annotated[
@@ -341,7 +345,11 @@ class PublishPolicyRequest(ApiModel):
 
 
 def _request_id(request: Request) -> str:
-    return request.headers.get("X-Request-ID") or f"request_{uuid4().hex}"
+    request_id = getattr(request.state, "request_id", None)
+    if request_id is None:
+        request_id = request.headers.get("X-Request-ID") or f"request_{uuid4().hex}"
+        request.state.request_id = request_id
+    return request_id
 
 
 def _error_response(
@@ -405,7 +413,14 @@ def create_app(
         )
 
     @app.exception_handler(Exception)
-    async def unexpected_error_handler(request: Request, _exc: Exception) -> JSONResponse:
+    async def unexpected_error_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception(
+            "Unhandled API error request_id=%s method=%s path=%s",
+            _request_id(request),
+            request.method,
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
         return _error_response(
             request,
             status_code=500,
@@ -855,8 +870,10 @@ def create_app(
         return service.list_investigations(task_id)
 
     @app.get('/api/v1/tasks/{task_id}/selection-gaps')
-    def selection_gaps(task_id: str, expected_task_revision: int = Query(ge=1)):
-        return service.selection_gaps(task_id, expected_task_revision=expected_task_revision)
+    def selection_gaps(task_id: str, expected_task_revision: int = Query(ge=1),
+                       expected_result_id: str | None = None):
+        return service.selection_gaps(task_id, expected_task_revision=expected_task_revision,
+                                      expected_result_id=expected_result_id)
 
     @app.post('/api/v1/tasks/{task_id}/requirement-simulations')
     def requirement_simulation(task_id: str, body: RequirementSimulationRequest):

@@ -17,11 +17,13 @@ from supplier_comparison.extraction.csv_parser import (
 from supplier_comparison.extraction.contracts import DocumentContext
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.errors import ContractError, UnreadableInputError
+from supplier_comparison.extraction.evidence import source_semantic_contexts
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.quote_field_rules import (
     extract_document_unit_price_observations,
     select_document_unit_price,
 )
+from supplier_comparison.extraction.review import has_other_fee_source_semantics
 from supplier_comparison.rag.uploads import (
     PolicyDraftClauseInput,
     PolicyFileImportMetadata,
@@ -272,6 +274,35 @@ def test_full_flow_demo3_primary_pdfs_pass_production_parser_and_scan_fails() ->
             ),
         )
     assert exc_info.value.code == "blank_pdf"
+
+
+def test_great_wall_handling_column_is_valid_other_fee_evidence() -> None:
+    parsed = PdfQuoteParser().parse(
+        DATASET / "quotes/great_wall_quote.pdf",
+        DocumentContext(
+            task_id="TASK-FF3-HANDLING",
+            task_revision=1,
+            scenario_id="MCU-FULL-FLOW-EDGE-003",
+            quote_id="FF3-Q-D",
+            quote_version=1,
+            document_id="FF3-DOC-D-V1",
+            document_version=1,
+            supplier_id="SUP-029",
+        ),
+    )
+    contexts = source_semantic_contexts(parsed)
+    handling_sources = [
+        source
+        for source in parsed.sources
+        if source.raw_text in {"Handling", "SGD 75.00"}
+    ]
+
+    assert {source.raw_text for source in handling_sources} == {"Handling", "SGD 75.00"}
+    assert all(
+        has_other_fee_source_semantics(contexts[source.source_id])
+        for source in handling_sources
+    )
+    assert not has_other_fee_source_semantics("Special handling instructions apply")
 
 
 def test_full_flow_demo3_ambiguous_price_control_is_deterministically_conflicting() -> None:

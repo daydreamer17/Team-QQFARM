@@ -11,7 +11,8 @@ from pathlib import Path
 from langgraph.checkpoint.postgres import PostgresSaver
 
 from .backend.checkpoints import checkpoint_connection_string
-from .backend.conversations import ConversationModelConfig, generate_conversation_turn
+from .backend.conversations import CONVERSATION_PROMPT_VERSION, ConversationModelConfig, process_conversation_turn
+from .backend.decision_intents import CONVERSATION_INTENT_VERSION
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
@@ -139,6 +140,8 @@ def _run_decision_conversation_job(
 ) -> dict:
     context = service.conversation_job_context(job_id)
     attempts = 0
+    started_at = time.monotonic()
+    stage = "intent"
     try:
         config = ConversationModelConfig.from_env()
         if config is None:
@@ -147,28 +150,51 @@ def _run_decision_conversation_job(
                 attempts=0,
                 error_code="conversation_model_unconfigured",
             )
-        turn, attempts = generate_conversation_turn(context, config)
+        def record_stage(next_stage: str, calls: int) -> None:
+            nonlocal stage
+            stage = next_stage
+            service.record_conversation_stage(
+                job_id, stage=stage, calls_used=calls, elapsed_seconds=time.monotonic() - started_at,
+                provider=config.provider, model_id=config.model_id,
+                prompt_version=f"{CONVERSATION_INTENT_VERSION}+{CONVERSATION_PROMPT_VERSION}",
+            )
+
+        turn, attempts = process_conversation_turn(context, config, on_stage=record_stage)
         return service.complete_conversation_job(
             job_id,
             turn=turn,
             attempts=attempts,
             provider=config.provider,
             model_id=config.model_id,
+            prompt_version=f"{CONVERSATION_INTENT_VERSION}+{CONVERSATION_PROMPT_VERSION}",
         )
     except ModelClientError as exc:
         attempts += exc.attempts
-        message = (
-            "回答未通过事实与引用校验，请重试或缩小问题范围。"
-            if exc.error_code == "conversation_model_output_invalid"
-            else str(exc)
-        )
+        message = {
+            "conversation_model_output_invalid": "本次说明未通过事实与引用核验，未更改正式结果。可以重试生成说明。",
+            "conversation_intent_invalid": "未能可靠识别本次请求，尚未生成模拟。请明确主次排序指标、容差或供应商名称后重试。",
+            "conversation_intent_mismatch": "回答与已识别的请求不一致，本次未保存，也未更改正式结果。请重试。",
+        }.get(exc.error_code, str(exc))
         service.fail_conversation_job(
             job_id,
             code=exc.error_code,
             message=message,
             attempts=attempts,
-            **({"diagnostic": str(exc)[:1000]}
-               if exc.error_code == "conversation_model_output_invalid" else {}),
+            diagnostic=f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; {str(exc)}"[:1000],
+        )
+        raise
+    except BackendError as exc:
+        messages = {
+            "selection_review_required": "参与本次模拟的报价仍有待审核字段。请到“待处理事项／集中审核”确认这些字段，重新分析后再生成模拟；已排除报价重新纳入时也需要通过审核。",
+            "conversation_stale": "当前对话依据的结果已过期。请打开最新决策结果后重新提出模拟请求。",
+            "selection_input_stale": "计算期间任务版本发生变化，本次未保存。请刷新最新结果后重试。",
+            "conversation_model_output_invalid": "本次回复在保存前校验失败，未更改正式结果。请重试；若持续失败，请提供任务编号。",
+        }
+        service.fail_conversation_job(
+            job_id, code=exc.code,
+            message=messages.get(exc.code, "本次模拟或保存未完成。请核对当前版本与待审核字段，再重试。"),
+            attempts=attempts,
+            diagnostic=f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; code={exc.code}; {str(exc)}"[:1000],
         )
         raise
     except Exception as exc:

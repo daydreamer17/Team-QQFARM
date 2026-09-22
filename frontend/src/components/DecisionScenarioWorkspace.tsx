@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   api,
   ApiClientError,
@@ -62,6 +62,7 @@ interface DisplayCitation {
 }
 
 function citationTitle(id: string) {
+  if (id.startsWith('SIMULATION:')) return '本次条件的确定性模拟（未应用）'
   if (id.startsWith('REQUIREMENT:')) return '已确认采购需求与偏好'
   if (id.startsWith('RESULT:')) return '当前决策结果'
   if (id.startsWith('QUOTE:')) return '供应商报价'
@@ -93,14 +94,17 @@ function citationPresentation(content: string, referenceIds: string[]) {
 }
 
 function CitedText({ text }: { text: string }) {
-  return text.split(/(\[\d+\])/g).map((part, index) => (
+  return text.split(/(\[\d+\]|\*\*[^*]+\*\*)/g).map((part, index) => (
     /^\[\d+\]$/.test(part)
       ? <span className="chat-citation-marker" key={`${part}-${index}`}>{part}</span>
+      : part.startsWith('**') && part.endsWith('**')
+        ? <strong key={`emphasis-${index}`}>{part.slice(2, -2)}</strong>
       : part
   ))
 }
 
 function MessageBubble({
+  taskId,
   message,
   currency,
   readOnly,
@@ -109,6 +113,7 @@ function MessageBubble({
   onConfirm,
   onOpenCitation,
 }: {
+  taskId: string
   message: DecisionMessage
   currency: string
   readOnly: boolean
@@ -127,6 +132,9 @@ function MessageBubble({
       {message.content && <p><CitedText text={citation.displayContent} /></p>}
       {message.status === 'FAILED' && (
         <p className="chat-message-error">生成失败：{message.error_message ?? message.error_code ?? '未知错误'}</p>
+      )}
+      {message.status === 'FAILED' && message.error_code === 'selection_review_required' && (
+        <Link className="button button-secondary" to={`/tasks/${taskId}/review#excluded-review`}>前往集中审核</Link>
       )}
       {citation.citations.length > 0 && (
         <footer className="chat-citations">
@@ -246,6 +254,7 @@ export function DecisionScenarioWorkspace({
   const [message, setMessage] = useState('')
   const [streamingText, setStreamingText] = useState('')
   const [streamError, setStreamError] = useState('')
+  const [processingStage, setProcessingStage] = useState('正在识别您的问题与偏好')
   const [queuedTurn, setQueuedTurn] = useState<{ conversationId: string; messageId: string } | null>(null)
   const [confirmedIntents, setConfirmedIntents] = useState<Set<string>>(() => new Set())
   const [primaryCriterion, setPrimaryCriterion] = useState('')
@@ -258,6 +267,7 @@ export function DecisionScenarioWorkspace({
   const [clearExclusions, setClearExclusions] = useState(false)
   const [formError, setFormError] = useState('')
   const [selectedCitationId, setSelectedCitationId] = useState<string | null>(null)
+  const [scenarioManagerOpen, setScenarioManagerOpen] = useState(!compact)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const readOnly = !result.is_current || task.status === 'ABANDONED'
@@ -350,6 +360,17 @@ export function DecisionScenarioWorkspace({
       const payload = parse(event)
       if (typeof payload.delta === 'string') setStreamingText((current) => current + payload.delta)
     }
+    const stageChanged = (event: Event) => {
+      const payload = parse(event)
+      if (payload.reply_to_message_id !== pendingReplyTo) return
+      const labels: Record<string, string> = {
+        intent: '正在识别您的问题与偏好',
+        simulation: '正在按新条件进行确定性模拟，不会修改正式结果',
+        narration: '正在生成事实说明并核验引用',
+        persist: '正在保存本次回复',
+      }
+      setProcessingStage(labels[String(payload.stage)] ?? '正在处理本次请求')
+    }
     const completed = (event: Event) => {
       const payload = parse(event)
       const assistant = payload.message as { reply_to_message_id?: string } | undefined
@@ -375,6 +396,7 @@ export function DecisionScenarioWorkspace({
       })
     }
     source.addEventListener('assistant.started', started)
+    source.addEventListener('assistant.stage', stageChanged)
     source.addEventListener('assistant.delta', delta)
     source.addEventListener('assistant.completed', completed)
     source.addEventListener('assistant.failed', failed)
@@ -432,6 +454,7 @@ export function DecisionScenarioWorkspace({
     ),
     onSuccess: (response) => {
       setConfirmedIntents((current) => new Set(current).add(response.decision_intent_id))
+      setScenarioManagerOpen(true)
       void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-scenarios'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-intents'] })
     },
@@ -445,6 +468,7 @@ export function DecisionScenarioWorkspace({
     ),
     onSuccess: () => {
       setFormError('')
+      setScenarioManagerOpen(true)
       void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'decision-scenarios'] })
     },
   })
@@ -639,11 +663,6 @@ export function DecisionScenarioWorkspace({
           </header>
 
           <div className="decision-chat-transcript" aria-live="polite" ref={transcriptRef}>
-            {activeConversation && activeConversation.base_result_id !== result.result_id && (
-              <div className="run-notice">
-                这是 Revision {activeConversation.base_task_revision} 的历史对话，仅作背景；新回复会基于当前冻结结果重新核验。
-              </div>
-            )}
             {!activeConversation && (
               <div className="decision-chat-empty">
                 <strong>和当前冻结结果对话</strong>
@@ -658,6 +677,7 @@ export function DecisionScenarioWorkspace({
             )}
             {activeConversation?.messages.map((item) => (
               <MessageBubble
+                taskId={task.task_id}
                 key={item.message_id}
                 message={item}
                 currency={viewCurrency}
@@ -674,10 +694,15 @@ export function DecisionScenarioWorkspace({
             {(streamingText || activeTurn) && (
               <article className="decision-chat-message chat-role-assistant chat-streaming">
                 <header><strong>AI 决策助手</strong><span>生成并校验中</span></header>
-                <p>{streamingText || '正在读取冻结事实；完整回答通过事实与引用校验后才会显示。'}</p>
+                <p>{streamingText || processingStage}</p>
               </article>
             )}
             {streamError && <div className="chat-message-error">{streamError}</div>}
+            {activeConversation && activeConversation.base_result_id !== result.result_id && (
+              <div className="run-notice">
+                这是 Revision {activeConversation.base_task_revision} 的历史对话，仅作背景；新回复会基于当前冻结结果重新核验。
+              </div>
+            )}
           </div>
 
           {compact && activeConversation && (
@@ -711,7 +736,11 @@ export function DecisionScenarioWorkspace({
           </form>
         </article>
 
-        <details className={`decision-scenario-manager${compact ? ' decision-scenario-manager-compact' : ''}`} open={compact ? undefined : true}>
+        <details
+          className={`decision-scenario-manager${compact ? ' decision-scenario-manager-compact' : ''}`}
+          open={scenarioManagerOpen}
+          onToggle={(event) => setScenarioManagerOpen(event.currentTarget.open)}
+        >
           <summary>Scenario 管理 · {resultScenarios.length} 个</summary>
           <aside className="scenario-workbench">
           <details className="scenario-builder">

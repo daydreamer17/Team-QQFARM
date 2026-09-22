@@ -10,6 +10,7 @@ import type {
   TaskQuote,
 } from '../api/types'
 import { fieldLabel } from '../lib/presentation'
+import { canConfirmReviewField, fieldCorrectionErrorMessage } from '../lib/reviewPanel'
 import {
   reviewFindingAction,
   reviewFindingActionMessages,
@@ -29,7 +30,9 @@ interface EditorState {
   normalizedValue: string
   unit: string
   reason: string
-  knownAmountAvailable: boolean
+  amountField?: QuoteField
+  amount?: string
+  currency?: string
 }
 
 const feeStatusFields = new Set([
@@ -119,8 +122,8 @@ function errorMessage(error: unknown, quotes: TaskQuote[] = []) {
     error instanceof ApiClientError &&
     error.code === 'field_correction_batch_invalid'
   ) {
-    const summary = blockingFindingSummary(error.details, quotes)
-    return `提交失败：${summary || '字段版本或修正内容已经变化'}。请刷新后重新核对。`
+    return fieldCorrectionErrorMessage(error, quotes)
+      ?? `提交失败：${blockingFindingSummary(error.details, quotes) || '修正内容未通过校验'}。`
   }
   return error instanceof ApiClientError ? error.message : '字段修正失败。'
 }
@@ -198,6 +201,15 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
       })),
     [fieldQueries, quotes],
   )
+  const usableDrafts = useMemo(() => Object.fromEntries(Object.entries(drafts).filter(([key, state]) => {
+    const row = reviewRows.find(({ quote }) => quote.quote_id === state.quote.quote_id)
+    const latest = row?.query.data?.fields.find((field) => field.field_name === state.field.field_name)
+    return Boolean(
+      latest && latest.field_version === state.field.field_version &&
+      !(feeStatusFields.has(latest.field_name) && state.normalizedValue === 'UNKNOWN') &&
+      key === state.quote.quote_id + ':' + state.field.field_name,
+    )
+  })), [drafts, reviewRows])
 
   const correction = useMutation({
     mutationFn: (states: EditorState[]) =>
@@ -243,7 +255,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
       ),
     [reviewRows],
   )
-  const stagedBlockingCount = blockingKeys.filter((key) => drafts[key]).length
+  const stagedBlockingCount = blockingKeys.filter((key) => usableDrafts[key]).length
   const allBlockingStaged =
     blockingKeys.length === 0 || stagedBlockingCount === blockingKeys.length
 
@@ -261,7 +273,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
     const amountField = amountFieldName
       ? response.fields.find((item) => item.field_name === amountFieldName)
       : undefined
-    setEditor(drafts[key] ?? {
+    setEditor(usableDrafts[key] ?? {
       quote,
       finding,
       field,
@@ -271,9 +283,9 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
         : editableValue(field.normalized_value),
       unit: field.unit ?? '',
       reason: '人工核对原始报价后修正',
-      knownAmountAvailable:
-        amountField?.normalized_value !== null &&
-        amountField?.normalized_value !== undefined,
+      amountField,
+      amount: editableValue(amountField?.normalized_value),
+      currency: String(response.fields.find((item) => item.field_name === 'currency')?.normalized_value ?? task.requirement.currency),
     })
     correction.reset()
   }
@@ -282,7 +294,18 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
     event.preventDefault()
     if (!editor) return
     const key = editor.quote.quote_id + ':' + editor.field.field_name
-    setDrafts((current) => ({ ...current, [key]: editor }))
+    setDrafts((current) => {
+      const next = { ...current, [key]: editor }
+      if (editor.amountField && editor.normalizedValue === 'KNOWN_AMOUNT') {
+        next[editor.quote.quote_id + ':' + editor.amountField.field_name] = {
+          quote: editor.quote, finding: editor.finding, field: editor.amountField,
+          rawValue: `${editor.currency} ${editor.amount}`,
+          normalizedValue: editor.amount?.trim() ?? '', unit: editor.currency ?? '',
+          reason: editor.reason,
+        }
+      }
+      return next
+    })
     setEditor(null)
   }
 
@@ -311,15 +334,15 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
         normalizedValue: editableValue(field.normalized_value),
         unit: field.unit ?? '',
         reason: '人工核对原报价，确认系统提取值正确',
-        knownAmountAvailable:
-          amount?.normalized_value !== null && amount?.normalized_value !== undefined,
+        amountField: amount,
+        amount: editableValue(amount?.normalized_value),
       },
     }))
     setEditor(null)
   }
 
   function submitAllCorrections() {
-    const states = Object.values(drafts)
+    const states = Object.values(usableDrafts)
     if (states.length > 0 && allBlockingStaged) correction.mutate(states)
   }
 
@@ -358,12 +381,10 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                   const field = query.data.fields.find(
                     (item) => item.field_name === finding.field_name,
                   )
-                  const staged = drafts[key]
+                  const staged = usableDrafts[key]
                   const isEditing = editor?.quote.quote_id === quote.quote_id &&
                     editor.field.field_name === finding.field_name
-                  const canConfirm =
-                    field?.raw_value !== null && field?.raw_value !== undefined &&
-                    field?.normalized_value !== null && field?.normalized_value !== undefined
+                  const canConfirm = canConfirmReviewField(field)
                   const severity = findingGroup.some((item) => item.severity === 'BLOCKING')
                     ? 'BLOCKING'
                     : findingGroup.some((item) => item.severity === 'WARNING')
@@ -466,15 +487,12 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                                     onChange={(event) => setEditor({ ...editor, normalizedValue: event.target.value })}
                                   >
                                     <option value="">请选择已经人工确认的实际状态</option>
-                                    {resolvingFeeStatuses
-                                      .filter(([value]) => value !== 'KNOWN_AMOUNT' || editor.knownAmountAvailable)
-                                      .map(([value, label]) => (
+                                    {resolvingFeeStatuses.map(([value, label]) => (
                                         <option key={value} value={value}>{value} — {label}</option>
                                       ))}
                                   </select>
                                   <small>
-                                    UNKNOWN 表示仍然未知，不能解除成本计算阻塞。
-                                    {!editor.knownAmountAvailable && ' 当前报价没有对应费用金额，因此不能选择 KNOWN_AMOUNT。'}
+                                    已确认具体金额时，选择 KNOWN_AMOUNT 并填写金额，两项一起保存。
                                   </small>
                                 </>
                               ) : (
@@ -485,6 +503,14 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                                 />
                               )}
                             </label>
+                            {feeStatusFields.has(editor.field.field_name) && editor.normalizedValue === 'KNOWN_AMOUNT' && (
+                              <label>
+                                已确认费用金额（{editor.currency}）
+                                <input required inputMode="decimal" pattern="\d+(?:\.\d{1,4})?"
+                                  value={editor.amount ?? ''}
+                                  onChange={(event) => setEditor({ ...editor, amount: event.target.value })} />
+                              </label>
+                            )}
                             <label>
                               单位（没有可留空）
                               <input value={editor.unit} onChange={(event) => setEditor({ ...editor, unit: event.target.value })} />
@@ -524,7 +550,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
           type="button"
           disabled={
             correction.isPending ||
-            Object.keys(drafts).length === 0 ||
+            Object.keys(usableDrafts).length === 0 ||
             !allBlockingStaged
           }
           onClick={submitAllCorrections}

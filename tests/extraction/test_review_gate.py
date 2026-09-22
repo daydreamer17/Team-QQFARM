@@ -648,6 +648,8 @@ def test_tax_evidence_cannot_prove_other_fee_status(quote_dictionary) -> None:
     "evidence",
     [
         "Handling and admin Included in the quoted line rate",
+        "Handling SGD 75.00",
+        "SGD 75.00 Handling",
         "Ancillary charges NOT APPLICABLE",
         "Extras policy AMOUNT",
         "Administration fee status AMOUNT",
@@ -1013,6 +1015,45 @@ def test_distinct_document_unit_prices_block_single_selected_value(
         and "CRITICAL_FIELD_CONFLICT" in finding.codes
         for finding in envelope.review.findings
     )
+
+
+@pytest.mark.parametrize("use_correction", [False, True])
+def test_human_can_adopt_same_price_despite_automatic_evidence_doubt(quote_dictionary, use_correction):
+    batch = _replace_candidate(_batch(quote_dictionary), "unit_price", normalized_value="6.88")
+    before = _review(batch, quote_dictionary)
+    assert any("NORMALIZED_PRICE_NOT_IN_EVIDENCE" in finding.codes for finding in before.review.findings)
+    events, corrections = (), ()
+    if use_correction:
+        batch, correction = apply_candidate_correction(
+            batch, field_name="unit_price", action=CorrectionAction.USER_CORRECTION,
+            raw_value="6.88", normalized_value="6.88", unit="SGD",
+            reason_code="HUMAN_SELECTED_VALUE", reason="Buyer checked the effective quote.",
+            reviewer_id="test-user", reviewed_at=NOW,
+        )
+        corrections = (correction,)
+    else:
+        events = (create_review_event(batch, field_name="unit_price", action=HumanReviewAction.CONFIRM_VALUE,
+                                      reviewer_id="test-user", reviewed_at=NOW),)
+    after = review_extraction_batch(batch, quote_dictionary, CRITICALITY_CONTEXT,
+        input_is_synthetic=True, reviewed_at=NOW, review_events=events, corrections=corrections)
+    price_findings = [finding for finding in after.review.findings if finding.field_name == "unit_price"]
+    assert price_findings
+    assert all(finding.resolved for finding in price_findings)
+    assert all(finding.resolution_event_id for finding in price_findings)
+    assert "unit_price" not in after.submission_blocking_fields
+
+
+def test_human_confirmation_cannot_accept_fabricated_source_quote(quote_dictionary):
+    batch = _batch(quote_dictionary)
+    price = next(item for item in batch.candidates if item.field_name == "unit_price")
+    batch = _replace_candidate(batch, "unit_price", source_refs=(SourceCitation(
+        source_id=price.source_refs[0].source_id, quoted_text="invented text outside the file"),))
+    event = create_review_event(batch, field_name="unit_price", action=HumanReviewAction.CONFIRM_VALUE,
+                                reviewer_id="test-user", reviewed_at=NOW)
+    result = review_extraction_batch(batch, quote_dictionary, CRITICALITY_CONTEXT,
+        input_is_synthetic=True, reviewed_at=NOW, review_events=(event,))
+    assert result.review_status == ReviewStatus.REJECTED
+    assert any("SOURCE_QUOTE_MISMATCH" in finding.codes and not finding.resolved for finding in result.review.findings)
 
 
 def test_model_failure_is_not_disguised_as_missing_fields() -> None:

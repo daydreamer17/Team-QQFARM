@@ -17,9 +17,12 @@ from supplier_comparison.backend.service import (
 from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
 from supplier_comparison.extraction.contracts import (
+    CandidateProducer,
     DocumentContext,
     ExtractionBatch,
+    SourceCitation,
 )
+from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.criticality import POLICY_FIELDS
@@ -541,7 +544,7 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
     assert already_active.value.code == "quote_already_active"
 
 
-def test_unknown_required_fee_blocks_review_and_rolls_back_all_actions(
+def test_unknown_required_fee_can_be_submitted_but_not_calculated(
     service: BackendService,
     tmp_path: Path,
 ) -> None:
@@ -564,43 +567,39 @@ def test_unknown_required_fee_blocks_review_and_rolls_back_all_actions(
             )
         )
 
-    with pytest.raises(BackendError) as blocked:
-        _review_all_fields(
-            service,
-            task,
-            draft,
-            current,
-            key="review-unknown-shipping",
-            overrides={
-                "shipping_fee_status": {
-                    "action": "SET_VALUE",
-                    "raw_value": "Not stated in the quotation",
-                    "normalized_value": "UNKNOWN",
-                    "unit": None,
-                    "reason": "Supplier has not confirmed the shipping charge.",
-                }
-            },
-        )
-
-    assert blocked.value.code == "quote_draft_review_failed"
-    assert "shipping_fee_status" in blocked.value.details[
-        "submission_blocking_fields"
-    ]
-    assert blocked.value.details["unconfirmed_fields"] == []
-    assert any(
-        error["code"] == "FEE_STATUS_UNKNOWN"
-        and error["field_names"] == ["shipping_fee_status"]
-        for error in blocked.value.details["errors"]
+    saved = _review_all_fields(
+        service,
+        task,
+        draft,
+        current,
+        key="review-unknown-shipping",
+        overrides={
+            "shipping_fee_status": {
+                "action": "SET_VALUE",
+                "raw_value": "Not stated in the quotation",
+                "normalized_value": "UNKNOWN",
+                "unit": None,
+                "reason": "Supplier has not confirmed the shipping charge.",
+            }
+        },
     )
 
+    assert "shipping_fee_status" not in saved[
+        "submission_blocking_fields"
+    ]
+    assert saved["unconfirmed_fields"] == []
+    assert saved["review_errors"] == []
+
     unchanged = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
-    assert unchanged["draft_revision"] == initial_revision
-    assert unchanged["status"] == "REVIEW_REQUIRED"
-    assert _field(unchanged, "shipping_fee_status")["field_id"] == initial_status[
+    assert unchanged["draft_revision"] == initial_revision + 1
+    assert unchanged["status"] == "READY_TO_SUBMIT"
+    assert _field(unchanged, "shipping_fee_status")["field_id"] != initial_status[
         "field_id"
     ]
-    assert _field(unchanged, "shipping_fee_status")["validation_status"] == "MISSING"
-    assert unchanged["human_review_complete"] is False
+    assert _field(unchanged, "shipping_fee_status")["normalized_value"] == "UNKNOWN"
+    assert unchanged["human_review_complete"] is True
+    assert unchanged["submission_ready"] is True
+    assert unchanged["calculation_ready"] is False
     with service.session_factory() as session:
         artifact_ids_after = tuple(
             session.scalars(
@@ -609,7 +608,7 @@ def test_unknown_required_fee_blocks_review_and_rolls_back_all_actions(
                 )
             )
         )
-    assert artifact_ids_after == artifact_ids_before
+    assert set(artifact_ids_after) > set(artifact_ids_before)
 
 
 @pytest.mark.parametrize(
@@ -649,26 +648,114 @@ def test_full_field_confirmation_cannot_bypass_fee_pair_rules(
         },
     }
 
-    with pytest.raises(BackendError) as blocked:
-        _review_all_fields(
-            service,
-            task,
-            draft,
-            current,
-            key=f"review-{key}",
-            overrides=overrides,
-        )
+    saved = _review_all_fields(
+        service,
+        task,
+        draft,
+        current,
+        key=f"review-{key}",
+        overrides=overrides,
+    )
 
-    assert blocked.value.code == "quote_draft_review_failed"
-    assert blocked.value.details["unconfirmed_fields"] == []
+    assert saved["submission_ready"] is False
+    assert saved["unconfirmed_fields"] == []
     assert any(
         error["code"] == "FEE_STATUS_AMOUNT_CONFLICT"
         and error["field_names"] == [amount_field]
-        for error in blocked.value.details["errors"]
+        for error in saved["review_errors"]
     )
     unchanged = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
-    assert unchanged["draft_revision"] == current["draft_revision"]
-    assert _field(unchanged, amount_field)["normalized_value"] == "0.00"
+    assert unchanged["draft_revision"] == current["draft_revision"] + 1
+    assert _field(unchanged, amount_field)["normalized_value"] == "1.00"
+    with pytest.raises(BackendError):
+        service.submit_quote_draft(
+            task["task_id"], draft["quote_draft_id"],
+            expected_task_revision=task["task_revision"],
+            expected_draft_revision=saved["draft_revision"],
+            idempotency_key=f"submit-invalid-{key}",
+        )
+
+
+@pytest.mark.parametrize(("field_name", "value", "code"), [
+    ("unit_price", "not-a-number", "MONEY_VALUE_INVALID"),
+    ("quote_date", "2026-02-30", "ISO_DATE_REQUIRED"),
+    ("condition", "BAD_ENUM", "NORMALIZED_ENUM_INVALID"),
+    ("price_basis_quantity", "many", "NORMALIZED_TYPE_INVALID"),
+])
+def test_invalid_input_is_saved_then_repaired_before_submission(service, tmp_path, field_name, value, code):
+    task, draft, current = _processed_canonical_draft(service, tmp_path, key=f"invalid-{field_name}")
+    original = _field(current, field_name)
+    saved = _review_all_fields(service, task, draft, current, key=f"save-{field_name}", overrides={field_name: {
+        "action": "SET_VALUE", "raw_value": value, "normalized_value": value, "unit": original["unit"],
+    }})
+    assert _field(saved, field_name)["normalized_value"] == value
+    assert not saved["submission_ready"]
+    issue = next(issue for issue in saved["review_errors"] if issue["code"] == code)
+    assert issue["category"] == "INVALID_INPUT"
+    assert issue["next_action"] and "EDIT_VALUE" in issue["actions"]
+    assert not any("passed deterministic" in issue["message"] for issue in saved["review_errors"])
+    restored = _review_all_fields(service, task, draft, saved, key=f"repair-{field_name}", overrides={field_name: {
+        "action": "SET_VALUE", "raw_value": str(original["normalized_value"]),
+        "normalized_value": original["normalized_value"], "unit": original["unit"],
+    }})
+    assert restored["submission_ready"]
+    service.submit_quote_draft(task["task_id"], draft["quote_draft_id"], expected_task_revision=task["task_revision"],
+        expected_draft_revision=restored["draft_revision"], idempotency_key=f"submit-repaired-{field_name}")
+
+
+def test_sterling_pdf_human_confirmation_survives_semantic_doubts_and_submits(service, tmp_path):
+    """Fixed candidate injection + real PDF parser; this is NOT live model acceptance."""
+    data_dir = ROOT / "data/generated/inputs/development/full_flow_demo3/quotes"
+
+    class FixedSterlingProcessor:
+        def process(self, *, path, media_type, context, budget):
+            with (data_dir / "sterling_semitech_quote.csv").open(newline="", encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                columns, row = reader.fieldnames, next(reader)
+            row.update(scenario_id=context.scenario_id, quote_id=context.quote_id,
+                       quote_version=str(context.quote_version), document_id=context.document_id,
+                       supplier_id=context.supplier_id)
+            csv_path = tmp_path / "fixed-sterling-candidates.csv"
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=columns)
+                writer.writeheader()
+                writer.writerow(row)
+            batch = FixedCsvQuoteParser(service.quote_dictionary).parse_row(csv_path, context, 2)
+            parsed = PdfQuoteParser().parse(path, context)
+            candidates = []
+            for candidate in batch.candidates:
+                updates = {"producer": CandidateProducer.MODEL_ADAPTER,
+                           "adapter_version": "fixed-recovery-test/1", "prompt_version": "fixed-recovery-test/1"}
+                if candidate.source_refs:
+                    needle = "28.00" if candidate.field_name in {"other_fees_amount", "other_fees_status"} else str(candidate.normalized_value)
+                    source = next((source for source in parsed.sources if needle in source.raw_text), parsed.sources[0])
+                    updates["source_refs"] = (SourceCitation(source_id=source.source_id, quoted_text=source.raw_text),)
+                candidates.append(candidate.model_copy(update=updates))
+            return batch.model_copy(update={"schema_version": "1.1", "parsed_input": parsed, "candidates": tuple(candidates)})
+
+    task = service.create_task(requirement(), idempotency_key="create-sterling", scenario_id="sterling-recovery")
+    with (data_dir / "sterling_semitech_quote.pdf").open("rb") as handle:
+        draft = service.upload_quote_draft_stream(task["task_id"], expected_task_revision=1,
+            supplier_id="SUP-030", original_filename="sterling_semitech_quote.pdf", media_type="application/pdf",
+            stream=handle, idempotency_key="upload-sterling", is_synthetic=True, provider="fixed",
+            model_id="fixed-output", environment="FIXED_TEST", prompt_version="fixed-recovery-test/1")
+    DraftReviewRunner(service, processor=FixedSterlingProcessor(), dictionary_path=DICTIONARY_PATH).run_job(draft["job"]["job_id"])
+    current = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
+    assert _field(current, "unit_price")["normalized_value"] == "6.88"
+    assert _field(current, "other_fees_amount")["normalized_value"] == "28.00"
+    assert any("7.20" in item["quoted_text"] for item in _field(current, "unit_price")["review_evidence"])
+    assert {"unit_price", "other_fees_amount"} <= set(current["submission_blocking_fields"])
+    saved = _review_all_fields(service, task, draft, current, key="adopt-current-sterling")
+    assert saved["submission_ready"], saved["review_errors"]
+    assert not saved["review_errors"]
+    assert any(finding["resolved"] for finding in saved["review_findings"] if finding["field_name"] == "unit_price")
+    assert _field(saved, "unit_price")["normalized_value"] == "6.88"
+    assert _field(saved, "other_fees_amount")["normalized_value"] == "28.00"
+    replay = _review_all_fields(service, task, draft, current, key="adopt-current-sterling")
+    assert replay == saved
+    service.submit_quote_draft(task["task_id"], draft["quote_draft_id"], expected_task_revision=1,
+        expected_draft_revision=saved["draft_revision"], idempotency_key="submit-sterling")
+    assert service.get_quote_draft(task["task_id"], draft["quote_draft_id"])["status"] == "SUBMITTED"
 
 
 def test_invalid_full_review_is_atomic_even_after_a_valid_correction_action(

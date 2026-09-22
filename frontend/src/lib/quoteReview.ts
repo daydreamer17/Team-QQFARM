@@ -378,14 +378,7 @@ export function validateQuoteReview(
       const status = value(statusField)
       const amount = value(amountField)
       const label = schemaFields.get(statusField)?.label ?? statusField
-      if (status === 'UNKNOWN') {
-        issues.push(issue(
-          'FEE_STATUS_UNKNOWN',
-          [statusField],
-          relation.group_id,
-          `${label}不能保持“未知”；请依据报价原文或向供应商确认。`,
-        ))
-      } else if (status === 'KNOWN_AMOUNT' && amount === null) {
+      if (status === 'KNOWN_AMOUNT' && amount === null) {
         issues.push(issue(
           'FEE_AMOUNT_REQUIRED',
           [statusField, amountField],
@@ -491,7 +484,8 @@ function normalizedActionValue(
   value: string,
 ): string | number | boolean {
   if (valueType(definition).includes('integer')) {
-    return Number(value)
+    const parsed = Number(value)
+    return /^\d+$/.test(value) && Number.isSafeInteger(parsed) ? parsed : value
   }
   if (valueType(definition).includes('boolean')) return value.toLowerCase() === 'true'
   return value
@@ -501,6 +495,7 @@ export function buildQuoteReviewActions(
   draft: QuoteDraftResponse,
   schema: QuoteFieldSchemaResponse,
   values: QuoteReviewValues,
+  adoptedFields: ReadonlySet<string> = new Set(),
 ): QuoteDraftReviewActionInput[] {
   const byName = new Map(draft.fields.map((field) => [field.field_name, field]))
   const requiredFields = requiredQuoteFields(draft, schema, values)
@@ -547,6 +542,7 @@ export function buildQuoteReviewActions(
     }
     if (
       field.validation_status === 'CONFLICT' &&
+      !adoptedFields.has(field.field_name) &&
       valuesEqual(field, current) &&
       !requiredFields.has(field.field_name)
     ) {

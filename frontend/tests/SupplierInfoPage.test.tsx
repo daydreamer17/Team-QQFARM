@@ -195,7 +195,8 @@ describe('SupplierInfoPage', () => {
     expect(screen.queryByText('当前第 7 版')).not.toBeInTheDocument()
     expect(screen.getByText('历史结果第 7 版')).toBeInTheDocument()
 
-    const supplierList = screen.getByRole('heading', { name: '候选供应商' }).closest('article')!
+    const supplierList = screen.getByRole('heading', { name: '本次比较供应商' }).closest('article')!
+    expect(within(supplierList).getByText('SUP-024 · 本次可行')).toBeInTheDocument()
     await userEvent.click(within(supplierList).getByRole('button', { name: /Redwood Components/ }))
     const detail = screen.getByText('SELECTED SUPPLIER').closest('section')!
     expect(within(detail).getByRole('heading', { name: 'Redwood Components' })).toBeInTheDocument()
@@ -221,7 +222,38 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    const supplierList = (await screen.findByRole('heading', { name: '候选供应商' })).closest('article')!
+    const supplierList = (await screen.findByRole('heading', { name: '本次比较供应商' })).closest('article')!
     expect(within(supplierList).getAllByRole('button')).toHaveLength(2)
+  })
+
+  test('explains why active quotes and the frozen comparison scope have different counts', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue({
+      ...task,
+      current_result_id: 'result-current',
+      quotes: [
+        { quote_id: 'quote-1', quote_version: 1, supplier_id: 'SUP-024', document_id: 'doc-1', document_version: 1, original_filename: 'one.pdf' },
+        { quote_id: 'quote-2', quote_version: 1, supplier_id: 'SUP-022', document_id: 'doc-2', document_version: 1, original_filename: 'two.pdf' },
+        { quote_id: 'quote-3', quote_version: 1, supplier_id: 'SUP-030', document_id: 'doc-3', document_version: 1, original_filename: 'excluded.pdf' },
+      ],
+    })
+    vi.spyOn(api, 'getSupplierInformation').mockResolvedValue({
+      ...supplierInformation,
+      result_id: 'result-current',
+      snapshot_revision: 8,
+      view_state: 'CURRENT_RESULT',
+      is_current: true,
+      effective_preferences: {
+        ...supplierInformation.effective_preferences!,
+        excluded_supplier_ids: ['SUP-030'],
+      },
+    })
+
+    renderPage()
+
+    expect(await screen.findByText('范围：3 份有效 − 1 份设置排除 = 2 份参与比较')).toBeInTheDocument()
+    const overview = screen.getByLabelText('供应商概览')
+    expect(within(overview).getByText('参与比较')).toBeInTheDocument()
+    expect(within(overview).getByText('设置排除')).toBeInTheDocument()
+    expect(screen.getByText('不含已按当前设置排除的 SUP-030')).toBeInTheDocument()
   })
 })

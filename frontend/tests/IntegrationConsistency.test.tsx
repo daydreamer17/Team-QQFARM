@@ -393,6 +393,44 @@ describe('frontend and backend version consistency', () => {
     )
   })
 
+  test('keeps infeasible quotes visible while explaining that they do not enter ranking', async () => {
+    const result = makeHistoricalResult()
+    result.result.supplier_results.push({
+      ...result.result.supplier_results[0],
+      quote_id: 'quote-wrong-part',
+      supplier_name: 'Wrong Part Devices',
+      status: 'INFEASIBLE',
+      total_cost: '9660.00',
+      pending_reasons: [],
+      failed_reasons: [{
+        code: 'MANUFACTURER_PART_NUMBER_MISMATCH',
+        fields: ['manufacturer_part_number'],
+        message: 'Quoted manufacturer_part_number does not match the procurement requirement.',
+      }],
+    })
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getResult').mockResolvedValue(result)
+    vi.spyOn(api, 'getQuoteFields').mockImplementation(async (_taskId, quoteId) => ({
+      quote_id: quoteId,
+      review_status: 'READY_FOR_DOWNSTREAM',
+      review_findings: [],
+      fields: [],
+    }))
+    vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionScenarios').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionIntents').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+
+    renderRoute(
+      '/tasks/task-1/results/result-old',
+      '/tasks/:taskId/results/:resultId',
+      <ResultPage />,
+    )
+
+    expect(await screen.findByText(/1 家不符合/)).toBeInTheDocument()
+    expect(screen.getByText(/不符合项仍保留在矩阵中，但不参与排序/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Wrong Part Devices' })).toBeInTheDocument()
+  })
+
   test('stale result can start analysis for the current quote version', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
@@ -441,9 +479,28 @@ describe('frontend and backend version consistency', () => {
 
   test('current completed result can be rerun after deterministic logic changes', async () => {
     const user = userEvent.setup()
-    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    const currentTask = makeTask({
+      quotes: [
+        { quote_id: 'quote-1', quote_version: 1, supplier_id: 'SUP-1', document_id: 'document-1', document_version: 1, original_filename: 'quote.pdf' },
+        { quote_id: 'quote-excluded', quote_version: 1, supplier_id: 'SUP-030', document_id: 'document-excluded', document_version: 1, original_filename: 'excluded.pdf' },
+      ],
+      decision_profile: {
+        decision_profile_id: 'profile-current',
+        task_revision: 6,
+        profile_version: 1,
+        preferences: {
+          ranking_mode: 'FASTEST_CONFIRMED_DELIVERY',
+          excluded_supplier_ids: ['SUP-030'],
+          cost_tolerance_amount: null,
+        },
+        source_scenario_id: null,
+      },
+    })
+    const currentResult = makeHistoricalResult()
+    currentResult.input_snapshot!.decision_profile = currentTask.decision_profile
+    vi.spyOn(api, 'getTask').mockResolvedValue(currentTask)
     vi.spyOn(api, 'getResult').mockResolvedValue({
-      ...makeHistoricalResult(),
+      ...currentResult,
       result_id: 'result-current',
       task_revision: 6,
       graph_run_id: 'run-current',
@@ -470,6 +527,8 @@ describe('frontend and backend version consistency', () => {
       <ResultPage />,
     )
 
+    expect(await screen.findByText(/1 家待确认 · 1 家已排除/)).toBeInTheDocument()
+    expect(screen.getByText(/当前 2 份有效报价中，1 份进入比较，1 份按设置排除（SUP-030）/)).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: '重新分析' }))
     await waitFor(() => expect(startRun).toHaveBeenCalledWith('task-1', 6, expect.any(String)))
     expect(await screen.findByText('决策页')).toBeInTheDocument()

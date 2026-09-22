@@ -551,7 +551,7 @@ def test_conversation_turn_accepts_typed_deadline_proposal_without_fact_citation
         "recent_messages": [
             {
                 "role": "USER",
-                "content": "我就想在10月18号那天收到货，我就那天有时间",
+                "content": "最晚10月18号收到货，可以提前到货",
             }
         ],
     }
@@ -714,13 +714,44 @@ def test_citation_after_punctuation_still_binds_to_its_sentence():
 
 
 def test_user_proposal_does_not_exempt_uncited_supplier_fact():
-    with pytest.raises(ValueError, match="missing an inline reference"):
-        conversations.validate_conversation_turn({
+    output = conversations.validate_conversation_turn({
             "assistant_text": "按您的要求Demo Alpha到货日调整为2026-10-18。",
             "reference_ids": [], "changes": {"delivery_deadline": "2026-10-18"},
         }, {"allowed_reference_ids": ["RESULT:demo"], "frozen_references": {
             "RESULT:demo": {"supplier_results": [{"supplier_name": "Demo Alpha"}]},
         }})
+    assert output.assistant_text == ''
+    assert output.reference_ids == []
+    assert output.changes.delivery_deadline.isoformat() == '2026-10-18'
+
+
+@pytest.mark.parametrize('boundary', ['model', 'persistence'])
+def test_proposal_discards_wrong_money_but_fact_answer_still_rejects_it(boundary):
+    context = {'allowed_reference_ids': ['RESULT:test'], 'available_supplier_ids': ['SUP-030'],
+               'frozen_references': {'RESULT:test': {'total_cost': '9653.75'}}}
+    payload = {'assistant_text': '总成本为 SGD 1（RESULT:test）。',
+               'reference_ids': ['RESULT:test'], 'changes': {
+                   'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST',
+                   'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY', 'cost_tolerance_amount': '10'}}
+    def validate(turn):
+        if boundary == 'persistence':
+            return conversations.validate_conversation_turn(turn, context)
+        return conversations._validated_turn({'choices': [{'finish_reason': 'stop',
+            'message': {'content': json.dumps(turn)}}]}, context)
+    output = validate(payload)
+    assert output.assistant_text == '' and output.reference_ids == []
+    assert str(output.changes.cost_tolerance_amount) == '10'
+    with pytest.raises(ValueError, match='unsupported monetary claim'):
+        validate(payload | {'changes': None})
+    with pytest.raises(ValueError, match='unknown supplier'):
+        validate(payload | {'changes': {'excluded_supplier_ids': ['SUP-FAKE']}})
+    with pytest.raises(ValueError):
+        validate(payload | {'changes': {'primary_criterion': 'invented-ranking'}})
+    with pytest.raises(ValueError):
+        validate(payload | {'changes': {}})
+    context['recent_messages'] = [{'role': 'USER', 'content': '我只在那天有时间收货'}]
+    with pytest.raises(ValueError, match='exact-day'):
+        validate(payload | {'changes': {'delivery_deadline': '2026-10-18'}})
 
 
 def test_frozen_requirement_has_its_own_citation():

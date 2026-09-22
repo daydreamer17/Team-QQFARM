@@ -1,0 +1,21 @@
+{
+  "manufacturer": "QQ Demo Components",
+  "manufacturer_part_number": "QW-MCU9-DEMO",
+  "package": "QFN-32",
+  "revision": "R1",
+  "condition": "NEW",
+  "allow_substitutes": false,
+  "base_unit": "piece",
+  "required_quantity": 1000,
+  "quantity_unit": "piece",
+  "budget_amount": "8000.00",
+  "currency": "SGD",
+  "includes_shipping": true,
+  "tax_mode": "EXCLUDED",
+  "other_fees_required": true,
+  "planned_order_date": "2026-11-02",
+  "delivery_deadline": "2026-11-15",
+  "delivery_location": "SG-DEMO-04",
+  "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
+  "secondary_preference": null
+}

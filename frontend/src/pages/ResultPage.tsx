@@ -12,6 +12,7 @@ import type {
   TaskDetail,
 } from '../api/types'
 import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspace'
+import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../components/SupplierMatrixDetails'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import {
@@ -128,7 +129,7 @@ function matrixGapSummary(
       tone: 'warning',
     }
   }
-  if (!gap) return { label: '详情不可用', detail: '该结果未保存供应商差距数据', tone: 'neutral' }
+  if (!gap) return { label: '详情暂不可用', detail: '未能读取本版本的差距详情，不影响已展示的计算结果', tone: 'neutral' }
   if (recommended) return { label: '无阻塞风险', detail: '满足当前硬性条件', tone: 'good' }
   if (supplier.status === 'INFEASIBLE') {
     return {
@@ -253,6 +254,7 @@ export function ResultPage() {
   const { taskId = '', resultId = '' } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [assistantExpanded, setAssistantExpanded] = useState(true)
   const [selectedSupplierIndex, setSelectedSupplierIndex] = useState<number | null>(null)
   const [expandedGapQuoteId, setExpandedGapQuoteId] = useState<string | null | undefined>(undefined)
   const resultQuery = useQuery({
@@ -303,8 +305,8 @@ export function ResultPage() {
     })),
   })
   const selectionGapsQuery = useQuery({
-    queryKey: ['tasks', taskId, 'selection-gaps', taskQuery.data?.task_revision],
-    queryFn: () => api.getSelectionGaps(taskId, taskQuery.data!.task_revision),
+    queryKey: ['tasks', taskId, 'selection-gaps', taskQuery.data?.task_revision, resultId],
+    queryFn: () => api.getSelectionGaps(taskId, taskQuery.data!.task_revision, resultQuery.data?.result_id),
     enabled: Boolean(taskId && taskQuery.data?.current_result_id && resultQuery.data?.is_current),
     retry: false,
   })
@@ -333,6 +335,7 @@ export function ResultPage() {
   const primaryRecommendation = suppliers.find((supplier) => recommended.has(supplier.quote_id))
   const feasibleCount = suppliers.filter((supplier) => supplier.status === 'FEASIBLE').length
   const pendingCount = suppliers.filter((supplier) => supplier.status === 'PENDING').length
+  const infeasibleCount = suppliers.filter((supplier) => supplier.status === 'INFEASIBLE').length
   const loadedEvidenceCount = fieldQueries.filter((query) => Boolean(query.data)).length
   const task = taskQuery.data
   const canReanalyze = Boolean(task && task.quotes.length > 0 && task.task_revision > 1 && (
@@ -352,6 +355,10 @@ export function ResultPage() {
     ?? (resultQuery.data.is_current ? task?.requirement : undefined)
   const frozenDecisionProfile = resultQuery.data.input_snapshot?.decision_profile
     ?? (resultQuery.data.is_current ? task?.decision_profile : undefined)
+  const excludedSupplierIds = frozenDecisionProfile?.preferences.excluded_supplier_ids ?? []
+  const excludedActiveQuoteCount = resultQuery.data.is_current && task
+    ? task.quotes.filter((quote) => excludedSupplierIds.includes(quote.supplier_id)).length
+    : excludedSupplierIds.length
   const currency = frozenRequirement?.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
   const policyReviewCount = resultQuery.data.policy_compliance.counts.REVIEW_REQUIRED ?? 0
@@ -440,10 +447,21 @@ export function ResultPage() {
       <section className="decision-ready-banner">
         <div>
           <strong>{resultQuery.data.is_current ? '报价审核已完成，可以比较' : '正在查看历史决策结果'}</strong>
-          <span>当前仅使用正式提交且字段审核通过的报价；字段证据 {loadedEvidenceCount} / {suppliers.length} 已读取。</span>
+          <span>
+            当前仅使用正式提交且字段审核通过的报价；字段证据 {loadedEvidenceCount} / {suppliers.length} 已读取。
+            {infeasibleCount > 0 ? ' 不符合项仍保留在矩阵中，但不参与排序。' : ''}
+            {excludedSupplierIds.length > 0
+              ? ` ${resultQuery.data.is_current && task ? `当前 ${task.quotes.length} 份有效报价中，` : ''}${suppliers.length} 份进入比较，${excludedActiveQuoteCount} 份按设置排除（${excludedSupplierIds.join('、')}）。`
+              : ''}
+          </span>
         </div>
         <div>
-          <span>{feasibleCount} 家可行{pendingCount > 0 ? ` · ${pendingCount} 家待确认` : ''}</span>
+          <span>
+            {feasibleCount} 家可行
+            {pendingCount > 0 ? ` · ${pendingCount} 家待确认` : ''}
+            {infeasibleCount > 0 ? ` · ${infeasibleCount} 家不符合` : ''}
+            {excludedSupplierIds.length > 0 ? ` · ${excludedSupplierIds.length} 家已排除` : ''}
+          </span>
           <strong>{resultQuery.data.is_current ? '分析完成' : '历史版本'}</strong>
           {canReanalyze && (
             <button
@@ -458,7 +476,16 @@ export function ResultPage() {
         </div>
       </section>
 
-      <div className="decision-workspace-layout">
+      {task && (
+        <div className="decision-assistant-toggle-bar">
+          <button className="button button-secondary" type="button"
+            aria-expanded={assistantExpanded} aria-controls="decision-assistant-panel"
+            onClick={() => setAssistantExpanded((expanded) => !expanded)}>
+            {assistantExpanded ? '收起 AI 决策助手' : '展开 AI 决策助手'}
+          </button>
+        </div>
+      )}
+      <div className={`decision-workspace-layout${!assistantExpanded || !task ? ' decision-assistant-collapsed' : ''}`}>
         <main className="decision-workspace-main">
           <section className="decision-summary-grid">
             <article className="decision-recommendation-hero">
@@ -503,6 +530,12 @@ export function ResultPage() {
           </section>
 
           <section className="comparison-matrix-panel">
+            {selectionGapsQuery.isError && (
+              <div className="notice error-panel" role="alert">
+                <p>差距与沟通详情加载失败：{errorMessage(selectionGapsQuery.error)}</p>
+                <button className="button button-secondary" type="button" onClick={() => void selectionGapsQuery.refetch()}>重试加载详情</button>
+              </div>
+            )}
             <header>
               <div><p className="eyebrow">确定性比较</p><h2>供应商比较矩阵</h2></div>
               <div>
@@ -513,7 +546,7 @@ export function ResultPage() {
               </div>
             </header>
             <div className="comparison-matrix-scroll">
-              <table className="comparison-matrix-table">
+              <table className="comparison-matrix-table" style={{ minWidth: Math.max(720, 128 + suppliers.length * 190) }}>
                 <thead>
                   <tr>
                     <th>指标</th>
@@ -529,6 +562,8 @@ export function ResultPage() {
                   <tr><th>已确认总成本</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{moneyText(currency, supplier.total_cost)}{recommended.has(supplier.quote_id) && <span className="matrix-tag">推荐</span>}</td>)}</tr>
                   <tr><th>预计到货</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{valueText(supplier.estimated_arrival_date)}</td>)}</tr>
                   <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, frozenRequirement?.quantity_unit)}</td>)}</tr>
+                  <tr><th scope="row">付款账期</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixPaymentTerm supplier={supplier} /></td>)}</tr>
+                  <tr><th scope="row">供应商表现</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixSupplierPerformance supplier={supplier} /></td>)}</tr>
                   <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>
                   <tr><th>字段证据</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? '读取中…' : `查看 ${evidenceCount(fieldQueries[index]?.data)} 个来源`}</button></td>)}</tr>
                   <tr><th>选择结论</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><div className="matrix-cell-summary"><strong>{supplierConclusion(supplier, recommended.has(supplier.quote_id))}</strong><small>{recommended.has(supplier.quote_id) ? '当前排序下优先' : supplier.status === 'FEASIBLE' ? '满足要求，可作为备选' : '未进入当前推荐'}</small></div></td>)}</tr>
@@ -611,12 +646,12 @@ export function ResultPage() {
           </section>
 
           <p className="result-boundary">
-            金额、数量、可行性和推荐来自 {displayDate(payload.evaluated_at)} 保存的确定性计算结果；AI 只解释事实并提出需确认的情景变更。
+            本版本的金额、数量、可行性和推荐于 {displayDate(payload.evaluated_at)} 计算生成；AI 只解释事实并提出需确认的情景变更。
           </p>
         </main>
 
         {task && (
-          <aside className="decision-chat-rail">
+          <aside className="decision-chat-rail" id="decision-assistant-panel" hidden={!assistantExpanded}>
             <DecisionScenarioWorkspace
               key={resultQuery.data.result_id}
               task={task}

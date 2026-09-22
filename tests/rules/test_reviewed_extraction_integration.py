@@ -86,6 +86,51 @@ def _review(batch, dictionary, *, review_events=(), corrections=()):
     )
 
 
+@pytest.mark.parametrize("alias", ["A", "B"])
+@pytest.mark.parametrize("terms,expected", [
+    ("Net 60 after invoice", "COMPARABLE"),
+    ("Net 60", "INCOMPARABLE"),
+    ("50% deposit / 50% before shipment", "INCOMPARABLE"),
+])
+def test_confirmed_payment_handoff_preserves_original_and_payment_rules(alias, terms, expected):
+    from supplier_comparison.extraction.contracts import ValidationStatus
+    from supplier_comparison.rules.payment import evaluate_payment_term
+
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    batch = _batches(dictionary)[alias]
+    batch = batch.model_copy(update={"candidates": tuple(
+        c.model_copy(update={"raw_value": terms, "normalized_value": terms,
+                             "validation_status": ValidationStatus.EXTRACTED})
+        if c.field_name == "payment_terms" else c for c in batch.candidates
+    )})
+    before = batch.model_dump(mode="json")
+    unconfirmed = quote_input_for_decision_impact(_review(batch, dictionary))
+    assert evaluate_payment_term(unconfirmed).reason_codes == ("PAYMENT_TERMS_NOT_VERIFIED",)
+    event = create_review_event(batch, field_name="payment_terms", action=HumanReviewAction.CONFIRM_VALUE,
+                                reviewer_id="buyer", reviewed_at=REVIEWED_AT)
+    envelope = _review(batch, dictionary, review_events=(event,))
+    quote = quote_input_for_decision_impact(envelope)
+    assert evaluate_payment_term(quote).parse_status.value == expected
+    assert batch.model_dump(mode="json") == before
+    assert next(c for c in envelope.batch.candidates if c.field_name == "payment_terms").validation_status == ValidationStatus.EXTRACTED
+
+
+@pytest.mark.parametrize("attribute,value", [
+    ("candidate_field_version", 999), ("candidate_field_id", "different-field"),
+    ("task_revision", 999), ("quote_version", 999), ("document_version", 999),
+    ("document_sha256", "0" * 64), ("quote_id", "other-quote"),
+    ("document_id", "other-document"),
+])
+def test_stale_payment_confirmation_cannot_enter_calculation(attribute, value):
+    dictionary = QuoteDictionary.load(CONTRACT_PATH)
+    batch = _batches(dictionary)["A"]
+    event = create_review_event(batch, field_name="payment_terms", action=HumanReviewAction.CONFIRM_VALUE,
+                                reviewer_id="buyer", reviewed_at=REVIEWED_AT)
+    envelope = _review(batch, dictionary, review_events=(event.model_copy(update={attribute: value}),))
+    with pytest.raises(DownstreamNotReadyError):
+        quote_input_for_decision_impact(envelope)
+
+
 def test_unreviewed_missing_quote_is_blocked_before_c() -> None:
     dictionary = QuoteDictionary.load(CONTRACT_PATH)
     supplier_b = _review(_batches(dictionary)["B"], dictionary)

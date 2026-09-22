@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -59,9 +59,35 @@ def client(tmp_path: Path) -> tuple[TestClient, BackendService]:
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     service = BackendService(sessions, tmp_path / "quotes", actor_id="local-test-user")
+    return TestClient(create_app(service, readiness_check=lambda: True)), service
+
+
+@pytest.fixture
+def fk_client(tmp_path: Path) -> tuple[TestClient, BackendService]:
+    """SQLite client with production-like foreign-key enforcement enabled."""
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = BackendService(
+        sessions,
+        tmp_path / "fk-quotes",
+        actor_id="local-test-user",
+    )
     return TestClient(create_app(service, readiness_check=lambda: True)), service
 
 
@@ -1091,8 +1117,7 @@ def test_unexpected_error_uses_envelope_without_leaking_exception(
     }
 
 
-@pytest.fixture
-def batch_review(client, tmp_path):
+def _prepare_batch_review(client, tmp_path):
     http, service = client
     task = service.create_task(_requirement(), idempotency_key="batch-create")
     revision = task["task_revision"]
@@ -1131,6 +1156,16 @@ def batch_review(client, tmp_path):
     return http, service, task, runner, review, body
 
 
+@pytest.fixture
+def batch_review(client, tmp_path):
+    return _prepare_batch_review(client, tmp_path)
+
+
+@pytest.fixture
+def fk_batch_review(fk_client, tmp_path):
+    return _prepare_batch_review(fk_client, tmp_path)
+
+
 def test_batch_review_lists_all_quotes_and_current_problems(batch_review):
     http, _service, task, _runner, review, _body = batch_review
     assert review["task_revision"] == 3
@@ -1140,6 +1175,20 @@ def test_batch_review_lists_all_quotes_and_current_problems(batch_review):
     assert all(p["field_version"] and p["original_filename"] for p in review["problems"])
     assert all(q["evidence_sources"] and all(s["raw_text"] for s in q["evidence_sources"]) for q in review["quotes"])
     assert "storage_path" not in str(review)
+
+
+def test_batch_corrections_respect_foreign_key_insert_order(fk_batch_review):
+    http, _service, task, _runner, _review, body = fk_batch_review
+
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/corrections",
+        headers={"Idempotency-Key": "batch-fk-order"},
+        json=body,
+    )
+
+    assert response.status_code == 202
+    assert response.json()["task_revision"] == body["expected_task_revision"] + 1
+    assert response.json()["correction_count"] == len(body["corrections"])
 
 
 def test_comparison_limitation_does_not_offer_rewriting_a_valid_quote_field(batch_review):
@@ -1177,7 +1226,7 @@ def test_comparison_limitation_does_not_offer_rewriting_a_valid_quote_field(batc
         if item["field_name"] == "tax_mode"
         and "TAX_CONVERSION_REQUIRED" in item["codes"]
     )
-    assert problem["needs_resolution"] is True
+    assert problem["needs_resolution"] is False
     assert problem["resolution"] == "ADDITIONAL_INFORMATION_REQUIRED"
 
 
@@ -1257,6 +1306,50 @@ def test_batch_correction_uses_current_execution_instead_of_newer_unreferenced_b
         json=body,
     )
     assert response.status_code == 202, response.text
+
+
+def test_batch_correction_carries_only_current_quote_documents(batch_review):
+    http, service, task, _runner, review, body = batch_review
+    from sqlalchemy import select
+    from supplier_comparison.backend.models import DocumentExecution, Quote
+
+    quote = review["quotes"][0]
+    with service.session_factory.begin() as session:
+        current = session.scalar(select(Document).where(
+            Document.task_id == task["task_id"],
+            Document.quote_id == quote["quote_id"],
+            Document.quote_version == quote["quote_version"],
+        ))
+        session.add(Document(
+            document_id="historical-document-version",
+            task_id=current.task_id,
+            quote_id=current.quote_id,
+            quote_version=current.quote_version - 1,
+            document_version=max(0, current.document_version - 1),
+            original_filename="historical.csv",
+            media_type=current.media_type,
+            size_bytes=current.size_bytes,
+            sha256="0" * 64,
+            storage_path=str(service.storage_root / "historical-document-version.csv"),
+            is_synthetic=True,
+        ))
+
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/fields/corrections",
+        headers={"Idempotency-Key": "current-documents-only"},
+        json=body,
+    )
+    assert response.status_code == 202, response.text
+
+    with service.session_factory() as session:
+        executions = session.execute(
+            select(DocumentExecution, Document)
+            .join(Document, Document.document_id == DocumentExecution.document_id)
+            .where(DocumentExecution.graph_run_id == response.json()["graph_run_id"])
+        ).all()
+        assert len(executions) == len(review["quotes"])
+        for _execution, document in executions:
+            assert document.quote_version == session.get(Quote, document.quote_id).current_version
 
 
 @pytest.mark.parametrize("case", ["stale_task", "stale_fields", "duplicates", "invalid_fields", "foreign_quote", "wrong_scalar"])
@@ -1558,6 +1651,79 @@ def test_decision_scenario_persists_delta_becomes_stale_and_applies(batch_review
     assert stale_apply.json()['error']['code'] == 'decision_scenario_stale'
     audit = http.get(f"/api/v1/tasks/{task_id}/revisions").json()
     assert audit['revisions'][-1]['change_type'] == 'DECISION_SCENARIO_APPLIED'
+
+
+def test_scenario_and_rerun_reuse_corrected_inputs_and_share_exclusion_review(batch_review, monkeypatch):
+    from sqlalchemy import select
+    from supplier_comparison.backend.models import DocumentExecution
+    from supplier_comparison.rules import RequirementChanges
+
+    _http, service, task, runner, initial_review, body = batch_review
+    task_id = task['task_id']
+    excluded_row = next(row for row in initial_review['quotes'] if row['supplier_id'] == 'SUP-024')
+    unsafe_payload = service.artifact_payload(excluded_row['review_artifact_id'])
+    unsafe_payload['review_status'] = 'REVIEW_REQUIRED'
+    unsafe_payload['downstream_ready'] = False
+    unsafe_payload['calculation_inputs_complete'] = False
+    unsafe_payload['checks']['accepted_values_semantically_valid'] = False
+    corrected = service.correct_fields(
+        task_id=task_id, corrections=body['corrections'],
+        expected_task_revision=3, idempotency_key='reuse-correct',
+    )
+    runner.run_job(corrected['job_id'])
+    with service.session_factory() as session:
+        previous_batches = {row.document_id: row.batch_artifact_id for row in session.scalars(
+            select(DocumentExecution).where(DocumentExecution.graph_run_id == corrected['graph_run_id'])
+        )}
+    scenario = service.create_decision_scenario(
+        task_id, expected_task_revision=4, idempotency_key='reuse-scenario',
+        changes=RequirementChanges(excluded_supplier_ids=('SUP-024',)),
+    )
+    applied = service.apply_decision_scenario(
+        task_id, scenario['decision_scenario_id'], expected_task_revision=4,
+        idempotency_key='reuse-apply',
+    )
+
+    def must_not_extract(*args, **kwargs):
+        raise AssertionError('Preference-only runs must reuse corrected batches')
+
+    monkeypatch.setattr(runner.processor, 'process', must_not_extract)
+    runner.run_job(applied['job_id'])
+    with service.session_factory() as session:
+        carried = {row.document_id: row.batch_artifact_id for row in session.scalars(
+            select(DocumentExecution).where(DocumentExecution.graph_run_id == applied['graph_run_id'])
+        )}
+    assert carried == previous_batches
+    first_result_id = service.get_task(task_id)['current_result_id']
+    first = service.get_result(task_id, first_result_id)['result']
+    assert first['recommended_quote_ids']
+    assert service.selection_gaps(task_id, expected_task_revision=5)['gaps']
+    rerun = service.start_run(task_id, expected_task_revision=5, idempotency_key='reuse-rerun')
+    runner.run_job(rerun['job_id'])
+    second = service.get_result(task_id, service.get_task(task_id)['current_result_id'])['result']
+    assert second == first
+    with pytest.raises(BackendError) as stale:
+        service.selection_gaps(task_id, expected_task_revision=5, expected_result_id=first_result_id)
+    assert stale.value.code == 'selection_input_stale'
+
+    # An excluded quote's unsafe findings must not block details for the selected
+    # scope, but re-inclusion must not silently turn those findings into facts.
+    review = service.list_review_problems(task_id)
+    excluded = next(row for row in review['quotes'] if row['supplier_id'] == 'SUP-024')
+    with service.session_factory.begin() as session:
+        artifact = session.get(WorkflowArtifact, excluded['review_artifact_id'])
+        artifact.payload = unsafe_payload
+        artifact.content_sha256 = content_hash(unsafe_payload)
+        batch_artifact = session.get(WorkflowArtifact, excluded['batch_artifact_id'])
+        batch_artifact.payload = unsafe_payload['batch']
+        batch_artifact.content_sha256 = content_hash(unsafe_payload['batch'])
+    assert service.selection_gaps(task_id, expected_task_revision=5)['gaps']
+    with pytest.raises(BackendError) as failed:
+        service.requirement_simulation(
+            task_id, expected_task_revision=5,
+            changes=RequirementChanges(excluded_supplier_ids=()), user_authorized=True,
+        )
+    assert failed.value.code == 'selection_review_required'
 
 
 def test_decision_scenario_requires_current_result_and_explicit_confirmation(client):
@@ -1883,6 +2049,12 @@ def test_async_multi_turn_conversation_streams_validated_events_and_proposes_int
     )
     intent_id = proposed['message']['decision_intent_id']
     assert intent_id
+    assert proposed['message']['reference_ids'][0].startswith('SIMULATION:')
+    preview_id = proposed['message']['reference_ids'][0].split(':', 1)[1]
+    preview = service.artifact_payload(preview_id)
+    assert preview['source'] == 'DETERMINISTIC_SIMULATION'
+    assert preview['base_result_id'] == second_context['result_id']
+    assert service.get_task(task['task_id'])['current_result_id'] == second_context['result_id']
     assert proposed['message']['proposed_changes'] == {
         'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
         'secondary_criterion': None,
@@ -1997,12 +2169,24 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
          {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST'}},
          '与当前设置一致', False),
         ('改成到货最快优先',
-         {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'}},
+         {'assistant_text': '错误说明：总成本为 SGD 1（RESULT:fake）。', 'reference_ids': ['RESULT:fake'], 'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'}},
          '待确认', True),
+        ('总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。',
+         {'assistant_text': '错误说明：候选上限为 SGD 1（RESULT:fake）。',
+          'reference_ids': ['RESULT:fake'], 'changes': {
+              'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST',
+              'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
+              'cost_tolerance_amount': '10'}},
+         '候选上限为 SGD 7,010.00', True),
     ]
     for index, (question, response, expected_text, has_intent) in enumerate(cases):
+        routed_response = {
+            'route': 'SIMULATE' if response.get('changes') else 'CLARIFY',
+            'changes': response.get('changes'),
+            'clarification': response.get('clarification'),
+        }
         monkeypatch.setattr(conversations, '_post_json', lambda *args, **kwargs: (
-            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(response)}}]}, 1,
+            {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(routed_response)}}]}, 1,
         ))
         queued = http.post(base + '/' + conversation['conversation_id'] + '/messages',
                            json={'expected_task_revision': 4, 'message': question},
@@ -2012,6 +2196,8 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
         assert completed['job_status'] == 'SUCCEEDED'
         assert expected_text in completed['message']['content']
         assert bool(completed['message']['decision_intent_id']) == has_intent
+        assert '错误说明' not in completed['message']['content']
+        assert 'RESULT:fake' not in str(completed['message'])
     intent_id = completed['message']['decision_intent_id']
     confirmed = http.post(
         f"/api/v1/tasks/{task['task_id']}/decision-intents/{intent_id}/confirm",
@@ -2020,6 +2206,87 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
     )
     assert confirmed.status_code == 201, confirmed.text
     assert confirmed.json()['scenario']['status'] == 'READY'
+
+
+def test_live_conversation_preview_confirm_apply_isolated(batch_review, monkeypatch):
+    """Live conversation model + fixed quote fixture; never writes the developer DB."""
+    import os
+    import json
+    from supplier_comparison.backend import conversations
+    from supplier_comparison import worker
+    from supplier_comparison.backend.conversations import ConversationModelConfig
+    from supplier_comparison.backend.models import DocumentExecution
+    from sqlalchemy import select
+
+    if os.getenv('RUN_CONVERSATION_LIVE') != '1':
+        pytest.skip('Set RUN_CONVERSATION_LIVE=1 for paid isolated conversation acceptance')
+    assert ConversationModelConfig.from_env() is not None
+    observed_responses = []
+    real_call = conversations._call_conversation_model
+    def observed_call(*args, **kwargs):
+        payload, attempts = real_call(*args, **kwargs)
+        observed_responses.append(payload['choices'][0]['message']['content'])
+        return payload, attempts
+    monkeypatch.setattr(conversations, '_call_conversation_model', observed_call)
+    http, service, task, runner, _review, body = batch_review
+    task_id = task['task_id']
+    corrected = service.correct_fields(
+        task_id=task_id, corrections=body['corrections'], expected_task_revision=3,
+        idempotency_key='live-ready',
+    )
+    runner.run_job(corrected['job_id'])
+    with service.session_factory() as session:
+        batches = {row.document_id: row.batch_artifact_id for row in session.scalars(
+            select(DocumentExecution).where(DocumentExecution.graph_run_id == corrected['graph_run_id'])
+        )}
+    base = f'/api/v1/tasks/{task_id}/decision-conversations'
+    conversation = http.post(base, json={'expected_task_revision': 4, 'title': '隔离真实模型验收'},
+                             headers={'Idempotency-Key': 'live-conversation'}).json()
+    queued = http.post(base + '/' + conversation['conversation_id'] + '/messages',
+        json={'expected_task_revision': 4,
+              'message': '总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。'},
+        headers={'Idempotency-Key': 'live-message'})
+    assert queued.status_code == 202, queued.text
+    completed = worker._run_decision_conversation_job(service, queued.json()['job']['job_id'])
+    assert completed['job_status'] == 'SUCCEEDED'
+    message = completed['message']
+    assert '7,010.00' in message['content']
+    assert message['decision_intent_id']
+    assert service.get_task(task_id)['task_revision'] == 4
+    events = service.decision_conversation_events(task_id, conversation['conversation_id'])
+    assert any(row['event_type'] == 'assistant.stage' for row in events)
+    explanation = http.post(base + '/' + conversation['conversation_id'] + '/messages',
+        json={'expected_task_revision': 4, 'message': '只解释当前正式结果：当前推荐报价的已确认总成本是多少？不要调整设置。'},
+        headers={'Idempotency-Key': 'live-explanation'})
+    assert explanation.status_code == 202, explanation.text
+    try:
+        explained = worker._run_decision_conversation_job(service, explanation.json()['job']['job_id'])
+    except Exception:
+        print('Synthetic live-test responses:', json.dumps(observed_responses, ensure_ascii=False))
+        raise
+    assert explained['job_status'] == 'SUCCEEDED'
+    assert explained['message']['reference_ids']
+    assert not explained['message']['decision_intent_id']
+    confirmed = http.post(f"/api/v1/tasks/{task_id}/decision-intents/{message['decision_intent_id']}/confirm",
+        json={'expected_task_revision': 4, 'confirm': True}, headers={'Idempotency-Key': 'live-confirm'})
+    assert confirmed.status_code == 201, confirmed.text
+    scenario = confirmed.json()['scenario']
+    applied = service.apply_decision_scenario(task_id, scenario['decision_scenario_id'],
+        expected_task_revision=4, idempotency_key='live-apply')
+    def no_parse(*args, **kwargs):
+        raise AssertionError('Preference apply must not reparse quotations')
+    monkeypatch.setattr(runner.processor, 'process', no_parse)
+    runner.run_job(applied['job_id'])
+    current = service.get_task(task_id)
+    assert current['task_revision'] == 5
+    assert current['decision_profile']['preferences']['cost_tolerance_amount'] == '10'
+    assert service.selection_gaps(task_id, expected_task_revision=5,
+                                  expected_result_id=current['current_result_id'])['gaps']
+    with service.session_factory() as session:
+        carried = {row.document_id: row.batch_artifact_id for row in session.scalars(
+            select(DocumentExecution).where(DocumentExecution.graph_run_id == applied['graph_run_id'])
+        )}
+    assert carried == batches
 
 
 def test_stale_running_conversation_job_is_requeued(batch_review):

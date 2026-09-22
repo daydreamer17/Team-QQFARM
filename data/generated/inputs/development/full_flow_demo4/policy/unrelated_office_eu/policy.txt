@@ -1,0 +1,4 @@
+# SYNTHETIC procurement policy
+
+## [OFFICE-EU] EU office furniture approval
+For office furniture procurement in the EU only, EUR 100.00 or more requires recorded approval. This policy does not apply to SG electronic components.

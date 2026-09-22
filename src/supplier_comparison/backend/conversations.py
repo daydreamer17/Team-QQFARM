@@ -18,7 +18,7 @@ from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.rules import RequirementChanges
 
 
-CONVERSATION_PROMPT_VERSION = "decision-conversation/1.5.0"
+CONVERSATION_PROMPT_VERSION = "decision-conversation/1.7.0"
 
 
 _MONEY_PATTERNS = (
@@ -77,10 +77,11 @@ class ConversationTurnOutput(BaseModel):
     assistant_text: str = Field(max_length=6000)
     reference_ids: list[str] = Field(max_length=64)
     changes: RequirementChanges | None = None
-    clarification: Literal["EXACT_DELIVERY_DAY", "COST_LIMIT", "CHANGE_DETAILS"] | None = None
+    clarification: Literal["EXACT_DELIVERY_DAY", "COST_LIMIT", "CHANGE_DETAILS", "UNSUPPORTED"] | None = None
 
 
 CLARIFICATION_TEXT = {
+    "UNSUPPORTED": "此助手只能解释采购事实或模拟支持的需求与排序变更，不能批准采购、下单、付款、修改报价事实或设置指标权重。请改为询问当前结果，或指定主次排序指标。",
     "EXACT_DELIVERY_DAY": "系统目前只能设置最晚到货日，允许提前到货，不能保证恰好当天送达。您是否接受将要求改为最晚到货日？若只能当天收货，需要人工确认配送安排。",
     "COST_LIMIT": "请说明可接受的预算上限，或相对最低价最多可以增加多少费用。",
     "CHANGE_DETAILS": "请说明希望调整的排序偏好、预算或最晚到货日。",
@@ -269,7 +270,7 @@ def _validated_turn(
     choice = payload["choices"][0]
     if choice.get("finish_reason") != "stop":
         raise ValueError("response was truncated")
-    output = ConversationTurnOutput.model_validate_json(choice["message"]["content"])
+    output = normalize_conversation_turn(json.loads(choice["message"]["content"]))
     if output.assistant_text.strip() and not re.search(r"[\u4e00-\u9fff]", output.assistant_text):
         raise ValueError("assistant_text must contain Chinese narration")
     if not render_conversation_turn(output):
@@ -287,6 +288,22 @@ def _validated_turn(
         set(output.changes.excluded_supplier_ids or ()) - available_suppliers
     ):
         raise ValueError("excluded_supplier_ids contains an unknown supplier")
+    return output
+
+
+def normalize_conversation_turn(turn: dict[str, Any]) -> ConversationTurnOutput:
+    """Discard unused model narration for typed proposals, never waive fact checks.
+
+    Schema and intent semantics still apply. Only the deterministic trial may
+    supply the displayed recommendation, amounts and references for a proposal.
+    """
+    output = ConversationTurnOutput.model_validate(turn)
+    if output.changes is not None:
+        if output.clarification:
+            raise ValueError("clarify first; do not propose changes before the clarification is answered")
+        if not output.changes.model_fields_set:
+            raise ValueError("changes must contain an explicit preference change")
+        output = output.model_copy(update={"assistant_text": "", "reference_ids": []})
     return output
 
 
@@ -333,7 +350,12 @@ def generate_conversation_turn(
         "It may be an empty string for a preference change or clarification, with reference_ids=[]. "
         "Cite REQUIREMENT for confirmed budget, deadline and ranking settings. Keep requirement facts in separate "
         "sentences from supplier facts; RESULT and QUOTE do not prove a requirement deadline. "
-        "The server renders proposal and clarification text. Use changes for supported user preferences. "
+        "The server renders proposal and clarification text from deterministic simulation. "
+        "For a supported preference change, return assistant_text='' and reference_ids=[] with the typed changes. "
+        "Do not narrate the old recommendation as the answer to a new preference, or calculate a hypothetical winner yourself. "
+        "For factual questions without changes, use measured, clear written Chinese: conclusion first, then only the "
+        "relevant reasons and candidate differences. Avoid dumping all suppliers, jargon such as Pareto, and repetitive disclaimers. "
+        "Use changes for supported user preferences. "
         "Use clarification='EXACT_DELIVERY_DAY' when the user requires delivery exactly on a particular day, "
         "'COST_LIMIT' for an unspecified price limit, or 'CHANGE_DETAILS' when the desired change is unclear. "
         "Otherwise clarification=null. Clarification requires changes=null; never silently convert exact-day delivery "
@@ -342,6 +364,11 @@ def generate_conversation_turn(
         "Example cost preference: {\"assistant_text\":\"\",\"reference_ids\":[],"
         "\"changes\":{\"primary_criterion\":\"LOWEST_CONFIRMED_TOTAL_COST\"},\"clarification\":null}."
     )
+    if context.get("response_mode") == "EXPLAIN_ONLY":
+        system += (
+            " This request has already been routed as a factual explanation. Return changes=null and "
+            "clarification=null. Do not reinterpret it as an action or propose preference changes."
+        )
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -435,6 +462,44 @@ def generate_conversation_turn(
     return output.model_dump(mode="json", exclude_unset=True), attempts
 
 
+def process_conversation_turn(
+    context: dict[str, Any], config: ConversationModelConfig, *,
+    opener: Callable[..., object] = trusted_urlopen,
+    sleeper: Callable[[float], None] = time.sleep,
+    on_stage: Callable[[str, int], None] | None = None,
+) -> tuple[dict[str, Any], int]:
+    """Route once, then narrate facts only; the total transport budget is three calls."""
+    from .decision_intents import route_conversation_intent
+
+    if on_stage:
+        on_stage("intent", 0)
+    intent, calls = route_conversation_intent(
+        context, replace(config, max_attempts=1), opener=opener, sleeper=sleeper,
+    )
+    if intent.route != "EXPLAIN":
+        if on_stage:
+            on_stage("simulation" if intent.route == "SIMULATE" else "persist", calls)
+        return {
+            "assistant_text": "", "reference_ids": [],
+            "changes": intent.changes.model_dump(mode="json", exclude_unset=True) if intent.changes else None,
+            "clarification": "UNSUPPORTED" if intent.route == "UNSUPPORTED" else intent.clarification,
+        }, calls
+    factual_context = dict(context, response_mode="EXPLAIN_ONLY")
+    if on_stage:
+        on_stage("narration", calls)
+    try:
+        turn, additional = generate_conversation_turn(
+            factual_context, replace(config, max_attempts=min(config.max_attempts, 3 - calls)),
+            opener=opener, sleeper=sleeper,
+        )
+    except ModelClientError as exc:
+        raise ModelClientError(str(exc), attempts=calls + exc.attempts, error_code=exc.error_code) from exc
+    if turn.get("changes") is not None or turn.get("clarification"):
+        raise ModelClientError("narration attempted to change the classified intent",
+                               attempts=calls + additional, error_code="conversation_intent_mismatch")
+    return turn, calls + additional
+
+
 def _validate_grounded_output(
     output: ConversationTurnOutput, context: dict[str, Any]
 ) -> None:
@@ -474,7 +539,15 @@ def _validate_grounded_output(
             grounded_quantities.update(_payload_quantity_values(payload))
         for value in _money_values(sentence):
             if value not in grounded_numbers:
-                raise ValueError("unsupported monetary claim")
+                supporting = [ref for ref, data in references.items()
+                              if not ref.startswith("REQUEST:") and value in _monetary_values(data)]
+                raise ValueError(
+                    f"unsupported monetary claim in sentence {sentence_number}: value={value}; "
+                    f"cited={sorted(sentence_reference_ids)}; "
+                    f"candidate sources containing this value={supporting[:6]}; "
+                    "check the field meaning before citing; budgets require REQUIREMENT, "
+                    "matching a number alone does not prove the claim"
+                )
         if _date_values(sentence) - grounded_dates:
             raise ValueError("unsupported date claim")
         if _quantity_values(sentence) - grounded_quantities:
@@ -497,7 +570,7 @@ def validate_conversation_turn(
 ) -> ConversationTurnOutput:
     """Revalidate a generated turn at the database persistence boundary."""
 
-    output = ConversationTurnOutput.model_validate(turn)
+    output = normalize_conversation_turn(turn)
     if not render_conversation_turn(output):
         raise ValueError("response must contain facts, a proposal, or a clarification")
     if output.clarification and output.changes is not None:
@@ -508,6 +581,11 @@ def validate_conversation_turn(
     if set(output.reference_ids) - allowed_refs:
         raise ValueError("reference_ids contains an ID outside the frozen context")
     _validate_grounded_output(output, context)
+    if output.changes is not None and (
+        set(output.changes.excluded_supplier_ids or ())
+        - set(context.get("available_supplier_ids", []))
+    ):
+        raise ValueError("excluded_supplier_ids contains an unknown supplier")
     return output
 
 
@@ -667,16 +745,43 @@ def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
     mentioned_rows = [
         row
         for row in supplier_rows
-        if str(row.get("supplier_name", "")).strip().casefold() in text.casefold()
+        if str(row.get("supplier_name") or "").strip()
+        and str(row["supplier_name"]).strip().casefold() in text.casefold()
     ]
     if mentioned_rows:
+        # A price difference is not a supplier's total. Validate the explicit
+        # relationship separately, then check remaining absolute price claims.
+        absolute_price_text = text
+        difference_pattern = re.compile(
+            r"比(?P<base>推荐报价|最低价|最低成本)(?P<direction>高|低|贵|便宜)"
+            r"\s*(?:SGD|S\$)?\s*(?P<amount>[0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:新币|元)?",
+            re.IGNORECASE,
+        )
+        for match in difference_pattern.finditer(text):
+            base_costs = set()
+            for comparison in comparisons:
+                candidates = [row for row in comparison.get("supplier_results", [])
+                              if row.get("status") == "FEASIBLE" and row.get("total_cost") is not None]
+                if match["base"] == "推荐报价":
+                    candidates = [row for row in candidates if row.get("quote_id")
+                                  in comparison.get("recommended_quote_ids", [])]
+                values = [Decimal(str(row["total_cost"])) for row in candidates]
+                if values:
+                    base_costs.update(values if match["base"] == "推荐报价" else [min(values)])
+            amount = Decimal(match["amount"].replace(",", ""))
+            signed = amount if match["direction"] in {"高", "贵"} else -amount
+            if len(mentioned_rows) != 1 or len(base_costs) != 1 or mentioned_rows[0].get("total_cost") is None:
+                raise ValueError("cost difference requires an unambiguous supplier and comparison baseline")
+            if Decimal(str(mentioned_rows[0]["total_cost"])) - next(iter(base_costs)) != signed:
+                raise ValueError("unsupported cost difference claim")
+            absolute_price_text = absolute_price_text.replace(match.group(0), "", 1)
         allowed_money = {
             Decimal(str(row[field]))
             for row in mentioned_rows
             for field in ("total_cost", "goods_cost", "known_cost_subtotal")
             if row.get(field) is not None
         }
-        if _money_values(text) - allowed_money:
+        if _money_values(absolute_price_text) - allowed_money:
             raise ValueError("monetary claim is attributed to the wrong supplier")
         allowed_dates = {
             str(row["estimated_arrival_date"])

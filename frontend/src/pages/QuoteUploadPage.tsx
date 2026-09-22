@@ -53,6 +53,29 @@ function errorMessage(error: unknown) {
   return '操作失败，请稍后重试。'
 }
 
+function uploadFailureNotice(error: unknown, localMessage?: string) {
+  if (localMessage) {
+    return { title: '文件不符合要求', message: localMessage }
+  }
+  if (error instanceof ApiClientError) {
+    if (error.code === 'duplicate_quote_uploaded') {
+      return { title: '无需重复上传', message: errorMessage(error) }
+    }
+    if (
+      error.code.startsWith('csv_') ||
+      ['unsupported_media_type', 'unsupported_pdf', 'unsupported_csv', 'empty_file', 'file_empty', 'file_too_large', 'pdf_size_limit_exceeded', 'pdf_page_limit_exceeded', 'blank_pdf', 'pdf_text_quality_insufficient', 'encrypted_pdf_unsupported', 'corrupted_pdf'].includes(error.code)
+    ) {
+      return {
+        title: '文件不符合要求',
+        message: error.code === 'csv_header_unregistered'
+          ? 'CSV 表头与支持的报价模板不一致。'
+          : '请检查文件格式后重新上传。',
+      }
+    }
+  }
+  return { title: '上传失败', message: '请重新上传。' }
+}
+
 export function QuoteUploadPage() {
   const { taskId = '' } = useParams()
   const queryClient = useQueryClient()
@@ -61,7 +84,6 @@ export function QuoteUploadPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
-  const [lastSubmission, setLastSubmission] = useState<UploadSubmission | null>(null)
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
   const quoteHistory = useQuery({ queryKey: ['tasks', taskId, 'quotes'], queryFn: () => api.listQuotes(taskId), enabled: Boolean(taskId) })
   const drafts = useQuery({ queryKey: ['tasks', taskId, 'quote-drafts'], queryFn: () => api.listQuoteDrafts(taskId), enabled: Boolean(taskId), refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PROCESSING') ? 1_500 : false })
@@ -80,7 +102,7 @@ export function QuoteUploadPage() {
   })
   const activeDraft = activeDraftDetail.data ?? activeDraftSummary
   const refreshAll = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['tasks', taskId] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quotes'] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quote-drafts'] })]) }
-  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); setSelectedFile(null); setLastSubmission(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
+  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); setSelectedFile(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
   const revise = useMutation({
     mutationFn: (quoteId: string) => {
       if (!task.data) throw new Error('任务尚未加载。')
@@ -103,7 +125,6 @@ export function QuoteUploadPage() {
     onSuccess: async () => {
       upload.reset()
       setSelectedFile(null)
-      setLastSubmission(null)
       if (fileInput.current) fileInput.current.value = ''
       await refreshAll()
     },
@@ -118,7 +139,7 @@ export function QuoteUploadPage() {
     event.preventDefault(); setLocalError('')
     if (!task.data || !selectedFile || !supplierId.trim()) return setLocalError('请填写供应商编号并选择报价文件。')
     const submission = { expectedTaskRevision: task.data.task_revision, supplierId: supplierId.trim(), isSynthetic: import.meta.env.DEV, file: selectedFile, idempotencyKey: createIdempotencyKey() }
-    setLastSubmission(submission); upload.mutate(submission)
+    upload.mutate(submission)
   }
   function confirmDeactivate(quoteId: string) {
     if (!window.confirm('停用后，该报价不再参与比较，但历史文件会保留。确定停用？')) return
@@ -127,7 +148,13 @@ export function QuoteUploadPage() {
   const legacyFieldReview = task.data && task.data.status === 'FAILED' && task.data.current_job?.error_code === 'review_required'
   const batchReview = task.data?.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
   const legacyIssueReview = task.data?.current_issue && !['POLICY_EVIDENCE_REVIEW', 'BATCH_FIELD_REVIEW'].includes(task.data.current_issue.issue_type)
-  const duplicateUpload = upload.error instanceof ApiClientError && upload.error.code === 'duplicate_quote_uploaded'
+  const currentUploadNotice = localError || upload.isError
+    ? uploadFailureNotice(upload.error, localError || undefined)
+    : null
+  const latestDraft = drafts.data?.items[0]
+  const latestDraftFailureNotice = latestDraft?.status === 'FAILED'
+    ? uploadFailureNotice(new ApiClientError(400, latestDraft.error_code ?? 'quote_draft_failed', latestDraft.error_message ?? ''))
+    : null
   const submittedQuotes = quoteHistory.data?.items ?? []
   const submittedQuotePage = useTablePagination(submittedQuotes)
 
@@ -204,7 +231,8 @@ export function QuoteUploadPage() {
               <button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>预览文件</button>
             </div>
           )}
-          {(localError || upload.isError) && <div className="form-error compact-error"><div><strong>{duplicateUpload ? '无需重复上传' : '上传失败'}</strong><p>{localError || errorMessage(upload.error)}</p></div>{lastSubmission && !duplicateUpload && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>重试</button>}</div>}
+          {currentUploadNotice && <div className="form-error compact-error"><div><strong>{currentUploadNotice.title}</strong><p>{currentUploadNotice.message}</p></div></div>}
+          {!currentUploadNotice && latestDraftFailureNotice && latestDraft && <div className="form-error compact-error"><div><strong>{latestDraftFailureNotice.title}</strong><p>{latestDraft.original_filename}：{latestDraftFailureNotice.message}</p></div></div>}
           <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? '正在上传…' : '上传并开始审核'}</button>
         </form>
       )}

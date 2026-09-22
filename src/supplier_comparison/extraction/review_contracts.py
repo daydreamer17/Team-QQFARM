@@ -23,7 +23,7 @@ from .contracts import (
 
 LEGACY_REVIEW_SCHEMA_VERSION = "review-envelope/1.0.0"
 REVIEW_SCHEMA_VERSION = "review-envelope/1.1.0"
-REVIEW_POLICY_VERSION = "extraction-review/1.4.0"
+REVIEW_POLICY_VERSION = "extraction-review/1.5.0"
 CRITICALITY_POLICY_VERSION = "c-field-criticality/1.1.0"
 
 

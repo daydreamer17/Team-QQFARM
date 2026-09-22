@@ -24,6 +24,16 @@ function errorText(error: unknown) {
   return error instanceof ApiClientError ? error.message : '供应商信息读取失败。'
 }
 
+function decisionStatusLabel(entry: SupplierInformationEntry) {
+  const statuses = entry.quotes
+    .map((quote) => quote.evaluation?.status)
+    .filter((status): status is string => Boolean(status))
+  if (statuses.includes('FEASIBLE')) return '本次可行'
+  if (statuses.includes('PENDING')) return '本次待确认'
+  if (statuses.includes('INFEASIBLE')) return '本次不符合'
+  return '尚未比较'
+}
+
 export function SupplierInfoPage() {
   const { taskId = '' } = useParams()
   const [params] = useSearchParams()
@@ -87,6 +97,15 @@ export function SupplierInfoPage() {
     }
   })
   const context = info.history_dataset_context ?? {}
+  const excludedSupplierIds = info.effective_preferences?.excluded_supplier_ids ?? []
+  const excludedQuoteCount = info.is_current
+    ? task.quotes.filter((quote) => excludedSupplierIds.includes(quote.supplier_id)).length
+    : excludedSupplierIds.length
+  const scopeSummary = info.view_state === 'QUOTE_ONLY'
+    ? `当前 ${info.quote_count} 份有效报价；比较尚未运行`
+    : info.is_current
+      ? `范围：${task.quotes.length} 份有效 − ${excludedQuoteCount} 份设置排除 = ${info.quote_count} 份参与比较`
+      : `该冻结版本有 ${info.quote_count} 份报价参与比较${excludedSupplierIds.length ? `；排除 ${excludedSupplierIds.join('、')}` : ''}`
 
   return (
     <main className="page supplier-info-page">
@@ -103,9 +122,11 @@ export function SupplierInfoPage() {
         <div className="supplier-context-heading">
           <h2>供应商信息</h2>
           <p>{String(context.category ?? 'Electronics')} / {String(context.item ?? task.requirement.manufacturer_part_number)}</p>
+          <p className="supplier-scope-copy">{scopeSummary}</p>
         </div>
         <div className="supplier-kpis" aria-label="供应商概览">
-          <div><strong>{info.quote_count}</strong><span>报价</span></div>
+          <div><strong>{info.quote_count}</strong><span>{info.view_state === 'QUOTE_ONLY' ? '有效报价' : '参与比较'}</span></div>
+          {excludedSupplierIds.length > 0 && <div><strong>{excludedQuoteCount}</strong><span>设置排除</span></div>}
           <div><strong>{info.matched_supplier_count}</strong><span>身份已匹配</span></div>
           <div><strong>{info.unresolved_identity_quote_count}</strong><span>身份待核验</span></div>
           <div><strong>{entries.filter((entry) => entry.history_availability_status !== 'AVAILABLE').length}</strong><span>历史不可比</span></div>
@@ -119,13 +140,13 @@ export function SupplierInfoPage() {
 
       <section className="supplier-overview-grid">
         <article className="card supplier-list-card">
-          <div className="section-heading"><div><p className="eyebrow">CURRENT SCOPE</p><h2>候选供应商</h2></div></div>
+          <div className="section-heading"><div><p className="eyebrow">CURRENT SCOPE</p><h2>本次比较供应商</h2>{excludedSupplierIds.length > 0 && <p>不含已按当前设置排除的 {excludedSupplierIds.join('、')}</p>}</div></div>
           <div className="supplier-list">
             {entries.map((entry) => {
               const key = entry.supplier_identity_id ?? entry.quotes[0]?.quote_id
               const history = entry.history_snapshot
               return <button type="button" key={key} className={selected === entry ? 'supplier-row supplier-row-active' : 'supplier-row'} onClick={() => setSelectedId(key)}>
-                <span><strong>{entry.display_name}</strong><small>{entry.supplier_id ?? '身份待核验'}</small></span>
+                <span><strong>{entry.display_name}</strong><small>{entry.supplier_id ?? '身份待核验'} · {decisionStatusLabel(entry)}</small></span>
                 <span><b>{history?.overall_grade ?? '—'}</b><small>{availabilityLabel(entry.history_availability_status)}</small></span>
               </button>
             })}
@@ -174,7 +195,7 @@ export function SupplierInfoPage() {
         <div className="section-heading"><div><p className="eyebrow">SELECTED SUPPLIER</p><h2>{selected.display_name}</h2><p>{selected.identity_match_status === 'MATCHED' ? '与当前版本化历史目录匹配' : '身份尚未完成可信匹配'}</p></div><span className="signal-badge">{selected.history_snapshot?.overall_grade ? `MCU-9 历史等级 ${selected.history_snapshot.overall_grade}` : availabilityLabel(selected.history_availability_status)}</span></div>
         <div className="supplier-detail-grid">
           <div><h3>历史表现</h3><dl><div><dt>准时率</dt><dd>{percent(selected.history_snapshot?.on_time?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>拒收订单行率</dt><dd>{percent(selected.history_snapshot?.rejected_lines?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>数据版本</dt><dd>{String(context.dataset_version ?? '未记录')}</dd></div></dl></div>
-          <div><h3>本次报价</h3>{selected.quotes.map((quote) => <dl key={quote.quote_id}><div><dt>报价版本</dt><dd>v{quote.quote_version}</dd></div><div><dt>硬性状态</dt><dd>{quote.evaluation?.status ?? '尚未比较'}</dd></div><div><dt>确认总成本</dt><dd>{quote.evaluation?.total_cost ? `${task.requirement.currency} ${quote.evaluation.total_cost}` : '—'}</dd></div><div><dt>预计到货</dt><dd>{quote.evaluation?.estimated_arrival_date ?? '—'}</dd></div></dl>)}</div>
+          <div><h3>本次报价</h3>{selected.quotes.map((quote) => <dl key={quote.quote_id}><div><dt>报价版本</dt><dd>v{quote.quote_version}</dd></div><div><dt>硬性状态</dt><dd>{quote.evaluation ? decisionStatusLabel({ ...selected, quotes: [quote] }) : '尚未比较'}</dd></div><div><dt>确认总成本</dt><dd>{quote.evaluation?.total_cost ? `${task.requirement.currency} ${quote.evaluation.total_cost}` : '—'}</dd></div><div><dt>预计到货</dt><dd>{quote.evaluation?.estimated_arrival_date ?? '—'}</dd></div></dl>)}</div>
           <div><h3>当前排序影响</h3><dl><div><dt>主指标</dt><dd>{rankingCriterionLabel(info.effective_preferences?.primary_criterion)}</dd></div><div><dt>次指标</dt><dd>{rankingCriterionLabel(info.effective_preferences?.secondary_criterion)}</dd></div><div><dt>次指标触发</dt><dd>{info.ranking_trace?.secondary_applied ? '是' : '否'}</dd></div></dl></div>
         </div>
         {selected.quotes[0] && <div className="supplier-detail-links"><Link to={`/tasks/${taskId}/decision`}>查看决策矩阵</Link><Link to={`/tasks/${taskId}/compliance`}>查看制度检查</Link><Link to={`/tasks/${taskId}/quotes/new`}>查看报价证据</Link></div>}

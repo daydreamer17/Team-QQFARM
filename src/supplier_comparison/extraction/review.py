@@ -58,6 +58,7 @@ from .review_contracts import (
     ReviewSeverity,
     ReviewStatus,
     ReviewSummary,
+    ReviewerType,
 )
 from .submission import evaluate_submission_gate
 
@@ -110,6 +111,21 @@ HARD_SUBMISSION_CODES = frozenset(
         "OTHER_FEES_ABSENCE_STATUS_CONFLICT",
     }
 )
+# These checks describe interpretation uncertainty, not invalid input or provenance.
+# A version-bound human disposition resolves the finding, while retaining it for audit.
+HUMAN_RESOLVABLE_CODES = frozenset({
+    "SOURCE_SEMANTIC_MISMATCH",
+    "NORMALIZED_PRICE_NOT_IN_EVIDENCE",
+    "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE",
+    "OTHER_FEES_ABSENCE_AMOUNT_CONFLICT",
+    "OTHER_FEES_ABSENCE_STATUS_CONFLICT",
+    "CRITICAL_FIELD_CONFLICT",
+    "CURRENT_UNIT_PRICE_MISMATCH",
+    "START_EVENT_DOCUMENT_CONFLICT",
+    "OCR_CRITICAL_CONFIDENCE_LOW",
+    "OCR_CRITICAL_CONFIDENCE_UNAVAILABLE",
+    "OCR_CRITICAL_CONFUSABLE_TOKEN",
+})
 FEE_STATUS_FIELDS = {
     "shipping_fee_status": "shipping_fee_amount",
     "other_fees_status": "other_fees_amount",
@@ -151,6 +167,16 @@ OTHER_FEE_SOURCE_PATTERN = re.compile(
     r"\bhandling\s+and\s+admin(?:istration)?\b",
     re.IGNORECASE,
 )
+STANDALONE_HANDLING_AMOUNT_PATTERN = re.compile(
+    r"(?:"
+    r"\bhandling\b\s*(?::|=|-)?\s*"
+    r"(?:S\$|SGD|USD|EUR|GBP|MYR)\s*[0-9][0-9,]*(?:\.[0-9]{1,4})?"
+    r"|"
+    r"(?:S\$|SGD|USD|EUR|GBP|MYR)\s*[0-9][0-9,]*(?:\.[0-9]{1,4})?"
+    r"\s*(?::|=|-)?\s*\bhandling\b"
+    r")",
+    re.IGNORECASE,
+)
 NO_OTHER_FEES_PATTERN = re.compile(
     r"\bno\s+(?:other|additional)"
     r"(?:\s+(?:mandatory|required|applicable|commercial|miscellaneous)){0,3}"
@@ -162,6 +188,22 @@ NO_OTHER_FEES_PATTERN = re.compile(
     re.IGNORECASE,
 )
 DECIMAL_TOKEN_PATTERN = re.compile(r'(?<![A-Za-z0-9])([0-9][0-9,]*(?:\.[0-9]+)?)(?![A-Za-z0-9])')
+
+
+def has_other_fee_source_semantics(context: str) -> bool:
+    """Accept explicit fee aliases or a priced standalone Handling table label.
+
+    A bare ``Handling`` mention is too weak: it may describe packaging or
+    instructions instead of a charge. A deterministic FIELD_AND_VALUE context
+    such as ``Handling SGD 75.00`` is unambiguous enough to support both the
+    KNOWN_AMOUNT status and its amount. The reverse order is accepted because
+    semantic contexts are built for both the table label and value cells.
+    """
+
+    return bool(
+        OTHER_FEE_SOURCE_PATTERN.search(context)
+        or STANDALONE_HANDLING_AMOUNT_PATTERN.search(context)
+    )
 
 
 def _supplier_name_contains_system_id(supplier_name: str, supplier_id: str) -> bool:
@@ -249,6 +291,32 @@ def review_extraction_batch(
             _review_cross_field(batch, assessment_by_name, valid_review_events)
         )
 
+    resolution_ids = {
+        event.field_name: event.correction_id
+        for event in corrections
+        if event.field_name in valid_correction_fields
+        and event.action != CorrectionAction.MARK_MISSING
+    }
+    resolution_ids.update({
+        name: event.review_event_id
+        for name, event in valid_review_events.items()
+        if event.action == HumanReviewAction.CONFIRM_VALUE
+    })
+    findings = [
+        finding.model_copy(update={
+            "resolved": True,
+            "resolution_event_id": resolution_ids[finding.field_name],
+            "reviewer_type": ReviewerType.HUMAN,
+            "accepted_for_calculation": assessment_by_name[finding.field_name].is_critical,
+        })
+        if finding.field_name in resolution_ids
+        and finding.codes
+        and set(finding.codes) <= HUMAN_RESOLVABLE_CODES
+        and not finding.resolved
+        else finding
+        for finding in findings
+    ]
+
     unresolved_rejected = [
         finding
         for finding in findings
@@ -292,6 +360,7 @@ def review_extraction_batch(
                     finding.severity == ReviewSeverity.BLOCKING
                     or bool(set(finding.codes) & HARD_SUBMISSION_CODES)
                 )
+                and set(finding.codes) != {"FEE_STATUS_UNKNOWN"}
             }
         )
     )
@@ -637,6 +706,7 @@ def _review_human_events(
         identity_valid = (
             candidate is not None
             and event.candidate_field_id == candidate.field_id
+            and event.candidate_field_version == candidate.field_version
             and event.candidate_status == candidate.validation_status
             and event.task_revision == context.task_revision
             and event.quote_id == context.quote_id
@@ -1089,7 +1159,7 @@ def _review_sources(
     if (
         candidate.field_name in {"other_fees_status", "other_fees_amount"}
         and cited_sources
-        and not any(OTHER_FEE_SOURCE_PATTERN.search(context) for context in source_contexts)
+        and not any(has_other_fee_source_semantics(context) for context in source_contexts)
     ):
         findings.append(
             _candidate_problem(

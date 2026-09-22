@@ -509,9 +509,9 @@ export const api = {
     request<InvestigationCase[]>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/investigations`,
     ),
-  getSelectionGaps: (taskId: string, expectedTaskRevision: number) =>
+  getSelectionGaps: (taskId: string, expectedTaskRevision: number, expectedResultId?: string) =>
     request<SelectionGapResponse>(
-      `/api/v1/tasks/${encodeURIComponent(taskId)}/selection-gaps?expected_task_revision=${expectedTaskRevision}`,
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/selection-gaps?expected_task_revision=${expectedTaskRevision}${expectedResultId ? `&expected_result_id=${encodeURIComponent(expectedResultId)}` : ''}`,
     ),
   simulateRequirement: (
     taskId: string,

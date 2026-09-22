@@ -55,7 +55,13 @@ from supplier_comparison.extraction.errors import DownstreamNotReadyError
 from supplier_comparison.extraction.contracts import ValidationStatus
 from supplier_comparison.rules.contracts import RULE_VERSION
 
-from .service import BackendError, BackendService, ConflictError, new_id
+from .service import (
+    COMPARISON_FACT_CORRECTION_CODES,
+    BackendError,
+    BackendService,
+    ConflictError,
+    new_id,
+)
 from .investigation import CaseStatus, InvestigationRunner
 from .investigation_tools import ScopedInvestigationTools
 from .policy_investigation import ScopedPolicyInvestigationTools, diagnose_policy
@@ -291,6 +297,7 @@ class WorkflowState(TypedDict, total=False):
     nonblocking_unknown_quote_ids: list[str]
     blocking_unknown_quote_ids: list[str]
     undetermined_quote_ids: list[str]
+    publishable_pending_quote_ids: list[str]
     final_result_id: str
     evaluated_at: str
     investigation_waiting: bool
@@ -472,6 +479,15 @@ class WorkflowRunner:
                     context=context,
                     budget=budget,
                 )
+            except ExtractionError as exc:
+                # Surface the failed stage and input, without exposing transport
+                # URLs, credentials or provider response bodies.
+                filename = document.get("original_filename") or document["document_id"]
+                raise BackendError(
+                    exc.code,
+                    f"报价解析失败：{filename}（{exc.code}）。已使用 {budget.calls_used} 次模型调用；"
+                    "请检查模型服务后重试，或使用人工录入。",
+                ) from exc
             finally:
                 self.service.record_document_calls(
                     execution["document_execution_id"],
@@ -524,6 +540,7 @@ class WorkflowRunner:
                 requirement,
                 documents[quote_id]["is_synthetic"],
                 reviewed_at=self._state_evaluated_at(state),
+                review_events=self.service.review_confirmations_for_batch(batch_id),
                 corrections=corrections,
             )
             artifact = self.service.append_artifact(
@@ -615,6 +632,9 @@ class WorkflowRunner:
         }
         excluded_quote_ids = set(state["review_artifact_ids"]) - compared_quote_ids
         trace = report.comparison.ranking_trace
+        comparison_by_quote_id = {
+            row.quote_id: row for row in report.comparison.supplier_results
+        }
         payment_criterion_required = bool(
             trace
             and (
@@ -635,6 +655,17 @@ class WorkflowRunner:
             "undetermined_quote_ids": [
                 impact.quote_id for impact in report.quote_impacts
                 if impact.status == ImpactStatus.UNDETERMINED
+            ],
+            "publishable_pending_quote_ids": [
+                impact.quote_id
+                for impact in report.quote_impacts
+                if impact.status == ImpactStatus.UNDETERMINED
+                and comparison_by_quote_id.get(impact.quote_id) is not None
+                and comparison_by_quote_id[impact.quote_id].pending_reasons
+                and all(
+                    reason.code not in COMPARISON_FACT_CORRECTION_CODES
+                    for reason in comparison_by_quote_id[impact.quote_id].pending_reasons
+                )
             ],
             "payment_information_quote_ids": [
                 row.quote_id
@@ -664,8 +695,6 @@ class WorkflowRunner:
         if any(case.status == CaseStatus.STALE for case in cases) or not tools.current():
             raise ConflictError("investigation_input_changed", "Investigation inputs changed; restart on current inputs.")
         unresolved = any(case.status != CaseStatus.RESOLVED for case in cases)
-        if state.get("undetermined_quote_ids") and not cases:
-            raise BackendError("review_required", "No safe field investigation is available; operator repair required.")
         return {"investigation_waiting": unresolved, "investigation_case_ids": [case.case_id for case in cases]}
 
     def _await_batch_review(self, state: WorkflowState) -> WorkflowState:
@@ -689,10 +718,23 @@ class WorkflowRunner:
             return "needs_payment_information"
         if state.get("investigation_waiting"):
             return "needs_batch_review"
-        if state.get("undetermined_quote_ids"):
+        # A comparison-level limitation (for example BUSINESS_DAYS without a
+        # configured business calendar) is not a malformed quote fact.  The
+        # rules engine has already preserved it as PENDING_INPUT and forbidden
+        # a final recommendation, so publish that audited draft instead of
+        # forcing the operator to falsify the source value just to continue.
+        pending_comparison_quote_ids = set(
+            state.get("publishable_pending_quote_ids", [])
+        )
+        unsafe_undetermined_quote_ids = (
+            set(state.get("undetermined_quote_ids", []))
+            - pending_comparison_quote_ids
+        )
+        if unsafe_undetermined_quote_ids:
             raise BackendError(
-                "review_required", "Resolve unsupported or non-fee facts before requesting fees.",
-                quote_ids=state["undetermined_quote_ids"],
+                "review_required",
+                "Resolve invalid or ambiguous quote facts before comparison.",
+                quote_ids=sorted(unsafe_undetermined_quote_ids),
             )
         missing = []
         not_ready = []
@@ -703,18 +745,26 @@ class WorkflowRunner:
             )
             if quote_id in state.get("nonblocking_unknown_quote_ids", []):
                 continue
-            if envelope.downstream_ready:
+            if envelope.downstream_ready and (
+                quote_id not in state.get("blocking_unknown_quote_ids", [])
+                or quote_id in pending_comparison_quote_ids
+            ):
                 continue
             not_ready.append(quote_id)
             blocking_by_quote[quote_id] = sorted(
                 set(envelope.review.blocking_fields if envelope.review else ())
             )
-            if (
-                envelope.review is not None
-                and "shipping_fee_status" in envelope.review.blocking_fields
+            shipping = next((c for c in envelope.batch.candidates
+                             if c.field_name == "shipping_fee_status"), None) if envelope.batch else None
+            if shipping is not None and (
+                shipping.validation_status == ValidationStatus.MISSING
+                or shipping.normalized_value == "UNKNOWN"
             ):
                 missing.append(quote_id)
-        if not not_ready and not state.get("blocking_unknown_quote_ids"):
+        unresolved_blocking_quote_ids = (
+            set(state.get("blocking_unknown_quote_ids", [])) - pending_comparison_quote_ids
+        )
+        if not not_ready and not unresolved_blocking_quote_ids:
             return "ready"
         if len(not_ready) == 1 and missing == not_ready:
             envelope = ReviewEnvelope.model_validate(
@@ -723,10 +773,8 @@ class WorkflowRunner:
             assert envelope.batch is not None
             status = next(c for c in envelope.batch.candidates if c.field_name == "shipping_fee_status")
             confirmed_unknown = (
-                status.validation_status == ValidationStatus.VERIFIED
+                status.validation_status in {ValidationStatus.EXTRACTED, ValidationStatus.VERIFIED}
                 and status.normalized_value == "UNKNOWN"
-                and status.origin is not None
-                and status.origin.value in {"USER_INPUT", "USER_CORRECTION"}
             )
             if status.validation_status != ValidationStatus.MISSING and not confirmed_unknown:
                 raise BackendError("review_required", "Unknown fee status needs a typed correction.")
@@ -763,8 +811,54 @@ class WorkflowRunner:
         resolved = self.service.get_issue(issue["issue_id"])
         if resolved["status"] != "RESOLVED":
             raise ConflictError("issue_not_resolved", "Issue must be resolved before resume.")
+        # Persist this human clarification with the quote, not only with this
+        # graph's interrupt. Scenario/requirement reruns reuse the corrected batch.
+        prior = ReviewEnvelope.model_validate(self.service.artifact_payload(
+            state["review_artifact_ids"][quote_id]))
+        assert prior.batch is not None
+        terms = next(c for c in prior.batch.candidates if c.field_name == 'payment_terms')
+        clarified, correction = apply_candidate_correction(
+            prior.batch, field_name='payment_terms', action=CorrectionAction.USER_CORRECTION,
+            raw_value=terms.raw_value, normalized_value=f'{terms.normalized_value} after invoice',
+            unit=terms.unit, reason_code='AUTHORIZED_PAYMENT_INFORMATION',
+            reason=resolved['answer']['note'], reviewer_id=resolved['answered_by'],
+            reviewed_at=datetime.fromisoformat(resolved['answered_at']),
+        )
+        document_id = clarified.parsed_input.context.document_id
+        artifact = self.service.append_artifact(
+            task_id=state['task_id'], task_revision=resolved['resolved_revision'],
+            artifact_type='EXTRACTION_BATCH', payload=clarified.model_dump(mode='json'),
+            parent_artifact_id=state['batch_artifact_ids'][quote_id],
+            quote_id=quote_id, document_id=document_id, graph_run_id=state['graph_run_id'],
+        )
+        self.service.append_artifact(
+            task_id=state['task_id'], task_revision=resolved['resolved_revision'],
+            artifact_type='CORRECTION_EVENT', payload=correction.model_dump(mode='json'),
+            parent_artifact_id=artifact['artifact_id'], quote_id=quote_id,
+            document_id=document_id, graph_run_id=state['graph_run_id'],
+        )
+        context = self.service.workflow_context(state['graph_run_id'])
+        document = next(d for d in context['documents'] if d['quote_id'] == quote_id)
+        reviewed = self._review(
+            clarified, ProcurementRequirement.model_validate(context['requirement']),
+            document['is_synthetic'], reviewed_at=self._state_evaluated_at(state),
+            review_events=tuple(e for e in prior.review_events if e.field_name != 'payment_terms'),
+            corrections=(*prior.corrections, correction),
+        )
+        review = self.service.append_artifact(
+            task_id=state['task_id'], task_revision=resolved['resolved_revision'],
+            artifact_type='REVIEW_ENVELOPE', payload=reviewed.model_dump(mode='json'),
+            parent_artifact_id=artifact['artifact_id'], quote_id=quote_id,
+            document_id=document_id, graph_run_id=state['graph_run_id'],
+        )
+        execution = self.service.ensure_document_execution(
+            graph_run_id=state['graph_run_id'], document_id=document_id, max_calls=8)
+        self.service.link_document_artifacts(execution['document_execution_id'],
+            batch_artifact_id=artifact['artifact_id'], review_artifact_id=review['artifact_id'], status='REVIEWED')
         return {
             "task_revision": resolved["resolved_revision"],
+            "batch_artifact_ids": {**state['batch_artifact_ids'], quote_id: artifact['artifact_id']},
+            "review_artifact_ids": {**state['review_artifact_ids'], quote_id: review['artifact_id']},
             "payment_information_quote_ids": state["payment_information_quote_ids"][1:],
         }
 
@@ -875,7 +969,12 @@ class WorkflowRunner:
             requirement,
             document["is_synthetic"],
             reviewed_at=self._state_evaluated_at(state),
-            review_events=(event,),
+            review_events=tuple(
+                prior for prior in self.service.review_confirmations_for_batch(batch_id)
+                if prior.field_name != confirmation_field
+                and not (shipping_status.validation_status == ValidationStatus.MISSING
+                         and prior.field_name == 'shipping_fee_status')
+            ) + (event,),
             corrections=status_corrections,
         )
         review_artifact = self.service.append_artifact(
@@ -1016,6 +1115,10 @@ class WorkflowRunner:
                 *prior_envelope.corrections,
                 status_event,
                 amount_event,
+            ),
+            review_events=tuple(
+                event for event in prior_envelope.review_events
+                if event.field_name not in {"shipping_fee_status", "shipping_fee_amount"}
             ),
         )
         review_artifact = self.service.append_artifact(
@@ -1352,9 +1455,11 @@ class WorkflowRunner:
             if quote_id in state.get("nonblocking_unknown_quote_ids", []):
                 continue
             envelope = ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
-            if (
-                envelope.review is not None
-                and "shipping_fee_status" in envelope.review.blocking_fields
+            shipping = next((c for c in envelope.batch.candidates
+                             if c.field_name == "shipping_fee_status"), None) if envelope.batch else None
+            if shipping is not None and (
+                shipping.validation_status == ValidationStatus.MISSING
+                or shipping.normalized_value == "UNKNOWN"
             ):
                 matches.append(quote_id)
         if len(matches) != 1:

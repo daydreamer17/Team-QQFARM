@@ -410,6 +410,9 @@ export interface QuoteDraftResponse {
     field_names: string[]
     group_id: string | null
     message: string
+    category?: 'NEEDS_CONFIRMATION' | 'SOURCE_OR_VERSION_ERROR' | 'MISSING_INFORMATION' | 'INVALID_INPUT'
+    next_action?: string
+    actions?: string[]
   }>
   review_findings: ReviewFinding[]
   fields: QuoteField[]
@@ -536,6 +539,7 @@ export interface QuoteField {
   validation_status: string
   origin: string | null
   evidence: FieldEvidence[]
+  review_evidence?: FieldEvidence[]
   criticality?: string
   applicable?: boolean
   required_for_submission?: boolean
