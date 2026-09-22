@@ -1,0 +1,16 @@
+{
+  "dataset_id": "preference_demo",
+  "schema_version": "preference-demo/1.0.0",
+  "generated_at": "2026-09-21T00:00:00+00:00",
+  "is_synthetic": true,
+  "planned_order_date": "2026-10-10",
+  "files": {
+    "README.md": "cc3b7bb52366c8b3018ea6729046f746d034717fbf0b0423342bf8a1ab5d2fd6",
+    "quotes/sup-022_quote.csv": "ea764bd9b26ea2801264f79f874df503abab2b0a34cde49e653f63bd51e64ff0",
+    "quotes/sup-023_quote.csv": "d6d013dd867d08ae7381833a2b8d0dba35e1d3c05a41644c718721bd5598d3d6",
+    "quotes/sup-024_quote.csv": "129bb533007ec8ed18c1de64178a458de525f59711fb8361ff1b3c37b6e06a4a",
+    "quotes/sup-029_quote.csv": "c1be599d6c6f2a9ac35ba5a24cba413a7f8182088479ce15f62c09610a90c59d",
+    "requirement/confirmed_requirement.json": "c736a1fca0ebf5cbc76cba13156196b67092c1090077e65fb1bccdf82e407ef0",
+    "requirement/procurement_requirement.txt": "bc3a6212a8d26a9b6cfae56bde12f9e9fc2aacb88633b7f6bba0bf91835cfa79"
+  }
+}
