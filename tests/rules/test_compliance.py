@@ -67,11 +67,39 @@ def test_amount_threshold_is_an_action_not_purchase_approval():
         action="MANAGER_REVIEW", execution_stage="AFTER_SELECTION")
     assert evaluate(params, amount=Decimal("100"), currency="SGD").status == "NOT_APPLICABLE"
     result = evaluate(params, amount=Decimal("100"), currency="SGD", execution_stage="AFTER_SELECTION")
-    assert result.status == "PASS"
+    assert result.status == "REVIEW_REQUIRED"
     assert result.triggered is True
     assert result.action == "MANAGER_REVIEW"
+    assert result.approval_confirmed is False
+    approved = evidence(control_code="AMOUNT_APPROVAL", manufacturer=None, manufacturer_part_number=None,
+                        approval_amount=Decimal("120"), currency="SGD")
+    result = evaluate(params, (approved,), amount=Decimal("100"), currency="SGD",
+                      execution_stage="AFTER_SELECTION")
+    assert result.status == "PASS"
+    assert result.approval_confirmed is True
+    assert result.evidence_ids == ("ev-1",)
     assert evaluate(params, amount=None, currency="SGD", execution_stage="AFTER_SELECTION").status == "REVIEW_REQUIRED"
     assert evaluate(params, amount=Decimal("100"), currency="USD", execution_stage="AFTER_SELECTION").status == "REVIEW_REQUIRED"
+
+
+@pytest.mark.parametrize(("changes", "reason"), [
+    ({"approval_amount": Decimal("99")}, "AMOUNT_APPROVAL_INSUFFICIENT"),
+    ({"currency": "USD"}, "AMOUNT_APPROVAL_CURRENCY_MISMATCH"),
+    ({"outcome": "FAIL"}, "AMOUNT_APPROVAL_REJECTED"),
+    ({"expires_on": date(2026, 9, 23)}, "EVIDENCE_EXPIRED"),
+])
+def test_amount_approval_special_cases(changes, reason):
+    params = parameters() | dict(control_code="AMOUNT_APPROVAL", matching_fields=[],
+        currency="SGD", monetary_basis="TOTAL_COST", threshold="100", operator="GTE",
+        action="MANAGER_REVIEW", execution_stage="AFTER_SELECTION")
+    approved = evidence(**(dict(control_code="AMOUNT_APPROVAL", manufacturer=None,
+                                manufacturer_part_number=None, approval_amount=Decimal("120"),
+                                currency="SGD") | changes))
+    result = evaluate(params, (approved,), amount=Decimal("100"), currency="SGD",
+                      execution_stage="AFTER_SELECTION")
+    assert result.status in ("FAIL", "REVIEW_REQUIRED")
+    assert reason in result.reason_codes
+    assert result.approval_confirmed is False
 
 
 def test_binary_float_threshold_is_not_executable():

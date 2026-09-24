@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type {
   FieldEvidence,
+  PolicyComplianceSupplierAssessment,
   QuoteDecisionImpact,
   QuoteFieldsResponse,
   ResultReason,
@@ -15,7 +16,7 @@ import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../components/Supp
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
-import { supplierSelectionExplanation } from '../lib/resultComparison'
+import { supplierSelectionExplanation, withPolicyAssessment } from '../lib/resultComparison'
 import {
   fieldLabel,
   originLabel,
@@ -102,15 +103,16 @@ function matrixSelectionSummary(
   currency: string | undefined,
   impact: QuoteDecisionImpact | undefined,
   recommended: boolean,
+  policyAssessment: PolicyComplianceSupplierAssessment | undefined,
 ) {
-  if (impact?.unknown_fields.length && impact.status !== 'NON_BLOCKING') {
-    return {
+  const commercial = impact?.unknown_fields.length && impact.status !== 'NON_BLOCKING'
+    ? {
       label: `${impact.unknown_fields.length} 项待确认`,
       detail: impactMessage(impact.status, impact.message),
-      tone: 'warning',
+      tone: 'warning' as const,
     }
-  }
-  return supplierSelectionExplanation(supplier, primary, ranking, currency, recommended)
+    : supplierSelectionExplanation(supplier, primary, ranking, currency, recommended)
+  return withPolicyAssessment(commercial, policyAssessment)
 }
 
 function Reasons({ title, reasons }: { title: string; reasons: ResultReason[] }) {
@@ -334,6 +336,9 @@ export function ResultPage() {
     ?? frozenRequirement?.secondary_preference
   const suppliersByQuote = new Map(suppliers.map((supplier) => [supplier.quote_id, supplier]))
   const quoteImpactsByQuote = new Map(decisionImpact?.quote_impacts.map((impact) => [impact.quote_id, impact]) ?? [])
+  const policyAssessmentsByQuote = new Map(
+    resultQuery.data.policy_compliance.assessments.map((assessment) => [assessment.quote_id, assessment]),
+  )
   const selectionGapsByQuote = new Map(selectionGapsQuery.data?.gaps.map((gap) => [gap.quote_id, gap]) ?? [])
   const clarificationDraftsByQuote = new Map(
     selectionGapsQuery.data?.clarification_drafts.map((draft) => [draft.quote_id, draft]) ?? [],
@@ -562,6 +567,7 @@ export function ResultPage() {
                         currency,
                         impact,
                         recommended.has(supplier.quote_id),
+                        policyAssessmentsByQuote.get(supplier.quote_id),
                       )
                       return (
                         <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>

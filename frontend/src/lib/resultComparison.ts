@@ -1,5 +1,5 @@
-import type { SupplierComparisonResult } from '../api/types'
-import { reasonText } from './presentation'
+import type { PolicyComplianceSupplierAssessment, SupplierComparisonResult } from '../api/types'
+import { controlLabel, reasonText } from './presentation'
 
 export interface SupplierSelectionExplanation {
   label: string
@@ -136,4 +136,55 @@ export function supplierSelectionExplanation(
     detail: [reason, tradeoff].filter(Boolean).join('；'),
     tone: 'good',
   }
+}
+
+function policyIssueLabels(assessment: PolicyComplianceSupplierAssessment) {
+  return [...new Set(assessment.checks
+    .filter((check) => ['FAIL', 'REVIEW_REQUIRED', 'NOT_EVALUATED'].includes(check.status))
+    .map((check) => controlLabel(check.control_code)))]
+}
+
+export function withPolicyAssessment(
+  commercial: SupplierSelectionExplanation,
+  assessment: PolicyComplianceSupplierAssessment | undefined,
+): SupplierSelectionExplanation {
+  if (!assessment) return commercial
+
+  const issues = policyIssueLabels(assessment)
+  const issueText = issues.length > 0 ? issues.join('、') : '制度要求'
+  if (assessment.eligibility === 'EXCLUDED' || assessment.status === 'NON_COMPLIANT') {
+    return {
+      label: '制度排除',
+      detail: `制度检查不通过：${issueText}；已从推荐候选中排除。商业比较：${commercial.detail}`,
+      tone: 'danger',
+    }
+  }
+  if (assessment.eligibility === 'UNVERIFIED'
+      || assessment.status === 'REVIEW_REQUIRED'
+      || assessment.status === 'NOT_EVALUATED') {
+    return {
+      label: '制度待复核',
+      detail: `${issueText}尚未完成核验；有已核验合格候选时不优先推荐。商业比较：${commercial.detail}`,
+      tone: 'warning',
+    }
+  }
+  if (assessment.eligibility === 'VERIFIED' || assessment.status === 'COMPLIANT') {
+    return {
+      ...commercial,
+      detail: `制度检查已通过；${commercial.detail}`,
+    }
+  }
+  return commercial
+}
+
+export function policyAwareSupplierSelectionExplanation(
+  supplier: SupplierComparisonResult,
+  primary: SupplierComparisonResult | undefined,
+  ranking: string | undefined,
+  currency: string | undefined,
+  recommended: boolean,
+  assessment: PolicyComplianceSupplierAssessment | undefined,
+): SupplierSelectionExplanation {
+  const commercial = supplierSelectionExplanation(supplier, primary, ranking, currency, recommended)
+  return withPolicyAssessment(commercial, assessment)
 }

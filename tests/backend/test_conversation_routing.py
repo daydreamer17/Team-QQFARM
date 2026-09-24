@@ -214,6 +214,55 @@ def test_investigation_route_runs_agent_then_narrates_with_audit_reference(monke
     assert calls == 5  # intent + three Agent decisions + grounded narration
 
 
+def test_investigation_route_uses_grounded_fallback_when_model_narration_is_invalid(monkeypatch):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+
+    monkeypatch.setattr(
+        "supplier_comparison.backend.decision_intents.route_conversation_intent",
+        lambda *_args, **_kwargs: (ConversationIntent(route="INVESTIGATE"), 1),
+    )
+
+    def investigate(ctx):
+        enriched = dict(ctx)
+        reference = "INVESTIGATION:case-fallback"
+        enriched["frozen_references"] = {reference: {
+            "status": "RESOLVED",
+            "observations": [{
+                "result": {
+                    "tool_name": "inspect_quote_evidence",
+                    "status": "OK",
+                    "data": {"supplier_name": "Alpha", "focus": "COST"},
+                },
+            }, {
+                "result": {
+                    "tool_name": "compile_decision_brief",
+                    "status": "OK",
+                    "data": {"requires_follow_up": False, "unresolved_items": []},
+                },
+            }],
+        }}
+        enriched["allowed_reference_ids"] = [reference]
+        enriched["investigation_reference_id"] = reference
+        return enriched, 3
+
+    def invalid_narration(*_args, **_kwargs):
+        raise ModelClientError(
+            "unsupported compliance claim", attempts=2,
+            error_code="conversation_model_output_invalid",
+        )
+
+    monkeypatch.setattr(conversations, "generate_conversation_turn", invalid_narration)
+    ctx = context()
+    ctx["recent_messages"] = [{"role": "USER", "content": "核查报价成本证据"}]
+    turn, calls = process_conversation_turn(ctx, CONFIG, investigate=investigate)
+
+    assert calls == 6
+    assert turn["reference_ids"] == ["INVESTIGATION:case-fallback"]
+    assert "已核实" in turn["assistant_text"]
+    assert "Alpha" in turn["assistant_text"]
+    assert "尚缺信息" in turn["assistant_text"]
+
+
 def test_investigation_route_without_enabled_agent_is_explicit(monkeypatch):
     from supplier_comparison.backend.decision_intents import ConversationIntent
 

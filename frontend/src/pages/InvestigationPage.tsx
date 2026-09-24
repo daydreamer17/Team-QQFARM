@@ -23,6 +23,12 @@ const toolLabels: Record<string, string> = {
   simulate_requirement_change: '模拟需求变化',
   get_policy_retrieval_status: '诊断制度检索状态',
   retry_policy_retrieval: '重试制度检索',
+  read_decision_overview: '核对当前推荐',
+  compare_alternatives: '比较备选方案',
+  inspect_quote_evidence: '核对报价原文',
+  inspect_supplier_history: '核对供应商历史',
+  inspect_policy_evidence: '核对制度依据',
+  compile_decision_brief: '整理核查结论',
 }
 
 const stopReasonLabels: Record<string, string> = {
@@ -39,6 +45,24 @@ const stopReasonLabels: Record<string, string> = {
 
 function observationSummary(observation: InvestigationObservation) {
   const data = observation.result.data
+  if (observation.result.tool_name === 'read_decision_overview') {
+    return `已读取 ${Array.isArray(data.suppliers) ? data.suppliers.length : 0} 家供应商及当前排序依据。`
+  }
+  if (observation.result.tool_name === 'compare_alternatives') {
+    return `已比较 ${Array.isArray(data.gaps) ? data.gaps.length : 0} 家供应商的成本、交期和阻碍差异。`
+  }
+  if (observation.result.tool_name === 'inspect_quote_evidence') {
+    const focus = { COST: '成本', DELIVERY: '交期', TERMS: '商务条款', ALL: '关键' }[String(data.focus)] ?? '关键'
+    return `已核对 ${String(data.supplier_name || data.quote_id || '该供应商')} 的${focus}报价证据（${Array.isArray(data.fields) ? data.fields.length : 0} 项）。`
+  }
+  if (observation.result.tool_name === 'inspect_supplier_history') {
+    return `已核对 ${String(data.supplier_name || data.quote_id || '该供应商')} 的历史表现及数据可用性。`
+  }
+  if (observation.result.tool_name === 'inspect_policy_evidence') return '已核对本次结果冻结的制度检索与合规状态。'
+  if (observation.result.tool_name === 'compile_decision_brief') {
+    const pending = Array.isArray(data.unresolved_items) ? data.unresolved_items.length : 0
+    return pending > 0 ? `已汇总结论，并列出 ${pending} 项待补证明或审批记录。` : '已整理本轮核查事实与结论。'
+  }
   if (observation.result.tool_name === 'draft_clarification' && typeof data.text === 'string') {
     return data.text
   }

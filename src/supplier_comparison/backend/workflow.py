@@ -88,6 +88,18 @@ POLICY_RETRIEVAL_QUERIES = {
 }
 
 
+def _policy_clause_retrieval_query(clause: dict[str, Any]) -> str:
+    """Build a valid query without discarding a non-English policy clause."""
+
+    control_code = str(clause.get("control_code") or "")
+    clause_id = str(clause.get("clause_id") or "unknown")
+    section = str(clause.get("section") or "")
+    text = str(clause.get("text") or "")
+    suffix = f"\nLocate exact policy clause {clause_id}; control {control_code}."
+    source_text = f"{section}: {text}"
+    return source_text[: 4000 - len(suffix)] + suffix
+
+
 class QuoteProcessor(Protocol):
     def process(
         self,
@@ -1319,7 +1331,7 @@ class WorkflowRunner:
             for clause in plan['clauses']:
                 request = RetrievalRequest(task_id=state['task_id'], task_revision=state['task_revision'],
                     snapshot_id=state['snapshot_id'], policy_set_version=context['policy_set_version'],
-                    policy_index_version=context['policy_index_version'], query=(clause['section'] + ': ' + clause['text'])[:4000],
+                    policy_index_version=context['policy_index_version'], query=_policy_clause_retrieval_query(clause),
                     required_control_codes=[clause['control_code']], category=context['policy_category'],
                     region=context['policy_region'], evaluated_at=self._state_evaluated_at(state))
                 result = self._safe_policy_retrieval(request, clause['control_code'])
@@ -1428,7 +1440,7 @@ class WorkflowRunner:
         requests = {code: RetrievalRequest(
             task_id=state['task_id'], task_revision=state['task_revision'], snapshot_id=state['snapshot_id'],
             policy_set_version=context['policy_set_version'], policy_index_version=context['policy_index_version'],
-            query=(clauses[code]['section'] + ': ' + clauses[code]['text'])[:4000] if code in clauses else POLICY_RETRIEVAL_QUERIES[code],
+            query=_policy_clause_retrieval_query(clauses[code]) if code in clauses else POLICY_RETRIEVAL_QUERIES[code],
             required_control_codes=[clauses[code]['control_code'] if code in clauses else code],
             category=context['policy_category'], region=context['policy_region'],
             evaluated_at=self._state_evaluated_at(state),

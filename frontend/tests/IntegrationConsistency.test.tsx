@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { api, ApiClientError } from '../src/api/client'
-import type { ComparisonResultResponse, ProcurementRequirement, TaskDetail } from '../src/api/types'
+import type { ComparisonResultResponse, PolicyImportSummary, ProcurementRequirement, TaskDetail } from '../src/api/types'
 import { PolicyImportPage } from '../src/pages/PolicyImportPage'
 import type { PolicyImportResponse } from '../src/api/types'
 import { CompliancePage } from '../src/pages/CompliancePage'
@@ -590,8 +590,9 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/compliance', '/tasks/:taskId/compliance', <CompliancePage />)
 
-    expect(await screen.findByRole('heading', { name: '等待报价处理完成' })).toBeInTheDocument()
-    expect(screen.getByText(/历史结果不会作为当前制度结论显示/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '检查前准备证明材料' })).toBeInTheDocument()
+    expect(screen.getByText(/这是旧流程任务，历史结果尚未经过本阶段确认/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始制度检查' })).toBeInTheDocument()
     expect(history).not.toHaveBeenCalled()
   })
 
@@ -674,9 +675,9 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    expect(await screen.findByRole('heading', { name: '制度管理' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '规则资源库' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '已发布制度' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '待审核与发布' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '待处理版本' })).toBeInTheDocument()
     expect(screen.queryByLabelText('制度集名称')).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '上传制度版本' }))
     expect(screen.getByLabelText('上传方式')).toHaveValue('NEW')
@@ -696,8 +697,71 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByText(/PDF \/ UTF-8 TXT \/ Markdown/)).toBeInTheDocument()
     expect(screen.queryByLabelText('策略集 ID')).not.toBeInTheDocument()
     expect(screen.queryByText('KNOWLEDGE RESOURCES')).not.toBeInTheDocument()
-    expect(await screen.findByText('当前没有待处理文件。')).toBeInTheDocument()
+    expect(await screen.findByText('当前没有待处理版本。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '筛选' })).not.toBeInTheDocument()
+  })
+
+  test('only the most recently updated pending version is highlighted', async () => {
+    const makeImport = (overrides: Partial<PolicyImportSummary>): PolicyImportSummary => ({
+      policy_import_id: 'import-default',
+      status: 'READY_TO_PUBLISH',
+      revision: 1,
+      original_filename: 'rule.md',
+      media_type: 'text/markdown',
+      size_bytes: 900,
+      policy_set_id: 'electronics-procurement',
+      policy_set_version: 'v2',
+      policy_id: 'policy-default',
+      document_id: 'document-default',
+      document_version: '1',
+      title: 'Rule',
+      categories: ['Electronics'],
+      regions: ['SG'],
+      policy_index_version: null,
+      clause_count: 1,
+      created_at: '2026-09-24T10:00:00Z',
+      updated_at: '2026-09-24T10:00:00Z',
+      ...overrides,
+    })
+    const pending = [
+      makeImport({ policy_import_id: 'v2-admission', original_filename: 'admission.md', status: 'REVIEW_REQUIRED' }),
+      makeImport({ policy_import_id: 'v2-rohs', original_filename: 'rohs.md' }),
+      makeImport({ policy_import_id: 'v2-amount', original_filename: 'amount.md' }),
+      makeImport({
+        policy_import_id: 'v1-admission',
+        policy_set_version: 'v1',
+        original_filename: 'admission.md',
+        updated_at: '2026-09-23T10:00:00Z',
+      }),
+      makeImport({
+        policy_import_id: 'hardware-v1-rohs',
+        policy_set_id: 'data-center-hardware',
+        policy_set_version: 'v1',
+        original_filename: 'rohs.md',
+        updated_at: '2026-09-22T10:00:00Z',
+      }),
+    ]
+    vi.spyOn(api, 'listPolicyImports').mockImplementation(async (query) => ({
+      items: pending.filter((item) => item.status === query.status),
+      total: pending.filter((item) => item.status === query.status).length,
+      limit: 100,
+      offset: 0,
+    }))
+    vi.spyOn(api, 'listPolicySets').mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 })
+
+    renderRoute('/resources', '/resources', <ResourcePage />)
+
+    expect(await screen.findByText('最新 1 个版本')).toBeInTheDocument()
+    expect(screen.getByText('3 个文件 · 1 个待处理 · 2 个已识别')).toBeInTheDocument()
+    expect(screen.getByText('版本 v2')).toBeVisible()
+    for (const version of screen.getAllByText('版本 v1')) expect(version).not.toBeVisible()
+    expect(screen.getByText('data-center-hardware')).not.toBeVisible()
+    expect(screen.getByRole('link', { name: '继续处理' })).toHaveAttribute('href', '/resources/policies/v2-admission')
+
+    await userEvent.click(screen.getByText('其他待处理版本（2）'))
+    expect(screen.getAllByText('版本 v1')).toHaveLength(2)
+    expect(screen.getByText('data-center-hardware')).toBeVisible()
+    expect(screen.getAllByRole('link', { name: '查看草稿' })).toHaveLength(2)
   })
 
   test('published policy versions can start a replacement version or be deactivated', async () => {
@@ -933,10 +997,10 @@ function policyFixture(status = 'REVIEW_REQUIRED'): PolicyImportResponse {
     clauses: [{ clause_id: 'C1', title: 'Clause', text: 'Saved text', control_code: 'AMOUNT_APPROVAL', rule_parameters: {}, position: 0 }],
   }
 }
-function renderPolicy() {
+function renderPolicy(policyImportId = 'policy-test') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/policy/policy-test']}>
-    <Routes><Route path="/policy/:policyImportId" element={<PolicyImportPage />} /></Routes>
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/policy/${policyImportId}`]}>
+    <Routes><Route path="/policy/:policyImportId" element={<PolicyImportPage />} /><Route path="/resources/policies/:policyImportId" element={<PolicyImportPage />} /></Routes>
   </MemoryRouter></QueryClientProvider>)
   return client
 }
@@ -958,6 +1022,57 @@ test('policy editor locks fields during save and permits editing after completio
   await act(async () => finish({ ...data, revision: 3, status: 'READY_TO_PUBLISH', clauses: [{ ...data.clauses[0], text: 'Submitted' }] }))
   expect(field).toHaveValue('Submitted')
   expect(field).not.toBeDisabled()
+  client.clear()
+})
+test('editing a policy clause id keeps its rule settings expanded', async () => {
+  vi.restoreAllMocks()
+  const data = policyFixture()
+  vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
+  const client = renderPolicy()
+  const user = userEvent.setup()
+
+  await user.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
+  const summary = screen.getByText('检查规则设置')
+  const settings = summary.closest('details')!
+  await user.click(summary)
+  expect(settings).toHaveAttribute('open')
+
+  const clauseId = screen.getByLabelText('条款编号')
+  await user.clear(clauseId)
+  await user.type(clauseId, 'CCD-ADM-001')
+
+  expect(clauseId).toHaveValue('CCD-ADM-001')
+  expect(settings).toHaveAttribute('open')
+  client.clear()
+})
+test('switching policy files replaces an unsaved clause draft instead of showing it under another filename', async () => {
+  vi.restoreAllMocks()
+  const admission = { ...policyFixture(), policy_import_id: 'policy-admission', original_filename: 'admission.md',
+    clauses: [{ ...policyFixture().clauses[0], title: 'Supplier admission', control_code: null }] }
+  const amount = { ...policyFixture(), policy_import_id: 'policy-amount', original_filename: 'amount.md',
+    clauses: [{ ...policyFixture().clauses[0], clause_id: 'AMT-1', title: 'Amount approval', control_code: null }] }
+  vi.spyOn(api, 'getPolicyImport').mockImplementation(async (id) => id === 'policy-admission' ? admission : amount)
+  vi.spyOn(api, 'listPolicyImports').mockResolvedValue({
+    items: [admission, amount].map((item) => ({
+      ...item,
+      clause_count: item.clauses.length,
+      created_at: '2026-09-24T00:00:00Z',
+      updated_at: '2026-09-24T00:00:00Z',
+    })),
+    total: 2, limit: 100, offset: 0,
+  } as never)
+  const client = renderPolicy('policy-admission')
+  const user = userEvent.setup()
+
+  await user.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
+  const title = await screen.findByLabelText('标题')
+  await user.clear(title)
+  await user.type(title, 'Unsaved admission edit')
+  await user.click(screen.getByRole('link', { name: /amount\.md/ }))
+
+  expect(await screen.findByText('正在审核：amount.md')).toBeInTheDocument()
+  expect(await screen.findByLabelText('标题')).toHaveValue('Amount approval')
+  expect(screen.queryByDisplayValue('Unsaved admission edit')).not.toBeInTheDocument()
   client.clear()
 })
 test('unrecognized policy clauses keep technical controls out of the normal workflow', async () => {

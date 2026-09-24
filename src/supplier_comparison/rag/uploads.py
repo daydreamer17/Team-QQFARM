@@ -1186,6 +1186,21 @@ class PolicyFileImportService:
                         clause_id=clause.clause_id,
                     )
                 seen_clause_ids.add(clause.clause_id)
+                try:
+                    executable_parameters = _materialize_executable_rule(
+                        control_code=str(clause.control_code).upper(),
+                        parameters=dict(clause.rule_parameters),
+                        reviewed_by=self._actor_id,
+                        reviewed_at=record.effective_from,
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ConflictError(
+                        "policy_clause_rule_invalid",
+                        "A supported policy clause is missing executable rule parameters.",
+                        filename=record.original_filename,
+                        clause_id=clause.clause_id,
+                    ) from exc
+                clause.rule_parameters = executable_parameters
                 clauses.append(
                     LoadedClause(
                         clause_id=clause.clause_id,
@@ -1193,7 +1208,7 @@ class PolicyFileImportService:
                         text=clause.text,
                         content_sha256=_sha256_text(clause.text),
                         control_code=str(clause.control_code).upper(),
-                        rule_parameters=dict(clause.rule_parameters),
+                        rule_parameters=executable_parameters,
                     )
                 )
             extension = _SUPPORTED_MEDIA[record.media_type]
@@ -1331,10 +1346,11 @@ def _draft_clauses(
 
 
 def _document_control_code(document_title: str) -> str | None:
-    document = document_title.casefold().replace("-", "_").replace(" ", "_")
+    document = Path(document_title).stem.casefold().replace("-", "_").replace(" ", "_")
     if any(
         marker in document
         for marker in (
+            "rohs",
             "environmental_compliance",
             "electronics_compliance",
             "electronics_rohs",
@@ -1346,6 +1362,7 @@ def _document_control_code(document_title: str) -> str | None:
     if any(
         marker in document
         for marker in (
+            "admission",
             "supplier_due_diligence",
             "supplier_qualification",
             "approved_supplier",
@@ -1357,6 +1374,7 @@ def _document_control_code(document_title: str) -> str | None:
     if any(
         marker in document
         for marker in (
+            "amount",
             "spend_approval",
             "procurement_approval",
             "amount_approval",
@@ -1389,7 +1407,7 @@ def _control_code_scores(title: str, text: str) -> dict[str, int]:
                 "供应商准入", "供应商身份", "供应商编号", "收款账户", "主数据",
                 "临时供应商", "制裁筛查", "准入例外", "未完成常规准入",
                 "approved supplier", "supplier qualification", "supplier due diligence",
-                "supplier identity", "vendor master",
+                "supplier identity", "supplier admission", "admission record", "vendor master",
             ),
         ),
         (
@@ -1484,15 +1502,27 @@ def _analyze_clause(title: str, text: str, document_title: str) -> dict[str, Any
 
     parameters: dict[str, Any] = {}
     reasons: list[str] = []
-    title_value = title.casefold()
-    if control_code == "AMOUNT_APPROVAL" and any(
-        marker in title_value for marker in ("门槛", "阈值", "threshold")
-    ):
+    if control_code == "AMOUNT_APPROVAL":
         amount = _AMOUNT_VALUE.search(text)
-        if amount is None:
+        value = f"{title}\n{text}".casefold()
+        is_executable_amount_rule = amount is not None or any(
+            marker in title.casefold() for marker in ("门槛", "阈值", "threshold")
+        )
+        if not is_executable_amount_rule:
+            control_code = "INFORMATIONAL"
+            amount = None
+        elif amount is None:
             reasons.append("MISSING_REQUIRED_PARAMETER")
         else:
-            parameters = {
+            if any(
+                marker in value for marker in ("after selection", "授标后", "选定后")
+            ):
+                execution_stage = "AFTER_SELECTION"
+            elif any(marker in value for marker in ("before publication", "发布前")):
+                execution_stage = "BEFORE_PUBLICATION"
+            else:
+                execution_stage = "BEFORE_RECOMMENDATION"
+            parameters: dict[str, Any] = {
                 "rule_key": "approval_threshold:" + re.sub(
                     r"\s+", "_", title.strip().casefold()
                 ),
@@ -1500,6 +1530,8 @@ def _analyze_clause(title: str, text: str, document_title: str) -> dict[str, Any
                 "threshold": amount.group(2).replace(",", ""),
                 "operator": ">=",
             }
+            if execution_stage != "BEFORE_RECOMMENDATION":
+                parameters["execution_stage"] = execution_stage
 
     status = "ADMIN_REVIEW" if reasons else "AUTO_ACCEPTED"
     return {
@@ -1513,6 +1545,88 @@ def _analyze_clause(title: str, text: str, document_title: str) -> dict[str, Any
             "conflicts_with": [],
         },
     }
+
+
+def _materialize_executable_rule(
+    *,
+    control_code: str,
+    parameters: dict[str, Any],
+    reviewed_by: str,
+    reviewed_at: datetime,
+) -> dict[str, Any]:
+    """Turn a supported, reviewed upload into the finite runtime rule contract."""
+    from supplier_comparison.rules.compliance import ExecutableRuleParameters
+
+    if control_code == "INFORMATIONAL":
+        return dict(parameters)
+    if control_code not in {
+        "APPROVED_SUPPLIER", "ROHS_COMPLIANCE", "AMOUNT_APPROVAL"
+    }:
+        raise ValueError("unsupported executable control")
+    if "version" in parameters:
+        return ExecutableRuleParameters.model_validate(parameters).model_dump(
+            mode="json"
+        )
+
+    common: dict[str, Any] = {
+        "version": "compliance-rule/1.0",
+        "reviewed_by": reviewed_by,
+        "reviewed_at": (
+            reviewed_at.replace(tzinfo=timezone.utc)
+            if reviewed_at.tzinfo is None
+            else reviewed_at
+        ),
+        "date_basis": "EVALUATED_AT",
+        "missing_outcome": "REVIEW_REQUIRED",
+        "expired_outcome": "REVIEW_REQUIRED",
+        "mismatch_outcome": "REVIEW_REQUIRED",
+        "execution_stage": "BEFORE_RECOMMENDATION",
+        "allow_unspecified_validity": False,
+        "control_code": control_code,
+    }
+    if control_code == "APPROVED_SUPPLIER":
+        common["matching_fields"] = ["supplier_id"]
+    elif control_code == "ROHS_COMPLIANCE":
+        common.update(
+            {
+                "matching_fields": [
+                    "supplier_id", "manufacturer", "manufacturer_part_number"
+                ],
+                "expired_outcome": "FAIL",
+                "mismatch_outcome": "FAIL",
+            }
+        )
+    else:
+        currency = parameters.get("currency")
+        threshold = parameters.get("threshold")
+        operator = parameters.get("operator")
+        if (
+            not currency
+            or threshold is None
+            or operator not in {">", ">=", "<", "<="}
+        ):
+            raise ValueError(
+                "amount approval rule is missing currency, threshold, or operator"
+            )
+        common.update(
+            {
+                "matching_fields": [],
+                "execution_stage": parameters.get(
+                    "execution_stage", "BEFORE_RECOMMENDATION"
+                ),
+                "currency": currency,
+                "monetary_basis": "TOTAL_COST",
+                "threshold": threshold,
+                "operator": {">": "GT", ">=": "GTE", "<": "LT", "<=": "LTE"}[
+                    operator
+                ],
+                "action": (
+                    "Obtain and record amount approval before proceeding at the "
+                    "configured execution stage."
+                ),
+            }
+        )
+    return ExecutableRuleParameters.model_validate(common).model_dump(mode="json")
 
 
 def _sha256_text(value: str) -> str:

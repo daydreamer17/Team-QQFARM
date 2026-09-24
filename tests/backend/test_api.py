@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
-from supplier_comparison.backend.investigation import AgentChoice, InvestigationRunner
+from supplier_comparison.backend.investigation import AgentChoice, AgentLimits, InvestigationRunner
 from supplier_comparison.backend.decision_investigation import DecisionInvestigationTools
 from supplier_comparison.backend.models import (
     Base,
@@ -144,7 +144,6 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
             "original_filename": "supplier-a.csv",
         }
     ]
-
     history = http.get(f"/api/v1/tasks/{task['task_id']}/quotes")
     assert history.status_code == 200
     assert history.json()["task_revision"] == 2
@@ -164,10 +163,7 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
         }
     ]
     assert "storage_path" not in str(history.json())
-
-    supplier_information = http.get(
-        f"/api/v1/tasks/{task['task_id']}/suppliers"
-    )
+    supplier_information = http.get(f"/api/v1/tasks/{task['task_id']}/suppliers")
     assert supplier_information.status_code == 200
     supplier_payload = supplier_information.json()
     assert supplier_payload["view_state"] == "QUOTE_ONLY"
@@ -1434,6 +1430,108 @@ def test_decision_agent_cannot_finish_without_follow_up_evidence(batch_review):
     assert response.json()["status"] == "WAITING_INPUT"
     assert "compile_decision_brief" not in [o["result"]["tool_name"] for o in response.json()["observations"]]
     assert service.get_task(task["task_id"]) == current
+
+
+def test_decision_agent_reserves_final_call_instead_of_exhausting_tool_budget(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-budget",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    result = service.get_result(task["task_id"], current["current_result_id"])
+    recommended = result["result"]["recommended_quote_ids"][0]
+    alternative = next(row["quote_id"] for row in result["result"]["supplier_results"]
+                       if row["quote_id"] != recommended)
+
+    class BudgetPlanner:
+        model_id = "scripted-budget-agent"
+
+        def choose(self, case, schemas, *, timeout_seconds):
+            checked = [o for o in case.observations if o.result.tool_name == "inspect_quote_evidence"]
+            if not checked:
+                return call("inspect_quote_evidence", {"quote_id": recommended, "focus": "ALL"})
+            return call("inspect_quote_evidence", {"quote_id": alternative, "focus": "ALL"})
+
+    http = TestClient(create_app(
+        service,
+        readiness_check=lambda: True,
+        investigator=InvestigationRunner(
+            BudgetPlanner(),
+            limits=AgentLimits(max_model_calls=8, max_tool_calls=5, max_seconds=30),
+        ),
+    ))
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/decision-investigations",
+        json={"expected_task_revision": current["task_revision"]},
+    )
+    assert response.status_code == 201, response.text
+    record = response.json()
+    names = [observation["result"]["tool_name"] for observation in record["observations"]]
+    assert record["status"] == "RESOLVED"
+    assert record["stop_reason"] == "REQUEST_COMPLETED"
+    assert names == [
+        "read_decision_overview", "compare_alternatives",
+        "inspect_quote_evidence", "inspect_quote_evidence", "compile_decision_brief",
+    ]
+    assert len({observation["arguments"].get("quote_id") for observation in record["observations"][2:4]}) == 2
+    brief = record["observations"][-1]["result"]["data"]
+    assert brief["requires_follow_up"] is False
+    assert len(brief["facts"]) == 3
+
+
+def test_decision_agent_treats_refocused_quote_read_as_duplicate(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-duplicate-focus",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    quote_id = next(iter(tools.rows))
+    case = tools.requested_case(request_id="duplicate-focus")
+    assert tools.call_signature(case, "inspect_quote_evidence", {"quote_id": quote_id, "focus": "ALL"}) == (
+        tools.call_signature(case, "inspect_quote_evidence", {"quote_id": quote_id, "focus": "COST"})
+    )
+
+
+def test_decision_agent_recovers_from_premature_stop_for_narrow_evidence_question(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-premature-stop",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    case = tools.prepare_case(tools.requested_case(
+        request_id="premature-stop",
+        question="当前推荐报价的总成本是否有报价原文依据？",
+    ))
+    completed = InvestigationRunner(ScriptedPlanner([
+        AgentChoice(action="STOP", reason="无需继续"),
+        AgentChoice(action="STOP", reason="已观察到所需证据"),
+    ])).run((case,), tools, tools.save)[0]
+    names = [observation.result.tool_name for observation in completed.observations]
+    assert completed.status == "RESOLVED"
+    assert completed.stop_reason == "REQUEST_COMPLETED"
+    assert completed.model_calls == 2
+    assert names == [
+        "read_decision_overview", "compare_alternatives",
+        "inspect_quote_evidence", "compile_decision_brief",
+    ]
+    assert completed.observations[2].arguments["focus"] == "COST"
 
 
 @pytest.mark.skipif(__import__('os').getenv('RUN_AGENT_LIVE_TESTS') != '1',

@@ -7,7 +7,7 @@
 下列命令在仓库根目录的 **PowerShell** 中执行。使用已有 `.venv` 和本地 `.env`；数据库、API 和 worker 必须使用相同数据库及文件存储配置。先备份重要数据库，停止旧 API/worker 后迁移；不要删除数据卷。
 
 ```powershell
-Set-Location G:\Team-QQFARM
+Set-Location E:\iss_hackathon\Team-QQFARM
 docker compose up -d postgres
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m supplier_comparison.checkpoints setup
@@ -29,7 +29,7 @@ docker compose up -d postgres
 前端在单独终端启动，使用项目要求的 Node 版本：
 
 ```powershell
-Set-Location G:\Team-QQFARM\frontend
+Set-Location E:\iss_hackathon\Team-QQFARM\frontend
 npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
@@ -39,20 +39,20 @@ npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 
 ## 2. 导入可执行的合成制度
 
-新增演示制度在 `data/policies/compliance-closure-demo/v1/`，包含三个完整条款：供应商准入、RoHS 材料、金额后续审批事项。适用范围为 `Electronics / SG`，制度版本为 `compliance-closure-demo-2026.09.1`。审核人为显式标注的虚构演示审核人，不能当成真实企业审核。
+演示制度有两个不可变版本：`data/policies/compliance-closure-demo/v1/` 保留选定后金额待办；`data/policies/compliance-closure-demo/v2/` 增加发布前金额审批记录核验，门槛为 SGD 6500.00。两版均覆盖供应商准入、RoHS 材料和金额审批，适用范围为 `Electronics / SG`。若要验证三类证明闭环，请发布 v2；审核人为显式标注的虚构演示审核人，不能当成真实企业审核。
 
 配置已有 `SUPPLIER_EMBEDDING_*`、`SUPPLIER_RERANK_*` 及其引用的密钥环境变量后，从根目录执行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m supplier_comparison.rag smoke-models
-.\.venv\Scripts\python.exe -m supplier_comparison.rag import-policies --manifest data/policies/compliance-closure-demo/v1/manifest.json --publish
+.\.venv\Scripts\python.exe -m supplier_comparison.rag import-policies --manifest data/policies/compliance-closure-demo/v2/manifest.json --publish
 ```
 
 以上命令会调用真实模型服务，可能产生费用。发布需全部 embedding 成功；从发布返回值或 `GET /api/v1/policy-sets` 取得实际 `policy_index_version`，不要手写或沿用其他制度的索引版本。新建采购任务时选择该已发布集合与索引。任务固定版本，不会自动切换到后来发布的制度。
 
 旧制度的空 `rule_parameters` 或旧阈值格式不等于新可执行规则。它们仍可展示引用，但会显示未自动核验。要启用核验，必须审核 `compliance-rule/1.0` 的匹配字段、日期要求、缺失/过期/不匹配处理和执行阶段，并发布**新的制度版本**；不要覆盖旧正文、索引或历史参数。
 
-本演示金额条件为 `TOTAL_COST / SGD / GTE / 10000.00 / AFTER_SELECTION`。触发时产生选定后的审批待办，不表示供应商不合格，也不表示采购已批准。若另一个经审核制度采用正式发布前审批阶段，首版没有审批执行能力，只能保留草稿和待办。
+v2 金额条件为 `TOTAL_COST / SGD / GTE / 6500.00 / BEFORE_PUBLICATION`。达到门槛时必须核对任务内的金额审批记录；系统只保存和匹配审批事实，不执行审批。审批缺失、金额不足、错币种、过期或拒绝时保留发布阻塞，但不把供应商资质写成不合格。
 
 ## 3. 五步操作与材料演示
 
@@ -62,7 +62,7 @@ npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 4. **确认后比较：**可以补齐材料，也可以明确确认仍缺的项目。全部候选资料不足时得到暂定比较，没有已核验正式推荐；存在已核验候选时，先在该资格范围按采购偏好排序。制度资格不改变报价的可行性含义，也不写入用户排除名单。
 5. **采购总结：**生成后检查其核验版本、引用和待办与所选结果一致。旧结果、旧总结和旧 AI 消息保留原依据，不随新材料改写。
 
-材料包：`data/generated/inputs/development/compliance_closure_demo/`。
+单供应商基础材料包：`data/generated/inputs/development/compliance_closure_demo/`。多供应商异常与版本替换材料包：`data/generated/compliance_evidence/`，其中 `supplier-approval`、`rohs-certificates`、`amount-approvals` 三类各有 `v1` 和 `v2`。完整文件与预期见该目录的 `README.md`。
 
 本目录也提供一份**新生成的合成采购需求与单供应商报价**，可在 2026-09-24 演示，无需延长旧 V1 报价：
 
@@ -118,6 +118,8 @@ npm.cmd run dev -- --host 127.0.0.1 --port 5173 --strictPort
 
 `outcome` 是原件声明的人工确认事实，不是前端决定的最终核验结果。至少提供附件或可追溯来源。服务端记录操作者和时间，不能在请求中伪造。支持 PDF/TXT/MD、最大 10 MiB；不做证书解析、OCR、真实性鉴定或来源链接访问。
 
+金额审批记录沿用同一接口，`control_code` 为 `AMOUNT_APPROVAL`，并增加精确字符串金额与币种，例如 `"approval_amount": "8000.00"`、`"currency": "SGD"`。前端从“金额审批要求”区域进入；已有记录通过“替换金额审批记录”建立版本关系，不能覆盖旧记录。
+
 确认接口使用 JSON，包含 `expected_task_revision`、`expected_assessment_id`、`acknowledged_missing_item_ids`、`acknowledge_no_policy`。ID 均取自**当前**工作区；明确暂不补充时填写当前全部相应缺项 ID，不能传旧列表。未绑定制度时必须显式确认 `acknowledge_no_policy=true`，页面显示“未启用”，不是“合规通过”。相同幂等键与相同请求返回原操作；不同请求不要复用同一个键。
 
 ## 5. 实现边界与故障定位
@@ -161,8 +163,8 @@ PostgreSQL 条件测试需显式启用 `RUN_POSTGRES_TESTS=1` 并配置测试数
 
 ## Final local acceptance (2026-09-24)
 
-- Backend: 1039 passed, 46 opt-in tests skipped, in both the isolated worktree and main workspace.
-- Frontend: 111 tests passed; lint and production build passed. Chrome desktop (1440px) and mobile (390px) interaction checks used mocked API responses, not a live full-stack browser test.
+- Backend: current main workspace regression is 1051 passed and 46 opt-in tests skipped; paid/live-model and PostgreSQL opt-in cases are listed separately below.
+- Frontend: 112 tests passed; lint and production build passed. Chrome desktop (1440px) and mobile (390px) interaction checks used mocked API responses, not a live full-stack browser test.
 - PostgreSQL: fixed and live RAG cross-process compliance tests both passed (2 tests), including migration upgrade/downgrade/upgrade, checkpoints and document reuse. Existing recovery/retrieval suites: 10 passed, 1 paid Agent test skipped. Isolated test databases were removed.
 - Live models: BAAI/bge-m3 (1024 dimensions) and BAAI/bge-reranker-v2-m3 smoke tests each succeeded on the first attempt. Live policy import/retrieval and the compliance closure passed; quotation extraction in this test used a fixed adapter, not live PDF extraction.
 - Live LLM: one isolated conversation preview/confirmation/application/explanation regression passed. This does not constitute exhaustive chatbot or multi-tool Agent acceptance.

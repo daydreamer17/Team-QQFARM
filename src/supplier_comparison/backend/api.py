@@ -51,6 +51,7 @@ from .settings import settings
 from .summaries import SUMMARY_PROMPT_VERSION, SummaryModelConfig
 from .worker_health import worker_heartbeat_status
 from .compliance import EvidenceInput
+from .compliance_evidence_parser import parse_compliance_evidence
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -532,24 +533,57 @@ def create_app(
     def compliance_workspace(task_id: str):
         return service.compliance_workspace(task_id)
 
-    def save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, previous=None):
+    @app.post('/api/v1/tasks/{task_id}/compliance/evidence/parse')
+    def parse_evidence_file(task_id: str,
+            control_code: Literal['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE', 'AMOUNT_APPROVAL'] = Form(...),
+            file: UploadFile = File(...)):
+        # Enforce the task owner boundary before inspecting user-supplied content.
+        service.get_task(task_id)
+        content = file.file.read(10 * 1024 * 1024 + 1)
+        try:
+            return parse_compliance_evidence(
+                content,
+                filename=file.filename or 'evidence',
+                media_type=file.content_type or 'application/octet-stream',
+                control_code=control_code,
+            )
+        except ValueError as exc:
+            code = str(exc)
+            messages = {
+                'empty_file': '证明文件为空。',
+                'file_too_large': '证明文件超过 10 MiB。',
+                'unsupported_media_type': '仅支持 PDF、UTF-8 TXT 或 Markdown 证明文件。',
+                'invalid_text_encoding': 'TXT 或 Markdown 证明文件必须使用 UTF-8 编码。',
+                'invalid_pdf': 'PDF 证明文件无效或无法读取。',
+                'pdf_page_limit_exceeded': 'PDF 证明文件不能超过 50 页。',
+                'text_unavailable': '文件中没有足够的可解析文字。',
+            }
+            raise BackendError(code, messages.get(code, '无法解析证明文件。'))
+
+    def save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, previous=None,
+                      run_after_save=True):
         try:
             parsed = EvidenceInput.model_validate_json(facts)
         except ValidationError:
             raise BackendError('evidence_fields_invalid', '材料字段不完整或格式错误，请核对身份、日期与来源。')
         return service.save_compliance_evidence(task_id, expected_task_revision=expected_task_revision,
             facts=parsed, idempotency_key=idempotency_key, previous_evidence_id=previous,
-            file=file.file if file else None, filename=file.filename if file else None)
+            file=file.file if file else None, filename=file.filename if file else None,
+            run_after_save=run_after_save)
 
     @app.post('/api/v1/tasks/{task_id}/compliance/evidence', status_code=202)
     def create_compliance_evidence(task_id: str, idempotency_key: IdempotencyKey,
-            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...), file: UploadFile | None = File(None)):
-        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file)
+            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...),
+            run_after_save: bool = Form(True), file: UploadFile | None = File(None)):
+        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file,
+                             run_after_save=run_after_save)
 
     @app.post('/api/v1/tasks/{task_id}/compliance/evidence/{evidence_id}/revisions', status_code=202)
     def revise_compliance_evidence(task_id: str, evidence_id: str, idempotency_key: IdempotencyKey,
-            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...), file: UploadFile | None = File(None)):
-        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, evidence_id)
+            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...),
+            run_after_save: bool = Form(True), file: UploadFile | None = File(None)):
+        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, evidence_id,
+                             run_after_save=run_after_save)
 
     @app.get('/api/v1/tasks/{task_id}/compliance/evidence/{evidence_id}/files/{file_id}/content')
     def compliance_evidence_content(task_id: str, evidence_id: str, file_id: str, download: bool = False):

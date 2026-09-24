@@ -1,6 +1,8 @@
 import type {
   ComplianceWorkspace,
   ComplianceEvidenceFacts,
+  ComplianceEvidenceParseResponse,
+  ComplianceEvidenceSaveResponse,
   ApiErrorEnvelope,
   ComparisonResultResponse,
   ConfirmDecisionIntentResponse,
@@ -214,13 +216,22 @@ export function decisionConversationEventsUrl(
 
 export const api = {
   getCompliance: (taskId: string) => request<ComplianceWorkspace>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance`),
-  saveComplianceEvidence: (taskId: string, input: { expectedTaskRevision: number; facts: ComplianceEvidenceFacts; file?: File | null; evidenceId?: string }, idempotencyKey: string) => {
+  parseComplianceEvidence: (taskId: string, controlCode: ComplianceEvidenceFacts['control_code'], file: File) => {
+    const body = new FormData()
+    body.append('control_code', controlCode)
+    body.append('file', file)
+    return request<ComplianceEvidenceParseResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/evidence/parse`, {
+      method: 'POST', body,
+    })
+  },
+  saveComplianceEvidence: (taskId: string, input: { expectedTaskRevision: number; facts: ComplianceEvidenceFacts; file?: File | null; evidenceId?: string; runAfterSave?: boolean }, idempotencyKey: string) => {
     const body = new FormData()
     body.append('expected_task_revision', String(input.expectedTaskRevision))
     body.append('facts', JSON.stringify(input.facts))
+    body.append('run_after_save', String(input.runAfterSave ?? true))
     if (input.file) body.append('file', input.file)
     const suffix = input.evidenceId ? `/${encodeURIComponent(input.evidenceId)}/revisions` : ''
-    return request<StartRunResponse & { evidence_id: string }>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/evidence${suffix}`, {
+    return request<ComplianceEvidenceSaveResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/evidence${suffix}`, {
       method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body,
     })
   },

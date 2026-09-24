@@ -417,8 +417,11 @@ def _compliance_lines(assessment: Any) -> list[str]:
             lines.append(f"条款 {check.get('clause_id')}：{check.get('status')}；原因 {', '.join(check.get('reason_codes', []))}；"
                          f"材料 {', '.join(check.get('evidence_ids', [])) or '尚未提供'}；引用 {', '.join(check.get('citation_ids', [])) or '无'}。")
     for amount in assessment.get('amount_requirements', []):
+        approval = ('未达到审批门槛' if amount.get('triggered') is False else
+                    '审批记录已核对' if amount.get('approval_confirmed') else '审批记录待补充或不满足')
         lines.append(f"金额要求 {amount.get('quote_id')}：{amount.get('currency')} {amount.get('amount')}；"
-                     f"门槛 {amount.get('threshold')}；后续动作 {amount.get('action') or '无已确认触发动作'}。未触发不等于获批。")
+                     f"门槛 {amount.get('threshold')}；状态 {approval}；"
+                     f"后续动作 {amount.get('action') or '无已确认触发动作'}。系统记录审批事实，不代替采购审批。")
     lines.append(f"待补充项：{len(assessment.get('missing_item_ids', []))} 项。")
     return lines
 

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 import type { SupplierComparisonResult, SupplierHistorySnapshot } from '../src/api/types'
 import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../src/components/SupplierMatrixDetails'
-import { supplierSelectionExplanation } from '../src/lib/resultComparison'
+import { policyAwareSupplierSelectionExplanation, supplierSelectionExplanation } from '../src/lib/resultComparison'
 
 const base: SupplierComparisonResult = {
   quote_id: 'q1', quote_version: 1, supplier_name: 'Example', status: 'FEASIBLE',
@@ -135,5 +135,49 @@ describe('supplier selection explanations', () => {
     )
 
     expect(explanation.detail).toBe('总成本比推荐供应商高 SGD 200.00')
+  })
+
+  test('puts a policy exclusion before commercial trade-offs', () => {
+    const explanation = policyAwareSupplierSelectionExplanation(
+      { ...base, quote_id: 'excluded', total_cost: '6500.00', estimated_arrival_date: '2026-11-12' },
+      { ...recommendedSupplier, estimated_arrival_date: '2026-11-07' },
+      'FASTEST_CONFIRMED_DELIVERY',
+      'SGD',
+      false,
+      {
+        quote_id: 'excluded', quote_version: 1, supplier_name: 'Excluded',
+        status: 'NON_COMPLIANT', eligibility: 'EXCLUDED',
+        checks: [
+          { control_code: 'ROHS_COMPLIANCE', status: 'FAIL', citation_ids: [] },
+          { control_code: 'APPROVED_SUPPLIER', status: 'REVIEW_REQUIRED', citation_ids: [] },
+        ],
+      },
+    )
+
+    expect(explanation.label).toBe('制度排除')
+    expect(explanation.tone).toBe('danger')
+    expect(explanation.detail).toBe(
+      '制度检查不通过：RoHS 合规、供应商资质；已从推荐候选中排除。商业比较：预计到货比推荐供应商晚 5 天；总成本比推荐供应商低 SGD 400.00',
+    )
+  })
+
+  test('does not mislabel a pending policy review as a failure', () => {
+    const explanation = policyAwareSupplierSelectionExplanation(
+      { ...base, quote_id: 'review', total_cost: '6700.00', estimated_arrival_date: '2026-11-10' },
+      { ...recommendedSupplier, estimated_arrival_date: '2026-11-07' },
+      'FASTEST_CONFIRMED_DELIVERY',
+      'SGD',
+      false,
+      {
+        quote_id: 'review', quote_version: 1, supplier_name: 'Review',
+        status: 'REVIEW_REQUIRED', eligibility: 'UNVERIFIED',
+        checks: [{ control_code: 'APPROVED_SUPPLIER', status: 'REVIEW_REQUIRED', citation_ids: [] }],
+      },
+    )
+
+    expect(explanation.label).toBe('制度待复核')
+    expect(explanation.detail).toContain('供应商资质尚未完成核验')
+    expect(explanation.detail).toContain('有已核验合格候选时不优先推荐')
+    expect(explanation.detail).not.toContain('制度检查不通过')
   })
 })

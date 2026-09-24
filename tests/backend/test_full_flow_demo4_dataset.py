@@ -39,6 +39,20 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data/generated/inputs/development/full_flow_demo4"
 REF = ROOT / "evaluation/reference/full_flow_demo4"
 DICTIONARY = ROOT / "data/contracts/quote_data_field.csv"
+
+
+def test_compliance_evidence_demo_has_three_controls_two_versions_and_four_suppliers():
+    evidence_root = ROOT / 'data/generated/compliance_evidence'
+    controls = ('supplier-approval', 'rohs-certificates', 'amount-approvals')
+    suppliers = {'SUP-022', 'SUP-023', 'SUP-024', 'SUP-029'}
+    for control in controls:
+        for version in ('v1', 'v2'):
+            files = sorted((evidence_root / control / version).glob('*.md'))
+            assert len(files) == 4
+            assert {path.name[:7] for path in files} == suppliers
+            assert all('Fictional' in path.read_text(encoding='utf-8') for path in files)
+
+
 ANSWERS = json.loads((REF / "reference_answers.json").read_text())
 EVALUATED_AT = datetime.fromisoformat(ANSWERS["evaluated_at"].replace("Z", "+00:00"))
 

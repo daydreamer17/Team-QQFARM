@@ -12,11 +12,76 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.models import Base, Task, WorkflowArtifact
+from supplier_comparison.backend.compliance_evidence_parser import parse_compliance_evidence
 from supplier_comparison.backend.service import BackendService, ConflictError
-from supplier_comparison.backend.workflow import WorkflowRunner
+from supplier_comparison.backend.workflow import WorkflowRunner, _policy_clause_retrieval_query
 from .test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
 from supplier_comparison.rag.contracts import PolicyCitation, RetrievalResult
 from supplier_comparison.rag.models import PolicySet, PolicyIndex, PolicyDocument, PolicyClause
+
+
+def test_paired_demo_evidence_is_complete_and_auto_parseable():
+    root = Path(__file__).resolve().parents[2] / 'data' / 'generated' / 'compliance_evidence' / 'paired-scenarios'
+    supplier_dirs = sorted(path for path in root.iterdir() if path.is_dir())
+    assert [path.name.split('-', 2)[:2] for path in supplier_dirs] == [
+        ['SUP', '022'], ['SUP', '023'], ['SUP', '024'], ['SUP', '029'],
+    ]
+    parsed_files = 0
+    for supplier_dir in supplier_dirs:
+        supplier_id = '-'.join(supplier_dir.name.split('-', 2)[:2])
+        files = sorted(supplier_dir.glob('*.md'))
+        assert len(files) == 6
+        assert sum('compliant.md' in path.name for path in files) == 3
+        assert sum('non-compliant-' in path.name for path in files) == 3
+        for path in files:
+            control_code = (
+                'APPROVED_SUPPLIER' if path.name.startswith('supplier-') else
+                'ROHS_COMPLIANCE' if path.name.startswith('rohs-') else
+                'AMOUNT_APPROVAL'
+            )
+            parsed = parse_compliance_evidence(
+                path.read_bytes(), filename=path.name, media_type='text/markdown', control_code=control_code,
+            )
+            assert parsed['status'] == 'FOUND', path
+            assert parsed['missing_fields'] == [], path
+            facts = parsed['facts']
+            if path.name.endswith('compliant.md'):
+                assert facts['supplier_id'] == supplier_id
+                assert facts['outcome'] == 'PASS'
+            if 'wrong-id' in path.name:
+                assert facts['supplier_id'] != supplier_id
+            if 'wrong-part' in path.name:
+                assert facts['manufacturer_part_number'] != 'QW-MCU9-DEMO'
+            if 'wrong-currency' in path.name:
+                assert facts['currency'] != 'SGD'
+            if any(case in path.name for case in ('failed', 'revoked', 'suspended', 'rejected')):
+                assert facts['outcome'] == 'FAIL'
+            if 'expired' in path.name:
+                assert facts['expires_on'] == '2026-09-23'
+            parsed_files += 1
+    assert parsed_files == 24
+
+
+def test_non_english_policy_clause_produces_valid_retrieval_query():
+    from supplier_comparison.rag.contracts import RetrievalRequest
+
+    clause = {
+        'clause_id': 'DCH-SUP-001',
+        'control_code': 'APPROVED_SUPPLIER',
+        'section': '供应商身份',
+        'text': '报价主体必须与供应商准入记录一致。',
+    }
+    request = RetrievalRequest(
+        task_id='task', task_revision=1, snapshot_id='snapshot',
+        policy_set_version='v1', policy_index_version='idx',
+        query=_policy_clause_retrieval_query(clause),
+        required_control_codes=['APPROVED_SUPPLIER'], category='Electronics', region='SG',
+        evaluated_at=datetime(2026, 9, 24, tzinfo=timezone.utc),
+    )
+    assert request.query.startswith(clause['section'] + ': ' + clause['text'])
+    assert 'Locate exact policy clause' in request.query
+    assert 'DCH-SUP-001' in request.query
+    assert clause['text'] in request.query
 
 
 def seed_policy(service):
@@ -34,6 +99,11 @@ def seed_policy(service):
         session.add(PolicyIndex(policy_index_version='idx', policy_set_record_id='set', collection_sha256='a'*64,
             provider='fixed', embedding_model='fixed', embedding_dimension=1024, preprocessing_version='1', status='PUBLISHED'))
         session.flush()
+        labels = {
+            'APPROVED_SUPPLIER': '供应商准入',
+            'ROHS_COMPLIANCE': '有害物质合规',
+            'AMOUNT_APPROVAL': '金额审批',
+        }
         for code in ('APPROVED_SUPPLIER','ROHS_COMPLIANCE','AMOUNT_APPROVAL'):
             rule = {**params, 'control_code': code, 'matching_fields': ['supplier_id']}
             if code == 'ROHS_COMPLIANCE':
@@ -41,9 +111,9 @@ def seed_policy(service):
             if code == 'AMOUNT_APPROVAL':
                 rule.update(matching_fields=[], currency='SGD', monetary_basis='TOTAL_COST', threshold='10000.00',
                             operator='GTE', action='Obtain finance approval', execution_stage='AFTER_SELECTION')
-            text = 'Synthetic reviewed requirement: ' + code
+            text = '合成且已复核的制度要求：' + labels[code]
             session.add(PolicyClause(policy_clause_record_id=code, policy_set_record_id='set', policy_document_record_id='doc',
-                clause_id=code, section=code, text=text, normalized_text=text.lower(),
+                clause_id=code, section=labels[code], text=text, normalized_text=text.lower(),
                 content_sha256=hashlib.sha256(text.encode()).hexdigest(), control_code=code, rule_parameters=rule))
 
 
@@ -93,6 +163,11 @@ def evidence(quote_id, control_code='APPROVED_SUPPLIER', **overrides):
         'effective_from':'2026-01-01','expires_on':'2027-01-01', 'source_refs':['Synthetic record DEMO-001'], **overrides}
 
 
+def amount_approval(quote_id, **overrides):
+    return evidence(quote_id, 'AMOUNT_APPROVAL', **(dict(material_number='APR-2026-001',
+        approval_amount='8000.00', currency='SGD') | overrides))
+
+
 def save_and_run(service, task_id, runner, facts, *, previous=None, key='save'):
     response = service.save_compliance_evidence(task_id, expected_task_revision=service.get_task(task_id)['task_revision'],
         facts=facts, previous_evidence_id=previous, idempotency_key=key)
@@ -138,6 +213,32 @@ def test_retrieval_error_cannot_be_confirmed(policy_workspace):
     assert view['stage']['status'] == 'BLOCKED'
     with pytest.raises(ConflictError, match='检索|条款'):
         confirm_and_run(service, task_id, runner)
+
+
+def test_evidence_can_be_staged_before_compliance_check(policy_workspace):
+    service, task_id, runner, quote_id = policy_workspace
+    assert service.get_task(task_id)['progress']['quote_review_completed'] is True
+    saved = service.save_compliance_evidence(
+        task_id,
+        expected_task_revision=service.get_task(task_id)['task_revision'],
+        facts=evidence(quote_id),
+        idempotency_key='stage-before-check',
+        run_after_save=False,
+    )
+    assert saved['analysis_started'] is False
+    assert 'job_id' not in saved
+    staged = service.compliance_workspace(task_id)
+    assert staged['stage']['status'] == 'NOT_STARTED'
+    assert staged['assessment'] is None
+    assert staged['evidence'][0]['facts']['material_number'] == 'DEMO-001'
+    assert service.get_task(task_id)['progress']['quote_review_completed'] is True
+
+    job = service.start_run(task_id, expected_task_revision=saved['task_revision'], idempotency_key='check-staged')
+    runner.run_job(job['job_id'])
+    checked = service.compliance_workspace(task_id)
+    admission = next(check for check in checked['assessment']['assessments'][0]['checks']
+                     if check['control_code'] == 'APPROVED_SUPPLIER')
+    assert admission['status'] == 'PASS'
 
 
 def test_evidence_replay_conflict_authorization_and_file_access(policy_workspace):
@@ -188,11 +289,37 @@ def test_api_material_submission_and_cross_task_rejection(tmp_path):
     quote = service.upload_quote(task['task_id'], expected_task_revision=1, supplier_id='SUP-024',
         original_filename='quote.csv', media_type='text/csv', content=b'placeholder', idempotency_key='upload')
     import json
+    parse_url = f"/api/v1/tasks/{task['task_id']}/compliance/evidence/parse"
+    parse_cases = [
+        ('APPROVED_SUPPLIER', 'admission.md', b'Record ID: ADM-024\nSupplier ID: SUP-024\nStatus: APPROVED\nEffective from: 2026-01-01\nExpires on: 2027-01-01',
+         {'material_number': 'ADM-024', 'supplier_id': 'SUP-024', 'outcome': 'PASS'}),
+        ('ROHS_COMPLIANCE', 'rohs.md', b'Certificate ID: RH-024\nSupplier ID: SUP-024\nManufacturer: Demo Maker\nManufacturer part number: PART-1\nOutcome: NON-CONFORMING\nEffective from: 2026-01-01\nExpires on: 2027-01-01',
+         {'material_number': 'RH-024', 'manufacturer_part_number': 'PART-1', 'outcome': 'FAIL'}),
+        ('AMOUNT_APPROVAL', 'approval.md', b'Approval ID: APR-024\nSupplier ID: SUP-024\nDecision: APPROVED\nApproved amount: SGD 8000.00\nEffective from: 2026-01-01\nExpires on: 2027-01-01',
+         {'material_number': 'APR-024', 'currency': 'SGD', 'approval_amount': '8000.00', 'outcome': 'PASS'}),
+    ]
+    for control_code, filename, content, expected in parse_cases:
+        parsed_response = http.post(parse_url, data={'control_code': control_code},
+                                    files={'file': (filename, content, 'text/markdown')})
+        assert parsed_response.status_code == 200, parsed_response.text
+        parsed = parsed_response.json()
+        assert parsed['status'] == 'FOUND'
+        assert parsed['facts'] | expected == parsed['facts']
+    mismatch_response = http.post(parse_url, data={'control_code': 'APPROVED_SUPPLIER'}, files={
+        'file': ('rohs.md', parse_cases[1][2], 'text/markdown'),
+    })
+    assert mismatch_response.status_code == 200
+    assert mismatch_response.json()['status'] == 'TYPE_MISMATCH'
+    assert mismatch_response.json()['detected_control_code'] == 'ROHS_COMPLIANCE'
+    assert mismatch_response.json()['facts'] == {}
     url = f"/api/v1/tasks/{task['task_id']}/compliance/evidence"
-    body = {'expected_task_revision':2, 'facts':json.dumps(evidence(quote['quote_id']))}
-    response = http.post(url, data=body, headers={'Idempotency-Key':'save'})
-    assert response.status_code == 202, response.text
-    assert http.post(url, data=body, headers={'Idempotency-Key':'save'}).json() == response.json()
+    body = {'expected_task_revision':2, 'facts':json.dumps(evidence(quote['quote_id'])),
+            'run_after_save':'false'}
+    saved_response = http.post(url, data=body, headers={'Idempotency-Key':'save'})
+    assert saved_response.status_code == 202, saved_response.text
+    assert saved_response.json()['analysis_started'] is False
+    assert 'job_id' not in saved_response.json()
+    assert http.post(url, data=body, headers={'Idempotency-Key':'save'}).json() == saved_response.json()
     assert http.post(url, data=body, headers={'Idempotency-Key':'stale'}).status_code == 409
     other = service.create_task(_requirement(), idempotency_key='other')
     response = http.post(f"/api/v1/tasks/{other['task_id']}/compliance/evidence", data={**body,'expected_task_revision':1},
@@ -200,6 +327,13 @@ def test_api_material_submission_and_cross_task_rejection(tmp_path):
     assert response.status_code == 404
     bad = {**body,'facts':json.dumps(evidence(quote['quote_id'],coverage_confirmed=False))}
     assert http.post(url, data=bad, headers={'Idempotency-Key':'bad'}).status_code == 422
+    amount_body = {'expected_task_revision': saved_response.json()['task_revision'],
+                   'facts': json.dumps(amount_approval(quote['quote_id']))}
+    amount_response = http.post(url, data=amount_body, headers={'Idempotency-Key':'amount'})
+    assert amount_response.status_code == 202, amount_response.text
+    invalid_amount = {**amount_body, 'expected_task_revision': amount_response.json()['task_revision'],
+                      'facts': json.dumps(amount_approval(quote['quote_id'], approval_amount=None))}
+    assert http.post(url, data=invalid_amount, headers={'Idempotency-Key':'invalid-amount'}).status_code == 422
 
 
 def test_known_material_does_not_bypass_unsupported_rule_stage(policy_workspace):
@@ -210,6 +344,13 @@ def test_known_material_does_not_bypass_unsupported_rule_stage(policy_workspace)
     save_and_run(service, task_id, runner, evidence(quote_id))
     view = service.compliance_workspace(task_id)
     assert view['assessment']['policy_eligibility'][quote_id]['status'] == 'UNVERIFIED'
+    assert view['stage']['status'] == 'BLOCKED'
+    assert f'{quote_id}:APPROVED_SUPPLIER' not in view['assessment']['missing_item_ids']
+    assert view['assessment']['amount_requirements']
+    invalid = [error for error in view['assessment']['policy_errors']
+               if error['code'] == 'POLICY_EXECUTABLE_RULES_INVALID']
+    assert len(invalid) == 1
+    assert invalid[0]['clause_ids'] == ['APPROVED_SUPPLIER']
 
 
 def test_frozen_summary_exports_and_simulation_use_same_assessment(policy_workspace):
@@ -254,6 +395,30 @@ def test_simulation_preserves_frozen_publication_blockers(policy_workspace):
         assert comparison['recommended_quote_ids'] == []
         assert comparison['compliance_assessment'] == result['policy_compliance']
     assert service.get_task(task_id)['current_result_id'] == result['result_id']
+
+
+def test_amount_approval_record_unblocks_before_publication_and_keeps_history(policy_workspace):
+    service, task_id, runner, quote_id = policy_workspace
+    with service.session_factory.begin() as session:
+        clause = session.get(PolicyClause, 'AMOUNT_APPROVAL')
+        clause.rule_parameters = {**clause.rule_parameters, 'execution_stage': 'BEFORE_PUBLICATION',
+                                  'threshold': '7000.00'}
+    for code in ('APPROVED_SUPPLIER', 'ROHS_COMPLIANCE'):
+        save_and_run(service, task_id, runner, evidence(quote_id, code), key=code)
+    before = service.compliance_workspace(task_id)
+    assert before['assessment']['publication_blocked'] is True
+    assert before['assessment']['amount_requirements'][0]['approval_confirmed'] is False
+    first = save_and_run(service, task_id, runner, amount_approval(quote_id, approval_amount='7000.00'), key='amount-low')
+    still_low = service.compliance_workspace(task_id)
+    assert still_low['assessment']['publication_blocked'] is True
+    assert 'AMOUNT_APPROVAL_INSUFFICIENT' in still_low['assessment']['amount_requirements'][0]['reason_codes']
+    save_and_run(service, task_id, runner, amount_approval(quote_id), previous=first['evidence_id'], key='amount-correct')
+    after = service.compliance_workspace(task_id)
+    assert after['assessment']['publication_blocked'] is False
+    assert after['assessment']['amount_requirements'][0]['approval_confirmed'] is True
+    records = [record for record in after['evidence'] if record['control_code'] == 'AMOUNT_APPROVAL']
+    assert [record['version'] for record in records] == [1, 2]
+    assert records[0]['superseded'] is True
 
 
 @pytest.mark.skipif(os.getenv('RUN_POSTGRES_TESTS') != '1', reason='Set RUN_POSTGRES_TESTS=1 for isolated PostgreSQL migration/restart acceptance')

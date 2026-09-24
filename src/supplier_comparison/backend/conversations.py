@@ -532,6 +532,11 @@ def process_conversation_turn(
             opener=opener, sleeper=sleeper,
         )
     except ModelClientError as exc:
+        if (factual_context.get("response_mode") == "INVESTIGATION_ONLY"
+                and exc.error_code == "conversation_model_output_invalid"):
+            fallback = deterministic_investigation_explanation(factual_context)
+            if fallback is not None:
+                return fallback, calls + exc.attempts
         raise ModelClientError(str(exc), attempts=calls + exc.attempts, error_code=exc.error_code) from exc
     if turn.get("changes") is not None or turn.get("clarification"):
         raise ModelClientError("narration attempted to change the classified intent",
@@ -541,6 +546,62 @@ def process_conversation_turn(
         raise ModelClientError("investigation answer omitted its audit reference",
                                attempts=calls + additional, error_code="conversation_model_output_invalid")
     return turn, calls + additional
+
+
+def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str, Any] | None:
+    """Return a safe audit summary when model narration fails strict grounding checks."""
+    reference_id = context.get("investigation_reference_id")
+    record = (context.get("frozen_references") or {}).get(reference_id)
+    if not isinstance(reference_id, str) or not isinstance(record, dict):
+        return None
+    observations = record.get("observations")
+    if not isinstance(observations, list):
+        return None
+
+    evidence = [
+        row for row in observations
+        if isinstance(row, dict)
+        and isinstance(row.get("result"), dict)
+        and row["result"].get("tool_name") == "inspect_quote_evidence"
+        and row["result"].get("status") == "OK"
+    ]
+    suppliers: list[str] = []
+    focuses: list[str] = []
+    focus_labels = {"COST": "成本", "DELIVERY": "交期", "TERMS": "商务条款", "ALL": "关键字段"}
+    for row in evidence:
+        data = row["result"].get("data") or {}
+        supplier = data.get("supplier_name")
+        if isinstance(supplier, str) and supplier and supplier not in suppliers:
+            suppliers.append(supplier)
+        focus = focus_labels.get(str(data.get("focus")))
+        if focus and focus not in focuses:
+            focuses.append(focus)
+
+    subject = "、".join(suppliers) if suppliers else "相关供应商"
+    scope = "、".join(focuses) if focuses else "相关"
+    if record.get("status") == "RESOLVED":
+        verified = f"已核实：本轮只读调查已完成，并核对了{subject}的{scope}报价依据（{reference_id}）。"
+    else:
+        verified = f"已核实：本轮只读调查保留了已取得的{scope}核查记录，但尚未完成全部目标（{reference_id}）。"
+
+    brief = next((
+        row["result"].get("data") or {} for row in reversed(observations)
+        if isinstance(row, dict) and isinstance(row.get("result"), dict)
+        and row["result"].get("tool_name") == "compile_decision_brief"
+    ), {})
+    if brief.get("requires_follow_up"):
+        missing = f"尚缺信息：仍需补充核查记录列出的证明或审批材料后再分析（{reference_id}）。"
+    else:
+        missing = f"尚缺信息：本轮记录之外的费用、交期或商务条款不能据此视为已确认（{reference_id}）。"
+    turn = {
+        "assistant_text": verified + missing,
+        "reference_ids": [reference_id],
+        "changes": None,
+        "clarification": None,
+    }
+    output = ConversationTurnOutput.model_validate(turn)
+    _validate_grounded_output(output, context)
+    return turn
 
 
 _CRITERION_LABELS = {

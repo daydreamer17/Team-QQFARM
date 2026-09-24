@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { PolicyImportStatus, PolicyImportUploadMetadata, PolicySetSummary } from '../api/types'
+import type { PolicyImportStatus, PolicyImportSummary, PolicyImportUploadMetadata, PolicySetSummary } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 
 const MAX_POLICY_BYTES = 5 * 1024 * 1024
@@ -116,6 +116,93 @@ function groupPolicySets(items: PolicySetSummary[]) {
   })
 }
 
+interface PendingPolicyVersion {
+  key: string
+  policy_set_id: string
+  policy_set_version: string
+  items: PolicyImportSummary[]
+  status: PolicyImportStatus
+  updated_at: string
+  categories: string[]
+  regions: string[]
+  clause_count: number
+}
+
+function groupPendingPolicyVersions(items: PolicyImportSummary[]) {
+  const versions = new Map<string, PolicyImportSummary[]>()
+  for (const item of items) {
+    const key = JSON.stringify([item.policy_set_id, item.policy_set_version])
+    const files = versions.get(key) ?? []
+    files.push(item)
+    versions.set(key, files)
+  }
+  const grouped: PendingPolicyVersion[] = [...versions.entries()].map(([key, files]) => {
+    const ordered = [...files].sort((left, right) => {
+      const priority = { REVIEW_REQUIRED: 0, READY_TO_PUBLISH: 1, PUBLISHING: 2, PUBLISHED: 3 }
+      return priority[left.status] - priority[right.status]
+        || left.original_filename.localeCompare(right.original_filename)
+    })
+    const status: PolicyImportStatus = ordered.some((item) => item.status === 'REVIEW_REQUIRED')
+      ? 'REVIEW_REQUIRED'
+      : ordered.some((item) => item.status === 'PUBLISHING') ? 'PUBLISHING' : 'READY_TO_PUBLISH'
+    return {
+      key,
+      policy_set_id: ordered[0].policy_set_id,
+      policy_set_version: ordered[0].policy_set_version,
+      items: ordered,
+      status,
+      updated_at: ordered.reduce((latest, item) => item.updated_at > latest ? item.updated_at : latest, ''),
+      categories: [...new Set(ordered.flatMap((item) => item.categories))],
+      regions: [...new Set(ordered.flatMap((item) => item.regions))],
+      clause_count: ordered.reduce((total, item) => total + item.clause_count, 0),
+    }
+  })
+  return grouped.sort((left, right) => right.updated_at.localeCompare(left.updated_at)
+    || right.policy_set_version.localeCompare(left.policy_set_version))
+}
+
+function PendingVersionCard({ version, historical = false }: {
+  version: PendingPolicyVersion
+  historical?: boolean
+}) {
+  const reviewCount = version.items.filter((item) => item.status === 'REVIEW_REQUIRED').length
+  const readyCount = version.items.filter((item) => item.status === 'READY_TO_PUBLISH').length
+  const publishingCount = version.items.filter((item) => item.status === 'PUBLISHING').length
+  const target = version.items.find((item) => item.status === 'REVIEW_REQUIRED') ?? version.items[0]
+  const action = historical
+    ? '查看草稿'
+    : version.status === 'REVIEW_REQUIRED'
+    ? '继续处理'
+    : version.status === 'PUBLISHING' ? '查看进度' : '发布此版本'
+  return <article className={`pending-version-card${historical ? ' pending-version-card-history' : ''}`}>
+    <header>
+      <div><strong>{version.policy_set_id}</strong><span>版本 {version.policy_set_version}</span></div>
+      <span className={`status-pill ${statusClass(version.status)}`}>{statusLabel(version.status)}</span>
+    </header>
+    <p className="pending-version-summary">
+      {version.items.length} 个文件
+      {reviewCount > 0 && ` · ${reviewCount} 个待处理`}
+      {readyCount > 0 && ` · ${readyCount} 个已识别`}
+      {publishingCount > 0 && ` · ${publishingCount} 个发布中`}
+    </p>
+    <dl>
+      <div><dt>适用范围</dt><dd>{version.categories.join(' / ') || '—'} · {version.regions.join(' / ') || '—'}</dd></div>
+      <div><dt>条款</dt><dd>{version.clause_count}</dd></div>
+      <div><dt>更新时间</dt><dd>{formatDate(version.updated_at)}</dd></div>
+    </dl>
+    <details className="pending-version-files">
+      <summary>查看文件（{version.items.length}）</summary>
+      <div>{version.items.map((item) => <div className="pending-version-file" key={item.policy_import_id}>
+        <span><strong>{item.original_filename}</strong><small>{item.clause_count} 条 · {formatBytes(item.size_bytes)}</small></span>
+        <span><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><Link to={`/resources/policies/${item.policy_import_id}`}>查看</Link></span>
+      </div>)}</div>
+    </details>
+    <div className="pending-version-actions">
+      <Link className={`button ${!historical && version.status === 'READY_TO_PUBLISH' ? 'button-submit' : 'button-secondary'}`} to={`/resources/policies/${target.policy_import_id}`}>{action}</Link>
+    </div>
+  </article>
+}
+
 export function ResourcePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -199,6 +286,9 @@ export function ResourcePage() {
     : policySetGroups.filter((group) => group.current.status === 'PUBLISHED')
   const updateBasePolicies = groupPolicySets(updatePolicySets.data?.items ?? [])
     .map((group) => group.current)
+  const pendingPolicyVersions = groupPendingPolicyVersions(imports.data ?? [])
+  const currentPendingVersions = pendingPolicyVersions.slice(0, 1)
+  const otherPendingVersions = pendingPolicyVersions.slice(1)
 
   function update(field: keyof PolicyUploadForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -365,7 +455,7 @@ export function ResourcePage() {
     <div className="page-stack resource-page">
       <section className="page-heading resource-heading">
         <div>
-          <h1>制度管理</h1>
+          <h1>规则资源库</h1>
           <p>查看已发布制度，处理待审核文件，并按需发布新版本。</p>
         </div>
         <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? '收起上传' : '上传制度版本'}</button>
@@ -421,32 +511,24 @@ export function ResourcePage() {
         {deactivate.isError && <div className="form-error compact-error" role="alert">{errorMessage(deactivate.error)}</div>}
       </section>
 
-      <section className="card policy-directory">
+      <section className="card policy-directory pending-policy-directory">
         <div className="section-heading">
-          <div><h2>待审核与发布</h2><p className="section-helper">这里只显示尚未完成发布的制度文件。</p></div>
-          {imports.data && imports.data.length > 0 && <span>{imports.data.length} 个文件</span>}
+          <div><h2>待处理版本</h2><p className="section-helper">只突出最近更新的一个版本；其他版本默认收起。</p></div>
+          {imports.data && currentPendingVersions.length > 0 && <span>最新 1 个版本</span>}
         </div>
-        {imports.isPending && <div className="policy-directory-state">正在读取待处理文件…</div>}
-        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>待处理文件读取失败。</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>重试</button></div>}
-        {imports.data && imports.data.length === 0 && <div className="policy-directory-state">当前没有待处理文件。</div>}
-        {imports.data && imports.data.length > 0 && (
-          <div className="policy-directory-table-wrap">
-            <table className="policy-directory-table">
-              <thead><tr><th>制度文件</th><th>状态</th><th>制度集</th><th>适用范围</th><th>条款</th><th>更新时间</th><th /></tr></thead>
-              <tbody>{imports.data.map((item) => (
-                <tr key={item.policy_import_id}>
-                  <td><strong>{item.title}</strong><span>{item.original_filename} · {formatBytes(item.size_bytes)}</span></td>
-                  <td><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><small>第 {item.revision} 版</small></td>
-                  <td><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></td>
-                  <td><span>{item.categories.join(' / ') || '—'}</span><small>{item.regions.join(' / ') || '—'}</small></td>
-                  <td>{item.clause_count}</td>
-                  <td>{formatDate(item.updated_at)}</td>
-                  <td><Link className="policy-row-link" to={`/resources/policies/${item.policy_import_id}`}>{item.status === 'PUBLISHED' ? '查看' : '审核'}</Link></td>
-                </tr>
-              ))}</tbody>
-            </table>
+        {imports.isPending && <div className="policy-directory-state">正在读取待处理版本…</div>}
+        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>待处理版本读取失败。</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>重试</button></div>}
+        {imports.data && imports.data.length === 0 && <div className="policy-directory-state">当前没有待处理版本。</div>}
+        {currentPendingVersions.length > 0 && <div className="pending-version-grid">
+          {currentPendingVersions.map((version) => <PendingVersionCard key={version.key} version={version} />)}
+        </div>}
+        {otherPendingVersions.length > 0 && <details className="pending-draft-history">
+          <summary>其他待处理版本（{otherPendingVersions.length}）</summary>
+          <p>这些版本仍可处理，但不会和最近更新的版本同时铺开。</p>
+          <div className="pending-version-grid pending-version-history-grid">
+            {otherPendingVersions.map((version) => <PendingVersionCard key={version.key} version={version} historical />)}
           </div>
-        )}
+        </details>}
       </section>
 
       {showUpload && <form className="card policy-upload-form" onSubmit={submit}>

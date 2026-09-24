@@ -69,10 +69,12 @@ class ExecutableRuleParameters(FrozenModel):
 
 class ComplianceEvidence(FrozenModel):
     evidence_id: str = Field(min_length=1)
-    control_code: Literal["APPROVED_SUPPLIER", "ROHS_COMPLIANCE"]
+    control_code: ControlCode
     supplier_id: str = Field(min_length=1)
     manufacturer: str | None = None
     manufacturer_part_number: str | None = None
+    approval_amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     coverage_confirmed: bool
     outcome: Literal["PASS", "FAIL"]
     effective_from: date | None = None
@@ -88,6 +90,11 @@ class ComplianceEvidence(FrozenModel):
             raise ValueError("permanent evidence cannot also expire")
         if self.effective_from and self.expires_on and self.expires_on < self.effective_from:
             raise ValueError("evidence expiration precedes start")
+        if self.control_code == "AMOUNT_APPROVAL":
+            if self.approval_amount is None or self.currency is None:
+                raise ValueError("amount approval evidence requires amount and currency")
+        elif self.approval_amount is not None or self.currency is not None:
+            raise ValueError("supplier evidence cannot carry amount approval facts")
         return self
 
 
@@ -100,6 +107,7 @@ class ClauseEvaluation(FrozenModel):
     source_refs: tuple[str, ...] = ()
     execution_stage: ExecutionStage | None = None
     triggered: bool | None = None
+    approval_confirmed: bool | None = None
     action: str | None = None
     rule_version: str | None = None
 
@@ -111,7 +119,7 @@ def evaluate_compliance_rule(
     amount: Decimal | None = None, currency: str | None = None,
     execution_stage: ExecutionStage = "BEFORE_RECOMMENDATION",
 ) -> ClauseEvaluation:
-    """Evaluate one clause; PASS for amount means evaluated, never procurement approval."""
+    """Evaluate one reviewed clause against task-scoped, human-confirmed evidence."""
     try:
         rule = ExecutableRuleParameters.model_validate(parameters)
     except (ValidationError, TypeError):
@@ -141,8 +149,48 @@ def evaluate_compliance_rule(
         assert threshold is not None
         triggered = {"GT": amount > threshold, "GTE": amount >= threshold,
                      "LT": amount < threshold, "LTE": amount <= threshold}[rule.operator]
-        return result("PASS", "AMOUNT_RULE_EVALUATED", triggered=triggered,
-                      action=rule.action if triggered else None)
+        if not triggered:
+            return result("PASS", "AMOUNT_RULE_NOT_TRIGGERED", triggered=False,
+                          approval_confirmed=False)
+        control_records = tuple(item for item in evidence if item.control_code == "AMOUNT_APPROVAL")
+        records = tuple(item for item in control_records if item.supplier_id == supplier_id)
+        amount_extra = dict(triggered=True, action=rule.action)
+        if not records:
+            reason = "AMOUNT_APPROVAL_SCOPE_MISMATCH" if control_records else "AMOUNT_APPROVAL_MISSING"
+            return result("REVIEW_REQUIRED", reason, control_records,
+                          approval_confirmed=False, **amount_extra)
+        signatures = {(item.outcome, item.approval_amount, item.currency, item.coverage_confirmed,
+                       item.effective_from, item.expires_on, item.permanent) for item in records}
+        if len(signatures) > 1:
+            return result("REVIEW_REQUIRED", "AMOUNT_APPROVAL_CONFLICT", records,
+                          approval_confirmed=False, **amount_extra)
+        item = records[0]
+        if not item.coverage_confirmed:
+            return result("REVIEW_REQUIRED", "COVERAGE_UNCONFIRMED", records,
+                          approval_confirmed=False, **amount_extra)
+        if item.currency != currency:
+            return result(rule.mismatch_outcome, "AMOUNT_APPROVAL_CURRENCY_MISMATCH", records,
+                          approval_confirmed=False, **amount_extra)
+        if item.approval_amount is None or item.approval_amount < amount:
+            return result(rule.mismatch_outcome, "AMOUNT_APPROVAL_INSUFFICIENT", records,
+                          approval_confirmed=False, **amount_extra)
+        today = evaluated_at.astimezone(ZoneInfo("Asia/Singapore")).date()
+        if item.effective_from and item.effective_from > today:
+            return result(rule.missing_outcome, "EVIDENCE_NOT_YET_EFFECTIVE", records,
+                          approval_confirmed=False, **amount_extra)
+        if item.expires_on and item.expires_on < today:
+            return result(rule.expired_outcome, "EVIDENCE_EXPIRED", records,
+                          approval_confirmed=False, **amount_extra)
+        if not rule.allow_unspecified_validity and (
+            item.effective_from is None or (item.expires_on is None and not item.permanent)
+        ):
+            return result("REVIEW_REQUIRED", "VALIDITY_UNSPECIFIED", records,
+                          approval_confirmed=False, **amount_extra)
+        if item.outcome == "FAIL":
+            return result("FAIL", "AMOUNT_APPROVAL_REJECTED", records,
+                          approval_confirmed=False, **amount_extra)
+        return result("PASS", "AMOUNT_APPROVAL_CONFIRMED", records,
+                      approval_confirmed=True, **amount_extra)
 
     if not supplier_id:
         return result("REVIEW_REQUIRED", "SUPPLIER_IDENTITY_UNCONFIRMED")

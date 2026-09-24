@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 from sqlalchemy import select
 
 from .models import (ComplianceEvidenceFile, ComplianceEvidenceRecord, Document, DocumentExecution,
@@ -20,10 +20,12 @@ MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 class EvidenceInput(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     quote_id: str = Field(min_length=1, max_length=64)
-    control_code: Literal['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE']
+    control_code: Literal['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE', 'AMOUNT_APPROVAL']
     supplier_id: str = Field(min_length=1, max_length=128)
     manufacturer: str | None = Field(default=None, max_length=256)
     manufacturer_part_number: str | None = Field(default=None, max_length=256)
+    approval_amount: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    currency: str | None = Field(default=None, pattern=r'^[A-Z]{3}$')
     material_number: str = Field(min_length=1, max_length=256)
     coverage_confirmed: StrictBool
     outcome: Literal['PASS', 'FAIL']
@@ -32,6 +34,13 @@ class EvidenceInput(BaseModel):
     permanent: StrictBool = False
     source_refs: list[str] = Field(default_factory=list, max_length=10)
     note: str = Field(default='', max_length=2000)
+
+    @field_validator('approval_amount', mode='before')
+    @classmethod
+    def exact_approval_amount(cls, value):
+        if isinstance(value, (float, bool)):
+            raise ValueError('Approval amount requires exact decimal money.')
+        return value
 
     @model_validator(mode='after')
     def facts_consistent(self):
@@ -45,6 +54,11 @@ class EvidenceInput(BaseModel):
             raise ValueError('Source references must be non-empty and at most 1000 characters.')
         if self.control_code == 'ROHS_COMPLIANCE' and (not self.manufacturer or not self.manufacturer_part_number):
             raise ValueError('RoHS evidence requires manufacturer and part number as stated in the material.')
+        if self.control_code == 'AMOUNT_APPROVAL':
+            if self.approval_amount is None or self.currency is None:
+                raise ValueError('Amount approval evidence requires the approved amount and currency.')
+        elif self.approval_amount is not None or self.currency is not None:
+            raise ValueError('Supplier qualification evidence cannot carry amount approval facts.')
         return self
 
 
@@ -177,7 +191,11 @@ class ComplianceMixin:
 
     def assess_compliance(self, state, plan):
         from .service import content_hash
-        from ..rules.compliance import ComplianceEvidence, evaluate_compliance_rule
+        from ..rules.compliance import (
+            ComplianceEvidence,
+            ExecutableRuleParameters,
+            evaluate_compliance_rule,
+        )
         context = self.workflow_context(state['graph_run_id'])
         comparison = self.artifact_payload(state['comparison_result_id'])
         snapshot = self.artifact_payload(state['snapshot_id'])
@@ -195,6 +213,25 @@ class ComplianceMixin:
             if not citation or any(citation.get(k) != clause[k] for k in ('text', 'content_sha256', 'document_id', 'document_version', 'policy_set_version', 'policy_id', 'control_code', 'section')):
                 errors.append({'code': 'POLICY_COVERAGE_MISSING', 'clause_id': clause['clause_id'],
                                'message': '该适用条款尚无经过核对的检索引用，请修复检索后重试。'})
+        executable_rules = {}
+        invalid_rule_ids = []
+        for clause in plan['clauses']:
+            try:
+                rule = ExecutableRuleParameters.model_validate(clause.get('rule_parameters'))
+                if rule.control_code != clause['control_code']:
+                    raise ValueError('control code mismatch')
+                executable_rules[clause['clause_id']] = rule
+            except (TypeError, ValueError):
+                invalid_rule_ids.append(clause['clause_id'])
+        if invalid_rule_ids:
+            errors.append({
+                'code': 'POLICY_EXECUTABLE_RULES_INVALID',
+                'clause_ids': sorted(invalid_rule_ids),
+                'message': (
+                    f'当前制度版本有 {len(invalid_rule_ids)} 条条款缺少经审核的可执行规则参数；'
+                    '请制度管理员发布新版，供应商补充材料不能解决此问题。'
+                ),
+            })
         with self.session_factory() as session:
             records = session.scalars(select(ComplianceEvidenceRecord).where(
                 ComplianceEvidenceRecord.task_id == state['task_id'],
@@ -212,15 +249,14 @@ class ComplianceMixin:
                         if k in ComplianceEvidence.model_fields}, 'evidence_id': r['evidence_id']})
                         for r in evidence_payloads if r['quote_id'] == quote_id]
             for clause in plan['clauses']:
-                params = clause['rule_parameters']
-                if params.get('control_code') != clause['control_code']:
-                    params = {}
+                rule = executable_rules.get(clause['clause_id'])
+                params = rule.model_dump(mode='json') if rule is not None else None
                 check = evaluate_compliance_rule(clause_id=clause['clause_id'], parameters=params,
                     supplier_id=doc['supplier_id'], manufacturer=requirement['manufacturer'],
                     manufacturer_part_number=requirement['manufacturer_part_number'],
                     evaluated_at=datetime.fromisoformat(plan['evaluated_at']), evidence=evidence,
                     amount=Decimal(row['total_cost']) if row.get('total_cost') is not None else None,
-                    currency=requirement['currency'], execution_stage=params.get('execution_stage', 'BEFORE_RECOMMENDATION'))
+                    currency=requirement['currency'], execution_stage=(params or {}).get('execution_stage', 'BEFORE_RECOMMENDATION'))
                 data = check.model_dump(mode='json')
                 data.update({'control_code': clause['control_code'], 'citation_ids': [citations[clause['clause_id']]['citation_id']]
                     if clause['clause_id'] in citations else [], 'item_id': f"{quote_id}:{clause['clause_id']}",
@@ -228,10 +264,11 @@ class ComplianceMixin:
                 if row['status'] != 'FEASIBLE':
                     data.update(status='NOT_EVALUATED', reason_codes=['QUOTE_NOT_FEASIBLE'])
                 checks.append(data)
-                if clause['control_code'] == 'AMOUNT_APPROVAL':
-                    amounts.append({'quote_id': quote_id, **data, 'amount': row.get('total_cost'),
+                if rule is not None and clause['control_code'] == 'AMOUNT_APPROVAL':
+                    amounts.append({'quote_id': quote_id, 'supplier_name': row.get('supplier_name'), **data,
+                                    'amount': row.get('total_cost'),
                                     'currency': requirement['currency'], 'threshold': params.get('threshold')})
-                if data['status'] in ('REVIEW_REQUIRED', 'NOT_EVALUATED') and row['status'] == 'FEASIBLE':
+                if rule is not None and data['status'] == 'REVIEW_REQUIRED' and row['status'] == 'FEASIBLE':
                     missing_ids.append(data['item_id'])
             before = [c for c in checks if c['execution_stage'] == 'BEFORE_RECOMMENDATION' and c['control_code'] != 'AMOUNT_APPROVAL']
             status = ('EXCLUDED' if any(c['status'] == 'FAIL' for c in before) else
@@ -244,10 +281,18 @@ class ComplianceMixin:
             assessments.append({'quote_id': quote_id, 'quote_version': row['quote_version'], 'supplier_id': doc['supplier_id'],
                                 'supplier_name': row.get('supplier_name'), 'status': overall, 'eligibility': status, 'checks': checks})
         counts = {s: sum(r['status'] == s for r in assessments) for s in ('COMPLIANT','NON_COMPLIANT','REVIEW_REQUIRED','NOT_EVALUATED')}
+        def blocks_publication(check):
+            if 'EXECUTABLE_PARAMETERS_REQUIRED' in check.get('reason_codes', []):
+                return False
+            if check['control_code'] == 'AMOUNT_APPROVAL':
+                return (check['execution_stage'] in ('BEFORE_RECOMMENDATION', 'BEFORE_PUBLICATION')
+                        and (check['status'] not in ('PASS', 'NOT_APPLICABLE')
+                             or check.get('triggered') is True and not check.get('approval_confirmed')))
+            return (check['execution_stage'] == 'BEFORE_PUBLICATION'
+                    and check['status'] not in ('PASS', 'NOT_APPLICABLE'))
+
         publication_blockers = {row['quote_id']: [check['item_id'] for check in row['checks']
-            if (check['execution_stage'] == 'BEFORE_PUBLICATION' or
-                check['control_code'] == 'AMOUNT_APPROVAL' and check['execution_stage'] == 'BEFORE_RECOMMENDATION')
-            and (check['status'] not in ('PASS', 'NOT_APPLICABLE') or check.get('triggered') is True)]
+            if blocks_publication(check)]
             for row in assessments if row['status'] != 'NOT_EVALUATED'}
         payload = {'schema_version': WORKFLOW_VERSION,
             'task_id': state['task_id'], 'task_revision': state['task_revision'], 'plan_id': state['compliance_plan_id'],
@@ -303,6 +348,28 @@ class ComplianceMixin:
         return {'task_id': task.task_id, 'task_revision': task.current_revision, 'graph_run_id': graph_id,
                 'job_id': job_id, 'job_type': 'START', 'job_status': 'PENDING'}
 
+    def _compliance_preparation_graph(self, session, task, previous):
+        """Keep reviewed quote executions current while evidence is staged without a run."""
+        from .service import new_id
+        graph_id = new_id('graph')
+        graph = GraphRun(graph_run_id=graph_id, task_id=task.task_id, thread_id=graph_id,
+            started_revision=task.current_revision, effective_revision=task.current_revision, status='INTERRUPTED',
+            history_binding_id=previous.history_binding_id if previous else None,
+            provider=previous.provider if previous else None, model_id=previous.model_id if previous else None,
+            environment=previous.environment if previous else None, prompt_version=previous.prompt_version if previous else None)
+        session.add(graph)
+        session.flush()
+        if previous:
+            for old in session.scalars(select(DocumentExecution).where(
+                    DocumentExecution.graph_run_id == previous.graph_run_id)).all():
+                session.add(DocumentExecution(document_execution_id=new_id('docexec'), graph_run_id=graph_id,
+                    document_id=old.document_id, max_calls=old.max_calls, calls_used=old.calls_used,
+                    batch_artifact_id=old.batch_artifact_id, review_artifact_id=old.review_artifact_id,
+                    status=old.status))
+        task.current_graph_run_id = graph_id
+        task.workflow_contract_version = WORKFLOW_VERSION
+        return graph
+
     def revalidate_compliance_confirmation(self, task_id, *, old_assessment_id, new_assessment_id, graph_run_id, task_revision):
         from .service import ConflictError, content_hash, new_id
         with self.session_factory.begin() as session:
@@ -331,7 +398,7 @@ class ComplianceMixin:
             return True
 
     def save_compliance_evidence(self, task_id, *, expected_task_revision, facts, idempotency_key,
-                                 previous_evidence_id=None, file=None, filename=None):
+                                 previous_evidence_id=None, file=None, filename=None, run_after_save=True):
         from .service import BackendError, ConflictError, NotFoundError, content_hash, new_id
         facts = EvidenceInput.model_validate(facts)
         payload = facts.model_dump(mode='json')
@@ -357,7 +424,7 @@ class ComplianceMixin:
         if not facts.source_refs and file_bytes is None:
             raise BackendError('evidence_source_required', '请附上原件，或填写可追溯的来源记录。')
         request = {'revision': expected_task_revision, 'facts': payload, 'previous': previous_evidence_id,
-                   'filename': filename, 'file_sha256': sha}
+                   'filename': filename, 'file_sha256': sha, 'run_after_save': run_after_save}
         request_sha = content_hash(request)
         operation = f'compliance_evidence:{task_id}'
         created_path = None
@@ -400,7 +467,14 @@ class ComplianceMixin:
                 session.add(TaskRevision(revision_id=new_id('revision'), task_id=task_id, revision=task.current_revision,
                     change_type='COMPLIANCE_EVIDENCE', actor_id=self.actor_id, request_sha256=request_sha,
                     details={'evidence_id': evidence_id, 'previous_evidence_id': previous_evidence_id}))
-                response = {**self._compliance_new_run(session, task, previous), 'evidence_id': evidence_id}
+                if run_after_save:
+                    response = {**self._compliance_new_run(session, task, previous), 'evidence_id': evidence_id,
+                                'analysis_started': True}
+                else:
+                    self._compliance_preparation_graph(session, task, previous)
+                    task.status = 'NEEDS_INPUT'
+                    response = {'task_id': task.task_id, 'task_revision': task.current_revision,
+                                'status': task.status, 'evidence_id': evidence_id, 'analysis_started': False}
                 self._save_idempotent(session, operation=operation, key=idempotency_key, request_sha256=request_sha,
                                       response_status=202, response=response)
                 return response

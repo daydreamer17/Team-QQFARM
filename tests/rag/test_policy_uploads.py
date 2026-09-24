@@ -12,6 +12,7 @@ from supplier_comparison.backend.models import Base
 from supplier_comparison.backend.service import BackendError, ConflictError
 from supplier_comparison.rag.clients import FixedEmbeddingClient
 from supplier_comparison.rag.importer import PolicyImporter
+from supplier_comparison.rag.manifest import load_policy_manifest
 from supplier_comparison.rag.models import (
     PolicyClause,
     PolicyClauseEmbedding,
@@ -22,6 +23,7 @@ from supplier_comparison.rag.uploads import (
     PolicyFileImportMetadata,
     PolicyFileImportService,
 )
+from supplier_comparison.rules.compliance import ExecutableRuleParameters
 
 
 def _single_page_pdf(text: str) -> bytes:
@@ -184,6 +186,61 @@ def test_markdown_upload_preserves_utf8_text_and_media_type(
     assert uploaded["clauses"][0]["clause_id"] == "QUAL-001"
 
 
+def test_plain_policy_files_are_recognized_without_uploading_a_manifest(
+    sessions, tmp_path: Path
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    root = (
+        Path(__file__).resolve().parents[2]
+        / "data/policies/compliance-closure-demo/v1"
+    )
+    controls = {}
+
+    for number, filename in enumerate(("admission.md", "rohs.md", "amount.md"), start=1):
+        uploaded = service.upload_stream(
+            metadata=_metadata().model_copy(
+                update={
+                    "policy_id": f"POL-NO-MANIFEST-{number}",
+                    "document_id": f"DOC-NO-MANIFEST-{number}",
+                    "title": Path(filename).stem,
+                }
+            ),
+            original_filename=filename,
+            media_type="text/markdown",
+            stream=BytesIO((root / filename).read_bytes()),
+            idempotency_key=f"no-manifest-{filename}",
+        )
+
+        assert uploaded["status"] == "READY_TO_PUBLISH"
+        assert len(uploaded["clauses"]) == 1
+        controls[filename] = uploaded["clauses"][0]
+
+    assert controls["admission.md"]["control_code"] == "APPROVED_SUPPLIER"
+    assert controls["rohs.md"]["control_code"] == "ROHS_COMPLIANCE"
+    assert controls["amount.md"]["control_code"] == "AMOUNT_APPROVAL"
+    assert controls["amount.md"]["rule_parameters"] == {
+        "rule_key": "approval_threshold:post-selection_amount_action",
+        "currency": "SGD",
+        "threshold": "10000.00",
+        "operator": ">=",
+        "execution_stage": "AFTER_SELECTION",
+    }
+
+
+def test_compliance_closure_v2_manifest_has_three_reviewed_executable_controls():
+    root = Path(__file__).resolve().parents[2]
+    manifest = load_policy_manifest(root / 'data/policies/compliance-closure-demo/v2/manifest.json',
+                                    allowed_root=root / 'data/policies')
+    rules = [ExecutableRuleParameters.model_validate(clause.rule_parameters)
+             for document in manifest.documents for clause in document.clauses]
+    assert manifest.policy_set_version == 'compliance-closure-demo-2026.09.2'
+    assert {rule.control_code for rule in rules} == {
+        'APPROVED_SUPPLIER', 'ROHS_COMPLIANCE', 'AMOUNT_APPROVAL'}
+    amount = next(rule for rule in rules if rule.control_code == 'AMOUNT_APPROVAL')
+    assert str(amount.threshold) == '6500.00'
+    assert amount.execution_stage == 'BEFORE_PUBLICATION'
+
+
 @pytest.mark.parametrize(
     "version_directory",
     [
@@ -222,13 +279,23 @@ def test_upload_classification_matches_supported_demo_manifests(
         )
 
         assert uploaded["status"] == "READY_TO_PUBLISH"
-        assert {
+        actual_clauses = {
             clause["clause_id"]: {
                 "control_code": clause["control_code"],
                 "rule_parameters": clause["rule_parameters"],
             }
             for clause in uploaded["clauses"]
-        } == document["clauses"]
+        }
+        expected_clauses = {
+            clause_id: (
+                {"control_code": "INFORMATIONAL", "rule_parameters": {}}
+                if definition["control_code"] == "AMOUNT_APPROVAL"
+                and not definition["rule_parameters"]
+                else definition
+            )
+            for clause_id, definition in document["clauses"].items()
+        }
+        assert actual_clauses == expected_clauses
         assert all(
             clause["classification"]["status"] == "AUTO_ACCEPTED"
             for clause in uploaded["clauses"]
@@ -493,6 +560,13 @@ def test_reviewed_clauses_require_current_revision_and_cannot_change_after_publi
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(PolicyClause)) == 1
         assert session.scalar(select(func.count()).select_from(PolicyClauseEmbedding)) == 1
+        stored_clause = session.scalar(select(PolicyClause))
+        assert stored_clause is not None
+        rule = ExecutableRuleParameters.model_validate(stored_clause.rule_parameters)
+        assert rule.control_code == "ROHS_COMPLIANCE"
+        assert rule.matching_fields == (
+            "supplier_id", "manufacturer", "manufacturer_part_number"
+        )
 
     with pytest.raises(ConflictError) as immutable:
         service.replace_clauses(

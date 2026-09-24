@@ -18,6 +18,7 @@ const CONTROL_CODE_OPTIONS = [
 ]
 
 interface EditableClause {
+  editor_key: string
   clause_id: string
   title: string
   text: string
@@ -36,8 +37,9 @@ interface PublishSubmission {
   idempotencyKey: string
 }
 
-function toEditable(clause: PolicyDraftClause): EditableClause {
+function toEditable(clause: PolicyDraftClause, index: number): EditableClause {
   return {
+    editor_key: `source-${index}`,
     clause_id: clause.clause_id,
     title: clause.title,
     text: clause.text,
@@ -108,6 +110,10 @@ function statusClass(status: string) {
 
 export function PolicyImportPage() {
   const { policyImportId = '' } = useParams()
+  return <PolicyImportEditor key={policyImportId} policyImportId={policyImportId} />
+}
+
+function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
   const queryClient = useQueryClient()
   const syncedRevision = useRef<number | null>(null)
   const [clauses, setClauses] = useState<EditableClause[]>([])
@@ -137,10 +143,10 @@ export function PolicyImportPage() {
   })
 
   useEffect(() => {
-    if (!policy.data || dirty || syncedRevision.current === policy.data.revision) return
+    if (!policy.data || policy.data.policy_import_id !== policyImportId || dirty || syncedRevision.current === policy.data.revision) return
     setClauses(policy.data.clauses.map(toEditable))
     syncedRevision.current = policy.data.revision
-  }, [dirty, policy.data])
+  }, [dirty, policy.data, policyImportId])
 
   function acceptServerVersion(data: PolicyImportResponse) {
     setClauses(data.clauses.map(toEditable))
@@ -209,6 +215,7 @@ export function PolicyImportPage() {
     setClauses((current) => [
       ...current,
       {
+        editor_key: `draft-${Date.now()}-${current.length}`,
         clause_id: `CLAUSE-${String(current.length + 1).padStart(3, '0')}`,
         title: '',
         text: '',
@@ -437,7 +444,7 @@ export function PolicyImportPage() {
 
         <div className="policy-clause-list">
           {clauses.map((clause, index) => (!showAdvanced && !unresolvedIndexes.has(index) ? null : (
-            <article className="card policy-clause-card" key={`${clause.clause_id}-${index}`}>
+            <article className="card policy-clause-card" key={clause.editor_key}>
               <header>
                 <div><span>条款 {index + 1}</span><strong>{clause.title || '未命名条款'}</strong></div>
                 {!readonly && showAdvanced && (

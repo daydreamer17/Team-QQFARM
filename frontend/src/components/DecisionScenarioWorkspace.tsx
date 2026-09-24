@@ -57,10 +57,18 @@ function investigationObservationText(observation: InvestigationCase['observatio
     return `已比较 ${Array.isArray(data.gaps) ? data.gaps.length : 0} 家供应商的成本、交期和阻碍差异。`
   }
   if (observation.result.tool_name === 'inspect_quote_evidence') {
-    return `已核对 ${Array.isArray(data.fields) ? data.fields.length : 0} 个报价字段及其原文来源。`
+    const focus = { COST: '成本', DELIVERY: '交期', TERMS: '商务条款', ALL: '关键' }[String(data.focus)] ?? '关键'
+    const supplier = String(data.supplier_name || data.quote_id || '该供应商')
+    return `已核对 ${supplier} 的${focus}报价证据（${Array.isArray(data.fields) ? data.fields.length : 0} 项）。`
   }
-  if (observation.result.tool_name === 'inspect_supplier_history') return '已核对供应商历史数据及其可用性。'
+  if (observation.result.tool_name === 'inspect_supplier_history') {
+    return `已核对 ${String(data.supplier_name || data.quote_id || '该供应商')} 的历史表现及数据可用性。`
+  }
   if (observation.result.tool_name === 'inspect_policy_evidence') return '已核对本次结果冻结的制度检索与合规状态。'
+  if (observation.result.tool_name === 'compile_decision_brief') {
+    const pending = Array.isArray(data.unresolved_items) ? data.unresolved_items.length : 0
+    return pending > 0 ? `已汇总结论，并列出 ${pending} 项待补证明或审批记录。` : '已整理本轮核查事实与结论。'
+  }
   return '已整理本轮核查事实、局限和后续事项。'
 }
 

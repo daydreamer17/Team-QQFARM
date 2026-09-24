@@ -746,6 +746,7 @@ export interface PolicyComplianceCheck {
   source_refs?: string[]
   execution_stage?: string
   triggered?: boolean | null
+  approval_confirmed?: boolean | null
   action?: string | null
   control_code: string
   status: PolicyComplianceCheckStatus
@@ -807,10 +808,12 @@ export interface ComplianceClause {
 }
 export interface ComplianceEvidenceFacts {
   quote_id: string
-  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE'
+  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE' | 'AMOUNT_APPROVAL'
   supplier_id: string
   manufacturer?: string | null
   manufacturer_part_number?: string | null
+  approval_amount?: string | null
+  currency?: string | null
   material_number: string
   coverage_confirmed: boolean
   outcome: 'PASS' | 'FAIL'
@@ -825,7 +828,7 @@ export interface ComplianceEvidenceRecord {
   task_id: string
   task_revision: number
   quote_id: string
-  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE'
+  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE' | 'AMOUNT_APPROVAL'
   version: number
   previous_evidence_id: string | null
   facts: ComplianceEvidenceFacts
@@ -833,6 +836,25 @@ export interface ComplianceEvidenceRecord {
   confirmed_at: string
   superseded?: boolean
   files: Array<{ file_id: string; original_filename: string; media_type: string; size_bytes: number; sha256: string }>
+}
+export interface ComplianceEvidenceSaveResponse {
+  task_id: string
+  task_revision: number
+  evidence_id: string
+  analysis_started: boolean
+  status?: string
+  graph_run_id?: string
+  job_id?: string
+  job_type?: string
+  job_status?: string
+}
+export interface ComplianceEvidenceParseResponse {
+  status: 'FOUND' | 'PARTIAL' | 'NOT_FOUND' | 'TYPE_MISMATCH'
+  facts: Partial<Omit<ComplianceEvidenceFacts, 'quote_id' | 'control_code' | 'coverage_confirmed' | 'note'>>
+  parsed_fields: string[]
+  missing_fields: string[]
+  source_filename: string
+  detected_control_code?: ComplianceEvidenceFacts['control_code'] | null
 }
 export interface ComplianceAmountRequirement {
   quote_id?: string
@@ -844,6 +866,7 @@ export interface ComplianceAmountRequirement {
   execution_stage?: string
   status?: PolicyComplianceCheckStatus
   triggered?: boolean | null
+  approval_confirmed?: boolean | null
   action?: string | null
   reason_codes?: string[]
 }
