@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
@@ -34,6 +35,10 @@ from supplier_comparison.rag.uploads import (
 from supplier_comparison.rules import ProcurementRequirement, RequirementChanges
 
 from .database import create_session_factory, readiness_probe
+from .investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
+from .investigation_tools import ScopedInvestigationTools
+from .decision_investigation import DecisionInvestigationTools
+from .quote_identity import identify_supplier_id
 from .decision_intents import (
     DECISION_INTENT_PROMPT_VERSION,
     DecisionIntentModelConfig,
@@ -136,6 +141,38 @@ class RequirementSimulationRequest(ApiModel):
         if value is not True:
             raise ValueError('explicit hypothetical authorization is required')
         return value
+
+
+class RequestedInvestigationRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    quote_id: StrictStr = Field(min_length=1, max_length=64)
+    intent: Literal[
+        "ANALYZE_SELECTION_GAP",
+        "DRAFT_CLARIFICATION",
+        "SIMULATE_REQUIREMENT_CHANGE",
+    ]
+    confirm_hypothetical: StrictBool = False
+    changes: RequirementChanges | None = None
+
+    @model_validator(mode="after")
+    def validate_authorization(self):
+        simulation = self.intent == "SIMULATE_REQUIREMENT_CHANGE"
+        submitted_changes = (
+            self.changes.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+            if self.changes is not None
+            else {}
+        )
+        if simulation and (self.confirm_hypothetical is not True or not submitted_changes):
+            raise ValueError("simulation requires explicit authorization and changes")
+        if not simulation and (self.confirm_hypothetical or self.changes is not None):
+            raise ValueError("only simulation accepts hypothetical requirement changes")
+        return self
+
+
+class DecisionInvestigationRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
 
 
 class CreateDecisionScenarioRequest(ApiModel):
@@ -385,6 +422,7 @@ def create_app(
     decision_intent_parser: DecisionIntentParser | None = None,
     decision_intent_provider: str | None = None,
     decision_intent_model_id: str | None = None,
+    investigator: InvestigationRunner | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Supplier Comparison API", version="0.1.0")
 
@@ -696,6 +734,31 @@ def create_app(
             prompt_version=settings.supplier_prompt_version,
         )
 
+    @app.post("/api/v1/tasks/{task_id}/quote-supplier-identification")
+    def identify_quote_supplier(task_id: str, file: UploadFile = File(...)):
+        # The task lookup enforces the same owner boundary as quote upload.
+        service.get_task(task_id)
+        content = file.file.read(5 * 1024 * 1024 + 1)
+        if not content:
+            raise BackendError("empty_file", "The uploaded quote file is empty.")
+        if len(content) > 5 * 1024 * 1024:
+            raise BackendError("file_too_large", "Quote file exceeds the 5 MiB limit.")
+        try:
+            return identify_supplier_id(
+                content,
+                filename=file.filename or "quote",
+                media_type=file.content_type or "application/octet-stream",
+            )
+        except ValueError as exc:
+            code = str(exc)
+            messages = {
+                "unsupported_media_type": "Only PDF and UTF-8 CSV quote files are supported.",
+                "invalid_csv_encoding": "CSV quote files must use UTF-8 encoding.",
+                "invalid_pdf": "The PDF quote is damaged or unreadable.",
+                "pdf_page_limit_exceeded": "The PDF quote exceeds the 50-page preview limit.",
+            }
+            raise BackendError(code, messages.get(code, "Supplier identification failed.")) from exc
+
     @app.get("/api/v1/tasks/{task_id}/quote-drafts")
     def list_quote_drafts(task_id: str):
         return service.list_quote_drafts(task_id)
@@ -898,6 +961,85 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/investigations")
     def list_investigations(task_id: str):
         return service.list_investigations(task_id)
+
+    @app.post("/api/v1/tasks/{task_id}/decision-investigations", status_code=201)
+    def request_decision_investigation(task_id: str, body: DecisionInvestigationRequest):
+        if investigator is None:
+            raise BackendError("investigation_agent_disabled", "The investigation Agent is not enabled.")
+        context = service.requested_investigation_context(
+            task_id, expected_task_revision=body.expected_task_revision, quote_id=None,
+        )
+        tools = DecisionInvestigationTools(service, task_id=task_id, context=context)
+        case = tools.prepare_case(tools.requested_case(request_id=str(uuid4())))
+        completed = investigator.run((case,), tools, tools.save)[0]
+        return next(record for record in service.list_investigations(task_id)
+                    if record["case_id"] == completed.case_id)
+
+    @app.post("/api/v1/tasks/{task_id}/investigations", status_code=201)
+    def request_investigation(task_id: str, body: RequestedInvestigationRequest):
+        if investigator is None:
+            raise BackendError(
+                "investigation_agent_disabled",
+                "The investigation Agent is not enabled for this environment.",
+            )
+        context = service.requested_investigation_context(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            quote_id=body.quote_id,
+        )
+        definitions = {
+            "ANALYZE_SELECTION_GAP": {
+                "goal": "分析该报价相对当前可行方案的成本、交付与阻塞差距，形成可核验结论。",
+                "required": ("analyze_selection_gap",),
+                "allowed": (
+                    "get_task_context", "analyze_decision_impact", "get_comparison_result",
+                    "get_cost_breakdown", "analyze_selection_gap",
+                ),
+            },
+            "DRAFT_CLARIFICATION": {
+                "goal": "先分析该报价未入选或待确认的原因，再生成一份未发送的供应商澄清草稿。",
+                "required": ("analyze_selection_gap", "draft_clarification"),
+                "allowed": (
+                    "get_task_context", "analyze_decision_impact", "get_comparison_result",
+                    "get_cost_breakdown", "analyze_selection_gap", "draft_clarification",
+                ),
+            },
+            "SIMULATE_REQUIREMENT_CHANGE": {
+                "goal": "仅按用户明确授权的预算或交期变化进行假设试算，不修改正式采购需求。",
+                "required": ("simulate_requirement_change",),
+                "allowed": (
+                    "get_task_context", "analyze_decision_impact", "get_comparison_result",
+                    "get_cost_breakdown", "simulate_requirement_change",
+                ),
+            },
+        }
+        definition = definitions[body.intent]
+        tools = ScopedInvestigationTools(
+            service,
+            task_id=task_id,
+            graph_run_id=context["graph_run_id"],
+            task_revision=context["task_revision"],
+            impact_artifact_id=context["impact_artifact_id"],
+            evaluated_at=datetime.fromisoformat(context["evaluated_at"].replace("Z", "+00:00")),
+            authorized_requirement_changes=(
+                body.changes.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+                if body.changes is not None
+                else None
+            ),
+        )
+        case = tools.requested_case(
+            quote_id=body.quote_id,
+            goal=definition["goal"],
+            required_tools=definition["required"],
+            allowed_tools=definition["allowed"],
+            request_id=str(uuid4()),
+        )
+        completed = investigator.run((case,), tools, tools.save)[0]
+        return next(
+            record
+            for record in service.list_investigations(task_id)
+            if record["case_id"] == completed.case_id
+        )
 
     @app.get('/api/v1/tasks/{task_id}/selection-gaps')
     def selection_gaps(task_id: str, expected_task_revision: int = Query(ge=1),
@@ -1391,6 +1533,18 @@ _policy_file_import_service = PolicyFileImportService(
     max_pdf_pages=settings.policy_upload_max_pdf_pages,
     max_extracted_characters=settings.policy_upload_max_extracted_characters,
 )
+_investigator = None
+if settings.supplier_agent_enabled:
+    try:
+        _investigator = InvestigationRunner(
+            LiveInvestigationPlanner(AgentConfig.from_env()),
+            limits=AgentLimits.from_env(),
+        )
+    except ValidationError:
+        logger.warning(
+            "SUPPLIER_AGENT_ENABLED is true but the Agent model configuration is incomplete; "
+            "on-demand investigations are disabled."
+        )
 app = create_app(
     BackendService(
         _sessions,
@@ -1403,4 +1557,5 @@ app = create_app(
     readiness_check=readiness_probe(_engine),
     policy_file_import_service=_policy_file_import_service,
     allow_legacy_direct_quote_upload=settings.allow_legacy_direct_quote_upload,
+    investigator=_investigator,
 )

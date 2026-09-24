@@ -1,11 +1,71 @@
 import { useQuery } from '@tanstack/react-query'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
+import type { InvestigationObservation } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { fieldLabel, impactStatusLabel } from '../lib/presentation'
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '调查记录读取失败。'
+}
+
+const toolLabels: Record<string, string> = {
+  get_task_context: '读取当前任务信息',
+  analyze_decision_impact: '核对决策影响',
+  get_comparison_result: '读取供应商比较结果',
+  get_cost_breakdown: '读取成本明细',
+  locate_quote_source: '定位报价原文',
+  get_confirmed_quote_records: '查询历史人工确认',
+  request_clarification: '请求人工补充信息',
+  retrieve_policy: '检索适用制度',
+  analyze_selection_gap: '分析入选差距',
+  draft_clarification: '生成供应商澄清草稿',
+  simulate_requirement_change: '模拟需求变化',
+  get_policy_retrieval_status: '诊断制度检索状态',
+  retry_policy_retrieval: '重试制度检索',
+}
+
+const stopReasonLabels: Record<string, string> = {
+  EVIDENCE_CONFIRMED: '证据已确认',
+  REQUEST_COMPLETED: '调查目标已完成',
+  NO_DECISION_IMPACT: '不影响当前决策',
+  SOURCES_EXHAUSTED: '现有来源不足，等待补充',
+  CONFLICT_UNRESOLVED: '证据冲突，等待人工处理',
+  BUDGET_EXHAUSTED: '已达到本轮调查上限',
+  INPUT_CHANGED: '任务数据已变化，本记录已失效',
+  EVIDENCE_INSUFFICIENT: '证据不足',
+  MODEL_UNAVAILABLE: 'Agent 暂时不可用',
+}
+
+function observationSummary(observation: InvestigationObservation) {
+  const data = observation.result.data
+  if (observation.result.tool_name === 'draft_clarification' && typeof data.text === 'string') {
+    return data.text
+  }
+  if (observation.result.tool_name === 'analyze_selection_gap') {
+    const details = [
+      typeof data.cost_difference_vs_other === 'string' ? `成本差额 ${data.cost_difference_vs_other}` : null,
+      typeof data.delivery_days_late === 'number' ? `交付差 ${data.delivery_days_late} 天` : null,
+    ].filter(Boolean)
+    return details.join('；') || '已形成成本、交付和阻塞项分析。'
+  }
+  if (observation.result.tool_name === 'simulate_requirement_change') {
+    const comparison = data.comparison as Record<string, unknown> | undefined
+    const rows = Array.isArray(comparison?.supplier_results) ? comparison.supplier_results as Record<string, unknown>[] : []
+    const ids = Array.isArray(comparison?.recommended_quote_ids) ? comparison.recommended_quote_ids : []
+    const recommended = rows.filter((row) => ids.includes(row.quote_id)).map((row) => String(row.supplier_name))
+    const changes = data.changes as Record<string, unknown> | undefined
+    const conditions = [changes?.budget_amount ? `预算 ${changes.budget_amount}` : null,
+      changes?.delivery_deadline ? `交期 ${changes.delivery_deadline}` : null].filter(Boolean).join('、')
+    return `假设条件：${conditions || '已授权条件'}；试算推荐：${recommended.join('、') || '暂无'}。正式采购需求与推荐未改变。`
+  }
+  if (observation.result.sources.length > 0) {
+    return `找到 ${observation.result.sources.length} 条可追溯来源。`
+  }
+  if (observation.result.status === 'NOT_FOUND') return '当前范围内未找到可用记录。'
+  if (observation.result.status === 'NEEDS_INPUT') return '需要用户或管理员补充信息。'
+  if (observation.result.status === 'DENIED') return '该调用不在本次调查授权范围内。'
+  return observation.reason || '检查结果已保存。'
 }
 
 export function InvestigationPage() {
@@ -18,18 +78,19 @@ export function InvestigationPage() {
   return (
     <div className="page-stack investigation-page">
       <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.task_name} subtitle={`${investigations.data.length} 条只读调查记录`} status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'} active="investigations" />
-      <section className="review-workspace-lead"><div><p className="eyebrow">辅助调查</p><h2>系统调查记录</h2><p>仅用于说明系统为解决未知信息做过哪些检查；无需日常逐项操作。</p></div><span>{investigations.data.filter((item) => item.is_current).length} 条当前记录</span></section>
+      <section className="review-workspace-lead"><div><p className="eyebrow">辅助调查</p><h2>核查记录</h2><p>这里保留系统为解决未知信息形成的只读核查；新核查请在“决策结果”中发起，预算和交期试算请使用决策助手。</p></div><span>{investigations.data.filter((item) => item.is_current).length} 条当前记录 · 共 {investigations.data.length} 条</span></section>
+      {data.current_result_id && <Link className="button button-secondary" to={`/tasks/${taskId}/decision`}>返回决策结果</Link>}
       {investigations.data.length === 0 && <section className="card audit-empty">当前任务没有需要额外调查的信息，这是正常状态。</section>}
       <div className="investigation-list">
         {investigations.data.map((item) => (
           <article className="card investigation-card" key={item.case_id}>
-            <header><div><strong>{item.quote_id ? (data.quotes.find((quote) => quote.quote_id === item.quote_id)?.supplier_id ?? '报价调查') : '制度调查'}</strong><span>{item.kind === 'QUOTE' ? '报价信息核查' : '制度依据核查'}</span></div><span className={`status-pill ${item.is_current ? 'status-ready' : 'status-muted'}`}>{item.is_current ? '当前记录' : '历史记录'}</span></header>
+            <header><div><strong>{item.kind === 'DECISION' ? '决策核查' : item.quote_id ? (data.quotes.find((quote) => quote.quote_id === item.quote_id)?.supplier_id ?? '报价调查') : '制度调查'}</strong><span>{item.kind === 'QUOTE' ? '报价信息核查' : item.kind === 'DECISION' ? '供应商比较核查' : '制度依据核查'}</span></div><span className={`status-pill ${item.is_current ? 'status-ready' : 'status-muted'}`}>{item.is_current ? '当前记录' : '历史记录'}</span></header>
             <p>{item.goal}</p>
-            <dl className="detail-grid"><div><dt>对决策的影响</dt><dd>{impactStatusLabel(item.impact_status)}</dd></div><div><dt>检查状态</dt><dd>{item.stop_reason ? '本轮检查已停止' : '检查已记录'}</dd></div><div><dt>自动分析</dt><dd>{item.model_calls > 0 ? `已分析 ${item.model_calls} 次` : '未调用'}</dd></div></dl>
+            <dl className="detail-grid"><div><dt>对决策的影响</dt><dd>{impactStatusLabel(item.impact_status)}</dd></div><div><dt>调查结果</dt><dd>{item.stop_reason ? (stopReasonLabels[item.stop_reason] ?? item.stop_reason) : '检查已记录'}</dd></div><div><dt>模型决策</dt><dd>{item.model_calls > 0 ? `${item.model_calls} 次` : '未调用'}</dd></div></dl>
             {item.unknown_fields.length > 0 && <p><strong>待确认信息：</strong>{item.unknown_fields.map(fieldLabel).join('、')}</p>}
             {item.plan.length > 0 && <ol>{item.plan.map((step) => <li key={step}>{step}</li>)}</ol>}
             <div className="investigation-observations">
-              {item.observations.map((observation) => <div key={observation.sequence}><strong>检查步骤 {observation.sequence}</strong><span>已保存检查结果</span><p>{observation.reason}</p></div>)}
+              {item.observations.map((observation) => <div key={observation.sequence}><strong>{observation.sequence}. {toolLabels[observation.result.tool_name] ?? observation.result.tool_name}</strong><span>{observation.result.status === 'OK' ? '完成' : observation.result.status}</span><p>{observationSummary(observation)}</p></div>)}
             </div>
             {item.clarification.length > 0 && <div className="run-notice">有 {item.clarification.length} 项信息需要人工确认，请前往“待处理事项”统一处理。</div>}
           </article>

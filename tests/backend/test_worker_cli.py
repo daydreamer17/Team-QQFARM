@@ -186,7 +186,7 @@ def test_conversation_review_gate_explains_next_step_and_preserves_call_count(mo
     service = FakeService()
     monkeypatch.setattr(worker.ConversationModelConfig, 'from_env',
                         lambda: SimpleNamespace(provider='fixed-test', model_id='fixed-model'))
-    def simulated_turn(context, config, *, on_stage):
+    def simulated_turn(context, config, *, on_stage, **_kwargs):
         on_stage('simulation', 1)
         return {'assistant_text': '', 'reference_ids': [], 'changes': {'excluded_supplier_ids': []}}, 1
     monkeypatch.setattr(worker, 'process_conversation_turn', simulated_turn)

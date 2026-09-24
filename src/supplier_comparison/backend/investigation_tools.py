@@ -81,6 +81,71 @@ class ScopedInvestigationTools:
                 'arguments_are_server_injected': True, 'formal_requirement_unchanged': True,
             }
 
+    def requested_case(
+        self,
+        *,
+        quote_id: str,
+        goal: str,
+        required_tools: tuple[str, ...],
+        allowed_tools: tuple[str, ...],
+        request_id: str,
+    ) -> InvestigationCase:
+        """Create a user-requested investigation without changing official facts.
+
+        The server, not the model, fixes the quote identity, objective and tool
+        boundary.  A unique request ID keeps separate user investigations in the
+        audit trail while every tool remains scoped to the current task inputs.
+        """
+        quote = self.quotes.get(quote_id)
+        if quote is None:
+            raise ConflictError(
+                "investigation_quote_unavailable",
+                "The selected quote is not available in the current reviewed inputs.",
+            )
+        unknown_fields = tuple(sorted({
+            field
+            for impact in (self.impact or {}).get("quote_impacts", [])
+            if impact.get("quote_id") == quote_id
+            for field in impact.get("unknown_fields", [])
+        }))
+        rows = {
+            row["quote_id"]: row
+            for row in (self.impact or {}).get("comparison", {}).get("supplier_results", [])
+        }
+        impacts = {
+            impact["quote_id"]: impact
+            for impact in (self.impact or {}).get("quote_impacts", [])
+        }
+        identity = content_hash([
+            self.graph_run_id,
+            quote_id,
+            self.task_revision,
+            self.input_sha256,
+            request_id,
+        ])
+        return InvestigationCase(
+            case_id="case_" + identity[:32],
+            task_id=self.task_id,
+            task_revision=self.task_revision,
+            graph_run_id=self.graph_run_id,
+            quote_id=quote_id,
+            quote_version=quote["quote_version"],
+            impact_input_sha256=self.input_sha256,
+            policy_binding=self.policy_binding,
+            goal=goal,
+            known_facts={
+                "comparison": rows.get(quote_id),
+                "impact": impacts.get(quote_id),
+                "original_filename": quote["original_filename"],
+                "impact_proof_available": self.impact is not None,
+                "requested_investigation": True,
+                "required_tools": list(required_tools),
+                "allowed_tools": list(allowed_tools),
+            },
+            unknown_fields=unknown_fields,
+            impact_status="REQUIRES_INVESTIGATION",
+        )
+
     @staticmethod
     def _fingerprint(task: dict, review: dict) -> str:
         return content_hash({
@@ -103,7 +168,24 @@ class ScopedInvestigationTools:
         completed = {o.result.tool_name for o in case.observations
                      if o.result.status in {'OK', 'NOT_FOUND'}
                      and o.result.tool_name in TOOLS and TOOLS[o.result.tool_name][0] is NoArguments}
-        return {name: schema for name, schema in self.schemas.items() if name not in completed}
+        allowed = set(case.known_facts.get("allowed_tools", ()))
+        return {
+            name: schema
+            for name, schema in self.schemas.items()
+            if name not in completed and (not allowed or name in allowed)
+        }
+
+    @staticmethod
+    def resolution(case: InvestigationCase) -> str | None:
+        required = set(case.known_facts.get("required_tools", ()))
+        if not required:
+            return None
+        completed = {
+            observation.result.tool_name
+            for observation in case.observations
+            if observation.result.status == "OK"
+        }
+        return "REQUEST_COMPLETED" if required <= completed else None
 
     def call_signature(self, case: InvestigationCase, name: str, arguments: dict) -> str:
         try:
@@ -210,7 +292,8 @@ class ScopedInvestigationTools:
                 or case.task_revision != self.task_revision or case.impact_input_sha256 != self.input_sha256
                 or case.quote_id not in self.quotes or case.quote_version != self.quotes[case.quote_id]["quote_version"]):
             return ToolResult(**common, status="DENIED", error_code="tool_scope_denied")
-        if name not in self.schemas:
+        allowed = set(case.known_facts.get("allowed_tools", ()))
+        if name not in self.schemas or (allowed and name not in allowed):
             return ToolResult(**common, status="DENIED", error_code="tool_not_allowed")
         try:
             args = TOOLS[name][0].model_validate(arguments)

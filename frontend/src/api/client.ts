@@ -15,6 +15,7 @@ import type {
   IssueAnswer,
   IssueHistoryItem,
   InvestigationCase,
+  RequestedInvestigationInput,
   PolicyClauseInput,
   PolicyImportListQuery,
   PolicyImportListResponse,
@@ -32,6 +33,7 @@ import type {
   QuoteReactivateResponse,
   QuoteFieldSchemaResponse,
   QuoteHistoryResponse,
+  QuoteSupplierIdentification,
   QuoteUploadResponse,
   RequirementDraftResponse,
   RequirementSimulationResponse,
@@ -269,6 +271,14 @@ export const api = {
     request<QuoteDraftListResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,
     ),
+  identifyQuoteSupplier: (taskId: string, file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return request<QuoteSupplierIdentification>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-supplier-identification`,
+      { method: 'POST', body },
+    )
+  },
   uploadQuoteDraft: (
     taskId: string,
     input: {
@@ -561,6 +571,24 @@ export const api = {
   listInvestigations: (taskId: string) =>
     request<InvestigationCase[]>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/investigations`,
+    ),
+  requestDecisionInvestigation: (taskId: string, expectedTaskRevision: number) =>
+    request<InvestigationCase>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/decision-investigations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+      },
+    ),
+  requestInvestigation: (taskId: string, input: RequestedInvestigationInput) =>
+    request<InvestigationCase>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/investigations`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
     ),
   getSelectionGaps: (taskId: string, expectedTaskRevision: number, expectedResultId?: string) =>
     request<SelectionGapResponse>(

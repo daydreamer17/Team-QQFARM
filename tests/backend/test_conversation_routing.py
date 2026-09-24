@@ -175,6 +175,58 @@ def test_narration_budget_counts_routing_call(monkeypatch):
     assert caught.value.attempts == 3
 
 
+def test_investigation_route_runs_agent_then_narrates_with_audit_reference(monkeypatch):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+
+    monkeypatch.setattr(
+        "supplier_comparison.backend.decision_intents.route_conversation_intent",
+        lambda *_args, **_kwargs: (ConversationIntent(route="INVESTIGATE"), 1),
+    )
+    seen = {}
+
+    def investigate(ctx):
+        seen["question"] = ctx["recent_messages"][-1]["content"]
+        enriched = dict(ctx)
+        enriched["frozen_references"] = {
+            "INVESTIGATION:case-1": {"status": "RESOLVED", "observations": []},
+        }
+        enriched["allowed_reference_ids"] = ["INVESTIGATION:case-1"]
+        enriched["investigation_reference_id"] = "INVESTIGATION:case-1"
+        return enriched, 3
+
+    def narrate(ctx, config, **_kwargs):
+        assert ctx["response_mode"] == "INVESTIGATION_ONLY"
+        assert config.max_attempts == CONFIG.max_attempts
+        return {
+            "assistant_text": "已完成证据核查（INVESTIGATION:case-1）。",
+            "reference_ids": ["INVESTIGATION:case-1"],
+            "changes": None,
+            "clarification": None,
+        }, 1
+
+    monkeypatch.setattr(conversations, "generate_conversation_turn", narrate)
+    ctx = context()
+    ctx["recent_messages"] = [{"role": "USER", "content": "请核查这个价格是否有报价原文依据"}]
+    turn, calls = process_conversation_turn(ctx, CONFIG, investigate=investigate)
+
+    assert seen["question"] == "请核查这个价格是否有报价原文依据"
+    assert turn["reference_ids"] == ["INVESTIGATION:case-1"]
+    assert calls == 5  # intent + three Agent decisions + grounded narration
+
+
+def test_investigation_route_without_enabled_agent_is_explicit(monkeypatch):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+
+    monkeypatch.setattr(
+        "supplier_comparison.backend.decision_intents.route_conversation_intent",
+        lambda *_args, **_kwargs: (ConversationIntent(route="INVESTIGATE"), 1),
+    )
+    turn, calls = process_conversation_turn(context(), CONFIG)
+    assert calls == 1
+    assert turn["clarification"] == "INVESTIGATION_UNAVAILABLE"
+    assert turn["changes"] is None
+
+
 def test_cost_difference_is_not_confused_with_supplier_total():
     comparison = {'recommended_quote_ids': ['q1'], 'supplier_results': [
         {'quote_id': 'q1', 'supplier_name': 'Alpha', 'status': 'FEASIBLE', 'total_cost': '7000'},
@@ -185,6 +237,70 @@ def test_cost_difference_is_not_confused_with_supplier_total():
         conversations._validate_comparison_claims('Beta总成本为 SGD 7100，比推荐报价低 SGD 100。', [comparison])
     with pytest.raises(ValueError, match='wrong supplier'):
         conversations._validate_comparison_claims('Beta总成本为 SGD 100，比推荐报价高 SGD 100。', [comparison])
+
+
+def test_generic_evidence_counts_are_not_treated_as_procurement_quantities():
+    assert conversations._quantity_values('已核对1个报价字段和2个证据来源。') == set()
+    assert conversations._quantity_values('采购数量为1,000个。') == {1000}
+    assert conversations._quantity_values('实际采购1,000件。') == {1000}
+    assert conversations._payload_quantity_values({'raw_text': '单价 SGD 660 / 100 pieces'}) == {100}
+
+
+def comparison_context(question: str):
+    result_id = 'RESULT:comparison-1'
+    requirement_id = 'REQUIREMENT:requirement-1'
+    comparison = {
+        'recommended_quote_ids': ['q-fast'],
+        'supplier_results': [
+            {'quote_id': 'q-cheap', 'supplier_name': 'Great Wall Components', 'status': 'FEASIBLE',
+             'total_cost': '6500.00', 'estimated_arrival_date': '2026-11-12'},
+            {'quote_id': 'q-fast', 'supplier_name': 'Schwarzwald Circuits', 'status': 'FEASIBLE',
+             'total_cost': '6900.00', 'estimated_arrival_date': '2026-11-07'},
+        ],
+    }
+    return {
+        'recent_messages': [{'role': 'USER', 'content': question}],
+        'current_decision_preferences': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'},
+        'available_supplier_ids': ['SUP-023', 'SUP-029'],
+        'frozen_references': {
+            result_id: comparison,
+            requirement_id: {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'},
+        },
+        'allowed_reference_ids': [result_id, requirement_id],
+    }
+
+
+@pytest.mark.parametrize('question,expected', [
+    ('四家供应商里，成本和交期分别谁最好？', ('Great Wall Components', 'Schwarzwald Circuits')),
+    ('Great Wall Components 明明最便宜，为什么没有排第一？',
+     ('确认总成本最低', '最快确认到货', '当前推荐为 Schwarzwald Circuits')),
+])
+def test_common_comparison_questions_use_stable_grounded_answer(monkeypatch, question, expected):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+    monkeypatch.setattr(
+        'supplier_comparison.backend.decision_intents.route_conversation_intent',
+        lambda *_args, **_kwargs: (ConversationIntent(route='EXPLAIN'), 1),
+    )
+    monkeypatch.setattr(
+        conversations, 'generate_conversation_turn',
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError('common comparison must not need narration model')),
+    )
+    ctx = comparison_context(question)
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+    assert calls == 1
+    assert all(value in turn['assistant_text'] for value in expected)
+    conversations.validate_conversation_turn(turn, ctx)
+
+
+def test_superlative_is_checked_only_against_the_supplier_it_describes():
+    comparison = comparison_context('')['frozen_references']['RESULT:comparison-1']
+    conversations._validate_comparison_claims(
+        'Schwarzwald Circuits 到货最快，而 Great Wall Components 成本最低。', [comparison],
+    )
+    with pytest.raises(ValueError, match='fastest-supplier'):
+        conversations._validate_comparison_claims(
+            'Great Wall Components 到货最快，而 Schwarzwald Circuits 成本更高。', [comparison],
+        )
 
 
 @pytest.mark.parametrize('messages,expected', [

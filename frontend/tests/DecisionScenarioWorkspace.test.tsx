@@ -232,7 +232,10 @@ describe('DecisionScenarioWorkspace', () => {
     render(<QueryClientProvider client={queryClient}><MemoryRouter>
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
-    await waitFor(() => expect(handlers['assistant.stage']).toBeDefined())
+    await waitFor(() => {
+      expect(handlers['assistant.stage']).toBeDefined()
+      expect(handlers['assistant.tool']).toBeDefined()
+    })
     act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
       data: JSON.stringify({ reply_to_message_id: 'other', stage: 'narration' }),
     })))
@@ -241,6 +244,15 @@ describe('DecisionScenarioWorkspace', () => {
       data: JSON.stringify({ reply_to_message_id: 'message-1', stage: 'simulation' }),
     })))
     expect(await screen.findByText('正在按新条件进行确定性模拟，不会修改正式结果')).toBeInTheDocument()
+    act(() => handlers['assistant.tool'](new MessageEvent('assistant.tool', {
+      data: JSON.stringify({
+        reply_to_message_id: 'message-1',
+        tool_name: 'inspect_quote_evidence',
+        status: 'OK',
+        reason: '核对最低价报价原文',
+      }),
+    })))
+    expect(await screen.findByText('核对报价原文：完成；核对最低价报价原文')).toBeInTheDocument()
     queryClient.clear()
   })
 
@@ -260,6 +272,64 @@ describe('DecisionScenarioWorkspace', () => {
     </MemoryRouter></QueryClientProvider>)
     expect(await screen.findByRole('link', { name: '前往集中审核' }))
       .toHaveAttribute('href', '/tasks/task-1/review#excluded-review')
+  })
+
+  test('uses user-facing statuses and can retry a failed generated answer', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('EventSource', class {
+      addEventListener() {}
+      close() {}
+    })
+    const response = await api.listDecisionConversations('task-1')
+    const original = response.items[0].messages[0]
+    const userMessage = {
+      ...original,
+      message_id: 'user-message',
+      sequence: 1,
+      role: 'USER' as const,
+      content: '为什么没有选择最低价？',
+      reference_ids: [],
+      proposed_changes: null,
+      decision_intent_id: null,
+    }
+    const failed = {
+      ...original,
+      message_id: 'failed-message',
+      sequence: 2,
+      status: 'FAILED',
+      content: null,
+      reference_ids: [],
+      proposed_changes: null,
+      decision_intent_id: null,
+      reply_to_message_id: 'user-message',
+      error_code: 'conversation_model_output_invalid',
+      error_message: '本次回答未通过事实核验。',
+    }
+    response.items[0].messages = [userMessage, failed]
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    vi.spyOn(api, 'sendDecisionMessage').mockResolvedValue({
+      conversation_id: 'conversation-1',
+      message: { ...userMessage, message_id: 'retry-message', sequence: 3 },
+      job: {
+        job_id: 'retry-job', task_id: 'task-1', graph_run_id: null,
+        conversation_id: 'conversation-1', conversation_message_id: 'retry-message',
+        issue_id: null, job_type: 'DECISION_CONVERSATION', status: 'PENDING',
+        task_revision: 6, attempts: 0,
+      },
+    })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+
+    expect(await screen.findByText('生成失败')).toBeInTheDocument()
+    expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument()
+    expect(screen.queryByText('FAILED')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新生成' }))
+    await waitFor(() => expect(api.sendDecisionMessage).toHaveBeenCalledWith(
+      'task-1', 'conversation-1', 6, '为什么没有选择最低价？', expect.any(String),
+    ))
+    queryClient.clear()
   })
 
   test('applying a scenario opens the latest decision route and clears the old result cache', async () => {

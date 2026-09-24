@@ -1,0 +1,109 @@
+{
+  "schema_version": "agent-investigation-expectations/1.0.0",
+  "dataset_id": "agent-investigation-demo-v1",
+  "cases": [
+    {
+      "case_id": "missing-freight-source-check",
+      "required_any": [
+        [
+          "locate_quote_source",
+          "request_clarification"
+        ],
+        [
+          "get_confirmed_quote_records",
+          "request_clarification"
+        ]
+      ],
+      "forbidden_tools": [
+        "simulate_requirement_change"
+      ],
+      "allowed_final_statuses": [
+        "WAITING_INPUT"
+      ]
+    },
+    {
+      "case_id": "conflicting-price-evidence",
+      "required_tools": [
+        "locate_quote_source"
+      ],
+      "forbidden_tools": [
+        "simulate_requirement_change"
+      ],
+      "allowed_stop_reasons": [
+        "CONFLICT_UNRESOLVED"
+      ]
+    },
+    {
+      "case_id": "confirmed-record-reuse",
+      "required_tools": [
+        "get_confirmed_quote_records"
+      ],
+      "forbidden_tools": [],
+      "allowed_final_statuses": [
+        "RESOLVED",
+        "WAITING_INPUT"
+      ]
+    },
+    {
+      "case_id": "selection-gap-and-draft",
+      "required_tools": [
+        "analyze_selection_gap",
+        "draft_clarification"
+      ],
+      "forbidden_tools": [
+        "simulate_requirement_change",
+        "request_clarification"
+      ],
+      "allowed_stop_reasons": [
+        "REQUEST_COMPLETED"
+      ]
+    },
+    {
+      "case_id": "authorized-requirement-simulation",
+      "required_tools": [
+        "simulate_requirement_change"
+      ],
+      "forbidden_tools": [
+        "request_clarification"
+      ],
+      "allowed_stop_reasons": [
+        "REQUEST_COMPLETED"
+      ]
+    },
+    {
+      "case_id": "policy-transient-recovery",
+      "required_tools": [
+        "get_policy_retrieval_status",
+        "retry_policy_retrieval"
+      ],
+      "forbidden_tools": [],
+      "allowed_stop_reasons": [
+        "EVIDENCE_CONFIRMED"
+      ]
+    },
+    {
+      "case_id": "policy-terminal-problem",
+      "required_tools": [
+        "get_policy_retrieval_status"
+      ],
+      "forbidden_tools": [
+        "retry_policy_retrieval"
+      ],
+      "allowed_stop_reasons": [
+        "CONFLICT_UNRESOLVED",
+        "EVIDENCE_INSUFFICIENT"
+      ]
+    },
+    {
+      "case_id": "stale-input-stop",
+      "required_tools": [],
+      "forbidden_tools": [],
+      "allowed_final_statuses": [
+        "STALE"
+      ],
+      "allowed_stop_reasons": [
+        "INPUT_CHANGED"
+      ]
+    }
+  ]
+}

@@ -6760,7 +6760,7 @@ class BackendService:
         provider: str, model_id: str, prompt_version: str,
     ) -> None:
         """Persist bounded diagnostics without holding a transaction during model calls."""
-        if stage not in {"intent", "simulation", "narration", "persist"}:
+        if stage not in {"intent", "investigation", "simulation", "narration", "persist"}:
             raise ValueError("unknown conversation stage")
         with self.session_factory.begin() as session:
             job = session.get(Job, job_id)
@@ -6777,6 +6777,27 @@ class BackendService:
                 "elapsed_seconds": round(elapsed_seconds, 3),
                 "task_revision": job.task_revision, "result_id": conversation.base_result_id,
                 "provider": provider, "model_id": model_id, "prompt_version": prompt_version,
+            })
+
+    def record_conversation_tool(self, job_id: str, *, tool_name: str, status: str,
+                                 sequence: int, reason: str = "",
+                                 plan: tuple[str, ...] = ()) -> None:
+        """Expose bounded public tool progress, never model reasoning or raw source text."""
+        from .decision_investigation import DECISION_TOOLS
+
+        if tool_name not in DECISION_TOOLS or status not in {"OK", "NOT_FOUND", "DENIED", "ERROR", "STALE"}:
+            raise ValueError("invalid decision investigation tool event")
+        with self.session_factory.begin() as session:
+            job = session.get(Job, job_id)
+            if job is None or job.status != "RUNNING" or not job.conversation_id:
+                return
+            conversation = session.get(DecisionConversation, job.conversation_id)
+            if conversation is None:
+                return
+            self._append_conversation_event(session, conversation.conversation_id, "assistant.tool", {
+                "job_id": job_id, "reply_to_message_id": job.conversation_message_id,
+                "tool_name": tool_name, "status": status, "sequence": sequence,
+                "reason": reason[:240], "plan": list(plan[:4]),
             })
 
     def fail_conversation_job(
@@ -6943,6 +6964,75 @@ class BackendService:
                     "stop_reason": artifact.payload["stop_reason"] if current else "INPUT_CHANGED",
                 }
             return list(records.values())
+
+    def requested_investigation_context(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        quote_id: str | None,
+    ) -> dict[str, Any]:
+        """Freeze the current published comparison used by an on-demand Agent run."""
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if not task.current_result_id or not task.current_graph_run_id:
+                raise ConflictError(
+                    "investigation_result_required",
+                    "Run the current comparison before requesting an investigation.",
+                )
+            result = session.get(WorkflowArtifact, task.current_result_id)
+            if (
+                result is None
+                or result.task_id != task_id
+                or result.graph_run_id != task.current_graph_run_id
+                or result.task_revision != task.current_revision
+                or result.artifact_type != "COMPARISON_RESULT"
+            ):
+                raise ConflictError(
+                    "investigation_result_stale",
+                    "The current comparison no longer matches the task inputs.",
+                )
+            supplier = next((row for row in result.payload.get("supplier_results", [])
+                             if row.get("quote_id") == quote_id), None) if quote_id else None
+            if quote_id is not None and supplier is None:
+                raise NotFoundError(
+                    "investigation_quote_not_found",
+                    "The selected quote is not part of the current comparison.",
+                )
+            snapshot = (
+                session.get(WorkflowArtifact, result.parent_artifact_id)
+                if result.parent_artifact_id
+                else None
+            )
+            if (
+                snapshot is None
+                or snapshot.task_id != task_id
+                or snapshot.artifact_type != "INPUT_SNAPSHOT"
+            ):
+                raise ConflictError(
+                    "investigation_snapshot_missing",
+                    "The frozen comparison inputs are unavailable.",
+                )
+            impact_artifact_id = snapshot.payload.get("decision_impact_artifact_id")
+            evaluated_at = snapshot.payload.get("evaluated_at")
+            if not impact_artifact_id or not evaluated_at:
+                raise ConflictError(
+                    "investigation_snapshot_incomplete",
+                    "The frozen comparison is missing its impact proof or evaluation time.",
+                )
+            return {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "graph_run_id": task.current_graph_run_id,
+                "result_id": result.artifact_id,
+                "quote_id": quote_id,
+                "quote_version": supplier.get("quote_version") if supplier else None,
+                "impact_artifact_id": impact_artifact_id,
+                "evaluated_at": evaluated_at,
+            }
 
     def review_confirmations_for_batch(self, batch_artifact_id: str):
         """Recover human decisions for these exact candidate versions, including

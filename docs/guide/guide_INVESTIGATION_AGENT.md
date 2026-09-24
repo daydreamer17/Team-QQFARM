@@ -1,5 +1,9 @@
 # 受约束自主调查 Agent：开启与验证
 
+当前决策页的主入口是“决策核查 → 一键核查推荐”。系统先读取本版冻结的比较与供应商差异，模型再根据观察选择核对报价证据、供应商历史或制度依据；每步公开计划、选择原因和工具结果可展开查看。核查只读，不会触发重新计算、假设试算或审批。报价变化仍使用“重新分析”，预算/交期假设仍使用决策助手的试算功能。原独立调查页不再出现在任务导航中，仅保留旧记录与兼容入口。
+
+`POST /api/v1/tasks/{task_id}/decision-investigations` 仅接受当前 `expected_task_revision`，需要已有当前决策结果。服务端先完成两项必要基线核查，再由模型逐轮选择后续工具；没有成功核查任何相关证据时不能形成完整说明。模型选择停止后，服务端只依据已经返回的工具事实生成只读摘要。当前请求同步执行，前端会显示“正在核查”；正式采购审批始终需要人工完成。
+
 已完成第 4–6 部分的后端第一版：真实 LLM 选择工具、读取观察后调整下一步、持久化调查记录、集中补问、入选差距工具及制度故障调查。默认关闭，开启后用于**审核后的字段疑点查证与制度检索异常调查**。不是自动采购，也不是已完成的前端聊天。
 
 ## 1. 流程与权限
@@ -90,7 +94,15 @@ SUPPLIER_AGENT_POLICY_MAX_RETRIES=2
 
 为了不虚构“所有来源已经查过”，实现协议补充 `EVIDENCE_INSUFFICIENT`、`MODEL_UNAVAILABLE`；只有相关报价来源和当前确认记录均已查到终态，才记录 `SOURCES_EXHAUSTED`。等待和耗尽都不会被包装成成功。
 
-前端可先展示“目标 → 计划 → 工具名/状态/引用 → 待核对卡片 → 统一提交”，但本轮没有实现页面或时间线组件。所有读取接口沿用服务器任务所有者授权；当前测试身份不等于完整登录系统。
+前端“智能调查”页展示“目标 → 计划摘要 → 工具名/状态/公开结果 → 停止原因”，并允许用户针对当前结果发起三类按需调查：分析未入选差距、分析后生成未发送的澄清草稿、明确授权后的预算/交期假设试算。页面不展示模型内部思维链；试算也不会修改正式采购需求。所有接口沿用服务器任务所有者授权；当前测试身份不等于完整登录系统。
+
+按需调查接口为：
+
+```text
+POST /api/v1/tasks/{task_id}/investigations
+```
+
+请求必须携带当前 `expected_task_revision`、当前结果中的 `quote_id` 和受支持的 `intent`。每类意图由服务器固定业务目标、必需工具和工具白名单，模型不能把一次“分析差距”扩张成模拟需求或字段纠正。模拟意图还必须显式提交 `confirm_hypothetical=true` 和至少一项预算/交期变化。
 
 ## 5. 验证与剩余边界
 
@@ -99,8 +111,19 @@ SUPPLIER_AGENT_POLICY_MAX_RETRIES=2
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-覆盖不同工具顺序、真实调用记录、无影响未知无需调用模型、多报价集中补问、人工纠正重算、历史失效、模型非法返回/故障、重复与越权调用、输入变化、共享调用/时间预算及制度门禁。真实模型冒烟采用合成演示数据、SQLite 和内存 checkpoint，数据放在系统临时目录，不证明真实 PostgreSQL 或正式供应商资料核验通过。
+覆盖不同工具顺序、真实调用记录、无影响未知无需调用模型、多报价集中补问、人工纠正重算、历史失效、模型非法返回/故障、重复与越权调用、输入变化、共享调用/时间预算及制度门禁。8 个隔离验收场景见 `data/generated/inputs/development/agent_investigation_demo/manifest.json`，参考预期独立保存在 `evaluation/reference/agent_investigation_demo/cases.json`，避免把正确答案泄漏给 Agent。
+
+```powershell
+# 固定回归，不调用外部模型
+.\.venv\Scripts\python.exe scripts\evaluate_agent_investigations.py --output "$env:TEMP\agent-investigation-report.json"
+
+# 真实模型评测，会产生模型调用费用
+.\.venv\Scripts\python.exe -m dotenv -f .env run --no-override -- `
+  .\.venv\Scripts\python.exe scripts\evaluate_agent_investigations.py --live
+```
+
+真实模型冒烟采用合成数据、SQLite 和内存 checkpoint，不证明真实 PostgreSQL、原始 PDF 抽取或正式供应商资料核验已经通过。
 
 第 5–6 部分的接口、示例与验证见 [入选差距与制度调查](guide_SELECTION_GAP_POLICY.md)。完整输入可直接使用分析 API，不强制为每家已知不合格报价启动 LLM 调查。
 
-尚未实现：结果自然语言提问入口、前端调查页面、聊天授权参数接入、完整供应商资质数据源与业务核验、正式登录和组织级知识库隔离。原 `POLICY_EVIDENCE_REVIEW / RETRY_POLICY_RETRIEVAL` 恢复机制继续保留，修订制度或索引仍需新版本新任务。本轮仍复用固定三类必查条款，没有实现动态制度目录。
+尚未实现：自由文本自然语言调查入口、完整供应商资质数据源与业务核验、正式登录和组织级知识库隔离。当前按需调查采用三类受控业务意图，而不是开放聊天。原 `POLICY_EVIDENCE_REVIEW / RETRY_POLICY_RETRIEVAL` 恢复机制继续保留，修订制度或索引仍需新版本新任务。本轮仍复用固定三类必查条款，没有实现动态制度目录。

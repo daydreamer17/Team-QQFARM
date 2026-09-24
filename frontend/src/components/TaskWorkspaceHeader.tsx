@@ -80,7 +80,6 @@ export function TaskWorkspaceHeader({
         <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>供应商信息</Link>
         <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策结果</Link>
         {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>差距详情</Link>}
-        {active === 'investigations' && <Link className={tabClass(true)} to={`/tasks/${taskId}/investigations`}>调查详情</Link>}
         <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>制度检查</Link>
         <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>采购总结</Link>
         <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>版本记录</Link>

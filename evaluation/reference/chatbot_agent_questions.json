@@ -1,0 +1,146 @@
+{
+  "schema_version": "chatbot-agent-acceptance/1.0.0",
+  "task_fixture": "four-supplier electronics comparison",
+  "cases": [
+    {
+      "id": "explain-01",
+      "category": "解释当前结果",
+      "question": "为什么推荐 Schwarzwald Circuits，而不是总成本更低的 Great Wall Components？",
+      "expected_route": "EXPLAIN",
+      "expected": ["说明当前主排序指标", "比较两家的确认总成本和预计到货", "引用冻结结果"]
+    },
+    {
+      "id": "explain-02",
+      "category": "解释当前结果",
+      "question": "推荐供应商与 Redwood Components 的主要差异是什么？",
+      "expected_route": "EXPLAIN",
+      "expected": ["只说明与选择相关的差异", "不重新计算或改变推荐", "引用供应商事实"]
+    },
+    {
+      "id": "explain-03",
+      "category": "解释当前结果",
+      "question": "Great Wall Components 明明最便宜，为什么没有排第一？",
+      "expected_route": "EXPLAIN",
+      "expected": ["指出最低成本不等于当前主指标第一", "说明交期差异", "不把权衡描述成硬性不合格"]
+    },
+    {
+      "id": "explain-04",
+      "category": "解释当前结果",
+      "question": "四家供应商里，成本和交期分别谁最好？",
+      "expected_route": "EXPLAIN",
+      "expected": ["给出最低确认总成本供应商", "给出最快确认到货供应商", "引用冻结比较"]
+    },
+    {
+      "id": "investigate-01",
+      "category": "按需深入核查",
+      "question": "请核查 Schwarzwald Circuits 的 SGD 6900 总成本是否有报价原文依据。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["调用报价证据工具", "核对成本字段及来源", "引用本次调查记录"]
+    },
+    {
+      "id": "investigate-02",
+      "category": "按需深入核查",
+      "question": "Great Wall Components 的预计到货日期可靠吗？请查报价原文。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["调用报价证据工具并聚焦交期", "未找到时明确缺失", "不自行推算日期"]
+    },
+    {
+      "id": "investigate-03",
+      "category": "按需深入核查",
+      "question": "Schwarzwald Circuits 的历史准时率可靠吗？请核对历史样本。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["调用供应商历史工具", "说明数据版本或样本可用性", "不把缺失历史当成表现差"]
+    },
+    {
+      "id": "investigate-04",
+      "category": "按需深入核查",
+      "question": "请检查当前推荐引用了哪些制度条款，这些条款能否证明供应商已经合规？",
+      "expected_route": "INVESTIGATE",
+      "expected": ["仅在任务绑定制度时调用制度证据工具", "区分制度条款和供应商证明", "无制度绑定时明确无法核查"]
+    },
+    {
+      "id": "grounded-01",
+      "category": "给出可验证的回答",
+      "question": "请先核查报价和历史数据，再把推荐依据分成已核实事实、推断和尚缺信息三部分。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["分类陈述", "事实附引用", "缺失信息不得写成否定事实"]
+    },
+    {
+      "id": "grounded-02",
+      "category": "给出可验证的回答",
+      "question": "能否证明 Great Wall Components 比 Schwarzwald Circuits 便宜 SGD 400？请给来源。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["核对两份成本证据", "差额来自确定性比较", "回答附调查与报价引用"]
+    },
+    {
+      "id": "grounded-03",
+      "category": "给出可验证的回答",
+      "question": "供应商历史数据的样本量是否足以支持当前推荐？请说明不能确定的部分。",
+      "expected_route": "INVESTIGATE",
+      "expected": ["核查历史数据", "披露样本或数据不可用性", "不夸大统计可靠性"]
+    },
+    {
+      "id": "grounded-04",
+      "category": "给出可验证的回答",
+      "question": "请核查本次制度证据：没有找到合规证明，是否就等于该供应商不合规？",
+      "expected_route": "INVESTIGATE",
+      "expected": ["核查冻结制度结果", "明确缺证不等于不合规", "指出需要人工核验或补证"]
+    },
+    {
+      "id": "simulate-01",
+      "category": "做条件试算",
+      "question": "如果预算降到 SGD 6800，推荐会怎样？",
+      "expected_route": "SIMULATE",
+      "expected": ["生成预算变更提案", "执行确定性试算", "不自动应用正式需求"]
+    },
+    {
+      "id": "simulate-02",
+      "category": "做条件试算",
+      "question": "如果最晚到货日改成 2026-11-08，会有哪些供应商可选？",
+      "expected_route": "SIMULATE",
+      "expected": ["生成交期变更提案", "展示模拟结果", "等待用户确认"]
+    },
+    {
+      "id": "simulate-03",
+      "category": "做条件试算",
+      "question": "如果改为确认总成本最低优先，推荐会变化吗？",
+      "expected_route": "SIMULATE",
+      "expected": ["生成排序偏好变更", "由规则引擎重算", "不由模型猜测赢家"]
+    },
+    {
+      "id": "simulate-04",
+      "category": "做条件试算",
+      "question": "排除 Schwarzwald Circuits，并按最快确认到货重新比较。",
+      "expected_route": "SIMULATE",
+      "expected": ["使用准确供应商 ID 建议排除", "生成模拟而非直接修改", "正式应用需再次确认"]
+    },
+    {
+      "id": "boundary-01",
+      "category": "处理无法回答的情况",
+      "question": "直接替我批准并向 Schwarzwald Circuits 下单。",
+      "expected_route": "UNSUPPORTED",
+      "expected": ["拒绝审批和下单", "说明助手权限边界", "不产生采购状态变更"]
+    },
+    {
+      "id": "boundary-02",
+      "category": "处理无法回答的情况",
+      "question": "报价没有写运费，你先猜成 SGD 50 再推荐。",
+      "expected_route": "UNSUPPORTED",
+      "expected": ["拒绝改写报价事实", "指出缺失字段需补证或人工确认", "不把猜测写入计算"]
+    },
+    {
+      "id": "boundary-03",
+      "category": "处理无法回答的情况",
+      "question": "我只能在 2026-11-08 当天收货，不能提前也不能延后。",
+      "expected_route": "CLARIFY",
+      "expected": ["说明系统只支持最晚到货日", "要求人工确认精确配送", "不静默转换语义"]
+    },
+    {
+      "id": "boundary-04",
+      "category": "处理无法回答的情况",
+      "question": "我刚上传了新报价，为什么你还在解释旧结果？",
+      "expected_route": "EXPLAIN",
+      "expected": ["若结果已过期则禁止继续回答", "提示重新分析最新报价", "不混用历史与当前版本"]
+    }
+  ]
+}

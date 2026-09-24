@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from uuid import uuid4
 
 from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -19,6 +20,7 @@ from .backend.settings import settings
 from .backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
 from .backend.worker_health import write_worker_heartbeat
 from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
+from .backend.decision_investigation import DecisionInvestigationTools
 from .backend.intake import RequirementModelConfig, extract_requirement_candidates, parse_requirement_document
 from .backend.summaries import SummaryModelConfig, generate_summary_narrative
 from .extraction.dictionary import QuoteDictionary
@@ -159,7 +161,52 @@ def _run_decision_conversation_job(
                 prompt_version=f"{CONVERSATION_INTENT_VERSION}+{CONVERSATION_PROMPT_VERSION}",
             )
 
-        turn, attempts = process_conversation_turn(context, config, on_stage=record_stage)
+        def investigate(turn_context: dict) -> tuple[dict, int]:
+            frozen = service.requested_investigation_context(
+                turn_context["task_id"], expected_task_revision=turn_context["task_revision"], quote_id=None,
+            )
+            tools = DecisionInvestigationTools(service, task_id=turn_context["task_id"], context=frozen)
+            latest_question = next((row["content"] for row in reversed(turn_context["recent_messages"])
+                                    if row["role"] == "USER"), "")
+            case = tools.prepare_case(tools.requested_case(request_id=str(uuid4()), question=latest_question))
+            emitted = 0
+
+            def save_and_report(updated):
+                nonlocal emitted
+                tools.save(updated)
+                for observation in updated.observations[emitted:]:
+                    service.record_conversation_tool(
+                        job_id, tool_name=observation.result.tool_name,
+                        status=observation.result.status, sequence=observation.sequence,
+                        reason=observation.reason, plan=observation.plan,
+                    )
+                emitted = len(updated.observations)
+
+            save_and_report(case)
+            runner = InvestigationRunner(
+                LiveInvestigationPlanner(AgentConfig.from_env()), limits=AgentLimits.from_env(),
+            )
+            completed = runner.run((case,), tools, save_and_report)[0]
+            if not tools.current():
+                raise BackendError("conversation_stale", "Investigation inputs changed during the turn.")
+            record = next((item for item in service.list_investigations(turn_context["task_id"])
+                           if item["case_id"] == completed.case_id), None)
+            if record is None:
+                raise BackendError("investigation_record_missing", "Investigation record was not saved.")
+            reference = "INVESTIGATION:" + record["artifact_id"]
+            evidence = {key: record.get(key) for key in (
+                "case_id", "kind", "status", "stop_reason", "goal", "unknown_fields", "clarification", "observations",
+            )}
+            enriched = dict(turn_context)
+            enriched["frozen_references"] = dict(turn_context["frozen_references"]) | {reference: evidence}
+            enriched["allowed_reference_ids"] = sorted(enriched["frozen_references"])
+            enriched["investigation_reference_id"] = reference
+            return enriched, completed.model_calls
+
+        turn, attempts = process_conversation_turn(
+            context, config, on_stage=record_stage,
+            investigate=investigate if settings.supplier_agent_enabled else None,
+        )
         return service.complete_conversation_job(
             job_id,
             turn=turn,

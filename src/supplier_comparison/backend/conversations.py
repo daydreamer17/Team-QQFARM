@@ -42,7 +42,11 @@ _REFERENCE_TOKEN = re.compile(
 _ISO_DATE = re.compile(r"(?<!\d)(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)")
 _CN_DATE = re.compile(r"(?<!\d)(\d{4})年(\d{1,2})月(\d{1,2})日")
 _QUANTITY = re.compile(
-    r"(?<!\d)([0-9][0-9,]*)\s*(?:件|颗|个|片|套|只|pcs?|pieces?)",
+    r"(?<!\d)([0-9][0-9,]*)\s*(?:件|颗|片|套|只|pcs?|pieces?)",
+    re.IGNORECASE,
+)
+_GENERIC_UNIT_QUANTITY = re.compile(
+    r"(?:采购|订购|需求|物料)?数量\D{0,12}([0-9][0-9,]*)\s*个",
     re.IGNORECASE,
 )
 _MOQ = re.compile(r"MOQ\s*(?:为|是|[:：])?\s*([0-9][0-9,]*)", re.IGNORECASE)
@@ -84,7 +88,7 @@ class ConversationTurnOutput(BaseModel):
     assistant_text: str = Field(max_length=6000)
     reference_ids: list[str] = Field(max_length=64)
     changes: RequirementChanges | None = None
-    clarification: Literal["EXACT_DELIVERY_DAY", "COST_LIMIT", "CHANGE_DETAILS", "UNSUPPORTED"] | None = None
+    clarification: Literal["EXACT_DELIVERY_DAY", "COST_LIMIT", "CHANGE_DETAILS", "UNSUPPORTED", "INVESTIGATION_UNAVAILABLE"] | None = None
 
 
 CLARIFICATION_TEXT = {
@@ -92,6 +96,7 @@ CLARIFICATION_TEXT = {
     "EXACT_DELIVERY_DAY": "系统目前只能设置最晚到货日，允许提前到货，不能保证恰好当天送达。您是否接受将要求改为最晚到货日？若只能当天收货，需要人工确认配送安排。",
     "COST_LIMIT": "请说明可接受的预算上限，或相对最低价最多可以增加多少费用。",
     "CHANGE_DETAILS": "请说明希望调整的排序偏好、预算或最晚到货日；排序最多支持一个主指标和一个次指标。",
+    "INVESTIGATION_UNAVAILABLE": "当前未启用证据核查 Agent，无法进一步验证报价原文、供应商历史或制度依据。您仍可询问当前已冻结的比较结果。",
 }
 
 
@@ -371,6 +376,16 @@ def generate_conversation_turn(
         "Example cost preference: {\"assistant_text\":\"\",\"reference_ids\":[],"
         "\"changes\":{\"primary_criterion\":\"LOWEST_CONFIRMED_TOTAL_COST\"},\"clarification\":null}."
     )
+    if context.get("response_mode") == "INVESTIGATION_ONLY":
+        system += (
+            " This question has already been routed to a read-only investigation. Use its INVESTIGATION reference "
+            "and the frozen references to answer the user's specific evidence question. Cite the investigation "
+                "record in at least one factual sentence. Distinguish verified findings, inference, and missing evidence. "
+                "A NOT_FOUND observation is lack of evidence, not proof of the opposite. If the investigation stopped "
+                "without resolving, say so. Never claim supplier compliance from a retrieved policy clause alone. "
+                "Do not state counts of tools, records, sources, citations, or inspected fields; summarize their substance. "
+                "Return changes=null and clarification=null; do not propose or apply changes."
+            )
     if context.get("response_mode") == "EXPLAIN_ONLY":
         system += (
             " This request has already been routed as a factual explanation. Return changes=null and "
@@ -430,8 +445,9 @@ def generate_conversation_turn(
                                 "assistant_text contains ONLY referenced frozen facts, and may be empty. "
                                 "Remove user-intent restatements and all dialogue instructions from assistant_text; "
                                 "use changes or clarification instead. clarification is EXACT_DELIVERY_DAY, COST_LIMIT, "
-                                "CHANGE_DETAILS, or null. Append supporting IDs before punctuation in each factual sentence."
-                            ),
+                                    "CHANGE_DETAILS, or null. Append supporting IDs before punctuation in each factual sentence."
+                                    " For investigation answers, remove counts of tools, records, sources, citations, and inspected fields."
+                                ),
                         },
                         ensure_ascii=False,
                     ),
@@ -474,6 +490,7 @@ def process_conversation_turn(
     opener: Callable[..., object] = trusted_urlopen,
     sleeper: Callable[[float], None] = time.sleep,
     on_stage: Callable[[str, int], None] | None = None,
+    investigate: Callable[[dict[str, Any]], tuple[dict[str, Any], int]] | None = None,
 ) -> tuple[dict[str, Any], int]:
     """Route once, then narrate facts only; the total transport budget is three calls."""
     from .decision_intents import route_conversation_intent
@@ -483,7 +500,10 @@ def process_conversation_turn(
     intent, calls = route_conversation_intent(
         context, replace(config, max_attempts=1), opener=opener, sleeper=sleeper,
     )
-    if intent.route != "EXPLAIN":
+    if intent.route == "INVESTIGATE" and investigate is None:
+        return {"assistant_text": "", "reference_ids": [], "changes": None,
+                "clarification": "INVESTIGATION_UNAVAILABLE"}, calls
+    if intent.route not in {"EXPLAIN", "INVESTIGATE"}:
         if on_stage:
             on_stage("simulation" if intent.route == "SIMULATE" else "persist", calls)
         return {
@@ -492,11 +512,23 @@ def process_conversation_turn(
             "clarification": "UNSUPPORTED" if intent.route == "UNSUPPORTED" else intent.clarification,
         }, calls
     factual_context = dict(context, response_mode="EXPLAIN_ONLY")
+    if intent.route == "EXPLAIN":
+        deterministic = deterministic_comparison_explanation(factual_context)
+        if deterministic is not None:
+            if on_stage:
+                on_stage("narration", calls)
+            return deterministic, calls
+    if intent.route == "INVESTIGATE":
+        if on_stage:
+            on_stage("investigation", calls)
+        factual_context, investigation_calls = investigate(context)  # type: ignore[misc]
+        calls += investigation_calls
+        factual_context["response_mode"] = "INVESTIGATION_ONLY"
     if on_stage:
         on_stage("narration", calls)
     try:
         turn, additional = generate_conversation_turn(
-            factual_context, replace(config, max_attempts=min(config.max_attempts, 3 - calls)),
+            factual_context, replace(config, max_attempts=config.max_attempts),
             opener=opener, sleeper=sleeper,
         )
     except ModelClientError as exc:
@@ -504,7 +536,121 @@ def process_conversation_turn(
     if turn.get("changes") is not None or turn.get("clarification"):
         raise ModelClientError("narration attempted to change the classified intent",
                                attempts=calls + additional, error_code="conversation_intent_mismatch")
+    investigation_reference = factual_context.get("investigation_reference_id")
+    if investigation_reference and investigation_reference not in turn.get("reference_ids", []):
+        raise ModelClientError("investigation answer omitted its audit reference",
+                               attempts=calls + additional, error_code="conversation_model_output_invalid")
     return turn, calls + additional
+
+
+_CRITERION_LABELS = {
+    "LOWEST_CONFIRMED_TOTAL_COST": "确认总成本最低",
+    "FASTEST_CONFIRMED_DELIVERY": "最快确认到货",
+    "LONGEST_CONFIRMED_PAYMENT_TERM": "确认账期最长",
+    "HIGHEST_SUPPLIER_PERFORMANCE": "供应商综合表现最高",
+    "HIGHEST_HISTORICAL_ON_TIME_RATE": "历史准时率最高",
+    "LOWEST_HISTORICAL_REJECTED_LINE_RATE": "历史拒收订单行率最低",
+}
+
+
+def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, Any] | None:
+    """Answer common comparison questions from frozen facts without model variance."""
+
+    question = next((
+        str(row.get("content", ""))
+        for row in reversed(context.get("recent_messages", []))
+        if isinstance(row, dict) and row.get("role") == "USER"
+    ), "")
+    wants_cost = bool(re.search(r"成本|价格|总价|便宜|最低|最好", question, re.IGNORECASE))
+    wants_delivery = bool(re.search(r"交期|交付|到货|最快|最早|最好", question, re.IGNORECASE))
+    wants_choice = bool(re.search(r"推荐|第一|未选|没选|为什么|差异|比较", question, re.IGNORECASE))
+    if not (wants_cost or wants_delivery or wants_choice):
+        return None
+
+    references = context.get("frozen_references", {})
+    result_item = next((
+        (reference_id, payload)
+        for reference_id, payload in references.items()
+        if reference_id.startswith("RESULT:")
+        and isinstance(payload, dict)
+        and isinstance(payload.get("supplier_results"), list)
+    ), None)
+    if result_item is None:
+        return None
+    result_reference, comparison = result_item
+    rows = [
+        row for row in comparison["supplier_results"]
+        if isinstance(row, dict)
+        and str(row.get("status", "")).upper() == "FEASIBLE"
+        and row.get("total_cost") is not None
+        and row.get("estimated_arrival_date")
+    ]
+    if not rows:
+        return None
+    by_quote = {str(row.get("quote_id")): row for row in rows}
+    recommended = [
+        by_quote[quote_id] for quote_id in map(str, comparison.get("recommended_quote_ids", []))
+        if quote_id in by_quote
+    ]
+    lowest_cost = min(Decimal(str(row["total_cost"])) for row in rows)
+    earliest_date = min(str(row["estimated_arrival_date"]) for row in rows)
+    cheapest = [row for row in rows if Decimal(str(row["total_cost"])) == lowest_cost]
+    fastest = [row for row in rows if str(row["estimated_arrival_date"]) == earliest_date]
+
+    sentences: list[str] = []
+    reference_ids: list[str] = []
+    requirement_reference = next((key for key in references if key.startswith("REQUIREMENT:")), None)
+    preferences = context.get("current_decision_preferences") or {}
+    primary = str(preferences.get("primary_criterion") or "")
+    if wants_choice and primary == "FASTEST_CONFIRMED_DELIVERY":
+        wants_delivery = True
+    if wants_choice and primary == "LOWEST_CONFIRMED_TOTAL_COST":
+        wants_cost = True
+    if wants_choice and requirement_reference and primary in _CRITERION_LABELS:
+        sentences.append(
+            f"当前排序主指标是“{_CRITERION_LABELS[primary]}”（{requirement_reference}）。"
+        )
+        reference_ids.append(requirement_reference)
+
+    if wants_cost:
+        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in cheapest)
+        sentences.append(
+            f"可行报价中，{names} 的已确认总成本最低，为 SGD {lowest_cost:,.2f}（{result_reference}）。"
+        )
+    if wants_delivery:
+        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in fastest)
+        sentences.append(
+            f"可行报价中，{names} 的预计到货最早，为 {earliest_date}（{result_reference}）。"
+        )
+    if wants_choice and recommended:
+        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in recommended)
+        sentences.append(f"当前推荐为 {names}（{result_reference}）。")
+
+    already_described = {
+        str(row.get("quote_id")) for row in cheapest + fastest + recommended
+    }
+    for row in rows:
+        name = str(row.get("supplier_name") or "").strip()
+        if (not name or name.casefold() not in question.casefold()
+                or str(row.get("quote_id")) in already_described):
+            continue
+        sentences.append(
+            f"{name} 的已确认总成本为 SGD {Decimal(str(row['total_cost'])):,.2f}，"
+            f"预计到货日为 {row['estimated_arrival_date']}（{result_reference}）。"
+        )
+    if wants_choice and requirement_reference and primary in _CRITERION_LABELS:
+        sentences.append(
+            f"因此当前推荐遵循既定排序主指标，而不是改按另一项指标排序（{requirement_reference}；{result_reference}）。"
+        )
+    if not sentences:
+        return None
+    reference_ids.append(result_reference)
+    return {
+        "assistant_text": "".join(sentences),
+        "reference_ids": list(dict.fromkeys(reference_ids)),
+        "changes": None,
+        "clarification": None,
+    }
 
 
 def _validate_grounded_output(
@@ -557,8 +703,14 @@ def _validate_grounded_output(
                 )
         if _date_values(sentence) - grounded_dates:
             raise ValueError("unsupported date claim")
-        if _quantity_values(sentence) - grounded_quantities:
-            raise ValueError("unsupported quantity claim")
+        unsupported_quantities = _quantity_values(sentence) - grounded_quantities
+        if unsupported_quantities:
+            raise ValueError(
+                f"unsupported quantity claim in sentence {sentence_number}: "
+                f"values={sorted(unsupported_quantities)}; cited={sorted(sentence_reference_ids)}; "
+                f"sentence={sentence[:500]!r}; "
+                "remove tool/evidence counts and mention only procurement quantities explicitly present in the cited data"
+            )
         if _POSITIVE_COMPLIANCE.search(sentence) and not any(
             _contains_positive_compliance(payload) for payload in sentence_payloads
         ):
@@ -706,6 +858,23 @@ def _validate_delivery_deadline_semantics(
         raise ValueError(
             "an exact-day delivery request must disclose that delivery_deadline is an on-or-before constraint"
         )
+
+
+def _supplier_has_positive_claim(text: str, supplier_name: str, claim: str) -> bool:
+    """Bind a superlative to the nearby supplier instead of every named supplier."""
+
+    name = re.escape(supplier_name)
+    claim_pattern = f"(?:{claim})"
+    patterns = (
+        rf"{name}(?P<body>[^。！？!?；;\n]{{0,20}}?){claim_pattern}",
+        rf"{claim_pattern}(?P<body>[^。！？!?；;\n]{{0,16}}?)(?:的供应商|的报价)?(?:是|为)\s*{name}",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            body = match.groupdict().get("body", "")
+            if not re.search(r"并非|不是|没有|不算|未(?:达到|成为)", body):
+                return True
+    return False
 
 
 def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
@@ -890,13 +1059,17 @@ def _validate_comparison_claims(text: str, cited_payloads: list[Any]) -> None:
             }
             for row in mentioned_rows:
                 quote_id = str(row.get("quote_id", ""))
+                supplier_name = str(row.get("supplier_name", "")).strip()
                 if quote_id not in costs:
                     continue
-                if re.search(r"最快|最早到货", text) and dates[quote_id] != fastest:
+                if (_supplier_has_positive_claim(text, supplier_name, r"最快|最早到货|到货最早")
+                        and dates[quote_id] != fastest):
                     raise ValueError("unsupported fastest-supplier claim")
-                if re.search(r"次快", text) and dates[quote_id] != second_fastest:
+                if (_supplier_has_positive_claim(text, supplier_name, r"次快")
+                        and dates[quote_id] != second_fastest):
                     raise ValueError("unsupported second-fastest-supplier claim")
-                if re.search(r"最便宜|最低成本|成本最低", text) and costs[quote_id] != cheapest:
+                if (_supplier_has_positive_claim(text, supplier_name, r"最便宜|最低成本|成本最低|总成本最低")
+                        and costs[quote_id] != cheapest):
                     raise ValueError("unsupported lowest-cost-supplier claim")
                 if (
                     re.search(r"兼顾价格|价格与交期.*平衡|性价比", text)
@@ -1033,7 +1206,8 @@ def _date_values(text: str) -> set[str]:
 
 
 def _quantity_values(text: str) -> set[int]:
-    return {int(value.replace(",", "")) for value in _QUANTITY.findall(text)}
+    values = _QUANTITY.findall(text) + _GENERIC_UNIT_QUANTITY.findall(text)
+    return {int(value.replace(",", "")) for value in values}
 
 
 def _validate_pairwise_ordering(
@@ -1131,8 +1305,12 @@ def _payload_quantity_values(value: Any, *, key: str | None = None) -> set[int]:
             values.update(_payload_quantity_values(item, key=key))
     elif key in _QUANTITY_KEYS and type(value) is int:
         values.add(value)
-    elif key in _QUANTITY_KEYS and isinstance(value, str) and value.isdigit():
-        values.add(int(value))
+    elif isinstance(value, str):
+        # Quoted source text such as "SGD 660 / 100 pieces" is valid quantity
+        # evidence even when the extractor did not normalize it into a dedicated key.
+        values.update(_quantity_values(value))
+        if key in _QUANTITY_KEYS and value.isdigit():
+            values.add(int(value))
     return values
 
 

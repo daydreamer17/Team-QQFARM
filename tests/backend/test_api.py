@@ -14,6 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
+from supplier_comparison.backend.investigation import AgentChoice, InvestigationRunner
+from supplier_comparison.backend.decision_investigation import DecisionInvestigationTools
 from supplier_comparison.backend.models import (
     Base,
     Document,
@@ -30,6 +32,7 @@ from supplier_comparison.rules import ProcurementRequirement
 from supplier_comparison.supplier_history import generate_supplier_history
 from langgraph.checkpoint.memory import InMemorySaver
 from tests.backend.test_workflow import CanonicalCsvProcessor, DICTIONARY_PATH, _requirement
+from tests.backend.test_investigation import ScriptedPlanner, call
 
 
 REQUIREMENT = {
@@ -172,6 +175,44 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert supplier_payload["unresolved_identity_quotes"][0]["document_id"] == uploaded.json()["document_id"]
     assert supplier_payload["unresolved_identity_quotes"][0]["quote_version"] == 1
     assert "storage_path" not in supplier_information.text
+
+
+def test_quote_supplier_identification_is_read_only_and_task_scoped(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    created = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "identify-create"},
+        json={"requirement": REQUIREMENT},
+    )
+    task = created.json()
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/quote-supplier-identification",
+        files={
+            "file": (
+                "quote.csv",
+                b"supplier_id,unit_price\nSUP-029,6.20\n",
+                "text/csv",
+            )
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "FOUND",
+        "supplier_id": "SUP-029",
+        "candidates": ["SUP-029"],
+        "source": "CSV_FIELD",
+    }
+    detail = http.get(f"/api/v1/tasks/{task['task_id']}").json()
+    assert detail["task_revision"] == 1
+    assert detail["quotes"] == []
+
+    missing_task = http.post(
+        "/api/v1/tasks/missing/quote-supplier-identification",
+        files={"file": ("quote.csv", b"supplier_id\nSUP-029\n", "text/csv")},
+    )
+    assert missing_task.status_code == 404
 
 
 def test_supplier_history_binding_is_frozen_and_refresh_is_explicit(tmp_path: Path) -> None:
@@ -1256,6 +1297,252 @@ def test_batch_review_lists_all_quotes_and_current_problems(batch_review):
     assert all(p["field_version"] and p["original_filename"] for p in review["problems"])
     assert all(q["evidence_sources"] and all(s["raw_text"] for s in q["evidence_sources"]) for q in review["quotes"])
     assert "storage_path" not in str(review)
+
+
+def test_user_can_request_a_scoped_agent_investigation_for_current_result(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"],
+        corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="requested-investigation-ready",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    result = service.get_result(task["task_id"], current["current_result_id"])
+    quote_id = result["result"]["supplier_results"][0]["quote_id"]
+    planner = ScriptedPlanner([call("analyze_selection_gap")])
+    http = TestClient(create_app(
+        service,
+        readiness_check=lambda: True,
+        investigator=InvestigationRunner(planner),
+    ))
+
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/investigations",
+        json={
+            "expected_task_revision": current["task_revision"],
+            "quote_id": quote_id,
+            "intent": "ANALYZE_SELECTION_GAP",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["status"] == "RESOLVED"
+    assert record["stop_reason"] == "REQUEST_COMPLETED"
+    assert record["known_facts"]["requested_investigation"] is True
+    assert [row["result"]["tool_name"] for row in record["observations"]] == [
+        "analyze_selection_gap"
+    ]
+    assert service.get_task(task["task_id"])["current_result_id"] == current["current_result_id"]
+
+    unconfirmed = http.post(
+        f"/api/v1/tasks/{task['task_id']}/investigations",
+        json={
+            "expected_task_revision": current["task_revision"],
+            "quote_id": quote_id,
+            "intent": "SIMULATE_REQUIREMENT_CHANGE",
+            "changes": {"budget_amount": "9000.00"},
+        },
+    )
+    assert unconfirmed.status_code == 422
+
+    empty_change = http.post(
+        f"/api/v1/tasks/{task['task_id']}/investigations",
+        json={
+            "expected_task_revision": current["task_revision"],
+            "quote_id": quote_id,
+            "intent": "SIMULATE_REQUIREMENT_CHANGE",
+            "confirm_hypothetical": True,
+            "changes": {},
+        },
+    )
+    assert empty_change.status_code == 422
+
+
+def test_decision_agent_checks_observations_and_preserves_official_result(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-ready",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    before = service.get_task(task["task_id"])
+    result = service.get_result(task["task_id"], before["current_result_id"])
+    recommended = result["result"]["recommended_quote_ids"][0]
+
+    class ObservingPlanner:
+        model_id = "scripted-observing-agent"
+
+        def __init__(self):
+            self.seen = []
+
+        def choose(self, case, schemas, *, timeout_seconds):
+            names = [o.result.tool_name for o in case.observations]
+            self.seen.append((names, set(schemas)))
+            if names == ["read_decision_overview", "compare_alternatives"]:
+                assert len(case.observations[-1].result.data["gaps"]) == 2
+                return call("inspect_quote_evidence", {"quote_id": recommended, "focus": "COST"})
+            return AgentChoice(action="STOP", reason="关键报价证据已核对，可以汇总")
+
+    planner = ObservingPlanner()
+    http = TestClient(create_app(service, readiness_check=lambda: True,
+                                 investigator=InvestigationRunner(planner)))
+    response = http.post(f"/api/v1/tasks/{task['task_id']}/decision-investigations",
+                         json={"expected_task_revision": before["task_revision"]})
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["kind"] == "DECISION" and record["status"] == "RESOLVED"
+    assert [o["result"]["tool_name"] for o in record["observations"]] == [
+        "read_decision_overview", "compare_alternatives", "inspect_quote_evidence", "compile_decision_brief",
+    ]
+    assert record["model_calls"] == 2
+    assert "inspect_quote_evidence" in planner.seen[0][1]
+    assert service.get_task(task["task_id"]) == before
+    assert http.post(f"/api/v1/tasks/{task['task_id']}/decision-investigations",
+                     json={"expected_task_revision": before["task_revision"] - 1}).status_code == 409
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=before["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    case = tools.prepare_case(tools.requested_case(request_id="scope-check"))
+    foreign = tools.execute(case, "inspect_quote_evidence", {"quote_id": "foreign"})
+    assert foreign.status == "DENIED" and foreign.error_code == "quote_out_of_scope"
+    assert tools.execute(case, "inspect_policy_evidence", {}).status == "DENIED"
+
+
+def test_decision_agent_cannot_finish_without_follow_up_evidence(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-incomplete",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    http = TestClient(create_app(service, readiness_check=lambda: True,
+                                 investigator=InvestigationRunner(ScriptedPlanner([
+                                     AgentChoice(action="STOP", reason="无需再查"),
+                                 ]))))
+    response = http.post(f"/api/v1/tasks/{task['task_id']}/decision-investigations",
+                         json={"expected_task_revision": current["task_revision"]})
+    assert response.status_code == 201
+    assert response.json()["status"] == "WAITING_INPUT"
+    assert "compile_decision_brief" not in [o["result"]["tool_name"] for o in response.json()["observations"]]
+    assert service.get_task(task["task_id"]) == current
+
+
+@pytest.mark.skipif(__import__('os').getenv('RUN_AGENT_LIVE_TESTS') != '1',
+                    reason='set RUN_AGENT_LIVE_TESTS=1 for live decision Agent acceptance')
+def test_live_decision_agent_uses_multiple_tools(batch_review):
+    import os
+    from supplier_comparison.backend.investigation import AgentConfig, AgentLimits, LiveInvestigationPlanner
+
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"], idempotency_key="live-decision-ready",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    config = AgentConfig.from_env()
+    assert config.model_id and os.getenv(config.api_key_env)
+    planner = LiveInvestigationPlanner(config)
+    http = TestClient(create_app(service, readiness_check=lambda: True,
+                                 investigator=InvestigationRunner(planner, limits=AgentLimits(max_model_calls=8,
+                                                                                               max_tool_calls=10,
+                                                                                               max_seconds=90))))
+    response = http.post(f"/api/v1/tasks/{task['task_id']}/decision-investigations",
+                         json={"expected_task_revision": current["task_revision"]})
+    assert response.status_code == 201, response.text
+    record = response.json()
+    names = [o["result"]["tool_name"] for o in record["observations"]]
+    print({"tools": names, "model_calls": record["model_calls"], "status": record["status"],
+           "tool_statuses": [o["result"]["status"] for o in record["observations"]],
+           "errors": [o["result"]["error_code"] for o in record["observations"]]})
+    assert record["status"] == "RESOLVED" and len(names) >= 4
+    assert names[:2] == ["read_decision_overview", "compare_alternatives"]
+    assert any(name.startswith("inspect_") for name in names)
+    assert names[-1] == "compile_decision_brief"
+    assert record["model_calls"] >= 2
+    assert any(o.get("plan") for o in record["observations"][2:])
+    assert all(o["result"]["status"] in {"OK", "NOT_FOUND"} for o in record["observations"])
+    assert service.get_task(task["task_id"]) == current
+
+
+@pytest.mark.skipif(__import__('os').getenv('RUN_CHATBOT_AGENT_LIVE') != '1',
+                    reason='set RUN_CHATBOT_AGENT_LIVE=1 for live chatbot Agent acceptance')
+def test_live_chatbot_investigation_runs_tools_and_returns_grounded_answer(batch_review):
+    """Exercise the real Chatbot -> Agent -> tools -> grounded answer path in an isolated DB."""
+    import json
+    from supplier_comparison import worker
+    from supplier_comparison.backend import conversations
+    from supplier_comparison.backend.conversations import ConversationModelConfig
+
+    http, service, task, runner, _review, body = batch_review
+    corrected = service.correct_fields(
+        task_id=task['task_id'], corrections=body['corrections'],
+        expected_task_revision=body['expected_task_revision'],
+        idempotency_key='live-chatbot-agent-ready',
+    )
+    assert runner.run_job(corrected['job_id'])['status'] == 'SUCCEEDED'
+    before = service.get_task(task['task_id'])
+    assert ConversationModelConfig.from_env() is not None
+    observed_responses = []
+    real_call = conversations._call_conversation_model
+    def observed_call(*args, **kwargs):
+        payload, attempts = real_call(*args, **kwargs)
+        observed_responses.append(payload['choices'][0]['message']['content'])
+        return payload, attempts
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(conversations, '_call_conversation_model', observed_call)
+
+    base = f"/api/v1/tasks/{task['task_id']}/decision-conversations"
+    conversation = http.post(
+        base,
+        json={'expected_task_revision': before['task_revision'], 'title': 'Chatbot Agent 隔离验收'},
+        headers={'Idempotency-Key': 'live-chatbot-agent-conversation'},
+    )
+    assert conversation.status_code == 201, conversation.text
+    conversation_id = conversation.json()['conversation_id']
+    queued = http.post(
+        f'{base}/{conversation_id}/messages',
+        json={
+            'expected_task_revision': before['task_revision'],
+            'message': '请核查当前推荐报价的总成本是否有报价原文依据，并把已核实事实和尚缺信息分开说明。',
+        },
+        headers={'Idempotency-Key': 'live-chatbot-agent-message'},
+    )
+    assert queued.status_code == 202, queued.text
+
+    try:
+        completed = worker._run_decision_conversation_job(service, queued.json()['job']['job_id'])
+    except Exception:
+        print('Live chatbot responses:', json.dumps(observed_responses, ensure_ascii=False))
+        raise
+    finally:
+        monkeypatch.undo()
+    assert completed['job_status'] == 'SUCCEEDED'
+    message = completed['message']
+    investigation_refs = [ref for ref in message['reference_ids'] if ref.startswith('INVESTIGATION:')]
+    assert len(investigation_refs) == 1
+    assert '已核实' in message['content']
+    assert any(word in message['content'] for word in ('尚缺', '缺失', '未确认', '无法确认'))
+
+    records = service.list_investigations(task['task_id'])
+    record = next(item for item in records if investigation_refs[0] == 'INVESTIGATION:' + item['artifact_id'])
+    tool_names = [row['result']['tool_name'] for row in record['observations']]
+    assert record['status'] == 'RESOLVED'
+    assert tool_names[:2] == ['read_decision_overview', 'compare_alternatives']
+    assert 'inspect_quote_evidence' in tool_names
+    assert tool_names[-1] == 'compile_decision_brief'
+    assert record['model_calls'] >= 2
+
+    events = service.decision_conversation_events(task['task_id'], conversation_id)
+    assert any(row['event_type'] == 'assistant.tool' for row in events)
+    assert service.get_task(task['task_id']) == before
 
 
 def test_batch_corrections_respect_foreign_key_insert_order(fk_batch_review):

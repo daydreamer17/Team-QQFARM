@@ -2128,6 +2128,77 @@
   gap: 0.65rem;
 }
 
+.field .supplier-identification-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.field .supplier-identification-note.is-success {
+  color: var(--green-dark);
+}
+
+.supplier-identification-note button {
+  padding: 0;
+  border: 0;
+  color: var(--blue);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.investigation-request-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.investigation-request-heading h2,
+.investigation-request-heading p {
+  margin: 0;
+}
+
+.investigation-request-heading p {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
+.investigation-request-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.investigation-request-grid label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.investigation-request-grid input,
+.investigation-request-grid select {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+
+.investigation-request-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.investigation-request-actions small {
+  color: var(--muted);
+}
+
 .investigation-observations > div,
 .impact-list article {
   display: grid;
@@ -2149,6 +2220,17 @@
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+@media (max-width: 760px) {
+  .investigation-request-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .investigation-request-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .simulation-form,
@@ -2440,4 +2522,28 @@
   .supplier-kpis { order: 3; width: 100%; }
   .supplier-context-tags { justify-content: flex-start; }
   .supplier-overview-grid, .supplier-detail-grid { grid-template-columns: 1fr; }
+}
+.decision-investigation-trace {
+  margin-top: 16px;
+}
+
+.decision-investigation-trace summary {
+  color: #3156cc;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.decision-investigation-trace ol {
+  margin: 12px 0 0;
+  padding-left: 24px;
+}
+
+.decision-investigation-trace li {
+  padding: 7px 0;
+}
+
+.decision-investigation-trace li span,
+.decision-investigation-trace li small {
+  display: block;
+  color: var(--text-muted, #64748b);
 }

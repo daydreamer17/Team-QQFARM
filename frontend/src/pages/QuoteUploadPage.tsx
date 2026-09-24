@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey, documentContentUrl, quoteDraftContentUrl } from '../api/client'
+import type { QuoteSupplierIdentification } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 import { IssuePanel } from '../components/IssuePanel'
 import { QuoteDraftReviewWorkspace } from '../components/QuoteDraftReviewWorkspace'
@@ -80,8 +81,13 @@ export function QuoteUploadPage() {
   const { taskId = '' } = useParams()
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
+  const supplierIdManuallyEdited = useRef(false)
+  const identificationSequence = useRef(0)
   const [supplierId, setSupplierId] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [supplierIdentification, setSupplierIdentification] = useState<QuoteSupplierIdentification | null>(null)
+  const [isIdentifyingSupplier, setIsIdentifyingSupplier] = useState(false)
+  const [identificationError, setIdentificationError] = useState(false)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
@@ -102,7 +108,7 @@ export function QuoteUploadPage() {
   })
   const activeDraft = activeDraftDetail.data ?? activeDraftSummary
   const refreshAll = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['tasks', taskId] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quotes'] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quote-drafts'] })]) }
-  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); setSelectedFile(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
+  const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); supplierIdManuallyEdited.current = false; setSupplierIdentification(null); setSelectedFile(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
   const revise = useMutation({
     mutationFn: (quoteId: string) => {
       if (!task.data) throw new Error('任务尚未加载。')
@@ -132,8 +138,37 @@ export function QuoteUploadPage() {
 
   function handleFile(file: File | null) {
     setLocalError(''); upload.reset()
+    const sequence = ++identificationSequence.current
+    if (!supplierIdManuallyEdited.current) setSupplierId('')
+    setSupplierIdentification(null)
+    setIdentificationError(false)
+    setIsIdentifyingSupplier(false)
     if (!file) return setSelectedFile(null)
-    try { setSelectedFile(prepareFile(file)) } catch (error) { setSelectedFile(null); setLocalError(error instanceof Error ? error.message : '文件无效。') }
+    try {
+      const prepared = prepareFile(file)
+      setSelectedFile(prepared)
+      setIsIdentifyingSupplier(true)
+      void api.identifyQuoteSupplier(taskId, prepared).then((result) => {
+        if (sequence !== identificationSequence.current) return
+        setSupplierIdentification(result)
+        if (result.status === 'FOUND' && result.supplier_id) {
+          setSupplierId((current) => {
+            if (!supplierIdManuallyEdited.current || !current.trim()) {
+              supplierIdManuallyEdited.current = false
+              return result.supplier_id!
+            }
+            return current
+          })
+        }
+      }).catch(() => {
+        if (sequence === identificationSequence.current) setIdentificationError(true)
+      }).finally(() => {
+        if (sequence === identificationSequence.current) setIsIdentifyingSupplier(false)
+      })
+    } catch (error) {
+      setSelectedFile(null)
+      setLocalError(error instanceof Error ? error.message : '文件无效。')
+    }
   }
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setLocalError('')
@@ -217,8 +252,14 @@ export function QuoteUploadPage() {
       {!activeDraft && (
         <form className="card upload-form" onSubmit={handleSubmit}>
           <label className="field">
-            <span>供应商编号</span>
-            <input required placeholder="例如 SUP-001" value={supplierId} onChange={(event) => setSupplierId(event.target.value)} />
+            <span>供应商编号 <small>可手工修改</small></span>
+            <input required placeholder="选择文件后自动识别，或手工填写" value={supplierId} onChange={(event) => { supplierIdManuallyEdited.current = true; setSupplierId(event.target.value) }} />
+            {isIdentifyingSupplier && <small className="supplier-identification-note">正在从报价文件识别供应商编号…</small>}
+            {!isIdentifyingSupplier && supplierIdentification?.status === 'FOUND' && supplierIdentification.supplier_id === supplierId && <small className="supplier-identification-note is-success">已从文件识别并填入，可继续修改。</small>}
+            {!isIdentifyingSupplier && supplierIdentification?.status === 'FOUND' && supplierIdentification.supplier_id !== supplierId && <small className="supplier-identification-note">文件识别到 {supplierIdentification.supplier_id}，已保留手工填写值。 <button type="button" onClick={() => { supplierIdManuallyEdited.current = false; setSupplierId(supplierIdentification.supplier_id ?? '') }}>使用识别结果</button></small>}
+            {!isIdentifyingSupplier && supplierIdentification?.status === 'NOT_FOUND' && <small className="supplier-identification-note">文件中没有明确的供应商编号，请手工填写。</small>}
+            {!isIdentifyingSupplier && supplierIdentification?.status === 'AMBIGUOUS' && <small className="supplier-identification-note">文件中存在多个供应商编号，请核对后手工填写。</small>}
+            {!isIdentifyingSupplier && identificationError && <small className="supplier-identification-note">自动识别暂不可用，仍可手工填写。</small>}
           </label>
           <label className="field">
             <span>报价文件</span>
@@ -233,7 +274,7 @@ export function QuoteUploadPage() {
           )}
           {currentUploadNotice && <div className="form-error compact-error"><div><strong>{currentUploadNotice.title}</strong><p>{currentUploadNotice.message}</p></div></div>}
           {!currentUploadNotice && latestDraftFailureNotice && latestDraft && <div className="form-error compact-error"><div><strong>{latestDraftFailureNotice.title}</strong><p>{latestDraft.original_filename}：{latestDraftFailureNotice.message}</p></div></div>}
-          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? '正在上传…' : '上传并开始审核'}</button>
+          <button className="button button-submit" type="submit" disabled={upload.isPending || (isIdentifyingSupplier && !supplierId.trim())}>{upload.isPending ? '正在上传…' : '上传并开始审核'}</button>
         </form>
       )}
       {drafts.isError && <section className="card error-panel">草稿读取失败：{errorMessage(drafts.error)}</section>}

@@ -386,6 +386,38 @@ def test_gap_and_draft_tools_preserve_unknown_facts_and_need_no_formal_edit(tmp_
     assert service.get_task(task["task_id"])["current_result_id"] is None
 
 
+def test_requested_investigation_is_goal_scoped_and_resolves_only_after_required_tools(tmp_path):
+    service, _sessions, task, started, runner, _planner = setup_agent(
+        tmp_path, [call("request_clarification")]
+    )
+    runner.run_job(started["job_id"])
+    tools = tools_from_waiting(service, task, started, runner)
+    quote_id = tools.cases()[0].quote_id
+    case = tools.requested_case(
+        quote_id=quote_id,
+        goal="先分析报价差距，再生成未发送的澄清草稿。",
+        required_tools=("analyze_selection_gap", "draft_clarification"),
+        allowed_tools=("analyze_selection_gap", "draft_clarification"),
+        request_id="requested-gap-and-draft",
+    )
+    planner = ScriptedPlanner([
+        call("analyze_selection_gap"),
+        call("draft_clarification"),
+    ])
+    completed = InvestigationRunner(planner).run((case,), tools, tools.save)[0]
+    assert completed.status == CaseStatus.RESOLVED
+    assert completed.stop_reason == "REQUEST_COMPLETED"
+    assert [item.result.tool_name for item in completed.observations] == [
+        "analyze_selection_gap",
+        "draft_clarification",
+    ]
+    assert "request_clarification" not in planner.calls[0][1]
+    denied = tools.execute(case, "request_clarification", {})
+    assert denied.status == "DENIED" and denied.error_code == "tool_not_allowed"
+    replayed = InvestigationRunner(ScriptedPlanner([])).run((completed,), tools, tools.save)[0]
+    assert replayed.stop_reason == "REQUEST_COMPLETED"
+
+
 @pytest.mark.skipif(os.getenv('RUN_AGENT_LIVE_TESTS') != '1', reason='set RUN_AGENT_LIVE_TESTS=1 for paid live Agent acceptance')
 @pytest.mark.parametrize('scenario', ['gap_and_draft', 'authorized_simulation', 'policy_recovery', 'policy_missing', 'policy_conflict'])
 def test_live_agent_selects_tools_observes_results_and_stops(tmp_path, scenario):

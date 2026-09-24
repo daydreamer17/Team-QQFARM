@@ -11,6 +11,7 @@ import type {
   ComparisonResultResponse,
   DecisionChanges,
   DecisionMessage,
+  InvestigationCase,
   RankingCriterion,
   DecisionScenario,
   TaskDetail,
@@ -25,6 +26,33 @@ const changeLabels: Record<string, string> = {
   secondary_criterion: '次排序指标',
   excluded_supplier_ids: '排除供应商',
   cost_tolerance_amount: '成本容差',
+}
+
+const investigationToolLabels: Record<string, string> = {
+  read_decision_overview: '核对当前推荐',
+  compare_alternatives: '比较备选方案',
+  inspect_quote_evidence: '核对报价原文',
+  inspect_supplier_history: '核对供应商历史',
+  inspect_policy_evidence: '核对制度依据',
+  compile_decision_brief: '整理核查结论',
+}
+
+function investigationObservationText(observation: InvestigationCase['observations'][number]) {
+  const data = observation.result.data
+  if (observation.result.status === 'NOT_FOUND') return '未找到可用证据，不能据此推断相反结论。'
+  if (observation.result.status !== 'OK') return '本步未取得可用结果。'
+  if (observation.result.tool_name === 'read_decision_overview') {
+    return `已读取 ${Array.isArray(data.suppliers) ? data.suppliers.length : 0} 家供应商及当前排序依据。`
+  }
+  if (observation.result.tool_name === 'compare_alternatives') {
+    return `已比较 ${Array.isArray(data.gaps) ? data.gaps.length : 0} 家供应商的成本、交期和阻碍差异。`
+  }
+  if (observation.result.tool_name === 'inspect_quote_evidence') {
+    return `已核对 ${Array.isArray(data.fields) ? data.fields.length : 0} 个报价字段及其原文来源。`
+  }
+  if (observation.result.tool_name === 'inspect_supplier_history') return '已核对供应商历史数据及其可用性。'
+  if (observation.result.tool_name === 'inspect_policy_evidence') return '已核对本次结果冻结的制度检索与合规状态。'
+  return '已整理本轮核查事实、局限和后续事项。'
 }
 
 function mutationError(error: unknown) {
@@ -112,6 +140,9 @@ function MessageBubble({
   confirming,
   onConfirm,
   onOpenCitation,
+  investigation,
+  onRetry,
+  retrying,
 }: {
   taskId: string
   message: DecisionMessage
@@ -121,13 +152,23 @@ function MessageBubble({
   confirming: boolean
   onConfirm: (intentId: string) => void
   onOpenCitation: (referenceId: string) => void
+  investigation?: InvestigationCase
+  onRetry?: () => void
+  retrying: boolean
 }) {
   const citation = citationPresentation(message.content ?? '', message.reference_ids)
+  const statusLabel = message.role === 'USER'
+    ? null
+    : message.status === 'FAILED'
+      ? '生成失败'
+      : message.status === 'PENDING'
+        ? '生成中'
+        : '已完成'
   return (
     <article className={`decision-chat-message chat-role-${message.role.toLowerCase()}`}>
       <header>
         <strong>{message.role === 'USER' ? '你' : 'AI 决策助手'}</strong>
-        <span>{message.status}</span>
+        {statusLabel && <span>{statusLabel}</span>}
       </header>
       {message.content && <p><CitedText text={citation.displayContent} /></p>}
       {message.status === 'FAILED' && (
@@ -135,6 +176,11 @@ function MessageBubble({
       )}
       {message.status === 'FAILED' && message.error_code === 'selection_review_required' && (
         <Link className="button button-secondary" to={`/tasks/${taskId}/review#excluded-review`}>前往集中审核</Link>
+      )}
+      {message.status === 'FAILED' && message.error_code !== 'selection_review_required' && onRetry && (
+        <button className="button button-secondary" type="button" disabled={readOnly || retrying} onClick={onRetry}>
+          {retrying ? '重新生成中…' : '重新生成'}
+        </button>
       )}
       {citation.citations.length > 0 && (
         <footer className="chat-citations">
@@ -155,6 +201,20 @@ function MessageBubble({
             ))}
           </ol>
         </footer>
+      )}
+      {investigation && (
+        <details className="decision-investigation-trace">
+          <summary>查看本次核查过程与工具结果</summary>
+          <p>状态：{investigation.status === 'RESOLVED' ? '已完成' : '未完成，结论仅供参考'}</p>
+          <ol>{investigation.observations.map((observation) => (
+            <li key={observation.sequence}>
+              <strong>{investigationToolLabels[observation.result.tool_name] ?? observation.result.tool_name}</strong>
+              <span>{investigationObservationText(observation)}</span>
+              {observation.plan && observation.plan.length > 0 && <small>公开计划：{observation.plan.join(' → ')}</small>}
+              {observation.reason && <small>选择原因：{observation.reason}</small>}
+            </li>
+          ))}</ol>
+        </details>
       )}
       {message.proposed_changes && (
         <section className="chat-proposal">
@@ -258,6 +318,7 @@ export function DecisionScenarioWorkspace({
   const [streamingText, setStreamingText] = useState('')
   const [streamError, setStreamError] = useState('')
   const [processingStage, setProcessingStage] = useState('正在识别您的问题与偏好')
+  const [toolProgress, setToolProgress] = useState<string[]>([])
   const [queuedTurn, setQueuedTurn] = useState<{ conversationId: string; messageId: string } | null>(null)
   const [confirmedIntents, setConfirmedIntents] = useState<Set<string>>(() => new Set())
   const [primaryCriterion, setPrimaryCriterion] = useState('')
@@ -295,6 +356,13 @@ export function DecisionScenarioWorkspace({
   const intents = useQuery({
     queryKey: ['tasks', task.task_id, 'decision-intents'],
     queryFn: () => api.listDecisionIntents(task.task_id),
+  })
+  const investigations = useQuery({
+    queryKey: ['tasks', task.task_id, 'investigations'],
+    queryFn: () => api.listInvestigations(task.task_id),
+    enabled: Boolean(selectedCitationId?.startsWith('INVESTIGATION:') ||
+      (conversations.data?.items ?? []).some((conversation) => conversation.messages.some((entry) =>
+        entry.reference_ids.some((id) => id.startsWith('INVESTIGATION:'))))),
   })
 
   const allConversations = conversations.data?.items ?? []
@@ -357,6 +425,7 @@ export function DecisionScenarioWorkspace({
         }, 130_000)
         setStreamingText('')
         setStreamError('')
+        setToolProgress([])
       }
     }
     const delta = (event: Event) => {
@@ -369,11 +438,20 @@ export function DecisionScenarioWorkspace({
       if (payload.reply_to_message_id !== pendingReplyTo) return
       const labels: Record<string, string> = {
         intent: '正在识别您的问题与偏好',
+        investigation: '正在核查报价、历史或制度依据',
         simulation: '正在按新条件进行确定性模拟，不会修改正式结果',
         narration: '正在生成事实说明并核验引用',
         persist: '正在保存本次回复',
       }
       setProcessingStage(labels[String(payload.stage)] ?? '正在处理本次请求')
+    }
+    const toolObserved = (event: Event) => {
+      const payload = parse(event)
+      if (payload.reply_to_message_id !== pendingReplyTo || typeof payload.tool_name !== 'string') return
+      const label = investigationToolLabels[payload.tool_name] ?? payload.tool_name
+      const status = payload.status === 'OK' ? '完成' : payload.status === 'NOT_FOUND' ? '未找到证据' : '未取得结果'
+      const reason = typeof payload.reason === 'string' && payload.reason ? `；${payload.reason}` : ''
+      setToolProgress((current) => [...current, `${label}：${status}${reason}`])
     }
     const completed = (event: Event) => {
       const payload = parse(event)
@@ -386,6 +464,7 @@ export function DecisionScenarioWorkspace({
       void queryClient.invalidateQueries({
         queryKey: ['tasks', task.task_id, 'decision-conversations'],
       })
+      void queryClient.invalidateQueries({ queryKey: ['tasks', task.task_id, 'investigations'] })
     }
     const failed = (event: Event) => {
       const payload = parse(event)
@@ -401,6 +480,7 @@ export function DecisionScenarioWorkspace({
     }
     source.addEventListener('assistant.started', started)
     source.addEventListener('assistant.stage', stageChanged)
+    source.addEventListener('assistant.tool', toolObserved)
     source.addEventListener('assistant.delta', delta)
     source.addEventListener('assistant.completed', completed)
     source.addEventListener('assistant.failed', failed)
@@ -421,6 +501,7 @@ export function DecisionScenarioWorkspace({
       setActiveConversationId(created.conversation_id)
       setStreamingText('')
       setStreamError('')
+      setToolProgress([])
       setQueuedTurn(null)
       void queryClient.invalidateQueries({
         queryKey: ['tasks', task.task_id, 'decision-conversations'],
@@ -440,6 +521,7 @@ export function DecisionScenarioWorkspace({
       setMessage('')
       setStreamingText('')
       setStreamError('')
+      setToolProgress([])
       setQueuedTurn({
         conversationId: response.conversation_id,
         messageId: response.message.message_id,
@@ -693,12 +775,23 @@ export function DecisionScenarioWorkspace({
                 confirming={confirmIntent.isPending}
                 onConfirm={(intentId) => confirmIntent.mutate(intentId)}
                 onOpenCitation={openCitation}
+                investigation={investigations.data?.find((record) => item.reference_ids.includes(`INVESTIGATION:${record.artifact_id}`))}
+                onRetry={item.status === 'FAILED' && item.reply_to_message_id
+                  ? (() => {
+                      const original = activeConversation.messages.find((entry) => entry.message_id === item.reply_to_message_id)
+                      if (original?.content) sendMessage.mutate({ conversationId: activeConversation.conversation_id, content: original.content })
+                    })
+                  : undefined}
+                retrying={sendMessage.isPending}
               />
             ))}
             {(streamingText || activeTurn) && (
               <article className="decision-chat-message chat-role-assistant chat-streaming">
                 <header><strong>AI 决策助手</strong><span>生成并校验中</span></header>
                 <p>{streamingText || processingStage}</p>
+                {toolProgress.length > 0 && <ol className="decision-chat-tool-progress">
+                  {toolProgress.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}
+                </ol>}
               </article>
             )}
             {streamError && <div className="chat-message-error">{streamError}</div>}
@@ -835,6 +928,24 @@ export function DecisionScenarioWorkspace({
                   </dl>
                   <blockquote><p>{policyCitation.text}</p></blockquote>
                   <small>内容哈希：{policyCitation.content_sha256}</small>
+                </section>
+              ) : selectedCitationId.startsWith('INVESTIGATION:') ? (
+                <section className="drawer-fields">
+                  {(() => {
+                    const record = investigations.data?.find((item) => `INVESTIGATION:${item.artifact_id}` === selectedCitationId)
+                    if (!record) return <p>正在读取本次核查记录，或该记录已不属于当前可查看的任务。</p>
+                    return <>
+                      <h3>本次核查记录</h3>
+                      <p>{record.status === 'RESOLVED' ? '核查已完成；不构成采购审批。' : '核查未完成，请不要将缺失证据视为通过。'}</p>
+                      <ol>{record.observations.map((observation) => <li key={observation.sequence}>
+                        <strong>{investigationToolLabels[observation.result.tool_name] ?? observation.result.tool_name}</strong>
+                        <span>{investigationObservationText(observation)}</span>
+                        {observation.plan && observation.plan.length > 0 && <small>公开计划：{observation.plan.join(' → ')}</small>}
+                        {observation.reason && <small>选择原因：{observation.reason}</small>}
+                        <details><summary>查看结构化工具结果</summary><pre>{JSON.stringify(observation.result.data, null, 2)}</pre></details>
+                      </li>)}</ol>
+                    </>
+                  })()}
                 </section>
               ) : selectedCitationId.startsWith('RESULT:') ? (
                 <section className="drawer-fields">

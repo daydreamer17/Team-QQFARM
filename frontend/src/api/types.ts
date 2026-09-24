@@ -303,6 +303,13 @@ export interface QuoteUploadResponse {
   document_sha256: string
 }
 
+export interface QuoteSupplierIdentification {
+  status: 'FOUND' | 'NOT_FOUND' | 'AMBIGUOUS'
+  supplier_id: string | null
+  candidates: string[]
+  source: 'CSV_FIELD' | 'PDF_TEXT'
+}
+
 export type QuoteDraftStatus =
   | 'UPLOADED'
   | 'PROCESSING'
@@ -1014,6 +1021,7 @@ export interface InvestigationToolResult {
 export interface InvestigationObservation {
   sequence: number
   reason: string
+  plan?: string[]
   arguments: Record<string, unknown>
   result: InvestigationToolResult
   latency_ms: number
@@ -1026,7 +1034,7 @@ export interface InvestigationCase {
   task_id: string
   task_revision: number
   graph_run_id: string
-  kind: 'QUOTE' | 'POLICY'
+  kind: 'QUOTE' | 'POLICY' | 'DECISION'
   quote_id: string | null
   quote_version: number | null
   impact_input_sha256: string
@@ -1046,6 +1054,22 @@ export interface InvestigationCase {
   started_at: string
   clarification: Record<string, unknown>[]
   is_current: boolean
+}
+
+export type RequestedInvestigationIntent =
+  | 'ANALYZE_SELECTION_GAP'
+  | 'DRAFT_CLARIFICATION'
+  | 'SIMULATE_REQUIREMENT_CHANGE'
+
+export interface RequestedInvestigationInput {
+  expected_task_revision: number
+  quote_id: string
+  intent: RequestedInvestigationIntent
+  confirm_hypothetical?: boolean
+  changes?: {
+    budget_amount?: string
+    delivery_deadline?: string
+  }
 }
 
 export interface SelectionGap {
