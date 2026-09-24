@@ -47,6 +47,9 @@ import type {
   SummaryListResponse,
   SummaryReportResponse,
   SupplierInformationResponse,
+  SupplierComplianceCheckResponse,
+  SupplierComplianceEvidenceInput,
+  SupplierComplianceEvidenceResponse,
   ResultHistoryItem,
 } from './types'
 
@@ -482,6 +485,29 @@ export const api = {
         '/results/' +
         encodeURIComponent(resultId),
     ),
+  getSupplierComplianceEvidence: (taskId: string, resultId?: string) =>
+    request<SupplierComplianceEvidenceResponse>(
+      `/api/v1/tasks/${encodeURIComponent(taskId)}/supplier-compliance/evidence` +
+        queryString({ result_id: resultId }),
+    ),
+  checkSupplierCompliance: (
+    taskId: string,
+    expectedTaskRevision: number,
+    resultId: string,
+    evidence: SupplierComplianceEvidenceInput[],
+    idempotencyKey: string,
+  ) => request<SupplierComplianceCheckResponse>(
+    `/api/v1/tasks/${encodeURIComponent(taskId)}/supplier-compliance/checks`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({
+        expected_task_revision: expectedTaskRevision,
+        result_id: resultId,
+        evidence,
+      }),
+    },
+  ),
   listSummaries: (taskId: string) =>
     request<SummaryListResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries`),
   createSummary: (taskId: string, expectedTaskRevision: number, resultId: string, idempotencyKey: string) =>

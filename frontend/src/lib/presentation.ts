@@ -67,7 +67,7 @@ const reasons: Record<string, string> = {
 }
 
 const controls: Record<string, string> = {
-  APPROVED_SUPPLIER: '供应商资质', ROHS_COMPLIANCE: 'RoHS 合规', AMOUNT_APPROVAL: '金额审批',
+  APPROVED_SUPPLIER: '供应商准入要求', ROHS_COMPLIANCE: 'RoHS 要求', AMOUNT_APPROVAL: '金额审批要求',
 }
 
 const validationStatuses: Record<string, string> = {

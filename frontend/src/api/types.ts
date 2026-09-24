@@ -735,6 +735,7 @@ export interface PolicyComplianceCheck {
 export interface PolicyComplianceSupplierAssessment {
   quote_id: string
   quote_version: number
+  supplier_id?: string | null
   supplier_name: string | null
   status: PolicyComplianceStatus
   checks: PolicyComplianceCheck[]
@@ -742,11 +743,42 @@ export interface PolicyComplianceSupplierAssessment {
 
 export interface PolicyComplianceResult {
   schema_version: string
+  evaluated_at?: string
+  evidence_artifact_id?: string
   disposition: 'COMPLIANT_SUPPLIERS_AVAILABLE' | 'NO_CONFIRMED_COMPLIANT_SUPPLIER' | 'NO_SUPPLIERS'
   recommendation_scope: 'COMPLIANCE_VERIFIED' | 'PROCUREMENT_COMPARISON_ONLY'
   requires_human_review: boolean
   counts: Record<PolicyComplianceStatus, number>
   assessments: PolicyComplianceSupplierAssessment[]
+}
+
+export interface SupplierComplianceEvidenceInput {
+  supplier_id: string
+  supplier_name?: string | null
+  approved_supplier: boolean
+  supplier_registry_valid_until: string | null
+  rohs_certificate_number: string | null
+  rohs_part_number: string | null
+  rohs_revision: string | null
+  rohs_valid_until: string | null
+}
+
+export interface SupplierComplianceEvidenceResponse {
+  schema_version: string
+  task_id: string
+  task_revision: number
+  result_id: string | null
+  evidence_artifact_id?: string
+  evidence: SupplierComplianceEvidenceInput[]
+}
+
+export interface SupplierComplianceCheckResponse {
+  task_id: string
+  task_revision: number
+  result_id: string
+  evidence_artifact_id: string
+  check_artifact_id: string
+  policy_compliance: PolicyComplianceResult
 }
 
 export interface HypotheticalComparison {

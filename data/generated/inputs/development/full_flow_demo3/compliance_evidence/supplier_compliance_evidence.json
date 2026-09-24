@@ -1,0 +1,55 @@
+{
+  "schema_version": "supplier-compliance-evidence/1.0.0",
+  "evidence": [
+    {
+      "supplier_id": "SUP-025",
+      "supplier_name": "Cascade Semitech",
+      "approved_supplier": true,
+      "supplier_registry_valid_until": "2027-12-31",
+      "rohs_certificate_number": "ROHS-CASCADE-2026-0041",
+      "rohs_part_number": "QW-MCU9-DEMO",
+      "rohs_revision": "R3",
+      "rohs_valid_until": "2027-06-30"
+    },
+    {
+      "supplier_id": "SUP-032",
+      "supplier_name": "Lotus Components",
+      "approved_supplier": true,
+      "supplier_registry_valid_until": "2027-03-31",
+      "rohs_certificate_number": "ROHS-LOTUS-2025-0098",
+      "rohs_part_number": "QW-MCU9-DEMO",
+      "rohs_revision": "R3",
+      "rohs_valid_until": "2026-08-31"
+    },
+    {
+      "supplier_id": "SUP-034",
+      "supplier_name": "Pacific Rim Circuits",
+      "approved_supplier": true,
+      "supplier_registry_valid_until": "2027-09-30",
+      "rohs_certificate_number": "ROHS-PRC-2026-0314",
+      "rohs_part_number": "QW-MCU9-DEMO",
+      "rohs_revision": "R3",
+      "rohs_valid_until": "2027-08-31"
+    },
+    {
+      "supplier_id": "SUP-027",
+      "supplier_name": "Golden Dragon Circuits",
+      "approved_supplier": false,
+      "supplier_registry_valid_until": null,
+      "rohs_certificate_number": null,
+      "rohs_part_number": null,
+      "rohs_revision": null,
+      "rohs_valid_until": null
+    },
+    {
+      "supplier_id": "SUP-035",
+      "supplier_name": "Pacific Rim Semitech",
+      "approved_supplier": true,
+      "supplier_registry_valid_until": "2027-11-30",
+      "rohs_certificate_number": "ROHS-PRS-2026-0177",
+      "rohs_part_number": "QW-MCU9-DEMO",
+      "rohs_revision": "R2",
+      "rohs_valid_until": "2027-10-31"
+    }
+  ]
+}

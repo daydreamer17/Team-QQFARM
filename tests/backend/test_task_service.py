@@ -217,6 +217,56 @@ def test_policy_compliance_reports_missing_supplier_facts_without_false_failure(
     }
 
 
+def test_supplier_compliance_uses_registry_and_rohs_evidence() -> None:
+    comparison = {
+        "evaluated_at": "2026-09-24T00:00:00+00:00",
+        "supplier_results": [
+            {"quote_id": "q-pass", "quote_version": 1, "supplier_name": "Pass", "status": "FEASIBLE"},
+            {"quote_id": "q-fail", "quote_version": 1, "supplier_name": "Fail", "status": "FEASIBLE"},
+        ],
+    }
+    snapshot = {
+        "requirement": {"manufacturer_part_number": "QW-MCU9-DEMO", "revision": "R3"},
+        "documents": [
+            {"quote_id": "q-pass", "supplier_id": "SUP-1"},
+            {"quote_id": "q-fail", "supplier_id": "SUP-2"},
+        ],
+    }
+    retrievals = [
+        {
+            "status": "OK", "covered_control_codes": [code], "missing_control_codes": [],
+            "citations": [{"citation_id": f"cit-{code}", "control_code": code}],
+        }
+        for code in ("APPROVED_SUPPLIER", "ROHS_COMPLIANCE")
+    ]
+    evidence = [
+        {
+            "supplier_id": "SUP-1", "approved_supplier": True,
+            "supplier_registry_valid_until": "2027-12-31",
+            "rohs_certificate_number": "ROHS-1", "rohs_part_number": "QW-MCU9-DEMO",
+            "rohs_revision": "R3", "rohs_valid_until": "2027-12-31",
+        },
+        {
+            "supplier_id": "SUP-2", "approved_supplier": False,
+            "supplier_registry_valid_until": None,
+            "rohs_certificate_number": "ROHS-2", "rohs_part_number": "WRONG-PART",
+            "rohs_revision": "R3", "rohs_valid_until": "2027-12-31",
+        },
+    ]
+
+    result = BackendService._evaluate_supplier_compliance(
+        comparison=comparison, snapshot=snapshot, retrievals=retrievals, evidence=evidence,
+    )
+
+    assert result["counts"]["COMPLIANT"] == 1
+    assert result["counts"]["NON_COMPLIANT"] == 1
+    assert result["assessments"][0]["status"] == "COMPLIANT"
+    assert result["assessments"][1]["status"] == "NON_COMPLIANT"
+    assert {item["reason_code"] for item in result["assessments"][1]["checks"]} == {
+        "SUPPLIER_NOT_APPROVED", "ROHS_PART_MISMATCH",
+    }
+
+
 def test_quote_upload_streams_in_bounded_chunks(service: BackendService) -> None:
     class TrackingStream(BytesIO):
         def __init__(self, value: bytes) -> None:

@@ -1,3 +1,5 @@
+> **当前范围（2026-09-24）**：最小版本实现结构化准入与 RoHS 数据录入和确定性检查；真实性验证、外部集成和金额审批仍为后续工作。
+
 # 成员 D 交接：后端编排、版本与恢复
 
 本文说明成员 D 在 Week1 新增的后端代码、各模块作用、数据与版本关系，以及如何迁移数据库、启动 FastAPI、执行一次性 worker，并复现 MCU-DEMO-001 的两次 LangGraph 中断。代码入口是 `supplier_comparison.backend.api:app`、`supplier_comparison.worker` 和 `supplier_comparison.checkpoints`。本轮实现基线已通过本地真实模型端到端验收；AWS Lightsail／主办方 Claude API 仍需单独验收。

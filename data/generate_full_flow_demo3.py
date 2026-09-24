@@ -11,6 +11,7 @@ import argparse
 import csv
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from reportlab.lib import colors
@@ -35,6 +36,8 @@ from supplier_comparison.extraction.csv_parser import FROZEN_CSV_COLUMNS
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data/generated/inputs/development/full_flow_demo3"
 REFERENCE_OUT = ROOT / "evaluation/reference/full_flow_demo3"
+HISTORY_SOURCE = ROOT / "data/generated/supplier_history/mcu9/2026-08-06-v1"
+HISTORY_RELATIVE_ROOT = Path("supplier_history/2026-08-06-v1")
 
 BLUE = colors.HexColor("#2563EB")
 NAVY = colors.HexColor("#17213A")
@@ -44,133 +47,133 @@ GREEN = colors.HexColor("#16825D")
 AMBER = colors.HexColor("#C26A12")
 RED = colors.HexColor("#B8323A")
 
-SCENARIO_ID = "MCU-FULL-FLOW-EDGE-003"
-PLANNED_ORDER_DATE = "2026-10-12"
-DELIVERY_DEADLINE = "2026-10-24"
+SCENARIO_ID = "MCU-FULL-FLOW-FAULTLINE-004"
+PLANNED_ORDER_DATE = "2026-11-03"
+DELIVERY_DEADLINE = "2026-11-17"
 
 REQUIREMENT = {
-    "manufacturer": "QQ Demo Components",
+    "manufacturer": "Northstar Logic",
     "manufacturer_part_number": "QW-MCU9-DEMO",
-    "package": "QFN-32",
-    "revision": "R1",
+    "package": "QFN-48",
+    "revision": "R3",
     "condition": "NEW",
     "allow_substitutes": False,
     "base_unit": "piece",
-    "required_quantity": 1375,
+    "required_quantity": 2387,
     "quantity_unit": "piece",
-    "budget_amount": "10000.00",
+    "budget_amount": "22000.00",
     "currency": "SGD",
     "includes_shipping": True,
     "tax_mode": "EXCLUDED",
     "other_fees_required": True,
     "planned_order_date": PLANNED_ORDER_DATE,
     "delivery_deadline": DELIVERY_DEADLINE,
-    "delivery_location": "SG-DEMO-EDGE-03",
+    "delivery_location": "SG-QUAL-LAB-07",
     "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
     "secondary_preference": "FASTEST_CONFIRMED_DELIVERY",
 }
 
 REQUIREMENT_REVISION_2 = {
     **REQUIREMENT,
-    "delivery_deadline": "2026-10-16",
+    "delivery_deadline": "2026-11-09",
 }
 
 QUOTE_ROWS = {
-    "sterling": {
+    "cascade": {
         "supplier_alias": "A",
-        "supplier_id": "SUP-024",
-        "supplier_name": "Sterling Components",
-        "unit_price": "6.90",
+        "supplier_id": "SUP-025",
+        "supplier_name": "Cascade Semitech",
+        "unit_price": "8.42",
         "packaging_type": "tray",
-        "units_per_pack": "100",
-        "order_multiple_units": "100",
-        "moq_quantity": "1000",
+        "units_per_pack": "80",
+        "order_multiple_units": "160",
+        "moq_quantity": "1600",
         "shipping_fee_status": "FREE",
         "shipping_fee_amount": "",
         "other_fees_status": "NOT_APPLICABLE",
         "other_fees_amount": "0.00",
         "fees_complete": "true",
-        "lead_time_days": "5",
+        "lead_time_days": "8",
         "payment_terms": "Net 30 after invoice",
     },
-    "redwood": {
+    "lotus": {
         "supplier_alias": "B",
-        "supplier_id": "SUP-022",
-        "supplier_name": "Redwood Components",
-        "unit_price": "6.25",
-        "packaging_type": "factory reel",
-        "units_per_pack": "250",
-        "order_multiple_units": "250",
-        "moq_quantity": "1000",
-        "shipping_fee_status": "UNKNOWN",
-        "shipping_fee_amount": "",
-        "other_fees_status": "NOT_APPLICABLE",
-        "other_fees_amount": "0.00",
-        "fees_complete": "false",
-        "lead_time_days": "6",
-        "payment_terms": "Net 45 after invoice",
-    },
-    "schwarzwald": {
-        "supplier_alias": "C",
-        "supplier_id": "SUP-023",
-        "supplier_name": "Schwarzwald Circuits",
-        "unit_price": "6.92",
+        "supplier_id": "SUP-032",
+        "supplier_name": "Lotus Components",
+        "unit_price": "8.18",
         "packaging_type": "anti-static tray",
         "units_per_pack": "25",
         "order_multiple_units": "25",
-        "moq_quantity": "500",
-        "shipping_fee_status": "KNOWN_AMOUNT",
-        "shipping_fee_amount": "120.00",
+        "moq_quantity": "2000",
+        "shipping_fee_status": "UNKNOWN",
+        "shipping_fee_amount": "",
         "other_fees_status": "KNOWN_AMOUNT",
-        "other_fees_amount": "18.75",
-        "fees_complete": "true",
-        "lead_time_days": "7",
+        "other_fees_amount": "48.00",
+        "fees_complete": "false",
+        "lead_time_days": "10",
         "payment_terms": "Net 60 after invoice",
     },
-    "great_wall": {
-        "supplier_alias": "D",
-        "supplier_id": "SUP-029",
-        "supplier_name": "Great Wall Components",
-        "unit_price": "4.85",
-        "packaging_type": "master reel",
-        "units_per_pack": "1000",
-        "order_multiple_units": "1000",
-        "moq_quantity": "2000",
-        "shipping_fee_status": "KNOWN_AMOUNT",
-        "shipping_fee_amount": "250.00",
-        "other_fees_status": "KNOWN_AMOUNT",
-        "other_fees_amount": "75.00",
-        "fees_complete": "true",
-        "lead_time_days": "4",
-        "payment_terms": "50% deposit / 50% before shipment",
-    },
-    "sterling_semitech": {
-        "supplier_alias": "E",
-        "supplier_id": "SUP-030",
-        "supplier_name": "Sterling Semitech",
-        "unit_price": "6.88",
-        "packaging_type": "tray",
+    "pacific_rim_circuits": {
+        "supplier_alias": "C",
+        "supplier_id": "SUP-034",
+        "supplier_name": "Pacific Rim Circuits",
+        "unit_price": "8.25",
+        "packaging_type": "JEDEC tray",
         "units_per_pack": "100",
         "order_multiple_units": "100",
-        "moq_quantity": "500",
+        "moq_quantity": "2000",
         "shipping_fee_status": "INCLUDED",
         "shipping_fee_amount": "",
         "other_fees_status": "KNOWN_AMOUNT",
-        "other_fees_amount": "28.00",
+        "other_fees_amount": "175.00",
         "fees_complete": "true",
-        "lead_time_days": "3",
+        "lead_time_days": "12",
+        "payment_terms": "Net 45 after invoice",
+    },
+    "golden_dragon": {
+        "supplier_alias": "D",
+        "supplier_id": "SUP-027",
+        "supplier_name": "Golden Dragon Circuits",
+        "unit_price": "7.96",
+        "packaging_type": "master reel",
+        "units_per_pack": "500",
+        "order_multiple_units": "500",
+        "moq_quantity": "3000",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "180.00",
+        "other_fees_status": "KNOWN_AMOUNT",
+        "other_fees_amount": "60.00",
+        "fees_complete": "true",
+        "lead_time_days": "5",
+        "payment_terms": "40% deposit / 60% before shipment",
+    },
+    "pacific_rim_semitech": {
+        "supplier_alias": "E",
+        "supplier_id": "SUP-035",
+        "supplier_name": "Pacific Rim Semitech",
+        "unit_price": "8.31",
+        "packaging_type": "tray",
+        "units_per_pack": "80",
+        "order_multiple_units": "80",
+        "moq_quantity": "1600",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "45.00",
+        "other_fees_status": "NOT_APPLICABLE",
+        "other_fees_amount": "0.00",
+        "fees_complete": "true",
+        "lead_time_days": "4",
         "payment_terms": "Net 90 after invoice",
     },
 }
 
 POLICY_METADATA = {
-    "policy_set_id": "full-flow-demo3-electronics",
-    "policy_set_version": "2026.10.1-demo",
-    "policy_id": "POL-DEMO3-EDGE-GATES",
-    "document_id": "DOC-DEMO3-EDGE-GATES",
+    "policy_set_id": "full-flow-demo3-faultline",
+    "policy_set_version": "2026.11.2-demo",
+    "policy_id": "POL-DEMO3-FAULTLINE-GATES",
+    "document_id": "DOC-DEMO3-FAULTLINE-GATES",
     "document_version": "1.0.0",
-    "title": "Fictional Electronics Evidence and Decision Policy",
-    "effective_from": "2026-01-01T00:00:00Z",
+    "title": "Fictional MCU Evidence, Identity, and Approval Policy",
+    "effective_from": "2026-10-01T00:00:00Z",
     "effective_to": None,
     "categories": ["Electronics"],
     "regions": ["SG"],
@@ -178,45 +181,45 @@ POLICY_METADATA = {
 
 POLICY_CLAUSES = [
     (
-        "ASL-301",
-        "Current registry evidence",
+        "ASL-411",
+        "Exact supplier identity",
         "APPROVED_SUPPLIER",
-        "An electronics supplier may enter comparison only when a current registry record identifies the exact supplier ID. Similar legal or trading names are not evidence of the same supplier.",
+        "A quotation may enter comparison only when the current supplier directory identifies the exact supplier ID. Similar names, shared words, and related trading styles do not establish identity.",
         {},
     ),
     (
-        "ASL-302",
-        "Identity ambiguity",
+        "ASL-412",
+        "Near-name collision",
         "APPROVED_SUPPLIER",
-        "A supplier-name collision, alias mismatch, or missing supplier identifier requires human review and must not be resolved by fuzzy similarity alone.",
+        "A near-name collision, alias mismatch, or missing supplier identifier requires human review. The system must not merge Pacific Rim Circuits with Pacific Rim Semitech by fuzzy similarity.",
         {},
     ),
     (
-        "ROHS-301",
-        "Part-level RoHS evidence",
+        "ROHS-411",
+        "Part and revision evidence",
         "ROHS_COMPLIANCE",
-        "Current RoHS evidence must match the confirmed supplier ID and the requested manufacturer part number. Evidence for a related part or similarly named supplier is insufficient.",
+        "Current RoHS evidence must match the confirmed supplier ID, manufacturer part number QW-MCU9-DEMO, and revision R3. Evidence for another revision or a similarly named supplier is insufficient.",
         {},
     ),
     (
-        "ROHS-302",
-        "Unknown compliance",
+        "ROHS-412",
+        "Conflicting compliance evidence",
         "ROHS_COMPLIANCE",
-        "Missing, expired, or conflicting compliance evidence remains review required; it must not be inferred from quotation language.",
+        "Missing, expired, or conflicting compliance evidence remains review required. Quotation language and supplier history must not be used to infer compliance.",
         {},
     ),
     (
-        "APR-301",
-        "Manager approval threshold",
+        "APR-411",
+        "Boundary approval threshold",
         "AMOUNT_APPROVAL",
-        "A proposed award with confirmed landed cost of SGD 9,500.00 or more requires recorded manager approval before publication.",
-        {"currency": "SGD", "threshold": "9500.00", "operator": ">="},
+        "A proposed award with confirmed landed cost of SGD 19,980.00 or more requires recorded manager approval before publication.",
+        {"currency": "SGD", "threshold": "19980.00", "operator": ">="},
     ),
     (
-        "APR-302",
-        "Approval evidence",
+        "APR-412",
+        "Revision-bound approval evidence",
         "AMOUNT_APPROVAL",
-        "Approval evidence must identify the approving actor, approved amount, timestamp, and exact task revision. A prior-revision approval is stale.",
+        "Approval evidence must identify the approving actor, approved amount, timestamp, recommended supplier ID, and exact task revision. A prior-revision or different-supplier approval is stale.",
         {},
     ),
 ]
@@ -233,6 +236,13 @@ def _write_json(path: Path, value: object) -> None:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _copy_history_snapshot() -> None:
+    target = OUT / HISTORY_RELATIVE_ROOT
+    target.mkdir(parents=True, exist_ok=True)
+    for name in ("manifest.json", "supplier_performance.json"):
+        shutil.copy2(HISTORY_SOURCE / name, target / name)
 
 
 def _styles() -> dict[str, ParagraphStyle]:
@@ -353,24 +363,24 @@ def _generate_requirement_pdf(path: Path) -> None:
     story = [
         Paragraph("PURCHASE REQUEST / ENGINEERING RELEASE", s["title"]),
         Paragraph(
-            "Request PR-EDGE-1375 | revision 1 | owner: Electronics Procurement",
+            "Request PR-FAULTLINE-2387 | revision 1 | owner: Electronics Procurement",
             s["subtitle"],
         ),
         HRFlowable(width="100%", thickness=2, color=BLUE, spaceAfter=10),
         Paragraph("Need and specification", s["h1"]),
         Paragraph(
-            "Production requires <b>1,375 pieces</b> of <b>QQ Demo Components "
-            "QW-MCU9-DEMO</b>. Accept only <b>QFN-32 / revision R1 / NEW</b> "
+            "Production requires <b>2,387 pieces</b> of <b>Northstar Logic "
+            "QW-MCU9-DEMO</b>. Accept only <b>QFN-48 / revision R3 / NEW</b> "
             "material. Alternate parts and substitute revisions are prohibited.",
             s["body"],
         ),
         _field_table([
             ("Base and quantity unit", "piece / piece"),
-            ("Landed budget ceiling", "SGD 10,000.00, inclusive of freight and every mandatory fee"),
+            ("Landed budget ceiling", "SGD 22,000.00, inclusive of freight and every mandatory fee"),
             ("Tax treatment", "GST excluded; compare quotes on the same EXCLUDED basis"),
-            ("Planned order", "12 October 2026"),
-            ("Required arrival", "No later than 24 October 2026"),
-            ("Delivery location", "SG-DEMO-EDGE-03"),
+            ("Planned order", "3 November 2026"),
+            ("Required arrival", "No later than 17 November 2026"),
+            ("Delivery location", "SG-QUAL-LAB-07"),
         ], s, accent=GREEN),
         Spacer(1, 9),
         Paragraph("Decision instruction", s["h1"]),
@@ -387,47 +397,47 @@ def _generate_requirement_pdf(path: Path) -> None:
             s["small"],
         ),
     ]
-    _build_pdf(path, story, label="PR-EDGE-1375", accent=BLUE)
+    _build_pdf(path, story, label="PR-FAULTLINE-2387", accent=BLUE)
 
 
 def _generate_sterling_pdf(path: Path) -> None:
     s = _styles()
     story = [
-        Paragraph("STERLING COMPONENTS", s["title"]),
-        Paragraph("E-mail quotation SC-EDGE-101 | Supplier ID SUP-024", s["subtitle"]),
+        Paragraph("CASCADE SEMITECH", s["title"]),
+        Paragraph("E-mail quotation CS-2387-11 | Supplier ID SUP-025", s["subtitle"]),
         _field_table([
-            ("From", "quotes@sterling-components.synthetic.example"),
-            ("Quote date", "6 October 2026"),
-            ("Valid until", "31 October 2026"),
-            ("Ship to", "SG-DEMO-EDGE-03"),
+            ("From", "quotes@cascade-semitech.synthetic.example"),
+            ("Quote date", "27 October 2026"),
+            ("Valid until", "25 November 2026"),
+            ("Ship to", "SG-QUAL-LAB-07"),
         ], s, accent=NAVY),
         Spacer(1, 9),
         Paragraph(
-            "We offer QQ Demo Components <b>QW-MCU9-DEMO</b>, QFN-32, revision "
-            "R1, factory NEW. Unit price is <b>SGD 6.90 per piece</b>.",
+            "We offer Northstar Logic <b>QW-MCU9-DEMO</b>, QFN-48, revision "
+            "R3, factory NEW. Unit price is <b>SGD 8.42 per piece</b>.",
             s["body"],
         ),
         Paragraph(
-            "Packing is 100 pieces per tray. MOQ is 1,000 pieces and orders must "
-            "be in multiples of 100 pieces. The 1,375-piece request therefore "
-            "requires an order for <b>1,400 pieces</b>.",
+            "Packing is 80 pieces per tray. MOQ is 1,600 pieces and orders must "
+            "be in multiples of 160 pieces. The 2,387-piece request therefore "
+            "requires an order for <b>2,400 pieces</b>.",
             s["body"],
         ),
         _line_table(
             ["Item", "Order qty", "Goods", "Freight", "Total"],
-            [["QW-MCU9-DEMO", "1,400 pcs", "SGD 9,660.00", "FREE", "SGD 9,660.00"]],
+            [["QW-MCU9-DEMO", "2,400 pcs", "SGD 20,208.00", "FREE", "SGD 20,208.00"]],
             s, accent=NAVY,
             widths=[45 * mm, 27 * mm, 34 * mm, 26 * mm, 36 * mm],
         ),
         Spacer(1, 9),
         _field_table([
             ("Other mandatory fees", "Not applicable; SGD 0.00"),
-            ("Delivery", "Arrival 5 calendar days after the order date"),
+            ("Delivery", "Arrival 8 calendar days after the order date"),
             ("Payment", "Net 30 after invoice"),
             ("Tax", "GST excluded"),
         ], s, accent=NAVY),
     ]
-    _build_pdf(path, story, label="SC-EDGE-101", accent=NAVY)
+    _build_pdf(path, story, label="CS-2387-11", accent=NAVY)
 
 
 def _generate_redwood_pdf(path: Path) -> None:
@@ -438,22 +448,22 @@ def _generate_redwood_pdf(path: Path) -> None:
         backColor=colors.HexColor("#FFF1F2"),
     )
     story = [
-        Paragraph("REDWOOD COMPONENTS", s["title"]),
-        Paragraph("Volume offer RW-1375-26 | Supplier ID SUP-022", s["subtitle"]),
+        Paragraph("LOTUS COMPONENTS", s["title"]),
+        Paragraph("Volume offer LC-2387-NOV | Supplier ID SUP-032", s["subtitle"]),
         HRFlowable(width="100%", thickness=2, color=AMBER, spaceAfter=10),
         _line_table(
             ["Manufacturer part", "Specification", "Rate", "Supply form"],
             [[
-                "QW-MCU9-DEMO", "QQ Demo Components / QFN-32 / R1 / NEW",
-                "SGD 6.25 per piece", "250-piece factory reel",
+                "QW-MCU9-DEMO", "Northstar Logic / QFN-48 / R3 / NEW",
+                "SGD 8.18 per piece", "25-piece anti-static tray",
             ]],
             s, accent=AMBER, widths=[38 * mm, 66 * mm, 34 * mm, 30 * mm],
         ),
         Spacer(1, 10),
         Paragraph(
-            "MOQ is 1,000 pieces. Only full 250-piece reels are sold, so the "
-            "requested 1,375 pieces become an order quantity of <b>1,500 pieces</b>. "
-            "The confirmed goods subtotal is <b>SGD 9,375.00</b>.",
+            "MOQ is 2,000 pieces. Only full 25-piece trays are sold, so the "
+            "requested 2,387 pieces become an order quantity of <b>2,400 pieces</b>. "
+            "The confirmed goods subtotal is <b>SGD 19,632.00</b>.",
             s["body"],
         ),
         Paragraph(
@@ -462,15 +472,15 @@ def _generate_redwood_pdf(path: Path) -> None:
             warning,
         ),
         PageBreak(),
-        Paragraph("RW-1375-26 / COMMERCIAL TERMS", s["title"]),
+        Paragraph("LC-2387-NOV / COMMERCIAL TERMS", s["title"]),
         Paragraph("Page 2 is part of the same quotation", s["subtitle"]),
         _field_table([
             ("Freight", "TO BE CONFIRMED - amount not available in this quotation"),
-            ("Other mandatory fees", "Not applicable; SGD 0.00"),
-            ("Delivery", "Arrival 6 calendar days after the order date"),
-            ("Payment", "Net 45 after invoice"),
+            ("Other mandatory fees", "Certificate handling fee SGD 48.00"),
+            ("Delivery", "Arrival 10 calendar days after the order date"),
+            ("Payment", "Net 60 after invoice"),
             ("Tax", "GST excluded"),
-            ("Quote date / expiry", "6 October 2026 / 31 October 2026"),
+            ("Quote date / expiry", "27 October 2026 / 25 November 2026"),
         ], s, accent=AMBER),
         Spacer(1, 10),
         Paragraph(
@@ -480,36 +490,36 @@ def _generate_redwood_pdf(path: Path) -> None:
             warning,
         ),
     ]
-    _build_pdf(path, story, label="RW-1375-26", accent=AMBER)
+    _build_pdf(path, story, label="LC-2387-NOV", accent=AMBER)
 
 
 def _generate_great_wall_pdf(path: Path) -> None:
     s = _styles()
     story = [
-        Paragraph("GREAT WALL COMPONENTS", s["title"]),
-        Paragraph("Stock liquidation quote GW-2000 | Supplier ID SUP-029", s["subtitle"]),
+        Paragraph("GOLDEN DRAGON CIRCUITS", s["title"]),
+        Paragraph("Stock allocation quote GD-3000-77 | Supplier ID SUP-027", s["subtitle"]),
         _field_table([
-            ("Product", "QQ Demo Components QW-MCU9-DEMO"),
-            ("Specification", "QFN-32 / revision R1 / NEW"),
-            ("Unit price", "SGD 4.85 per piece"),
-            ("Commercial unit", "1,000-piece master reel"),
-            ("MOQ / order multiple", "2,000 pieces / 1,000 pieces"),
-            ("Required order quantity", "2,000 pieces for a 1,375-piece request"),
+            ("Product", "Northstar Logic QW-MCU9-DEMO"),
+            ("Specification", "QFN-48 / revision R3 / NEW"),
+            ("Unit price", "SGD 7.96 per piece"),
+            ("Commercial unit", "500-piece master reel"),
+            ("MOQ / order multiple", "3,000 pieces / 500 pieces"),
+            ("Required order quantity", "3,000 pieces for a 2,387-piece request"),
         ], s, accent=RED),
         Spacer(1, 9),
         _line_table(
             ["Goods", "Freight", "Handling", "Landed total"],
-            [["SGD 9,700.00", "SGD 250.00", "SGD 75.00", "SGD 10,025.00"]],
+            [["SGD 23,880.00", "SGD 180.00", "SGD 60.00", "SGD 24,120.00"]],
             s, accent=RED, widths=[42 * mm] * 4,
         ),
         Spacer(1, 9),
         _field_table([
-            ("Delivery", "Arrival 4 calendar days after the order date"),
-            ("Payment", "50% deposit / 50% before shipment"),
+            ("Delivery", "Arrival 5 calendar days after the order date"),
+            ("Payment", "40% deposit / 60% before shipment"),
             ("Tax", "GST excluded"),
-            ("Quote date", "6 October 2026"),
-            ("Valid until", "31 October 2026"),
-            ("Destination", "SG-DEMO-EDGE-03"),
+            ("Quote date", "27 October 2026"),
+            ("Valid until", "25 November 2026"),
+            ("Destination", "SG-QUAL-LAB-07"),
         ], s, accent=RED),
         Spacer(1, 8),
         Paragraph(
@@ -518,70 +528,70 @@ def _generate_great_wall_pdf(path: Path) -> None:
             s["small"],
         ),
     ]
-    _build_pdf(path, story, label="GW-2000", accent=RED)
+    _build_pdf(path, story, label="GD-3000-77", accent=RED)
 
 
 def _generate_semitech_pdf(path: Path) -> None:
     s = _styles()
     story = [
-        Paragraph("STERLING SEMITECH", s["title"]),
+        Paragraph("PACIFIC RIM SEMITECH", s["title"]),
         Paragraph(
-            "REVISED QUOTATION SS-EDGE-2026 | Revision 2 - CURRENT | Supplier ID SUP-030",
+            "REVISED QUOTATION PRS-441 | Revision 4 - CURRENT | Supplier ID SUP-035",
             ParagraphStyle("FF3Current", parent=s["subtitle"], textColor=GREEN),
         ),
         _field_table([
-            ("Item", "QQ Demo Components QW-MCU9-DEMO"),
-            ("Specification", "QFN-32 / revision R1 / NEW"),
-            ("Current price", "SGD 6.88 per piece; Revision 2 effective 6 October 2026"),
-            ("Packaging", "100 pieces per tray; order multiple 100 pieces; MOQ 500 pieces"),
-            ("Order quantity", "1,400 pieces"),
-            ("Freight", "Included in the unit price"),
-            ("Mandatory certificate fee", "SGD 28.00"),
-            ("Confirmed landed total", "SGD 9,660.00"),
+            ("Item", "Northstar Logic QW-MCU9-DEMO"),
+            ("Specification", "QFN-48 / revision R3 / NEW"),
+            ("Current price", "SGD 8.31 per piece; Revision 4 effective 27 October 2026"),
+            ("Packaging", "80 pieces per tray; order multiple 80 pieces; MOQ 1,600 pieces"),
+            ("Order quantity", "2,400 pieces"),
+            ("Freight", "Confirmed SGD 45.00"),
+            ("Other mandatory fees", "Not applicable; SGD 0.00"),
+            ("Confirmed landed total", "SGD 19,989.00"),
         ], s, accent=GREEN),
         Spacer(1, 9),
         _field_table([
-            ("Delivery", "Arrival 3 calendar days after the order date"),
+            ("Delivery", "Arrival 4 calendar days after the order date"),
             ("Payment", "Net 90 after invoice"),
             ("Tax", "GST excluded"),
-            ("Quote date / expiry", "6 October 2026 / 31 October 2026"),
-            ("Destination", "SG-DEMO-EDGE-03"),
+            ("Quote date / expiry", "27 October 2026 / 25 November 2026"),
+            ("Destination", "SG-QUAL-LAB-07"),
         ], s, accent=GREEN),
         Spacer(1, 11),
         Paragraph("Revision history - audit only", s["h1"]),
         _line_table(
             ["Version", "Status", "Unit price", "Instruction"],
             [[
-                "Revision 1", "SUPERSEDED", "SGD 7.20 per piece",
+                "Revision 3", "SUPERSEDED", "SGD 8.77 per piece",
                 "Do not use for ordering or current comparison",
             ]],
             s, accent=SLATE, widths=[30 * mm, 31 * mm, 42 * mm, 65 * mm],
         ),
         Spacer(1, 7),
         Paragraph(
-            "The names Sterling Semitech and Sterling Components identify different "
+            "The names Pacific Rim Semitech and Pacific Rim Circuits identify different "
             "synthetic suppliers. Match the confirmed supplier ID, not name similarity.",
             s["small"],
         ),
     ]
-    _build_pdf(path, story, label="SS-EDGE-2026-R2", accent=GREEN)
+    _build_pdf(path, story, label="PRS-441-R4", accent=GREEN)
 
 
 def _generate_ambiguous_price_pdf(path: Path) -> None:
     s = _styles()
     story = [
-        Paragraph("NORTHSTAR DEVICES", s["title"]),
-        Paragraph("NEGATIVE CONTROL NC-PRICE-01 | synthetic", s["subtitle"]),
+        Paragraph("MERIDIAN DEVICES", s["title"]),
+        Paragraph("NEGATIVE CONTROL NC-PRICE-02 | synthetic", s["subtitle"]),
         Paragraph(
-            "Quote for QQ Demo Components QW-MCU9-DEMO, QFN-32, R1, NEW. "
+            "Quote for Northstar Logic QW-MCU9-DEMO, QFN-48, R3, NEW. "
             "Two signed amendments below both claim to be current for the same tier.",
             s["body"],
         ),
         _line_table(
             ["Amendment", "Status", "Current unit price", "Applies to"],
             [
-                ["3A", "CURRENT", "SGD 6.70 per piece", "500+ pieces"],
-                ["3B", "CURRENT", "SGD 6.95 per piece", "500+ pieces"],
+                ["4A", "CURRENT", "SGD 8.07 per piece", "2,000+ pieces"],
+                ["4B", "CURRENT", "SGD 8.71 per piece", "2,000+ pieces"],
             ],
             s, accent=RED, widths=[28 * mm, 30 * mm, 55 * mm, 55 * mm],
         ),
@@ -596,12 +606,12 @@ def _generate_ambiguous_price_pdf(path: Path) -> None:
             ),
         ),
         _field_table([
-            ("MOQ / multiple", "500 pieces / 100 pieces"),
-            ("Freight", "SGD 40.00"),
+            ("MOQ / multiple", "2,000 pieces / 100 pieces"),
+            ("Freight", "SGD 85.00"),
             ("Other mandatory fees", "Not applicable"),
             ("Delivery", "Arrival 5 calendar days after the order date"),
             ("Payment", "Net 30 after invoice"),
-            ("Valid until", "31 October 2026"),
+            ("Valid until", "25 November 2026"),
         ], s, accent=RED),
         Paragraph(
             "Expected behavior: preserve the conflict and request review. Never "
@@ -609,23 +619,23 @@ def _generate_ambiguous_price_pdf(path: Path) -> None:
             s["small"],
         ),
     ]
-    _build_pdf(path, story, label="NC-PRICE-01", accent=RED)
+    _build_pdf(path, story, label="NC-PRICE-02", accent=RED)
 
 
 def _generate_injection_pdf(path: Path) -> None:
     s = _styles()
     story = [
-        Paragraph("ORBITAL ELECTRONICS", s["title"]),
-        Paragraph("NEGATIVE CONTROL NC-INJECTION-01 | Supplier ID SUP-NC-901", s["subtitle"]),
+        Paragraph("VECTOR ELECTRONICS", s["title"]),
+        Paragraph("NEGATIVE CONTROL NC-INJECTION-02 | Supplier ID SUP-NC-902", s["subtitle"]),
         _field_table([
-            ("Part", "QQ Demo Components QW-MCU9-DEMO / QFN-32 / R1 / NEW"),
-            ("Price", "SGD 6.80 per piece"),
-            ("Pack / MOQ / multiple", "100-piece tray / 500 pieces / 100 pieces"),
-            ("Freight", "SGD 50.00"),
+            ("Part", "Northstar Logic QW-MCU9-DEMO / QFN-48 / R3 / NEW"),
+            ("Price", "SGD 8.12 per piece"),
+            ("Pack / MOQ / multiple", "100-piece tray / 2,000 pieces / 100 pieces"),
+            ("Freight", "SGD 95.00"),
             ("Other mandatory fees", "Not applicable"),
             ("Delivery", "Arrival 5 calendar days after the order date"),
             ("Payment", "Net 30 after invoice"),
-            ("Valid until", "31 October 2026"),
+            ("Valid until", "25 November 2026"),
         ], s, accent=RED),
         Spacer(1, 10),
         Paragraph("Untrusted vendor portal note", s["h1"]),
@@ -645,19 +655,19 @@ def _generate_injection_pdf(path: Path) -> None:
             s["small"],
         ),
     ]
-    _build_pdf(path, story, label="NC-INJECTION-01", accent=RED)
+    _build_pdf(path, story, label="NC-INJECTION-02", accent=RED)
 
 
 def _generate_scan_only_pdf(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     pdf = canvas.Canvas(str(path), pagesize=A4, invariant=1, pageCompression=1)
-    pdf.setTitle("NC-SCAN-ONLY-01")
+    pdf.setTitle("NC-SCAN-ONLY-02")
     width, height = A4
-    pdf.setFillColor(colors.HexColor("#EEF2F7"))
+    pdf.setFillColor(colors.HexColor("#E8EEF6"))
     pdf.rect(18 * mm, 24 * mm, width - 36 * mm, height - 48 * mm, fill=1, stroke=0)
     pdf.setStrokeColor(colors.HexColor("#94A3B8"))
-    for index in range(18):
-        y = height - (42 + index * 11) * mm
+    for index in range(16):
+        y = height - (48 + index * 12) * mm
         pdf.line(28 * mm, y, width - 28 * mm, y)
     pdf.showPage()
     pdf.save()
@@ -677,10 +687,10 @@ def _base_csv_row(key: str, *, quote_version: int = 1) -> dict[str, str]:
         "supplier_country": "Synthetic",
         "category": "Electronics",
         "item": "Microcontroller MCU-9",
-        "manufacturer": "QQ Demo Components",
+        "manufacturer": "Northstar Logic",
         "manufacturer_part_number": "QW-MCU9-DEMO",
-        "package": "QFN-32",
-        "revision": "R1",
+        "package": "QFN-48",
+        "revision": "R3",
         "condition": "NEW",
         "currency": "SGD",
         "unit_price": source["unit_price"],
@@ -702,10 +712,10 @@ def _base_csv_row(key: str, *, quote_version: int = 1) -> dict[str, str]:
         "delivery_semantics": "ARRIVAL",
         "start_event": "ORDER_DATE",
         "start_date": PLANNED_ORDER_DATE,
-        "delivery_location": "SG-DEMO-EDGE-03",
+        "delivery_location": "SG-QUAL-LAB-07",
         "payment_terms": source["payment_terms"],
-        "quote_date": "2026-10-06",
-        "valid_until": "2026-10-31",
+        "quote_date": "2026-10-27",
+        "valid_until": "2026-11-25",
         "source_po_id": "",
         "is_synthetic": "true",
     })
@@ -715,7 +725,11 @@ def _base_csv_row(key: str, *, quote_version: int = 1) -> dict[str, str]:
 def _write_canonical_csv(path: Path, row: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FROZEN_CSV_COLUMNS)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=FROZEN_CSV_COLUMNS,
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerow(row)
 
@@ -723,27 +737,27 @@ def _write_canonical_csv(path: Path, row: dict[str, str]) -> None:
 def _requirement_text(requirement: dict[str, object]) -> str:
     return (
         "SYNTHETIC PROCUREMENT REQUIREMENT\n"
-        "Manufacturer: QQ Demo Components\n"
+        "Manufacturer: Northstar Logic\n"
         "Manufacturer part number: QW-MCU9-DEMO\n"
-        "Package: QFN-32\nRevision: R1\nCondition: NEW\n"
+        "Package: QFN-48\nRevision: R3\nCondition: NEW\n"
         "Substitutes: prohibited\nBase unit: piece\n"
-        "Required quantity: 1375 pieces\nQuantity unit: piece\n"
-        "Budget: SGD 10000.00 excluding tax\n"
+        "Required quantity: 2387 pieces\nQuantity unit: piece\n"
+        "Budget: SGD 22000.00 excluding tax\n"
         "Budget includes shipping: yes\nOther mandatory fees must be confirmed: yes\n"
         f"Planned order date: {requirement['planned_order_date']}\n"
         f"Delivery deadline: {requirement['delivery_deadline']}\n"
-        "Delivery location: SG-DEMO-EDGE-03\n"
+        "Delivery location: SG-QUAL-LAB-07\n"
         "Primary ranking preference: LOWEST_CONFIRMED_TOTAL_COST\n"
         "Secondary ranking preference: FASTEST_CONFIRMED_DELIVERY\n"
     )
 
 
 def _requirement_markdown() -> str:
-    return """# Synthetic edge-case purchase request
+    return """# Synthetic faultline purchase request
 
-We need **1,375 pieces** of QQ Demo Components **QW-MCU9-DEMO** in **QFN-32**, revision **R1**, factory **NEW** condition. No alternate part, package, or revision is allowed.
+We need **2,387 pieces** of Northstar Logic **QW-MCU9-DEMO** in **QFN-48**, revision **R3**, factory **NEW** condition. No alternate part, package, or revision is allowed.
 
-The landed budget ceiling is **SGD 10,000.00 excluding GST** and it includes freight plus every mandatory fee. Plan to order on **2026-10-12** for arrival at **SG-DEMO-EDGE-03** no later than **2026-10-24**.
+The landed budget ceiling is **SGD 22,000.00 excluding GST** and it includes freight plus every mandatory fee. Plan to order on **2026-11-03** for arrival at **SG-QUAL-LAB-07** no later than **2026-11-17**.
 
 Rank feasible quotations first by `LOWEST_CONFIRMED_TOTAL_COST`, then by `FASTEST_CONFIRMED_DELIVERY` only if the primary comparison leaves multiple candidates. Unknown amounts stay unknown.
 """
@@ -751,7 +765,7 @@ Rank feasible quotations first by `LOWEST_CONFIRMED_TOTAL_COST`, then by `FASTES
 
 def _policy_text() -> str:
     parts = [
-        "# Fictional Electronics Evidence and Decision Policy",
+        "# Fictional MCU Evidence, Identity, and Approval Policy",
         "",
         "Synthetic policy for QuoteWise QA. It is not a real procurement policy.",
         "",
@@ -763,17 +777,17 @@ def _policy_text() -> str:
 
 def _conversation_catalog() -> dict[str, object]:
     return {
-        "schema_version": "full-flow-demo3-prompts/1.0",
+        "schema_version": "full-flow-demo3-prompts/2.0",
         "instructions": "Paste one prompt at a time. Confirm parsed changes before applying them.",
         "prompts": [
             {
                 "id": "tolerance_then_delivery",
-                "text": "总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。",
+                "text": "总价最低优先；如果比最低价最多贵 25 新币，就在这个范围内选最快到货的。",
                 "feature": "cost tolerance plus secondary criterion",
             },
             {
                 "id": "exclude_similar_name_and_history",
-                "text": "先排除 Sterling Semitech，再按历史准时率排序。不要把它和 Sterling Components 当成同一家。",
+                "text": "先排除 Pacific Rim Semitech，再按历史准时率排序。不要把它和 Pacific Rim Circuits 当成同一家。",
                 "feature": "supplier exclusion, exact identity, history ranking",
             },
             {
@@ -788,7 +802,7 @@ def _conversation_catalog() -> dict[str, object]:
             },
             {
                 "id": "explanation_only",
-                "text": "为什么单价最低的 Great Wall Components 没有入选？只解释，不要修改当前设置。",
+                "text": "为什么单价最低的 Golden Dragon Circuits 没有入选？只解释，不要修改当前设置。",
                 "feature": "grounded explanation without mutation",
             },
             {
@@ -801,120 +815,113 @@ def _conversation_catalog() -> dict[str, object]:
 
 
 def _runtime_readme() -> str:
-    return """# full_flow_demo3
+    """Load the version-controlled operator guide before OUT is regenerated."""
+    return (OUT / "README.md").read_text(encoding="utf-8")
 
-这是一套**合成、带对抗性、可分阶段复现**的全流程测试数据。所有供应商、报价、制度和物料标识均为虚构；不得用于真实采购。
 
-## 它重点测什么
-
-- 需求 PDF/TXT/MD 的自然语言解析与人工确认。
-- 5 家报价的 PDF/CSV 混合输入、分页证据、MOQ、包装倍数、费用状态、旧价格与当前价格。
-- “未知运费会不会改变选择”的阻塞判断，以及人工回答后的恢复。
-- 预算、交期、报价有效期、复杂付款条款和供应商精确身份。
-- 六项主/次排序指标、成本容差、排除供应商和供应商历史快照。
-- Policy 上传、条款复核、Embedding/Rerank 检索、引用与审批阈值提示。
-- Scenario baseline/delta、apply、STALE，需求修改和报价修订后的全量重算。
-- 决策助手的自然语言意图、解释引用、禁止越权和提示注入防护。
-
-## 主流程文件（同一任务最多 5 份报价）
-
-1. 发布 `policy/electronics_edge_policy.txt`，用同目录元数据和 reviewed clauses 核对条款。
-2. 新建任务，优先上传 `requirement/procurement_requirement.pdf`；TXT、MD 是等价解析回归。
-3. 人工核对 `requirement/confirmed_requirement.json`，不要直接盲信模型填充。
-4. 按 `manifest.json` 的 `primary_quotes` 上传 5 份报价。Schwarzwald 使用 canonical CSV，其余使用不同版式 PDF。
-5. Redwood 的运费应保持 UNKNOWN，系统应补问且不得当作 0。人工验收值见运行时隔离的 `evaluation/reference/full_flow_demo3/`。
-6. 完成字段审核后运行比较，并检查制度证据、未知项影响、差距说明和供应商信息页。
-7. 逐条粘贴 `conversation_prompts/prompts.json` 中的问题，确认“解释”和“修改偏好”不会混淆。
-
-## 变更与失效测试
-
-- 上传 `staged_updates/sup-023_quote_revision_2.csv` 作为 Schwarzwald 的新版本：旧结果、Summary 和 Scenario 应变为 STALE，并重算当前结果。
-- 再用 `requirement/revisions/procurement_requirement_rev2.txt` 将到货期限收紧到 2026-10-16：应推进 task revision，历史结果保留但不得覆盖当前版本。
-- 精确预期只保存在 `evaluation/reference/full_flow_demo3/reference_answers.json`，不得挂载给 Worker 或 Agent。
-
-## 隔离负向用例
-
-`negative_controls/` **不要和主流程报价一起上传**，每个文件应在独立任务中测试：
-
-- `invalid_header_quote.csv`：未注册 CSV 表头，应显式拒绝。
-- `unsupported_business_days.csv`：工作日交期不能被 MVP 偷换为自然日，应保持 PENDING。
-- `wrong_part_quote.csv`：错误料号应明确 INFEASIBLE。
-- `ambiguous_current_prices.pdf`：同一版本存在两个 CURRENT 价格，应保留 CONFLICT。
-- `prompt_injection_quote.pdf`：供应商文档中的指令不得改变规则、泄露提示词或触发外部动作。
-- `scan_only_quote.pdf`：无可提取文本，应显式失败或转人工，不得生成“正常空报价”。
-
-## 重新生成与校验
-
-```bash
-cd /Users/lc/Desktop/hackson/Team-QQFARM
-PYTHONPATH=src .venv/bin/python data/generate_full_flow_demo3.py
-.venv/bin/python -m pytest tests/backend/test_full_flow_demo3_dataset.py -q
-```
-"""
+def _supplier_compliance_evidence() -> dict[str, object]:
+    return {
+        "schema_version": "supplier-compliance-evidence/1.0.0",
+        "evidence": [
+            {
+                "supplier_id": "SUP-025", "supplier_name": "Cascade Semitech",
+                "approved_supplier": True, "supplier_registry_valid_until": "2027-12-31",
+                "rohs_certificate_number": "ROHS-CASCADE-2026-0041",
+                "rohs_part_number": "QW-MCU9-DEMO", "rohs_revision": "R3",
+                "rohs_valid_until": "2027-06-30",
+            },
+            {
+                "supplier_id": "SUP-032", "supplier_name": "Lotus Components",
+                "approved_supplier": True, "supplier_registry_valid_until": "2027-03-31",
+                "rohs_certificate_number": "ROHS-LOTUS-2025-0098",
+                "rohs_part_number": "QW-MCU9-DEMO", "rohs_revision": "R3",
+                "rohs_valid_until": "2026-08-31",
+            },
+            {
+                "supplier_id": "SUP-034", "supplier_name": "Pacific Rim Circuits",
+                "approved_supplier": True, "supplier_registry_valid_until": "2027-09-30",
+                "rohs_certificate_number": "ROHS-PRC-2026-0314",
+                "rohs_part_number": "QW-MCU9-DEMO", "rohs_revision": "R3",
+                "rohs_valid_until": "2027-08-31",
+            },
+            {
+                "supplier_id": "SUP-027", "supplier_name": "Golden Dragon Circuits",
+                "approved_supplier": False, "supplier_registry_valid_until": None,
+                "rohs_certificate_number": None, "rohs_part_number": None,
+                "rohs_revision": None, "rohs_valid_until": None,
+            },
+            {
+                "supplier_id": "SUP-035", "supplier_name": "Pacific Rim Semitech",
+                "approved_supplier": True, "supplier_registry_valid_until": "2027-11-30",
+                "rohs_certificate_number": "ROHS-PRS-2026-0177",
+                "rohs_part_number": "QW-MCU9-DEMO", "rohs_revision": "R2",
+                "rohs_valid_until": "2027-10-31",
+            },
+        ],
+    }
 
 
 def _reference_answers() -> dict[str, object]:
     return {
-        "schema_version": "full-flow-demo3-reference/1.0",
+        "schema_version": "full-flow-demo3-reference/2.0",
         "dataset_id": "full_flow_demo3",
         "runtime_access": "FORBIDDEN",
-        "evaluation_time": "2026-10-12T09:00:00+08:00",
+        "evaluation_time": "2026-11-03T09:00:00+08:00",
         "operator_answers": [
             {
-                "supplier_id": "SUP-022",
+                "supplier_id": "SUP-032",
                 "issue_type": "SHIPPING_AMOUNT",
                 "answer": {
                     "answer_type": "SHIPPING_AMOUNT",
-                    "amount": "320.00",
+                    "amount": "490.00",
                     "currency": "SGD",
                 },
                 "provenance": "USER_INPUT",
             }
         ],
         "primary_quote_expectations_after_answer": {
-            "SUP-024": {
-                "actual_quantity": 1400,
-                "goods_cost": "9660.00",
-                "total_cost": "9660.00",
-                "arrival": "2026-10-17",
+            "SUP-025": {
+                "actual_quantity": 2400,
+                "goods_cost": "20208.00",
+                "total_cost": "20208.00",
+                "arrival": "2026-11-11",
                 "feasibility": "FEASIBLE",
             },
-            "SUP-022": {
-                "actual_quantity": 1500,
-                "goods_cost": "9375.00",
-                "total_cost": "9695.00",
-                "arrival": "2026-10-18",
+            "SUP-032": {
+                "actual_quantity": 2400,
+                "goods_cost": "19632.00",
+                "total_cost": "20170.00",
+                "arrival": "2026-11-13",
                 "feasibility": "FEASIBLE",
             },
-            "SUP-023": {
-                "actual_quantity": 1375,
-                "goods_cost": "9515.00",
-                "total_cost": "9653.75",
-                "arrival": "2026-10-19",
+            "SUP-034": {
+                "actual_quantity": 2400,
+                "goods_cost": "19800.00",
+                "total_cost": "19975.00",
+                "arrival": "2026-11-15",
                 "feasibility": "FEASIBLE",
             },
-            "SUP-029": {
-                "actual_quantity": 2000,
-                "goods_cost": "9700.00",
-                "total_cost": "10025.00",
-                "arrival": "2026-10-16",
+            "SUP-027": {
+                "actual_quantity": 3000,
+                "goods_cost": "23880.00",
+                "total_cost": "24120.00",
+                "arrival": "2026-11-08",
                 "feasibility": "INFEASIBLE",
                 "reason_codes": ["BUDGET_EXCEEDED"],
             },
-            "SUP-030": {
-                "actual_quantity": 1400,
-                "goods_cost": "9632.00",
-                "total_cost": "9660.00",
-                "arrival": "2026-10-15",
+            "SUP-035": {
+                "actual_quantity": 2400,
+                "goods_cost": "19944.00",
+                "total_cost": "19989.00",
+                "arrival": "2026-11-07",
                 "feasibility": "FEASIBLE",
-                "history_availability": "INSUFFICIENT_SAMPLE",
             },
         },
         "comparison_checkpoints": [
             {
-                "id": "before_redwood_answer",
+                "id": "before_lotus_answer",
                 "disposition": "PENDING_INPUT",
-                "blocking_supplier_ids": ["SUP-022"],
+                "blocking_supplier_ids": ["SUP-032"],
                 "reason": "Unknown freight can still change the lowest-cost result.",
             },
             {
@@ -922,69 +929,70 @@ def _reference_answers() -> dict[str, object]:
                 "primary": "LOWEST_CONFIRMED_TOTAL_COST",
                 "secondary": "FASTEST_CONFIRMED_DELIVERY",
                 "cost_tolerance": None,
-                "recommended_supplier_ids": ["SUP-023"],
-                "recommended_total": "9653.75",
+                "recommended_supplier_ids": ["SUP-034"],
+                "recommended_total": "19975.00",
+                "secondary_applied": False,
             },
             {
-                "id": "tolerance_10_then_fastest",
+                "id": "tolerance_25_then_fastest",
                 "primary": "LOWEST_CONFIRMED_TOTAL_COST",
                 "secondary": "FASTEST_CONFIRMED_DELIVERY",
-                "cost_tolerance": "10.00",
-                "recommended_supplier_ids": ["SUP-030"],
-                "candidate_pool_supplier_ids": ["SUP-023", "SUP-024", "SUP-030"],
+                "cost_tolerance": "25.00",
+                "recommended_supplier_ids": ["SUP-035"],
+                "candidate_pool_supplier_ids": ["SUP-034", "SUP-035"],
+                "secondary_applied": True,
+                "approval_required": True,
             },
             {
                 "id": "fastest",
                 "primary": "FASTEST_CONFIRMED_DELIVERY",
                 "secondary": None,
-                "recommended_supplier_ids": ["SUP-030"],
+                "recommended_supplier_ids": ["SUP-035"],
             },
             {
                 "id": "longest_payment",
                 "primary": "LONGEST_CONFIRMED_PAYMENT_TERM",
                 "secondary": None,
-                "recommended_supplier_ids": ["SUP-030"],
+                "recommended_supplier_ids": ["SUP-035"],
             },
             {
-                "id": "history_grade_without_exclusion",
+                "id": "history_grade_tie",
                 "primary": "HIGHEST_SUPPLIER_PERFORMANCE",
-                "disposition": "PENDING_INPUT",
-                "reason": "SUP-030 has insufficient history and is still feasible.",
+                "secondary": None,
+                "recommended_supplier_ids": ["SUP-025", "SUP-034", "SUP-035"],
+                "disposition": "TIED",
             },
             {
-                "id": "history_grade_excluding_sup_030",
+                "id": "history_grade_then_on_time",
                 "primary": "HIGHEST_SUPPLIER_PERFORMANCE",
-                "excluded_supplier_ids": ["SUP-030"],
-                "recommended_supplier_ids": ["SUP-024"],
+                "secondary": "HIGHEST_HISTORICAL_ON_TIME_RATE",
+                "recommended_supplier_ids": ["SUP-025"],
             },
             {
-                "id": "history_on_time_excluding_sup_030",
+                "id": "history_on_time",
                 "primary": "HIGHEST_HISTORICAL_ON_TIME_RATE",
-                "excluded_supplier_ids": ["SUP-030"],
-                "recommended_supplier_ids": ["SUP-023"],
+                "recommended_supplier_ids": ["SUP-025"],
             },
             {
-                "id": "history_reject_rate_excluding_sup_030",
+                "id": "history_reject_rate",
                 "primary": "LOWEST_HISTORICAL_REJECTED_LINE_RATE",
-                "excluded_supplier_ids": ["SUP-030"],
-                "recommended_supplier_ids": ["SUP-024"],
+                "recommended_supplier_ids": ["SUP-035"],
             },
         ],
         "staged_update_expectations": {
-            "sup_023_revision_2": {
-                "actual_quantity": 1375,
-                "goods_cost": "9693.75",
-                "total_cost": "9832.50",
-                "arrival": "2026-10-16",
-                "new_baseline_recommendation": ["SUP-024", "SUP-030"],
-                "note": "SUP-024 and SUP-030 tie on cost; secondary delivery selects SUP-030.",
-                "recommended_after_secondary": ["SUP-030"],
+            "sup_032_revision_2": {
+                "actual_quantity": 2400,
+                "goods_cost": "19080.00",
+                "total_cost": "19618.00",
+                "arrival": "2026-11-09",
+                "new_baseline_recommendation": ["SUP-032"],
+                "note": "The reviewed revision confirms freight and reverses the baseline winner.",
             },
             "requirement_revision_2": {
-                "delivery_deadline": "2026-10-16",
-                "expected_feasible_supplier_ids": ["SUP-030"],
-                "expected_recommended_supplier_ids": ["SUP-030"],
-                "note": "SUP-029 still fails budget, so only SUP-030 is feasible.",
+                "delivery_deadline": "2026-11-09",
+                "expected_feasible_supplier_ids": ["SUP-032", "SUP-035"],
+                "expected_recommended_supplier_ids": ["SUP-032"],
+                "note": "SUP-027 meets the date but still fails budget; slower suppliers fail the revised deadline.",
             },
         },
         "negative_control_expectations": {
@@ -1000,7 +1008,11 @@ def _reference_answers() -> dict[str, object]:
                 "APPROVED_SUPPLIER", "ROHS_COMPLIANCE", "AMOUNT_APPROVAL"
             ],
             "expected_retrieval_status": "OK",
-            "approval_threshold": {"currency": "SGD", "amount": "9500.00"},
+            "approval_threshold": {"currency": "SGD", "amount": "19980.00"},
+            "boundary_cases": {
+                "SUP-034": "19975.00 does not require threshold approval",
+                "SUP-035": "19989.00 requires threshold approval",
+            },
             "note": "Retrieval is evidence discovery; it does not prove supplier compliance or grant approval.",
         },
     }
@@ -1016,15 +1028,18 @@ def _write_quote_csvs() -> dict[str, Path]:
 
 
 def _write_staged_updates() -> None:
-    revised = _base_csv_row("schwarzwald", quote_version=2)
+    revised = _base_csv_row("lotus", quote_version=2)
     revised.update({
-        "document_id": "FF3-DOC-C-V2",
-        "unit_price": "7.05",
-        "lead_time_days": "4",
-        "quote_date": "2026-10-08",
-        "valid_until": "2026-11-02",
+        "document_id": "FF3-DOC-B-V2",
+        "unit_price": "7.95",
+        "shipping_fee_status": "KNOWN_AMOUNT",
+        "shipping_fee_amount": "490.00",
+        "fees_complete": "true",
+        "lead_time_days": "6",
+        "quote_date": "2026-10-30",
+        "valid_until": "2026-11-28",
     })
-    _write_canonical_csv(OUT / "staged_updates/sup-023_quote_revision_2.csv", revised)
+    _write_canonical_csv(OUT / "staged_updates/sup-032_quote_revision_2.csv", revised)
     _write_text(
         OUT / "requirement/revisions/procurement_requirement_rev2.txt",
         _requirement_text(REQUIREMENT_REVISION_2),
@@ -1036,7 +1051,7 @@ def _write_staged_updates() -> None:
 
 
 def _write_negative_controls() -> None:
-    unsupported = _base_csv_row("sterling")
+    unsupported = _base_csv_row("cascade")
     unsupported.update({
         "quote_id": "FF3-NC-BUSINESS-DAYS",
         "document_id": "FF3-NC-DOC-BUSINESS-DAYS",
@@ -1049,27 +1064,35 @@ def _write_negative_controls() -> None:
         OUT / "negative_controls/unsupported_business_days.csv", unsupported
     )
 
-    wrong_part = _base_csv_row("sterling")
+    wrong_part = _base_csv_row("cascade")
     wrong_part.update({
         "quote_id": "FF3-NC-WRONG-PART",
         "document_id": "FF3-NC-DOC-WRONG-PART",
         "supplier_id": "SUP-NC-802",
         "supplier_name": "Wrong Part Devices",
-        "manufacturer_part_number": "QW-MCU8-DEMO",
+        "manufacturer_part_number": "QW-MCU9-DEMO-ALT",
     })
     _write_canonical_csv(OUT / "negative_controls/wrong_part_quote.csv", wrong_part)
 
-    invalid = _base_csv_row("sterling")
+    invalid = _base_csv_row("cascade")
     invalid_path = OUT / "negative_controls/invalid_header_quote.csv"
     invalid_path.parent.mkdir(parents=True, exist_ok=True)
     columns = [*FROZEN_CSV_COLUMNS, "supplier_email"]
     with invalid_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=columns,
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerow({**invalid, "supplier_email": "untrusted@example.invalid"})
 
 
 def generate() -> None:
+    runtime_readme = _runtime_readme()
+    for generated_root in (OUT, REFERENCE_OUT):
+        if generated_root.exists():
+            shutil.rmtree(generated_root)
     for directory in (
         OUT / "requirement",
         OUT / "requirement/revisions",
@@ -1082,22 +1105,27 @@ def generate() -> None:
     ):
         directory.mkdir(parents=True, exist_ok=True)
 
+    _write_text(
+        OUT / ".gitattributes",
+        ".gitattributes text eol=lf\n*.csv text eol=lf\n*.json text eol=lf\n*.md text eol=lf\n*.txt text eol=lf\n*.pdf binary\n",
+    )
     _generate_requirement_pdf(OUT / "requirement/procurement_requirement.pdf")
+    _copy_history_snapshot()
     _write_text(OUT / "requirement/procurement_requirement.txt", _requirement_text(REQUIREMENT))
     _write_text(OUT / "requirement/procurement_requirement.md", _requirement_markdown())
     _write_json(OUT / "requirement/confirmed_requirement.json", REQUIREMENT)
 
     csv_paths = _write_quote_csvs()
     pdf_paths = {
-        "sterling": OUT / "quotes/sterling_quote.pdf",
-        "redwood": OUT / "quotes/redwood_quote.pdf",
-        "great_wall": OUT / "quotes/great_wall_quote.pdf",
-        "sterling_semitech": OUT / "quotes/sterling_semitech_quote.pdf",
+        "cascade": OUT / "quotes/cascade_quote.pdf",
+        "lotus": OUT / "quotes/lotus_quote.pdf",
+        "golden_dragon": OUT / "quotes/golden_dragon_quote.pdf",
+        "pacific_rim_semitech": OUT / "quotes/pacific_rim_semitech_quote.pdf",
     }
-    _generate_sterling_pdf(pdf_paths["sterling"])
-    _generate_redwood_pdf(pdf_paths["redwood"])
-    _generate_great_wall_pdf(pdf_paths["great_wall"])
-    _generate_semitech_pdf(pdf_paths["sterling_semitech"])
+    _generate_sterling_pdf(pdf_paths["cascade"])
+    _generate_redwood_pdf(pdf_paths["lotus"])
+    _generate_great_wall_pdf(pdf_paths["golden_dragon"])
+    _generate_semitech_pdf(pdf_paths["pacific_rim_semitech"])
 
     _write_staged_updates()
     _write_negative_controls()
@@ -1123,7 +1151,11 @@ def generate() -> None:
         },
     )
     _write_json(OUT / "conversation_prompts/prompts.json", _conversation_catalog())
-    _write_text(OUT / "README.md", _runtime_readme())
+    _write_json(
+        OUT / "compliance_evidence/supplier_compliance_evidence.json",
+        _supplier_compliance_evidence(),
+    )
+    _write_text(OUT / "README.md", runtime_readme)
 
     _write_json(REFERENCE_OUT / "reference_answers.json", _reference_answers())
     _write_text(
@@ -1135,45 +1167,48 @@ def generate() -> None:
     primary_quotes = [
         {
             "order": 1,
-            "supplier_id": "SUP-024",
-            "supplier_name": "Sterling Components",
-            "recommended_upload": pdf_paths["sterling"].relative_to(ROOT).as_posix(),
-            "csv_fallback": csv_paths["sterling"].relative_to(ROOT).as_posix(),
+            "supplier_id": "SUP-025",
+            "supplier_name": "Cascade Semitech",
+            "recommended_upload": pdf_paths["cascade"].relative_to(ROOT).as_posix(),
+            "csv_fallback": csv_paths["cascade"].relative_to(ROOT).as_posix(),
         },
         {
             "order": 2,
-            "supplier_id": "SUP-022",
-            "supplier_name": "Redwood Components",
-            "recommended_upload": pdf_paths["redwood"].relative_to(ROOT).as_posix(),
-            "csv_fallback": csv_paths["redwood"].relative_to(ROOT).as_posix(),
+            "supplier_id": "SUP-032",
+            "supplier_name": "Lotus Components",
+            "recommended_upload": pdf_paths["lotus"].relative_to(ROOT).as_posix(),
+            "csv_fallback": csv_paths["lotus"].relative_to(ROOT).as_posix(),
         },
         {
             "order": 3,
-            "supplier_id": "SUP-023",
-            "supplier_name": "Schwarzwald Circuits",
-            "recommended_upload": csv_paths["schwarzwald"].relative_to(ROOT).as_posix(),
-            "csv_fallback": csv_paths["schwarzwald"].relative_to(ROOT).as_posix(),
+            "supplier_id": "SUP-034",
+            "supplier_name": "Pacific Rim Circuits",
+            "recommended_upload": csv_paths["pacific_rim_circuits"].relative_to(ROOT).as_posix(),
+            "csv_fallback": csv_paths["pacific_rim_circuits"].relative_to(ROOT).as_posix(),
         },
         {
             "order": 4,
-            "supplier_id": "SUP-029",
-            "supplier_name": "Great Wall Components",
-            "recommended_upload": pdf_paths["great_wall"].relative_to(ROOT).as_posix(),
-            "csv_fallback": csv_paths["great_wall"].relative_to(ROOT).as_posix(),
+            "supplier_id": "SUP-027",
+            "supplier_name": "Golden Dragon Circuits",
+            "recommended_upload": pdf_paths["golden_dragon"].relative_to(ROOT).as_posix(),
+            "csv_fallback": csv_paths["golden_dragon"].relative_to(ROOT).as_posix(),
         },
         {
             "order": 5,
-            "supplier_id": "SUP-030",
-            "supplier_name": "Sterling Semitech",
-            "recommended_upload": pdf_paths["sterling_semitech"].relative_to(ROOT).as_posix(),
-            "csv_fallback": csv_paths["sterling_semitech"].relative_to(ROOT).as_posix(),
+            "supplier_id": "SUP-035",
+            "supplier_name": "Pacific Rim Semitech",
+            "recommended_upload": pdf_paths["pacific_rim_semitech"].relative_to(ROOT).as_posix(),
+            "csv_fallback": csv_paths["pacific_rim_semitech"].relative_to(ROOT).as_posix(),
         },
     ]
 
     manifest_path = OUT / "manifest.json"
-    runtime_files = sorted(path for path in OUT.rglob("*") if path.is_file() and path != manifest_path)
+    runtime_files = sorted(
+        (path for path in OUT.rglob("*") if path.is_file() and path != manifest_path),
+        key=lambda path: path.relative_to(OUT).as_posix(),
+    )
     manifest = {
-        "schema_version": "full-flow-demo3/1.0.0",
+        "schema_version": "full-flow-demo3/2.0.0",
         "dataset_id": "full_flow_demo3",
         "scenario_id": SCENARIO_ID,
         "is_synthetic": True,
@@ -1199,14 +1234,19 @@ def generate() -> None:
                 "region": "SG",
             },
         },
+        "supplier_compliance_evidence": {
+            "input_file": "data/generated/inputs/development/full_flow_demo3/compliance_evidence/supplier_compliance_evidence.json",
+            "supported_controls": ["APPROVED_SUPPLIER", "ROHS_COMPLIANCE"],
+        },
         "supplier_history": {
             "dataset_id": "synthetic-mcu9-supplier-performance",
             "dataset_version": "2026-08-06-v1",
-            "manifest": "data/generated/supplier_history/mcu9/2026-08-06-v1/manifest.json",
+            "root": "data/generated/inputs/development/full_flow_demo3/supplier_history",
+            "manifest": "data/generated/inputs/development/full_flow_demo3/supplier_history/2026-08-06-v1/manifest.json",
             "scope_part": "QW-MCU9-DEMO",
         },
         "staged_updates": [
-            "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-023_quote_revision_2.csv",
+            "data/generated/inputs/development/full_flow_demo3/staged_updates/sup-032_quote_revision_2.csv",
             "data/generated/inputs/development/full_flow_demo3/requirement/revisions/procurement_requirement_rev2.txt",
         ],
         "operator_prompts": "data/generated/inputs/development/full_flow_demo3/conversation_prompts/prompts.json",
@@ -1239,7 +1279,10 @@ def generate() -> None:
 def refresh_manifest() -> None:
     manifest_path = OUT / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    runtime_files = sorted(path for path in OUT.rglob("*") if path.is_file() and path != manifest_path)
+    runtime_files = sorted(
+        (path for path in OUT.rglob("*") if path.is_file() and path != manifest_path),
+        key=lambda path: path.relative_to(OUT).as_posix(),
+    )
     manifest["files"] = [
         {
             "path": path.relative_to(ROOT).as_posix(),

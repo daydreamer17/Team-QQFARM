@@ -49,7 +49,7 @@ def _read_single_row(path: Path) -> dict[str, str]:
 def test_full_flow_demo3_manifest_integrity_and_runtime_separation() -> None:
     manifest = json.loads((DATASET / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["dataset_id"] == "full_flow_demo3"
-    assert manifest["scenario_id"] == "MCU-FULL-FLOW-EDGE-003"
+    assert manifest["scenario_id"] == "MCU-FULL-FLOW-FAULTLINE-004"
     assert manifest["is_synthetic"] is True
     assert manifest["runtime_safe"] is True
     assert manifest["primary_quote_limit"] == 5
@@ -73,8 +73,8 @@ def test_full_flow_demo3_requirement_and_policy_contracts() -> None:
         (DATASET / "requirement/confirmed_requirement.json").read_text(encoding="utf-8")
     )
     validated = ProcurementRequirement.model_validate(requirement)
-    assert validated.required_quantity == 1375
-    assert str(validated.budget_amount) == "10000.00"
+    assert validated.required_quantity == 2387
+    assert str(validated.budget_amount) == "22000.00"
     assert validated.ranking_preference.value == "LOWEST_CONFIRMED_TOTAL_COST"
     assert validated.secondary_preference is not None
     assert validated.secondary_preference.value == "FASTEST_CONFIRMED_DELIVERY"
@@ -84,7 +84,7 @@ def test_full_flow_demo3_requirement_and_policy_contracts() -> None:
             encoding="utf-8"
         )
     )
-    assert revision.delivery_deadline.isoformat() == "2026-10-16"
+    assert revision.delivery_deadline.isoformat() == "2026-11-09"
     assert revision.model_dump(exclude={"delivery_deadline"}) == validated.model_dump(
         exclude={"delivery_deadline"}
     )
@@ -110,11 +110,11 @@ def test_full_flow_demo3_requirement_and_policy_contracts() -> None:
 
 def test_full_flow_demo3_primary_csvs_preserve_edge_cases() -> None:
     expected = {
-        "SUP-024": ("6.90", "100", "1000", "FREE", "5"),
-        "SUP-022": ("6.25", "250", "1000", "UNKNOWN", "6"),
-        "SUP-023": ("6.92", "25", "500", "KNOWN_AMOUNT", "7"),
-        "SUP-029": ("4.85", "1000", "2000", "KNOWN_AMOUNT", "4"),
-        "SUP-030": ("6.88", "100", "500", "INCLUDED", "3"),
+        "SUP-025": ("8.42", "160", "1600", "FREE", "8"),
+        "SUP-032": ("8.18", "25", "2000", "UNKNOWN", "10"),
+        "SUP-034": ("8.25", "100", "2000", "INCLUDED", "12"),
+        "SUP-027": ("7.96", "500", "3000", "KNOWN_AMOUNT", "5"),
+        "SUP-035": ("8.31", "80", "1600", "KNOWN_AMOUNT", "4"),
     }
     rows = {}
     for path in sorted((DATASET / "quotes").glob("*.csv")):
@@ -133,9 +133,9 @@ def test_full_flow_demo3_primary_csvs_preserve_edge_cases() -> None:
         assert row["tax_mode"] == "EXCLUDED"
         assert row["is_synthetic"] == "true"
 
-    assert rows["SUP-022"]["shipping_fee_amount"] == ""
-    assert rows["SUP-022"]["fees_complete"] == "false"
-    assert rows["SUP-029"]["payment_terms"] == "50% deposit / 50% before shipment"
+    assert rows["SUP-032"]["shipping_fee_amount"] == ""
+    assert rows["SUP-032"]["fees_complete"] == "false"
+    assert rows["SUP-027"]["payment_terms"] == "40% deposit / 60% before shipment"
 
 
 def test_full_flow_demo3_primary_csvs_pass_production_parser() -> None:
@@ -172,10 +172,10 @@ def test_full_flow_demo3_reference_math_is_exact_decimal() -> None:
             for path in sorted((DATASET / "quotes").glob("*.csv"))
         )
     }
-    shipping_answer = Decimal("320.00")
+    shipping_answer = Decimal("490.00")
     for supplier_id, outcome in expected.items():
         row = rows[supplier_id]
-        quantity = max(1375, int(row["moq_quantity"]))
+        quantity = max(2387, int(row["moq_quantity"]))
         multiple = int(row["order_multiple_units"])
         actual = ((quantity + multiple - 1) // multiple) * multiple
         goods = (Decimal(actual) * Decimal(row["unit_price"])).quantize(Decimal("0.01"))
@@ -199,17 +199,17 @@ def test_full_flow_demo3_reference_math_is_exact_decimal() -> None:
         item for item in reference["comparison_checkpoints"]
         if item["id"] == "baseline_after_answer"
     )
-    assert baseline["recommended_supplier_ids"] == ["SUP-023"]
-    assert Decimal(baseline["recommended_total"]) == Decimal("9653.75")
+    assert baseline["recommended_supplier_ids"] == ["SUP-034"]
+    assert Decimal(baseline["recommended_total"]) == Decimal("19975.00")
 
 
 def test_full_flow_demo3_pdfs_are_machine_readable_except_scan_control() -> None:
     readable = [
         DATASET / "requirement/procurement_requirement.pdf",
-        DATASET / "quotes/sterling_quote.pdf",
-        DATASET / "quotes/redwood_quote.pdf",
-        DATASET / "quotes/great_wall_quote.pdf",
-        DATASET / "quotes/sterling_semitech_quote.pdf",
+        DATASET / "quotes/cascade_quote.pdf",
+        DATASET / "quotes/lotus_quote.pdf",
+        DATASET / "quotes/golden_dragon_quote.pdf",
+        DATASET / "quotes/pacific_rim_semitech_quote.pdf",
         DATASET / "negative_controls/ambiguous_current_prices.pdf",
         DATASET / "negative_controls/prompt_injection_quote.pdf",
     ]
@@ -219,16 +219,16 @@ def test_full_flow_demo3_pdfs_are_machine_readable_except_scan_control() -> None
         assert len(text) > 250
         assert "synthetic" in text.casefold()
 
-    with pdfplumber.open(DATASET / "quotes/redwood_quote.pdf") as pdf:
+    with pdfplumber.open(DATASET / "quotes/lotus_quote.pdf") as pdf:
         assert len(pdf.pages) == 2
         text = " ".join(page.extract_text() or "" for page in pdf.pages)
     assert "TO BE CONFIRMED" in text
     assert "must not be used as one" in text
 
-    with pdfplumber.open(DATASET / "quotes/sterling_semitech_quote.pdf") as pdf:
+    with pdfplumber.open(DATASET / "quotes/pacific_rim_semitech_quote.pdf") as pdf:
         text = " ".join(page.extract_text() or "" for page in pdf.pages)
-    assert "Revision 2 - CURRENT" in text
-    assert "Revision 1 SUPERSEDED SGD 7.20 per piece" in text
+    assert "Revision 4 - CURRENT" in text
+    assert "Revision 3 SUPERSEDED SGD 8.77 per piece" in text
 
     with pdfplumber.open(DATASET / "negative_controls/scan_only_quote.pdf") as pdf:
         assert all(not (page.extract_text() or "").strip() for page in pdf.pages)
@@ -237,10 +237,10 @@ def test_full_flow_demo3_pdfs_are_machine_readable_except_scan_control() -> None
 def test_full_flow_demo3_primary_pdfs_pass_production_parser_and_scan_fails() -> None:
     parser = PdfQuoteParser()
     supplier_ids = {
-        "sterling": "SUP-024",
-        "redwood": "SUP-022",
-        "great_wall": "SUP-029",
-        "sterling_semitech": "SUP-030",
+        "cascade": "SUP-025",
+        "lotus": "SUP-032",
+        "golden_dragon": "SUP-027",
+        "pacific_rim_semitech": "SUP-035",
     }
     for name, supplier_id in supplier_ids.items():
         parsed = parser.parse(
@@ -248,7 +248,7 @@ def test_full_flow_demo3_primary_pdfs_pass_production_parser_and_scan_fails() ->
             DocumentContext(
                 task_id="TASK-FF3-PARSER",
                 task_revision=1,
-                scenario_id="MCU-FULL-FLOW-EDGE-003",
+                scenario_id="MCU-FULL-FLOW-FAULTLINE-004",
                 quote_id=f"FF3-PARSER-{name}",
                 quote_version=1,
                 document_id=f"FF3-PARSER-DOC-{name}",
@@ -265,7 +265,7 @@ def test_full_flow_demo3_primary_pdfs_pass_production_parser_and_scan_fails() ->
             DocumentContext(
                 task_id="TASK-FF3-PARSER",
                 task_revision=1,
-                scenario_id="MCU-FULL-FLOW-EDGE-003",
+                scenario_id="MCU-FULL-FLOW-FAULTLINE-004",
                 quote_id="FF3-PARSER-SCAN",
                 quote_version=1,
                 document_id="FF3-PARSER-DOC-SCAN",
@@ -276,28 +276,28 @@ def test_full_flow_demo3_primary_pdfs_pass_production_parser_and_scan_fails() ->
     assert exc_info.value.code == "blank_pdf"
 
 
-def test_great_wall_handling_column_is_valid_other_fee_evidence() -> None:
+def test_golden_dragon_handling_column_is_valid_other_fee_evidence() -> None:
     parsed = PdfQuoteParser().parse(
-        DATASET / "quotes/great_wall_quote.pdf",
+        DATASET / "quotes/golden_dragon_quote.pdf",
         DocumentContext(
             task_id="TASK-FF3-HANDLING",
             task_revision=1,
-            scenario_id="MCU-FULL-FLOW-EDGE-003",
+            scenario_id="MCU-FULL-FLOW-FAULTLINE-004",
             quote_id="FF3-Q-D",
             quote_version=1,
             document_id="FF3-DOC-D-V1",
             document_version=1,
-            supplier_id="SUP-029",
+            supplier_id="SUP-027",
         ),
     )
     contexts = source_semantic_contexts(parsed)
     handling_sources = [
         source
         for source in parsed.sources
-        if source.raw_text in {"Handling", "SGD 75.00"}
+        if source.raw_text in {"Handling", "SGD 60.00"}
     ]
 
-    assert {source.raw_text for source in handling_sources} == {"Handling", "SGD 75.00"}
+    assert {source.raw_text for source in handling_sources} == {"Handling", "SGD 60.00"}
     assert all(
         has_other_fee_source_semantics(contexts[source.source_id])
         for source in handling_sources
@@ -311,7 +311,7 @@ def test_full_flow_demo3_ambiguous_price_control_is_deterministically_conflictin
         DocumentContext(
             task_id="TASK-FF3-CONFLICT",
             task_revision=1,
-            scenario_id="MCU-FULL-FLOW-EDGE-003",
+            scenario_id="MCU-FULL-FLOW-FAULTLINE-004",
             quote_id="FF3-NC-PRICE",
             quote_version=1,
             document_id="FF3-NC-DOC-PRICE",
@@ -322,7 +322,7 @@ def test_full_flow_demo3_ambiguous_price_control_is_deterministically_conflictin
     observations = extract_document_unit_price_observations(parsed)
     selection = select_document_unit_price(parsed)
     assert {(str(item.amount), item.version_status.value) for item in observations} == {
-        ("6.70", "CURRENT"), ("6.95", "CURRENT")
+        ("8.07", "CURRENT"), ("8.71", "CURRENT")
     }
     assert selection.selected_value is None
     assert selection.conflict_code == "MULTIPLE_CURRENT_UNIT_PRICES"
@@ -338,15 +338,15 @@ def test_full_flow_demo3_negative_csv_controls_are_isolated() -> None:
     )
     wrong_part = _read_single_row(DATASET / "negative_controls/wrong_part_quote.csv")
     assert business_days["day_basis"] == "BUSINESS_DAYS"
-    assert wrong_part["manufacturer_part_number"] == "QW-MCU8-DEMO"
+    assert wrong_part["manufacturer_part_number"] == "QW-MCU9-DEMO-ALT"
 
 
 def test_full_flow_demo3_update_and_prompt_catalog_contracts() -> None:
-    revised = _read_single_row(DATASET / "staged_updates/sup-023_quote_revision_2.csv")
-    assert revised["supplier_id"] == "SUP-023"
+    revised = _read_single_row(DATASET / "staged_updates/sup-032_quote_revision_2.csv")
+    assert revised["supplier_id"] == "SUP-032"
     assert revised["quote_version"] == "2"
-    assert revised["unit_price"] == "7.05"
-    assert revised["lead_time_days"] == "4"
+    assert revised["unit_price"] == "7.95"
+    assert revised["lead_time_days"] == "6"
 
     catalog = json.loads(
         (DATASET / "conversation_prompts/prompts.json").read_text(encoding="utf-8")

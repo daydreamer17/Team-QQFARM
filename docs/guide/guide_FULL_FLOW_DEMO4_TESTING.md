@@ -1,3 +1,5 @@
+> **当前范围（2026-09-24）**：平台支持结构化准入与 RoHS 检查，但 demo4 暂不提供对应样例；请使用 `full_flow_demo3` 验证该流程。
+
 # full_flow_demo4：MCU 取舍与审核流程测试
 
 本包沿用 `QQ Demo Components / QW-MCU9-DEMO / QFN-32 / R1 / NEW`，不扩展器件选型能力。所有报价、身份和历史数据均为合成演示数据。

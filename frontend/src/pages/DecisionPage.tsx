@@ -118,7 +118,7 @@ export function DecisionPage() {
           {policyBlocked && (
             <div className="run-notice decision-blocker-link">
               制度检索需要人工复核。
-              <Link to={`/tasks/${taskId}/compliance`}>进入合规页面处理</Link>
+              <Link to={`/tasks/${taskId}/compliance`}>查看制度依据</Link>
             </div>
           )}
           <RunPanel task={data} onRefresh={() => void task.refetch()} />

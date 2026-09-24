@@ -375,7 +375,6 @@ describe('frontend and backend version consistency', () => {
 
     expect(await screen.findByRole('heading', { name: 'FROZEN-PART' })).toBeInTheDocument()
     expect(screen.getByText('历史结果第 5 版')).toBeInTheDocument()
-    expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'CURRENT-PART' })).not.toBeInTheDocument()
     expect(screen.getByText(/这是历史第五版的回答/)).toBeInTheDocument()
     expect(screen.queryByText('这是当前第六版的回答。')).not.toBeInTheDocument()
@@ -508,6 +507,13 @@ describe('frontend and backend version consistency', () => {
       graph_run_id: 'run-current',
       is_current: true,
     })
+    vi.spyOn(api, 'getSupplierComplianceEvidence').mockResolvedValue({
+      schema_version: 'supplier-compliance-evidence/1.0.0',
+      task_id: 'task-1',
+      task_revision: 6,
+      result_id: 'result-current',
+      evidence: [],
+    })
     vi.spyOn(api, 'getQuoteFields').mockResolvedValue({
       quote_id: 'quote-1', review_status: 'REVIEW_REQUIRED', review_findings: [], fields: [],
     })
@@ -558,8 +564,37 @@ describe('frontend and backend version consistency', () => {
     renderRoute('/tasks/task-1/compliance', '/tasks/:taskId/compliance', <CompliancePage />)
 
     expect(await screen.findByRole('heading', { name: '当前版本没有有效决策结果' })).toBeInTheDocument()
-    expect(screen.getByText(/历史结果不会作为当前制度结论显示/)).toBeInTheDocument()
+    expect(screen.getByText(/历史结果不会作为当前制度依据显示/)).toBeInTheDocument()
     expect(history).not.toHaveBeenCalled()
+  })
+
+  test('compliance page keeps supplier requirement status without supplier evidence conclusions', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
+      policy_binding: {
+        policy_set_version: '2026.09.1',
+        policy_index_version: 'index-1',
+        category: 'Electronics',
+        region: 'SG',
+      },
+    }))
+    vi.spyOn(api, 'getResult').mockResolvedValue({
+      ...makeHistoricalResult(),
+      result_id: 'result-current',
+      task_revision: 6,
+      graph_run_id: 'run-current',
+      is_current: true,
+    })
+
+    renderRoute('/tasks/task-1/compliance', '/tasks/:taskId/compliance', <CompliancePage />)
+
+    expect(await screen.findByText('Supplier One')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '逐供应商采购要求检查' })).toBeInTheDocument()
+    expect(screen.getByText('第 1 版报价')).toBeInTheDocument()
+    expect(screen.getByText('等待确认')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '供应商准入与 RoHS 数据' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '执行制度检查' })).toBeInTheDocument()
+    expect(screen.queryByText('制度结论')).not.toBeInTheDocument()
+    expect(screen.queryByText('缺少供应商证明')).not.toBeInTheDocument()
   })
 
   test('historical summary renders its frozen requirement instead of the current task', async () => {

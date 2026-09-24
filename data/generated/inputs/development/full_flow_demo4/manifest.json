@@ -118,8 +118,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "6e2ff41fe302288de532d0cb43f6979bb1be22ac908360f4c16aced50ae8519b",
-      "size_bytes": 1971
+      "sha256": "0abb92c222845eb38323027835be1a288bffa065f2cd37559db7c5a57db6cbd1",
+      "size_bytes": 2158
     },
     {
       "path": "policy/electronics_sg/policy.txt",

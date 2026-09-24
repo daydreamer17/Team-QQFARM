@@ -172,6 +172,94 @@ def test_create_upload_and_read_task_without_exposing_storage_path(
     assert "storage_path" not in supplier_information.text
 
 
+def test_supplier_compliance_evidence_api_checks_registry_and_rohs(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, service = client
+    task = service.create_task(
+        ProcurementRequirement.model_validate(REQUIREMENT),
+        idempotency_key="create-compliance-task",
+        policy_set_version="2026.09.1",
+        policy_index_version="index-1",
+        policy_category="Electronics",
+        policy_region="SG",
+    )
+    quote = service.upload_quote(
+        task["task_id"], expected_task_revision=1, supplier_id="SUP-1",
+        original_filename="supplier.csv", media_type="text/csv", content=b"quote",
+        idempotency_key="upload-compliance-quote",
+    )
+    snapshot = service.append_artifact(
+        task_id=task["task_id"], task_revision=2, artifact_type="INPUT_SNAPSHOT",
+        payload={
+            "requirement": REQUIREMENT,
+            "evaluated_at": "2026-09-24T00:00:00+00:00",
+            "documents": [{"quote_id": quote["quote_id"], "supplier_id": "SUP-1"}],
+        },
+    )
+    result = service.append_artifact(
+        task_id=task["task_id"], task_revision=2, artifact_type="COMPARISON_RESULT",
+        parent_artifact_id=snapshot["artifact_id"],
+        payload={
+            "evaluated_at": "2026-09-24T00:00:00+00:00",
+            "supplier_results": [{
+                "quote_id": quote["quote_id"], "quote_version": 1,
+                "supplier_name": "Supplier One", "status": "FEASIBLE",
+            }],
+        },
+    )
+    for code in ("APPROVED_SUPPLIER", "ROHS_COMPLIANCE"):
+        service.append_artifact(
+            task_id=task["task_id"], task_revision=2,
+            artifact_type="POLICY_RETRIEVAL_RESULT", parent_artifact_id=result["artifact_id"],
+            payload={
+                "retrieval_id": f"ret-{code}", "status": "OK",
+                "covered_control_codes": [code], "missing_control_codes": [],
+                "citations": [{"citation_id": f"cit-{code}", "control_code": code}],
+            },
+        )
+    with service.session_factory.begin() as session:
+        stored_task = session.get(Task, task["task_id"])
+        assert stored_task is not None
+        stored_task.current_result_id = result["artifact_id"]
+
+    response = http.post(
+        f"/api/v1/tasks/{task['task_id']}/supplier-compliance/checks",
+        headers={"Idempotency-Key": "check-compliance-1"},
+        json={
+            "expected_task_revision": 2,
+            "result_id": result["artifact_id"],
+            "evidence": [{
+                "supplier_id": "SUP-1", "supplier_name": "Supplier One",
+                "approved_supplier": True, "supplier_registry_valid_until": "2027-12-31",
+                "rohs_certificate_number": "ROHS-1",
+                "rohs_part_number": "QW-MCU9-DEMO", "rohs_revision": "R1",
+                "rohs_valid_until": "2027-12-31",
+            }],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["policy_compliance"]["counts"]["COMPLIANT"] == 1
+    with service.session_factory() as session:
+        evidence_artifact = session.get(
+            WorkflowArtifact, response.json()["evidence_artifact_id"]
+        )
+        assert evidence_artifact is not None
+        assert evidence_artifact.schema_version == "supplier-evidence/1.0.0"
+        assert len(evidence_artifact.schema_version) <= WorkflowArtifact.__table__.c.schema_version.type.length
+    loaded = http.get(
+        f"/api/v1/tasks/{task['task_id']}/supplier-compliance/evidence",
+        params={"result_id": result["artifact_id"]},
+    )
+    assert loaded.status_code == 200
+    assert loaded.json()["evidence"][0]["rohs_certificate_number"] == "ROHS-1"
+    refreshed = http.get(
+        f"/api/v1/tasks/{task['task_id']}/results/{result['artifact_id']}"
+    )
+    assert refreshed.json()["policy_compliance"]["schema_version"] == "policy-compliance/2.0.0"
+
+
 def test_supplier_history_binding_is_frozen_and_refresh_is_explicit(tmp_path: Path) -> None:
     history_root = tmp_path / "history"
     source = Path(__file__).resolve().parents[2] / "data/purchase_orders.csv"

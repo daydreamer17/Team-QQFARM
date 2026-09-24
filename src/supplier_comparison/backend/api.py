@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
@@ -110,6 +111,39 @@ class RetrySummaryRequest(ApiModel):
 
 class StartRunRequest(ApiModel):
     expected_task_revision: int = Field(ge=1)
+
+
+class SupplierComplianceEvidenceInput(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    supplier_id: StrictStr = Field(min_length=1, max_length=128)
+    supplier_name: StrictStr | None = Field(default=None, max_length=255)
+    approved_supplier: StrictBool
+    supplier_registry_valid_until: date | None = None
+    rohs_certificate_number: StrictStr | None = Field(default=None, max_length=255)
+    rohs_part_number: StrictStr | None = Field(default=None, max_length=255)
+    rohs_revision: StrictStr | None = Field(default=None, max_length=128)
+    rohs_valid_until: date | None = None
+
+    @model_validator(mode="after")
+    def complete_evidence(self):
+        if self.approved_supplier and self.supplier_registry_valid_until is None:
+            raise ValueError("approved suppliers require supplier_registry_valid_until")
+        rohs_values = (
+            self.rohs_certificate_number,
+            self.rohs_part_number,
+            self.rohs_revision,
+            self.rohs_valid_until,
+        )
+        if any(value is not None for value in rohs_values) and not all(value is not None for value in rohs_values):
+            raise ValueError("RoHS evidence requires certificate number, part number, revision, and valid-until date")
+        return self
+
+
+class SupplierComplianceCheckRequest(ApiModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_task_revision: int = Field(ge=1)
+    result_id: StrictStr = Field(min_length=1, max_length=64)
+    evidence: list[SupplierComplianceEvidenceInput] = Field(min_length=1, max_length=100)
 
 
 class RefreshSupplierHistoryRequest(ApiModel):
@@ -1166,6 +1200,24 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/results/{result_id}")
     def get_result(task_id: str, result_id: str):
         return service.get_result(task_id, result_id)
+
+    @app.get("/api/v1/tasks/{task_id}/supplier-compliance/evidence")
+    def get_supplier_compliance_evidence(task_id: str, result_id: str | None = None):
+        return service.get_supplier_compliance_evidence(task_id, result_id=result_id)
+
+    @app.post("/api/v1/tasks/{task_id}/supplier-compliance/checks")
+    def check_supplier_compliance(
+        task_id: str,
+        body: SupplierComplianceCheckRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.check_supplier_compliance(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            result_id=body.result_id,
+            evidence=[item.model_dump(mode="json") for item in body.evidence],
+            idempotency_key=idempotency_key,
+        )
 
     @app.get("/api/v1/tasks/{task_id}/suppliers")
     def get_supplier_information(task_id: str, result_id: str | None = None):

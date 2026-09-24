@@ -1,3 +1,5 @@
+> **当前范围（2026-09-24）**：当前工作流支持结构化供应商准入与 RoHS 数据录入，并结合制度条款检索结果输出检查结论；真实性验证和金额审批记录仍不实现。
+
 # Supplier Comparison 项目 Workflow
 
 > 文档状态：Final，按 2026-09-18 `main` 分支更新。本文描述当前已实现的后端流程，并把尚未实现的功能明确标为后续工作。业务边界以 [ARCHITECTURE.md](ARCHITECTURE.md) 为准，开发安排见 [WEEK2_PLAN.md](WEEK2_PLAN.md)。

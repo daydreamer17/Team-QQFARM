@@ -67,13 +67,12 @@ function citationTitle(id: string) {
   if (id.startsWith('RESULT:')) return '当前决策结果'
   if (id.startsWith('QUOTE:')) return '供应商报价'
   if (id.startsWith('POLICY:')) return '制度证据'
-  if (id.startsWith('COMPLIANCE:')) return '合规检查状态'
   if (id.startsWith('INVESTIGATION:')) return 'Agent 调查记录'
   return '来源证据'
 }
 
 function citationPresentation(content: string, referenceIds: string[]) {
-  const ids = [...new Set(referenceIds)]
+  const ids = [...new Set(referenceIds.filter((id) => !id.startsWith('COMPLIANCE:')))]
   const citations: DisplayCitation[] = ids.map((id, index) => ({ id, number: index + 1 }))
   let displayContent = content
   const replacements = citations.flatMap((citation) => {
@@ -850,14 +849,6 @@ export function DecisionScenarioWorkspace({
                   <p>预算：{viewCurrency} {viewRequirement.budget_amount}</p>
                   <p>最晚到货日：{viewRequirement.delivery_deadline}</p>
                   <p>主排序：{rankingCriterionLabel(viewDecisionProfile?.preferences.primary_criterion ?? viewRequirement.ranking_preference)}</p>
-                </section>
-              ) : selectedCitationId.startsWith('COMPLIANCE:') ? (
-                <section className="drawer-fields">
-                  <h3>合规检查状态</h3>
-                  <p>{result.policy_compliance.disposition}</p>
-                  <p>{result.policy_compliance.recommendation_scope === 'COMPLIANCE_VERIFIED'
-                    ? '供应商合规状态已核验。'
-                    : '当前结果仅用于采购比较，仍需人工核验供应商合规。'}</p>
                 </section>
               ) : (
                 <section className="drawer-fields">

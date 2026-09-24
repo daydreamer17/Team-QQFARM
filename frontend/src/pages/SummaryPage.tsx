@@ -164,7 +164,6 @@ export function SummaryPage() {
   const referenceCount = new Set(
     narrative?.sections.flatMap((section) => section.reference_ids) ?? [],
   ).size
-  const policyCounts = result.data?.policy_compliance.counts
   const isExportable = current?.status === 'SUCCEEDED' && Boolean(narrative && reportRequirement)
   const generatedAt = current ? displayDate(current.updated_at) : '—'
 
@@ -361,11 +360,6 @@ export function SummaryPage() {
                   <p>{narrativeText(section.text)}</p>
                 </div>
               ))}
-              <div className="summary-policy-status">
-                <span>已确认合规 <strong>{policyCounts?.COMPLIANT ?? 0}</strong></span>
-                <span>需要人工确认 <strong>{policyCounts?.REVIEW_REQUIRED ?? feasibleCount}</strong></span>
-                <span>未进入评估 <strong>{policyCounts?.NOT_EVALUATED ?? infeasibleCount}</strong></span>
-              </div>
             </ReportSection>
 
             <ReportSection number="06" title="建议与下一步" id="summary-next">

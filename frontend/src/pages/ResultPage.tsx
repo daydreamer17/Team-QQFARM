@@ -318,7 +318,6 @@ export function ResultPage() {
     : excludedSupplierIds.length
   const currency = frozenRequirement?.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
-  const policyReviewCount = resultQuery.data.policy_compliance.counts.REVIEW_REQUIRED ?? 0
   const hasPolicyBinding = Boolean(
     resultQuery.data.input_snapshot?.policy_set_version
     ?? (resultQuery.data.is_current ? task?.policy_binding?.policy_set_version : null),
@@ -395,10 +394,6 @@ export function ResultPage() {
 
       {!resultQuery.data.is_current && (
         <div className="run-notice">这是历史结果，不代表任务当前版本。</div>
-      )}
-
-      {resultQuery.data.policy_compliance.recommendation_scope !== 'COMPLIANCE_VERIFIED' && (
-        <div className="run-notice">该结果仅用于采购比较；供应商合规仍需单独核验。</div>
       )}
 
       {reanalysis.isError && (
@@ -490,7 +485,7 @@ export function ResultPage() {
               {hasPolicyBinding ? (
                 <article>
                   <div><strong>制度检查</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
-                  <p>{policyState}{policyReviewCount > 0 ? `；${policyReviewCount} 家供应商仍需人工核验。` : '。'}</p>
+                  <p>{policyState}。</p>
                   {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
                 </article>
               ) : (

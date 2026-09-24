@@ -6425,6 +6425,88 @@ body {
   border-radius: 12px;
   background: var(--surface);
 }
+.supplier-policy-row.supplier-requirement-row {
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 1fr);
+}
+.supplier-policy-row.supplier-requirement-row.has-compliance-result {
+  grid-template-columns: minmax(200px, 0.8fr) minmax(190px, 0.7fr) minmax(320px, 1.4fr);
+}
+.compliance-evidence-editor {
+  display: grid;
+  gap: 16px;
+}
+.compliance-evidence-list {
+  display: grid;
+  gap: 12px;
+}
+.compliance-evidence-form {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.compliance-evidence-form header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+.compliance-evidence-form header span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.compliance-evidence-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 14px 15px;
+}
+.compliance-evidence-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.compliance-evidence-fields label.check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.compliance-evidence-fields input:not([type='checkbox']) {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+.compliance-evidence-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.compliance-import-button {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.compliance-import-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+.form-success {
+  margin: 0;
+  color: var(--success);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
 .supplier-policy-row > div {
   min-width: 0;
   padding: 15px 17px;
@@ -6634,6 +6716,11 @@ body {
   .gap-metrics div:nth-child(-n + 2),
   .summary-meta-strip div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
   .supplier-policy-row {
+    grid-template-columns: 1fr;
+  }
+  .supplier-policy-row.supplier-requirement-row,
+  .supplier-policy-row.supplier-requirement-row.has-compliance-result,
+  .compliance-evidence-fields {
     grid-template-columns: 1fr;
   }
   .supplier-policy-row > div {

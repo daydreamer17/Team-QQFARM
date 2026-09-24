@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 import shutil
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO, Callable
@@ -114,6 +114,10 @@ HISTORY_RANKING_CRITERIA = {
     RankingCriterion.HIGHEST_HISTORICAL_ON_TIME_RATE,
     RankingCriterion.LOWEST_HISTORICAL_REJECTED_LINE_RATE,
 }
+
+SUPPLIER_COMPLIANCE_EVIDENCE_SCHEMA = "supplier-compliance-evidence/1.0.0"
+# WorkflowArtifact.schema_version is VARCHAR(32); keep the storage envelope version compact.
+SUPPLIER_COMPLIANCE_EVIDENCE_ARTIFACT_SCHEMA = "supplier-evidence/1.0.0"
 
 
 def _requires_history(requirement: ProcurementRequirement) -> bool:
@@ -4397,6 +4401,151 @@ class BackendService:
                 raise NotFoundError("result_not_found", "Result was not found.")
             return self._comparison_result_response(session, task, artifact)
 
+    def get_supplier_compliance_evidence(
+        self, task_id: str, *, result_id: str | None = None
+    ) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            selected_result_id = result_id or task.current_result_id
+            if selected_result_id is None:
+                return {
+                    "schema_version": SUPPLIER_COMPLIANCE_EVIDENCE_SCHEMA,
+                    "task_id": task_id,
+                    "task_revision": task.current_revision,
+                    "result_id": None,
+                    "evidence": [],
+                }
+            result = session.get(WorkflowArtifact, selected_result_id)
+            if (
+                result is None
+                or result.task_id != task_id
+                or result.artifact_type != "COMPARISON_RESULT"
+            ):
+                raise NotFoundError("result_not_found", "Result was not found.")
+            artifact = session.scalar(
+                select(WorkflowArtifact).where(
+                    WorkflowArtifact.task_id == task_id,
+                    WorkflowArtifact.parent_artifact_id == selected_result_id,
+                    WorkflowArtifact.artifact_type == "SUPPLIER_COMPLIANCE_EVIDENCE",
+                ).order_by(WorkflowArtifact.created_at.desc()).limit(1)
+            )
+            if artifact is None:
+                return {
+                    "schema_version": SUPPLIER_COMPLIANCE_EVIDENCE_SCHEMA,
+                    "task_id": task_id,
+                    "task_revision": result.task_revision,
+                    "result_id": selected_result_id,
+                    "evidence": [],
+                }
+            return dict(artifact.payload) | {"evidence_artifact_id": artifact.artifact_id}
+
+    def check_supplier_compliance(
+        self,
+        task_id: str,
+        *,
+        expected_task_revision: int,
+        result_id: str,
+        evidence: list[dict[str, Any]],
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        request = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "result_id": result_id,
+            "evidence": evidence,
+        }
+        request_sha = content_hash(request)
+        operation = f"check_supplier_compliance:{task_id}:{result_id}"
+        with self.session_factory.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if repeated is not None:
+                return repeated
+            task = session.scalar(select(Task).where(Task.task_id == task_id).with_for_update())
+            if task is None or task.owner_id != self.actor_id:
+                raise NotFoundError("task_not_found", "Task was not found.")
+            self._require_revision(task, expected_task_revision)
+            if task.current_result_id != result_id:
+                raise ConflictError(
+                    "result_stale", "Supplier compliance can only be checked against the current result."
+                )
+            result = session.get(WorkflowArtifact, result_id)
+            if result is None or result.task_id != task_id or result.artifact_type != "COMPARISON_RESULT":
+                raise NotFoundError("result_not_found", "Result was not found.")
+            snapshot = session.get(WorkflowArtifact, result.parent_artifact_id) if result.parent_artifact_id else None
+            if snapshot is None or snapshot.artifact_type != "INPUT_SNAPSHOT":
+                raise ConflictError("result_snapshot_missing", "The result input snapshot is unavailable.")
+
+            documents = {
+                row.get("quote_id"): row for row in snapshot.payload.get("documents", [])
+                if row.get("quote_id") and row.get("supplier_id")
+            }
+            expected_suppliers = {
+                str(row["supplier_id"]) for row in documents.values()
+            }
+            supplied_ids = [str(row.get("supplier_id", "")).strip() for row in evidence]
+            if len(supplied_ids) != len(set(supplied_ids)):
+                raise BackendError("supplier_evidence_duplicate", "Supplier evidence contains duplicate supplier IDs.")
+            unknown = sorted(set(supplied_ids) - expected_suppliers)
+            if unknown:
+                raise BackendError(
+                    "supplier_evidence_out_of_scope",
+                    "Supplier evidence contains suppliers outside the current result.",
+                    supplier_ids=unknown,
+                )
+
+            evidence_payload = {
+                "schema_version": SUPPLIER_COMPLIANCE_EVIDENCE_SCHEMA,
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "result_id": result_id,
+                "evidence": evidence,
+            }
+            evidence_artifact = WorkflowArtifact(
+                artifact_id=new_id("artifact"), task_id=task_id,
+                task_revision=task.current_revision,
+                artifact_type="SUPPLIER_COMPLIANCE_EVIDENCE",
+                schema_version=SUPPLIER_COMPLIANCE_EVIDENCE_ARTIFACT_SCHEMA,
+                parent_artifact_id=result_id, graph_run_id=result.graph_run_id,
+                payload=evidence_payload, content_sha256=content_hash(evidence_payload),
+            )
+            session.add(evidence_artifact)
+
+            retrievals = self._policy_retrieval_payloads(session, result_id)
+            compliance = self._evaluate_supplier_compliance(
+                comparison=dict(result.payload),
+                snapshot=dict(snapshot.payload),
+                retrievals=retrievals,
+                evidence=evidence,
+            )
+            compliance["evidence_artifact_id"] = evidence_artifact.artifact_id
+            check_artifact = WorkflowArtifact(
+                artifact_id=new_id("artifact"), task_id=task_id,
+                task_revision=task.current_revision,
+                artifact_type="SUPPLIER_COMPLIANCE_CHECK",
+                schema_version="policy-compliance/2.0.0",
+                parent_artifact_id=result_id, graph_run_id=result.graph_run_id,
+                payload=compliance, content_sha256=content_hash(compliance),
+            )
+            session.add(check_artifact)
+            response = {
+                "task_id": task_id,
+                "task_revision": task.current_revision,
+                "result_id": result_id,
+                "evidence_artifact_id": evidence_artifact.artifact_id,
+                "check_artifact_id": check_artifact.artifact_id,
+                "policy_compliance": compliance,
+            }
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=200, response=response,
+            )
+            return response
+
     def supplier_information(
         self, task_id: str, *, result_id: str | None = None
     ) -> dict[str, Any]:
@@ -4678,6 +4827,13 @@ class BackendService:
             )
         } if snapshot else None
         retrievals = self._policy_retrieval_payloads(session, artifact.artifact_id)
+        compliance_artifact = session.scalar(
+            select(WorkflowArtifact).where(
+                WorkflowArtifact.task_id == task.task_id,
+                WorkflowArtifact.parent_artifact_id == artifact.artifact_id,
+                WorkflowArtifact.artifact_type == "SUPPLIER_COMPLIANCE_CHECK",
+            ).order_by(WorkflowArtifact.created_at.desc()).limit(1)
+        )
         return {
             "result_id": artifact.artifact_id,
             "snapshot_id": snapshot.artifact_id if snapshot else None,
@@ -4688,7 +4844,149 @@ class BackendService:
             "result": result,
             "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
             "policy_retrievals": retrievals,
-            "policy_compliance": self._policy_compliance_payload(result, retrievals),
+            "policy_compliance": (
+                dict(compliance_artifact.payload)
+                if compliance_artifact is not None
+                else self._policy_compliance_payload(result, retrievals)
+            ),
+        }
+
+    @staticmethod
+    def _evaluate_supplier_compliance(
+        *,
+        comparison: dict[str, Any],
+        snapshot: dict[str, Any],
+        retrievals: list[dict[str, Any]],
+        evidence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        requirement = snapshot.get("requirement") or {}
+        evaluated_raw = comparison.get("evaluated_at") or snapshot.get("evaluated_at")
+        try:
+            evaluated_on = datetime.fromisoformat(str(evaluated_raw).replace("Z", "+00:00")).date()
+        except (TypeError, ValueError):
+            evaluated_on = datetime.now(timezone.utc).date()
+        documents = {
+            row.get("quote_id"): row for row in snapshot.get("documents", [])
+            if row.get("quote_id")
+        }
+        evidence_by_supplier = {
+            str(row.get("supplier_id")): row for row in evidence if row.get("supplier_id")
+        }
+        retrieval_by_control: dict[str, dict[str, Any]] = {}
+        for retrieval in retrievals:
+            codes = {
+                *retrieval.get("covered_control_codes", []),
+                *retrieval.get("missing_control_codes", []),
+                *(citation.get("control_code") for citation in retrieval.get("citations", [])),
+            }
+            for code in codes:
+                retrieval_by_control[str(code)] = retrieval
+
+        def citation_ids(control_code: str) -> list[str]:
+            retrieval = retrieval_by_control.get(control_code) or {}
+            return [
+                str(item["citation_id"])
+                for item in retrieval.get("citations", [])
+                if item.get("control_code") == control_code and item.get("citation_id")
+            ]
+
+        def policy_ready(control_code: str) -> bool:
+            retrieval = retrieval_by_control.get(control_code)
+            return bool(retrieval and retrieval.get("status") == "OK")
+
+        assessments: list[dict[str, Any]] = []
+        for supplier in comparison.get("supplier_results", []):
+            quote_id = supplier.get("quote_id")
+            supplier_id = (documents.get(quote_id) or {}).get("supplier_id")
+            record = evidence_by_supplier.get(str(supplier_id))
+            checks: list[dict[str, Any]] = []
+
+            if supplier.get("status") != "FEASIBLE":
+                for control_code in ("APPROVED_SUPPLIER", "ROHS_COMPLIANCE"):
+                    checks.append({
+                        "control_code": control_code,
+                        "status": "NOT_EVALUATED",
+                        "reason_code": "QUOTE_NOT_FEASIBLE",
+                        "message": "该报价未通过采购要求，不进入供应商制度检查。",
+                        "citation_ids": citation_ids(control_code),
+                    })
+                overall_status = "NOT_EVALUATED"
+            else:
+                if not policy_ready("APPROVED_SUPPLIER"):
+                    approved_check = ("REVIEW_REQUIRED", "POLICY_EVIDENCE_INCOMPLETE", "供应商准入制度依据缺失或存在冲突。")
+                elif record is None:
+                    approved_check = ("REVIEW_REQUIRED", "SUPPLIER_REGISTRY_EVIDENCE_MISSING", "尚未录入该供应商的准入名单记录。")
+                elif not record.get("approved_supplier"):
+                    approved_check = ("FAIL", "SUPPLIER_NOT_APPROVED", "供应商不在当前有效准入名单中。")
+                else:
+                    try:
+                        registry_until = date.fromisoformat(str(record.get("supplier_registry_valid_until")))
+                    except (TypeError, ValueError):
+                        registry_until = None
+                    approved_check = (
+                        ("PASS", "SUPPLIER_APPROVED", "供应商准入记录有效。")
+                        if registry_until is not None and registry_until >= evaluated_on
+                        else ("FAIL", "SUPPLIER_REGISTRY_EXPIRED", "供应商准入记录已过期或缺少有效期。")
+                    )
+                checks.append({
+                    "control_code": "APPROVED_SUPPLIER", "status": approved_check[0],
+                    "reason_code": approved_check[1], "message": approved_check[2],
+                    "citation_ids": citation_ids("APPROVED_SUPPLIER"),
+                })
+
+                if not policy_ready("ROHS_COMPLIANCE"):
+                    rohs_check = ("REVIEW_REQUIRED", "POLICY_EVIDENCE_INCOMPLETE", "RoHS 制度依据缺失或存在冲突。")
+                elif record is None or not record.get("rohs_certificate_number"):
+                    rohs_check = ("REVIEW_REQUIRED", "ROHS_EVIDENCE_MISSING", "尚未录入该供应商的 RoHS 证书。")
+                elif record.get("rohs_part_number") != requirement.get("manufacturer_part_number"):
+                    rohs_check = ("FAIL", "ROHS_PART_MISMATCH", "RoHS 证书料号与采购需求不一致。")
+                elif requirement.get("revision") and record.get("rohs_revision") != requirement.get("revision"):
+                    rohs_check = ("FAIL", "ROHS_REVISION_MISMATCH", "RoHS 证书版本与采购需求不一致。")
+                else:
+                    try:
+                        rohs_until = date.fromisoformat(str(record.get("rohs_valid_until")))
+                    except (TypeError, ValueError):
+                        rohs_until = None
+                    rohs_check = (
+                        ("PASS", "ROHS_CERTIFICATE_VALID", "RoHS 证书与供应商、料号和版本匹配且在有效期内。")
+                        if rohs_until is not None and rohs_until >= evaluated_on
+                        else ("FAIL", "ROHS_CERTIFICATE_EXPIRED", "RoHS 证书已过期或缺少有效期。")
+                    )
+                checks.append({
+                    "control_code": "ROHS_COMPLIANCE", "status": rohs_check[0],
+                    "reason_code": rohs_check[1], "message": rohs_check[2],
+                    "citation_ids": citation_ids("ROHS_COMPLIANCE"),
+                })
+                overall_status = (
+                    "NON_COMPLIANT" if any(item["status"] == "FAIL" for item in checks)
+                    else "COMPLIANT" if all(item["status"] == "PASS" for item in checks)
+                    else "REVIEW_REQUIRED"
+                )
+
+            assessments.append({
+                "quote_id": quote_id,
+                "quote_version": supplier.get("quote_version"),
+                "supplier_id": supplier_id,
+                "supplier_name": supplier.get("supplier_name"),
+                "status": overall_status,
+                "checks": checks,
+            })
+
+        counts = {
+            status: sum(item["status"] == status for item in assessments)
+            for status in ("COMPLIANT", "NON_COMPLIANT", "REVIEW_REQUIRED", "NOT_EVALUATED")
+        }
+        return {
+            "schema_version": "policy-compliance/2.0.0",
+            "evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "disposition": (
+                "COMPLIANT_SUPPLIERS_AVAILABLE" if counts["COMPLIANT"]
+                else "NO_CONFIRMED_COMPLIANT_SUPPLIER" if assessments else "NO_SUPPLIERS"
+            ),
+            "recommendation_scope": "COMPLIANCE_VERIFIED" if counts["COMPLIANT"] else "PROCUREMENT_COMPARISON_ONLY",
+            "requires_human_review": counts["REVIEW_REQUIRED"] > 0,
+            "counts": counts,
+            "assessments": assessments,
         }
 
     @staticmethod
