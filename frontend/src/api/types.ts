@@ -33,6 +33,7 @@ export interface ProcurementRequirement {
 
 export interface CreateTaskRequest {
   requirement: ProcurementRequirement
+  task_name: string
   scenario_id: string | null
   policy_binding?: PolicyBinding | null
   requirement_draft_id?: string
@@ -41,6 +42,7 @@ export interface CreateTaskRequest {
 
 export interface TaskSummary {
   task_id: string
+  task_name: string
   task_revision: number
   status: string
   policy_binding?: PolicyBinding | null

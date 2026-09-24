@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import shutil
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -12,6 +13,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from supplier_comparison.rules import (
@@ -90,6 +92,7 @@ from .quote_review_schema import (
     build_quote_field_schema,
 )
 from .supplier_history import history_inputs
+from .summary_exports import build_summary_export
 from supplier_comparison.rag.clients import ModelClientError
 from supplier_comparison.supplier_history import (
     SupplierHistoryLoader,
@@ -99,6 +102,25 @@ from supplier_comparison.supplier_history import (
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex}"
+
+
+def _canonical_requirement_units(
+    requirement: ProcurementRequirement,
+) -> ProcurementRequirement:
+    """Keep the internal calculation unit aligned with the user-facing quantity unit."""
+    quantity_unit = requirement.quantity_unit.strip()
+    if requirement.base_unit == quantity_unit:
+        return requirement
+    return requirement.model_copy(update={"base_unit": quantity_unit})
+
+
+def _normalize_task_name(value: str) -> tuple[str, str]:
+    display = " ".join(unicodedata.normalize("NFKC", value).split())
+    if not display:
+        raise BackendError("task_name_invalid", "任务名称不能为空。")
+    if len(display) > 128:
+        raise BackendError("task_name_invalid", "任务名称不能超过 128 个字符。")
+    return display, display.casefold()
 
 
 def canonical_json(value: Any) -> str:
@@ -536,6 +558,7 @@ class BackendService:
         requirement: ProcurementRequirement,
         *,
         idempotency_key: str,
+        task_name: str | None = None,
         scenario_id: str | None = None,
         policy_set_version: str | None = None,
         policy_index_version: str | None = None,
@@ -544,6 +567,10 @@ class BackendService:
         requirement_draft_id: str | None = None,
         expected_requirement_draft_revision: int | None = None,
     ) -> dict[str, Any]:
+        requirement = _canonical_requirement_units(requirement)
+        normalized_task_name = (
+            _normalize_task_name(task_name) if task_name is not None else None
+        )
         policy_binding = (
             policy_set_version,
             policy_index_version,
@@ -568,6 +595,7 @@ class BackendService:
         ) = normalized_policy_binding
         request = {
             "requirement": requirement.model_dump(mode="json"),
+            "task_name": normalized_task_name[0] if normalized_task_name else None,
             "scenario_id": scenario_id,
             "policy_set_version": policy_set_version,
             "policy_index_version": policy_index_version,
@@ -609,9 +637,37 @@ class BackendService:
                         status=requirement_draft.status,
                     )
             task_id = new_id("task")
+            if normalized_task_name is None:
+                default_name = (
+                    f"{requirement.manufacturer_part_number} · "
+                    f"{datetime.now(timezone.utc).date().isoformat()}"
+                )
+                candidate_name, candidate_key = _normalize_task_name(default_name)
+                suffix = 2
+                while session.scalar(select(Task.task_id).where(
+                    Task.owner_id == self.actor_id,
+                    Task.task_name_key == candidate_key,
+                )) is not None:
+                    candidate_name, candidate_key = _normalize_task_name(
+                        f"{default_name} · {suffix:02d}"
+                    )
+                    suffix += 1
+            else:
+                candidate_name, candidate_key = normalized_task_name
+                if session.scalar(select(Task.task_id).where(
+                    Task.owner_id == self.actor_id,
+                    Task.task_name_key == candidate_key,
+                )) is not None:
+                    raise ConflictError(
+                        "task_name_conflict",
+                        "任务名称已存在，请修改后重试。",
+                        task_name=candidate_name,
+                    )
             task = Task(
                 task_id=task_id,
                 owner_id=self.actor_id,
+                task_name=candidate_name,
+                task_name_key=candidate_key,
                 scenario_id=scenario_id,
                 current_revision=1,
                 status="DRAFT",
@@ -623,7 +679,14 @@ class BackendService:
             session.add(task)
             # SQLAlchemy cannot infer object dependency ordering from scalar FK
             # values alone when no ORM relationship is assigned.
-            session.flush()
+            try:
+                session.flush()
+            except IntegrityError as exc:
+                raise ConflictError(
+                    "task_name_conflict",
+                    "任务名称已存在，请修改后重试。",
+                    task_name=candidate_name,
+                ) from exc
             session.add(
                 TaskRevision(
                     revision_id=new_id("rev"),
@@ -697,6 +760,7 @@ class BackendService:
             session.add(history_binding)
             response = {
                 "task_id": task_id,
+                "task_name": task.task_name,
                 "task_revision": 1,
                 "status": "DRAFT",
                 "policy_binding": self._policy_binding_response(task),
@@ -932,6 +996,7 @@ class BackendService:
             )
             return {
                 "task_id": task.task_id,
+                "task_name": task.task_name,
                 "scenario_id": task.scenario_id,
                 "task_revision": task.current_revision,
                 "status": task.status,
@@ -3462,6 +3527,7 @@ class BackendService:
                 items.append(
                     {
                         "task_id": task.task_id,
+                        "task_name": task.task_name,
                         "scenario_id": task.scenario_id,
                         "task_revision": task.current_revision,
                         "status": task.status,
@@ -3478,7 +3544,7 @@ class BackendService:
             term = (query or "").strip().casefold()
             if term:
                 items = [item for item in items if term in " ".join(str(item.get(key) or "") for key in (
-                    "task_id", "scenario_id", "manufacturer", "manufacturer_part_number"
+                    "task_id", "task_name", "scenario_id", "manufacturer", "manufacturer_part_number"
                 )).casefold()]
             if status:
                 items = [item for item in items if item["status"] == status]
@@ -3513,6 +3579,7 @@ class BackendService:
         environment: str | None = None,
         prompt_version: str | None = None,
     ) -> dict[str, Any]:
+        requirement = _canonical_requirement_units(requirement)
         payload = requirement.model_dump(mode="json")
         requested_binding = (
             policy_set_version,
@@ -3857,6 +3924,33 @@ class BackendService:
             if task is None or task.owner_id != self.actor_id or report is None or report.task_id != task_id:
                 raise NotFoundError("summary_not_found", "Summary was not found.")
             return self._summary_response(session, task, report)
+
+    def export_summary(
+        self, task_id: str, summary_id: str, *, export_format: str
+    ) -> dict[str, Any]:
+        with self.session_factory() as session:
+            task = session.get(Task, task_id)
+            report = session.get(SummaryReport, summary_id)
+            if (
+                task is None
+                or task.owner_id != self.actor_id
+                or report is None
+                or report.task_id != task_id
+            ):
+                raise NotFoundError("summary_not_found", "Summary was not found.")
+            if report.narrative is None or report.status not in ("SUCCEEDED", "STALE"):
+                raise ConflictError(
+                    "summary_not_exportable",
+                    "Summary must finish successfully before it can be exported.",
+                )
+            return build_summary_export(
+                facts=dict(report.facts),
+                narrative=dict(report.narrative),
+                summary_id=report.summary_id,
+                status=report.status,
+                updated_at=self._aware_datetime(report.updated_at),
+                export_format=export_format,
+            )
 
     def retry_summary(
         self, task_id: str, summary_id: str, *, expected_task_revision: int, idempotency_key: str
@@ -5433,12 +5527,16 @@ class BackendService:
             if current is None:
                 raise ConflictError("requirement_missing", "The task has no procurement requirement.")
             changes = RequirementChanges.model_validate(scenario.changes)
-            old_requirement = ProcurementRequirement.model_validate(current.payload)
+            old_requirement = _canonical_requirement_units(
+                ProcurementRequirement.model_validate(current.payload)
+            )
             requirement_values = old_requirement.model_dump(mode="python")
             for field in ("budget_amount", "delivery_deadline"):
                 if field in changes.model_fields_set:
                     requirement_values[field] = getattr(changes, field)
-            new_requirement = ProcurementRequirement.model_validate(requirement_values)
+            new_requirement = _canonical_requirement_units(
+                ProcurementRequirement.model_validate(requirement_values)
+            )
             old_preferences, old_profile = self._decision_preferences(
                 session, task, old_requirement
             )

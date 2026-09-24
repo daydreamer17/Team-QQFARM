@@ -53,7 +53,7 @@ export function SelectionGapPage() {
   }
   return (
     <div className="page-stack selection-gap-page">
-      <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.requirement.manufacturer_part_number} subtitle="查看每份报价为何入选或未入选" status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'} active="gaps" />
+      <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.task_name} subtitle="查看每份报价为何入选或未入选" status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'} active="gaps" />
       <section className="selection-gap-intro">
         <div><p className="eyebrow">选择说明</p><h2>为什么选它，其他报价差在哪里</h2><p>集中展示成本、交期和未满足条件。这里只解释当前结果，不会修改正式采购数据。</p></div>
         <div className="selection-gap-totals"><span><strong>{eligibleCount}</strong> 份符合要求</span><span><strong>{excludedCount}</strong> 份未入选</span></div>

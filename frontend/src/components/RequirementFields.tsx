@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import { RankingCriterionSelect } from './RankingCriterionSelect'
 
 export interface RequirementFormValues {
@@ -30,8 +29,6 @@ interface RequirementFieldsProps {
   onChange: <K extends RequirementField>(field: K, value: RequirementFormValues[K]) => void
   errors?: Partial<Record<RequirementField, string>>
   highlightedFields?: ReadonlySet<RequirementField>
-  materialPrefix?: ReactNode
-  deferAdvancedFields?: boolean
 }
 
 export function RequirementFields({
@@ -39,8 +36,6 @@ export function RequirementFields({
   onChange,
   errors = {},
   highlightedFields,
-  materialPrefix,
-  deferAdvancedFields = false,
 }: RequirementFieldsProps) {
   const historyApplicable = value.manufacturer_part_number.trim() === 'QW-MCU9-DEMO'
   const fieldClass = (field: RequirementField, extra = '') => [
@@ -57,7 +52,6 @@ export function RequirementFields({
     <fieldset className="form-section">
       <legend>任务与物料</legend>
       <div className="form-grid">
-        {!deferAdvancedFields && materialPrefix}
         <label className={fieldClass('manufacturer')}><span>制造商</span><input required aria-invalid={Boolean(errors.manufacturer)} value={value.manufacturer} onChange={(event) => onChange('manufacturer', event.target.value)} />{error('manufacturer')}</label>
         <label className={fieldClass('manufacturer_part_number')}><span>制造商料号</span><input required aria-invalid={Boolean(errors.manufacturer_part_number)} value={value.manufacturer_part_number} onChange={(event) => onChange('manufacturer_part_number', event.target.value)} />{error('manufacturer_part_number')}</label>
         <label className={fieldClass('package')}><span>封装</span><input required aria-invalid={Boolean(errors.package)} value={value.package} onChange={(event) => onChange('package', event.target.value)} />{error('package')}</label>
@@ -70,7 +64,6 @@ export function RequirementFields({
     <fieldset className="form-section">
       <legend>数量与预算</legend>
       <div className="form-grid">
-        {!deferAdvancedFields && <label className={fieldClass('base_unit')}><span>基础单位</span><input required aria-invalid={Boolean(errors.base_unit)} value={value.base_unit} onChange={(event) => onChange('base_unit', event.target.value)} />{error('base_unit')}</label>}
         <label className={fieldClass('required_quantity')}><span>需求数量</span><input required min="1" aria-invalid={Boolean(errors.required_quantity)} inputMode="numeric" type="number" value={value.required_quantity} onChange={(event) => onChange('required_quantity', event.target.value)} />{error('required_quantity')}</label>
         <label className={fieldClass('quantity_unit')}><span>数量单位</span><input required aria-invalid={Boolean(errors.quantity_unit)} value={value.quantity_unit} onChange={(event) => onChange('quantity_unit', event.target.value)} />{error('quantity_unit')}</label>
         <label className={fieldClass('budget_amount')}><span>预算金额</span><input required aria-invalid={Boolean(errors.budget_amount)} inputMode="decimal" value={value.budget_amount} onChange={(event) => onChange('budget_amount', event.target.value)} />{error('budget_amount') ?? <small>最多保留两位小数</small>}</label>
@@ -92,12 +85,5 @@ export function RequirementFields({
       </div>
     </fieldset>
 
-    {deferAdvancedFields && <details className="form-section requirement-advanced-settings">
-      <summary>更多设置</summary>
-      <div className="form-grid">
-        {materialPrefix}
-        <label className={fieldClass('base_unit')}><span>基础单位</span><input required aria-invalid={Boolean(errors.base_unit)} value={value.base_unit} onChange={(event) => onChange('base_unit', event.target.value)} />{error('base_unit')}</label>
-      </div>
-    </details>}
   </>
 }

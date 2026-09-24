@@ -17,7 +17,7 @@ export function InvestigationPage() {
   const data = task.data
   return (
     <div className="page-stack investigation-page">
-      <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.requirement.manufacturer_part_number} subtitle={`${investigations.data.length} 条只读调查记录`} status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'} active="investigations" />
+      <TaskWorkspaceHeader taskId={data.task_id} scenarioId={data.scenario_id} title={data.task_name} subtitle={`${investigations.data.length} 条只读调查记录`} status={data.status} revision={data.task_revision} resultId={data.current_result_id} quoteCount={data.quotes.length} summaryComplete={data.summary_completed} progress={data.progress} reviewBlocked={Boolean(data.current_issue)} policyReviewBlocked={data.current_issue?.issue_type === 'POLICY_EVIDENCE_REVIEW'} active="investigations" />
       <section className="review-workspace-lead"><div><p className="eyebrow">辅助调查</p><h2>系统调查记录</h2><p>仅用于说明系统为解决未知信息做过哪些检查；无需日常逐项操作。</p></div><span>{investigations.data.filter((item) => item.is_current).length} 条当前记录</span></section>
       {investigations.data.length === 0 && <section className="card audit-empty">当前任务没有需要额外调查的信息，这是正常状态。</section>}
       <div className="investigation-list">

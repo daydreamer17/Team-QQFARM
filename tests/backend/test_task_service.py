@@ -59,6 +59,48 @@ def test_create_task_is_idempotent_and_preserves_decimal_payload(
     assert task["requirement"]["budget_amount"] == "8000.00"
 
 
+def test_task_name_is_editable_and_unique_per_owner(service: BackendService) -> None:
+    first = service.create_task(
+        _requirement(), idempotency_key="named-1", task_name="  MCU 采购 · 2026-09-24  "
+    )
+
+    assert first["task_name"] == "MCU 采购 · 2026-09-24"
+    assert service.get_task(first["task_id"])["task_name"] == first["task_name"]
+    assert service.list_tasks()["items"][0]["task_name"] == first["task_name"]
+    with pytest.raises(ConflictError) as raised:
+        service.create_task(
+            _requirement(), idempotency_key="named-2", task_name="ｍｃｕ 采购 · 2026-09-24"
+        )
+    assert raised.value.code == "task_name_conflict"
+
+
+def test_default_task_name_gets_a_stable_suffix(service: BackendService) -> None:
+    first = service.create_task(_requirement(), idempotency_key="default-name-1")
+    second = service.create_task(_requirement(), idempotency_key="default-name-2")
+
+    assert first["task_name"].startswith("QW-MCU9-DEMO · ")
+    assert second["task_name"] == f"{first['task_name']} · 02"
+
+
+def test_base_unit_always_follows_quantity_unit(service: BackendService) -> None:
+    mismatched = _requirement().model_copy(update={"base_unit": "tray", "quantity_unit": "piece"})
+    created = service.create_task(mismatched, idempotency_key="unit-create")
+
+    task = service.get_task(created["task_id"])
+    assert task["requirement"]["base_unit"] == "piece"
+
+    updated = _requirement(quantity=1200).model_copy(
+        update={"base_unit": "piece", "quantity_unit": "unit"}
+    )
+    service.update_requirement(
+        created["task_id"],
+        updated,
+        expected_task_revision=1,
+        idempotency_key="unit-update",
+    )
+    assert service.get_task(created["task_id"])["requirement"]["base_unit"] == "unit"
+
+
 def test_reusing_idempotency_key_with_different_request_is_rejected(
     service: BackendService,
 ) -> None:

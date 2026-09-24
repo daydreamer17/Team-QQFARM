@@ -9,6 +9,7 @@ import { SupplierInfoPage } from '../src/pages/SupplierInfoPage'
 
 const task: TaskDetail = {
   task_id: 'task-1',
+  task_name: 'PREFERENCE-DEMO-001',
   task_revision: 8,
   status: 'COMPLETED',
   scenario_id: 'PREFERENCE-DEMO-001',

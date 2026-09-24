@@ -51,6 +51,7 @@ const frozenRequirement: ProcurementRequirement = {
 function makeTask(overrides: Partial<TaskDetail> = {}): TaskDetail {
   return {
     task_id: 'task-1',
+    task_name: 'FROZEN-PART',
     task_revision: 6,
     status: 'COMPLETED',
     scenario_id: 'SCENARIO-1',
@@ -881,6 +882,9 @@ describe('frontend and backend version consistency', () => {
     renderRoute('/tasks/new', '/tasks/new', <NewTaskPage />)
 
     expect(await screen.findByRole('heading', { name: '新建任务' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^任务名称/)).toHaveValue('')
+    expect(screen.queryByLabelText('基础单位')).not.toBeInTheDocument()
+    expect(screen.queryByText('更多设置')).not.toBeInTheDocument()
     for (const label of [
       '制造商', '制造商料号', '封装', '物料版本', '物料状态',
       '数量单位', '币种', '成本比较口径', '计划下单日期 可选',
@@ -899,12 +903,15 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByLabelText('要求计入其他费用')).not.toBeChecked()
 
     await userEvent.type(screen.getByLabelText('制造商'), 'Example Maker')
+    await userEvent.type(screen.getByLabelText('制造商料号'), 'EXAMPLE-PART')
+    expect((screen.getByLabelText(/^任务名称/) as HTMLInputElement).value).toMatch(/^EXAMPLE-PART · \d{4}-\d{2}-\d{2}$/)
     await userEvent.selectOptions(screen.getByLabelText('物料状态'), 'NEW')
     await userEvent.selectOptions(screen.getByLabelText('币种'), 'SGD')
     await userEvent.click(screen.getByLabelText('预算包含运费'))
     await userEvent.click(screen.getByRole('button', { name: '清空表单' }))
 
     expect(screen.getByLabelText('制造商')).toHaveValue('')
+    expect(screen.getByLabelText(/^任务名称/)).toHaveValue('')
     expect(screen.getByLabelText('物料状态')).toHaveValue('')
     expect(screen.getByLabelText('币种')).toHaveValue('')
     expect(screen.getByLabelText('预算包含运费')).not.toBeChecked()

@@ -138,6 +138,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+async function download(path: string): Promise<{ blob: Blob; filename: string }> {
+  let response: Response
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      headers: {
+        Accept: 'application/octet-stream',
+        'X-Request-ID': crypto.randomUUID(),
+      },
+    })
+  } catch {
+    throw new ApiClientError(
+      0,
+      'network_error',
+      '无法连接后端服务，请确认 Docker 和 API 服务是否正在运行。',
+    )
+  }
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? ''
+    const payload: unknown = contentType.includes('application/json')
+      ? await response.json()
+      : null
+    if (isApiErrorEnvelope(payload)) {
+      throw new ApiClientError(
+        response.status,
+        payload.error.code,
+        payload.error.message,
+        payload.error.details,
+        payload.error.request_id,
+      )
+    }
+    throw new ApiClientError(
+      response.status,
+      'unexpected_response',
+      `文件导出失败（HTTP ${response.status}）。`,
+    )
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const quotedName = disposition.match(/filename="([^"]+)"/i)?.[1]
+  let filename = quotedName ?? 'procurement-summary'
+  if (encodedName) {
+    try { filename = decodeURIComponent(encodedName) } catch { /* use fallback */ }
+  }
+  return { blob: await response.blob(), filename }
+}
+
 export function createIdempotencyKey() {
   return crypto.randomUUID()
 }
@@ -492,6 +538,8 @@ export const api = {
     }),
   getSummary: (taskId: string, summaryId: string) =>
     request<SummaryReportResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries/${encodeURIComponent(summaryId)}`),
+  exportSummary: (taskId: string, summaryId: string, format: 'md' | 'docx') =>
+    download(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries/${encodeURIComponent(summaryId)}/exports?format=${format}`),
   retrySummary: (taskId: string, summaryId: string, expectedTaskRevision: number, idempotencyKey: string) =>
     request<SummaryReportResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/summaries/${encodeURIComponent(summaryId)}/retries`, {
       method: 'POST',

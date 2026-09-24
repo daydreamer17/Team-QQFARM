@@ -127,7 +127,7 @@ export function AuditPage() {
       <TaskWorkspaceHeader
         taskId={data.task_id}
         scenarioId={data.scenario_id}
-        title={data.requirement.manufacturer_part_number}
+        title={data.task_name}
         subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} 份报价`}
         status={data.status}
         revision={data.task_revision}

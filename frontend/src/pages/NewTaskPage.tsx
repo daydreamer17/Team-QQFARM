@@ -9,7 +9,7 @@ import { backendFieldErrors } from '../lib/apiErrors'
 import { fieldLabel } from '../lib/presentation'
 
 interface FormState extends RequirementFormValues {
-  scenario_id: string
+  task_name: string
 }
 
 type FieldErrors = Partial<Record<keyof FormState, string>>
@@ -35,10 +35,11 @@ interface PersistedNewTaskState {
   selectedPolicyKey: string
   policyCategory: string
   policyRegion: string
+  taskNameEdited?: boolean
 }
 
 const initialForm: FormState = {
-  scenario_id: '',
+  task_name: '',
   manufacturer: '',
   manufacturer_part_number: '',
   package: '',
@@ -69,9 +70,13 @@ function readPersistedNewTask(): PersistedNewTaskState | null {
     if (!raw) return null
     const value = JSON.parse(raw) as Partial<PersistedNewTaskState>
     if (value.version !== 1 || !value.form || typeof value.form !== 'object') return null
+    const restoredForm = { ...initialForm, ...value.form }
+    if (!restoredForm.task_name && restoredForm.manufacturer_part_number) {
+      restoredForm.task_name = defaultTaskName(restoredForm.manufacturer_part_number)
+    }
     return {
       version: 1,
-      form: { ...initialForm, ...value.form },
+      form: restoredForm,
       requirementDraft: value.requirementDraft ?? null,
       requirementFileMetadata: value.requirementFileMetadata ?? null,
       autoFilledFields: Array.isArray(value.autoFilledFields) ? value.autoFilledFields : [],
@@ -79,6 +84,7 @@ function readPersistedNewTask(): PersistedNewTaskState | null {
       selectedPolicyKey: typeof value.selectedPolicyKey === 'string' ? value.selectedPolicyKey : '',
       policyCategory: typeof value.policyCategory === 'string' ? value.policyCategory : '',
       policyRegion: typeof value.policyRegion === 'string' ? value.policyRegion : '',
+      taskNameEdited: Boolean(value.taskNameEdited),
     }
   } catch {
     window.sessionStorage.removeItem(NEW_TASK_STORAGE_KEY)
@@ -119,11 +125,25 @@ function errorMessage(error: unknown) {
   return '任务创建失败，请稍后重试。'
 }
 
+function localDate() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function defaultTaskName(partNumber: string) {
+  const normalized = partNumber.trim()
+  return normalized ? `${normalized} · ${localDate()}` : ''
+}
+
 function validateForm(form: FormState): FieldErrors {
   const errors: FieldErrors = {}
   const requiredText: (keyof FormState)[] = [
+    'task_name',
     'manufacturer', 'manufacturer_part_number', 'package', 'revision', 'condition',
-    'base_unit', 'quantity_unit', 'currency', 'tax_mode', 'delivery_deadline',
+    'quantity_unit', 'currency', 'tax_mode', 'delivery_deadline',
     'delivery_location', 'ranking_preference',
   ]
   for (const field of requiredText) {
@@ -180,6 +200,7 @@ export function NewTaskPage() {
   const [selectedPolicyKey, setSelectedPolicyKey] = useState(() => restoredState?.selectedPolicyKey ?? '')
   const [policyCategory, setPolicyCategory] = useState(() => restoredState?.policyCategory ?? '')
   const [policyRegion, setPolicyRegion] = useState(() => restoredState?.policyRegion ?? '')
+  const [taskNameEdited, setTaskNameEdited] = useState(() => restoredState?.taskNameEdited ?? false)
 
   useEffect(() => {
     persistNewTask({
@@ -192,8 +213,9 @@ export function NewTaskPage() {
       selectedPolicyKey,
       policyCategory,
       policyRegion,
+      taskNameEdited,
     })
-  }, [autoFilledFields, bindPolicy, form, policyCategory, policyRegion, requirementDraft, requirementFileMetadata, selectedPolicyKey])
+  }, [autoFilledFields, bindPolicy, form, policyCategory, policyRegion, requirementDraft, requirementFileMetadata, selectedPolicyKey, taskNameEdited])
 
   useEffect(() => {
     const draftId = restoredState?.requirementDraft?.requirement_draft_id
@@ -221,6 +243,9 @@ export function NewTaskPage() {
   const selectedPolicy = policySets.data?.items.find(
     (policy) => policyKey(policy) === selectedPolicyKey,
   )
+  const visibleRequirementCandidates = requirementDraft?.candidates.filter(
+    (candidate) => !['scenario_id', 'base_unit'].includes(candidate.field_name),
+  ) ?? []
 
   const createTask = useMutation({
     mutationFn: ({ body, idempotencyKey }: Submission) => api.createTask(body, idempotencyKey),
@@ -251,7 +276,7 @@ export function NewTaskPage() {
       setForm((current) => {
         const next = { ...current }
         for (const candidate of draft.candidates) {
-          if (candidate.field_name === 'scenario_id' || !(candidate.field_name in next)) continue
+          if (candidate.field_name === 'scenario_id' || candidate.field_name === 'base_unit' || !(candidate.field_name in next)) continue
           const field = candidate.field_name as keyof RequirementFormValues
           const original = next[field]
           const value = candidate.normalized_value
@@ -262,6 +287,8 @@ export function NewTaskPage() {
           }
           nextFields.add(field)
         }
+        next.base_unit = next.quantity_unit
+        if (!taskNameEdited) next.task_name = defaultTaskName(next.manufacturer_part_number)
         return next
       })
       setAutoFilledFields(nextFields)
@@ -272,7 +299,15 @@ export function NewTaskPage() {
   })
 
   function update(field: keyof FormState, value: FormState[keyof FormState]) {
-    setForm((current) => ({ ...current, [field]: value }))
+    if (field === 'task_name') setTaskNameEdited(true)
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'quantity_unit' ? { base_unit: String(value) } : {}),
+      ...(field === 'manufacturer_part_number' && !taskNameEdited
+        ? { task_name: defaultTaskName(String(value)) }
+        : {}),
+    }))
     setFieldErrors((current) => {
       const next = { ...current }
       delete next[field]
@@ -280,7 +315,7 @@ export function NewTaskPage() {
     })
     setAutoFilledFields((current) => {
       const next = new Set(current)
-      if (field !== 'scenario_id') next.delete(field)
+      if (field !== 'task_name') next.delete(field as keyof RequirementFormValues)
       return next
     })
     setLocalError('')
@@ -358,6 +393,7 @@ export function NewTaskPage() {
     setSelectedPolicyKey('')
     setPolicyCategory('')
     setPolicyRegion('')
+    setTaskNameEdited(false)
     if (fileInput.current) fileInput.current.value = ''
   }
 
@@ -399,7 +435,8 @@ export function NewTaskPage() {
     return {
       idempotencyKey: createIdempotencyKey(),
       body: {
-        scenario_id: form.scenario_id.trim() || null,
+        task_name: form.task_name.trim(),
+        scenario_id: null,
         ...(bindPolicy && selectedPolicy ? {
           policy_binding: {
             policy_set_version: selectedPolicy.policy_set_version,
@@ -419,7 +456,7 @@ export function NewTaskPage() {
           revision: form.revision.trim(),
           condition: form.condition.trim(),
           allow_substitutes: form.allow_substitutes,
-          base_unit: form.base_unit.trim(),
+          base_unit: form.quantity_unit.trim(),
           required_quantity: Number(form.required_quantity),
           quantity_unit: form.quantity_unit.trim(),
           budget_amount: form.budget_amount,
@@ -455,6 +492,23 @@ export function NewTaskPage() {
         <Link className="button button-secondary" to="/">返回工作台</Link>
       </section>
 
+      <section className="requirement-source-panel task-name-panel">
+        <label className={`field field-wide ${fieldErrors.task_name ? 'field-invalid' : ''}`}>
+          <span>任务名称</span>
+          <input
+            form="new-task-form"
+            required
+            aria-invalid={Boolean(fieldErrors.task_name)}
+            placeholder={`例如：QW-MCU9-DEMO · ${localDate()}`}
+            value={form.task_name}
+            onChange={(event) => update('task_name', event.target.value)}
+          />
+          {fieldErrors.task_name
+            ? <small className="field-error-text">{fieldErrors.task_name}</small>
+            : <small>默认按“制造商料号 · 创建日期”生成，也可以自行修改；同一用户下不可重名。</small>}
+        </label>
+      </section>
+
       <section className="requirement-source-panel">
         <div className="requirement-source-intro">
           <span className="source-step">01</span>
@@ -487,10 +541,10 @@ export function NewTaskPage() {
         {requirementExtraction.isError && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
         {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{requirementDraft.error_message}</p></div>}
         {extractionNotice && <div className="extraction-notice" role="status">✓ {extractionNotice}</div>}
-        {requirementDraft?.status === 'READY' && requirementDraft.candidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{requirementDraft.candidates.length}）</summary><div className="audit-list">{requirementDraft.candidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{fieldLabel(candidate.field_name)}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.quoted_text}</small>)}</article>)}</div></details>}
+        {requirementDraft?.status === 'READY' && visibleRequirementCandidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{visibleRequirementCandidates.length}）</summary><div className="audit-list">{visibleRequirementCandidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{fieldLabel(candidate.field_name)}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.quoted_text}</small>)}</article>)}</div></details>}
       </section>
 
-      <form className="requirement-form" noValidate onSubmit={handleSubmit}>
+      <form id="new-task-form" className="requirement-form" noValidate onSubmit={handleSubmit}>
         <div className="form-title-row">
           <div><span className="source-step">02</span><div><h2>采购需求</h2></div></div>
           <button className="button button-secondary" type="button" onClick={clearForm}>清空表单</button>
@@ -503,8 +557,6 @@ export function NewTaskPage() {
             : update(field, value)}
           errors={fieldErrors}
           highlightedFields={autoFilledFields}
-          deferAdvancedFields
-          materialPrefix={<label className={`field field-wide ${fieldErrors.scenario_id ? 'field-invalid' : ''}`}><span>场景编号 <small>可选</small></span><input value={form.scenario_id} onChange={(event) => update('scenario_id', event.target.value)} />{fieldErrors.scenario_id && <small className="field-error-text">{fieldErrors.scenario_id}</small>}</label>}
         />
 
         <fieldset className="form-section policy-binding-section">

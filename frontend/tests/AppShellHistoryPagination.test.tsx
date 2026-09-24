@@ -9,6 +9,7 @@ import { AppShell } from '../src/components/AppShell'
 
 const tasks: TaskListItem[] = Array.from({ length: 9 }, (_, index) => ({
   task_id: `task-${index + 1}`,
+  task_name: `SCENARIO-${index + 1}`,
   task_revision: 1,
   status: 'COMPLETED',
   policy_binding: null,

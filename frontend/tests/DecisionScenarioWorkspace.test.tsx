@@ -41,6 +41,7 @@ const comparison = {
 
 const task = {
   task_id: 'task-1',
+  task_name: 'SCENARIO-1',
   task_revision: 6,
   status: 'COMPLETED',
   scenario_id: 'SCENARIO-1',

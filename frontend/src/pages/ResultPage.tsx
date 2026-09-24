@@ -371,7 +371,7 @@ export function ResultPage() {
         <TaskWorkspaceHeader
           taskId={task.task_id}
           scenarioId={task.scenario_id}
-          title={frozenRequirement?.manufacturer_part_number ?? '历史采购结果'}
+          title={task.task_name}
           subtitle={frozenRequirement
             ? `${frozenRequirement.required_quantity} ${frozenRequirement.quantity_unit} · ${frozenRequirement.currency} · 最晚交付 ${frozenRequirement.delivery_deadline}`
             : '该历史结果缺少可展示的冻结采购需求'}

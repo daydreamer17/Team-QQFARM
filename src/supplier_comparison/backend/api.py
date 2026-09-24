@@ -6,6 +6,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, Header, Query, Request, UploadFile
@@ -67,6 +68,7 @@ class PolicyBindingRequest(ApiModel):
 
 class CreateTaskRequest(ApiModel):
     requirement: ProcurementRequirement
+    task_name: str | None = Field(default=None, max_length=128)
     scenario_id: str | None = Field(default=None, max_length=128)
     policy_binding: PolicyBindingRequest | None = None
     requirement_draft_id: str | None = Field(default=None, min_length=1, max_length=64)
@@ -494,6 +496,7 @@ def create_app(
         return service.create_task(
             body.requirement,
             idempotency_key=idempotency_key,
+            task_name=body.task_name,
             scenario_id=body.scenario_id,
             policy_set_version=(
                 body.policy_binding.policy_set_version if body.policy_binding else None
@@ -1196,6 +1199,29 @@ def create_app(
     @app.get("/api/v1/tasks/{task_id}/summaries/{summary_id}")
     def get_summary(task_id: str, summary_id: str):
         return service.get_summary(task_id, summary_id)
+
+    @app.get("/api/v1/tasks/{task_id}/summaries/{summary_id}/exports")
+    def export_summary(
+        task_id: str,
+        summary_id: str,
+        format: Literal["md", "docx"] = Query(),
+    ):
+        exported = service.export_summary(
+            task_id, summary_id, export_format=format
+        )
+        filename = exported["filename"]
+        return StreamingResponse(
+            iter((exported["content"],)),
+            media_type=exported["media_type"],
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="procurement-summary.{format}"; '
+                    f"filename*=UTF-8''{quote(filename)}"
+                ),
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/v1/tasks/{task_id}/summaries/{summary_id}/retries", status_code=202)
     def retry_summary(

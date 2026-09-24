@@ -27,7 +27,6 @@ function tabClass(active: boolean) {
 
 export function TaskWorkspaceHeader({
   taskId,
-  scenarioId,
   title,
   subtitle,
   status,
@@ -51,7 +50,7 @@ export function TaskWorkspaceHeader({
     <section className="workspace-header">
       <div className="workspace-task-head">
         <div>
-          <span className="workspace-task-label">采购任务{scenarioId ? ` · ${scenarioId}` : ''}</span>
+          <span className="workspace-task-label">采购任务</span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>

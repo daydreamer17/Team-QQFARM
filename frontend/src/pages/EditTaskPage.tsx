@@ -48,6 +48,7 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
     mutationFn: () => {
       const requirement: ProcurementRequirement = {
         ...value,
+        base_unit: value.quantity_unit.trim(),
         required_quantity: Number(value.required_quantity),
         planned_order_date: value.planned_order_date || null,
         ranking_preference: value.ranking_preference as RankingCriterion,
@@ -67,7 +68,11 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
     },
   })
   function set<K extends keyof RequirementFormValues>(field: K, next: RequirementFormValues[K]) {
-    setValue((current) => ({ ...current, [field]: next }))
+    setValue((current) => ({
+      ...current,
+      [field]: next,
+      ...(field === 'quantity_unit' ? { base_unit: String(next) } : {}),
+    }))
     setLocalError('')
     update.reset()
   }

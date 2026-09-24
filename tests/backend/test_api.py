@@ -4,6 +4,8 @@ from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
+from xml.etree import ElementTree
+from zipfile import ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -331,9 +333,10 @@ def test_list_tasks_returns_safe_recent_summaries(
     assert response.status_code == 200
     assert response.json() == {
         "items": [
-            {
-                "task_id": created["task_id"],
-                "scenario_id": "LIST-DEMO-001",
+                {
+                    "task_id": created["task_id"],
+                    "task_name": created["task_name"],
+                    "scenario_id": "LIST-DEMO-001",
                 "task_revision": 1,
                 "status": "DRAFT",
                 "current_result_id": None,
@@ -1046,6 +1049,28 @@ def test_summary_is_bound_to_current_result_and_worker_output(
     loaded = http.get(f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}")
     assert loaded.status_code == 200
     assert loaded.json()["narrative"]["title"] == "采购摘要"
+    markdown = http.get(
+        f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}/exports",
+        params={"format": "md"},
+    )
+    assert markdown.status_code == 200
+    assert markdown.headers["content-type"].startswith("text/markdown")
+    assert "filename*=UTF-8''" in markdown.headers["content-disposition"]
+    assert "## 2. 采购需求" in markdown.text
+    assert "QW-MCU9-DEMO" in markdown.text
+    word = http.get(
+        f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}/exports",
+        params={"format": "docx"},
+    )
+    assert word.status_code == 200
+    assert word.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    with ZipFile(BytesIO(word.content)) as archive:
+        assert "word/document.xml" in archive.namelist()
+        document_xml = archive.read("word/document.xml")
+        ElementTree.fromstring(document_xml)
+        assert "采购需求" in document_xml.decode("utf-8")
     replacement = service.create_summary(
         task["task_id"],
         expected_task_revision=1,

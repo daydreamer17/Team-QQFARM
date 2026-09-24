@@ -31,6 +31,8 @@ class Task(Base):
 
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     owner_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    task_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    task_name_key: Mapped[str] = mapped_column(String(128), nullable=False)
     scenario_id: Mapped[str | None] = mapped_column(String(128))
     current_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
@@ -47,6 +49,10 @@ class Task(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        UniqueConstraint("owner_id", "task_name_key", name="uq_tasks_owner_task_name_key"),
     )
 
 

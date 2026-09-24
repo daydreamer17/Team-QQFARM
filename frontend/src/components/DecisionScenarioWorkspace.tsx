@@ -623,7 +623,7 @@ export function DecisionScenarioWorkspace({
 
       {compact && (
         <div className="decision-compact-chat-context">
-          <span>{task.scenario_id}</span>
+          <span>{task.task_name}</span>
           <span>{result.result.supplier_results.length} 家供应商</span>
           <span>Revision {result.task_revision}</span>
         </div>

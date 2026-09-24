@@ -12,6 +12,7 @@ import { makeQuoteFieldSchema } from './quoteReviewFixtures'
 function makeTask(): TaskDetail {
   return {
     task_id: 'task-1',
+    task_name: 'PART-1 · 2026-09-24',
     task_revision: 3,
     status: 'NEEDS_INPUT',
     scenario_id: null,

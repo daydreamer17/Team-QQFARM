@@ -61,7 +61,7 @@ export function TaskPage() {
       <TaskWorkspaceHeader
         taskId={task.data.task_id}
         scenarioId={task.data.scenario_id}
-        title={requirement.manufacturer_part_number}
+        title={task.data.task_name}
         subtitle={`${requirement.required_quantity} ${requirement.quantity_unit} · ${requirement.currency} · 最晚交付 ${requirement.delivery_deadline}`}
         status={task.data.status}
         revision={task.data.task_revision}
@@ -82,14 +82,12 @@ export function TaskPage() {
           </div>
         </div>
         <dl className="detail-grid">
-          <div><dt>场景编号</dt><dd>{task.data.scenario_id ?? '—'}</dd></div>
           <div><dt>制造商</dt><dd>{requirement.manufacturer}</dd></div>
           <div><dt>制造商料号</dt><dd>{requirement.manufacturer_part_number}</dd></div>
           <div><dt>封装 / 版本</dt><dd>{requirement.package} / {requirement.revision}</dd></div>
           <div><dt>物料状态</dt><dd>{requirement.condition}</dd></div>
           <div><dt>允许替代料</dt><dd>{requirement.allow_substitutes ? '是' : '否'}</dd></div>
           <div><dt>需求数量</dt><dd>{requirement.required_quantity} {requirement.quantity_unit}</dd></div>
-          <div><dt>基础单位</dt><dd>{requirement.base_unit}</dd></div>
           <div><dt>预算</dt><dd>{requirement.currency} {requirement.budget_amount}</dd></div>
           <div><dt>预算包含运费</dt><dd>{requirement.includes_shipping ? '是' : '否'}</dd></div>
           <div><dt>成本比较口径</dt><dd>{requirement.tax_mode}</dd></div>

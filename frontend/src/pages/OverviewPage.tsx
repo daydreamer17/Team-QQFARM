@@ -22,7 +22,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function taskTitle(task: TaskListItem) {
-  return task.scenario_id ?? task.manufacturer_part_number ?? '采购任务'
+  return task.task_name
 }
 
 function statusTone(status: string) {
@@ -119,7 +119,7 @@ export function OverviewPage() {
             <span className="task-search-icon" aria-hidden="true">⌕</span>
             <input
               type="search"
-              placeholder="搜索任务编号、制造商或料号"
+              placeholder="搜索任务名称、制造商或料号"
               value={search}
               onChange={(event) => updateSearch(event.target.value)}
             />

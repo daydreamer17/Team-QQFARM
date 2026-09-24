@@ -447,7 +447,7 @@ export function ReviewPage() {
       <TaskWorkspaceHeader
         taskId={data.task_id}
         scenarioId={data.scenario_id}
-        title={data.requirement.manufacturer_part_number}
+        title={data.task_name}
         subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${pendingCount} 个字段待处理`}
         status={data.status}
         revision={data.task_revision}

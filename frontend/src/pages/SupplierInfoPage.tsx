@@ -110,7 +110,7 @@ export function SupplierInfoPage() {
   return (
     <main className="page supplier-info-page">
       <TaskWorkspaceHeader
-        taskId={task.task_id} scenarioId={task.scenario_id} title={task.requirement.manufacturer_part_number}
+        taskId={task.task_id} scenarioId={task.scenario_id} title={task.task_name}
         subtitle={`${info.quote_count} 份报价 · ${info.matched_supplier_count} 家已匹配供应商`}
         status={task.status} revision={info.snapshot_revision} resultId={info.result_id}
         quoteCount={task.quotes.length} summaryComplete={task.summary_completed}
