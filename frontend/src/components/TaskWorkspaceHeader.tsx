@@ -66,7 +66,6 @@ export function TaskWorkspaceHeader({
               <li className={`task-timeline-${state}`} key={label} aria-label={`${label}：${description}`}>
                 <span>{stage}</span>
                 <strong>{label}</strong>
-                {index === 2 && progress.compliance && <small>{description}{progress.compliance.pending_count ? ` · ${progress.compliance.pending_count} 项待补充` : ''}</small>}
               </li>
             )
           })}

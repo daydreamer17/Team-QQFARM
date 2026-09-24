@@ -4,6 +4,14 @@ export function aggregateControlStatus(checks: PolicyComplianceCheck[], control:
   return (['FAIL', 'REVIEW_REQUIRED', 'NOT_EVALUATED', 'PASS'] as const).find((status) => statuses.includes(status))
     ?? (statuses.length ? 'NOT_APPLICABLE' : 'NOT_EVALUATED')
 }
+export function groupComplianceChecks(checks: PolicyComplianceCheck[]) {
+  return [...checks.reduce((groups, check) => {
+    const current = groups.get(check.control_code) ?? []
+    current.push(check)
+    groups.set(check.control_code, current)
+    return groups
+  }, new Map<string, PolicyComplianceCheck[]>()).entries()]
+}
 export function complianceStageLabel(stage?: ComplianceStage) {
   if (stage?.status === 'DISABLED' && stage.confirmed) return '未启用'
   if (stage?.confirmed) return stage.pending_count ? '已处理·有待补充' : '已处理'

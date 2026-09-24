@@ -38,6 +38,14 @@ const investigationToolLabels: Record<string, string> = {
   compile_decision_brief: '整理核查结论',
 }
 
+function conversationStatusLabel(status?: string) {
+  if (!status) return '尚未开始'
+  if (status === 'ACTIVE') return '使用当前结果'
+  if (status === 'STALE') return '历史对话'
+  if (status === 'CLOSED') return '已结束'
+  return status
+}
+
 function investigationObservationText(observation: InvestigationCase['observations'][number]) {
   const data = observation.result.data
   if (observation.result.status === 'NOT_FOUND') return '未找到可用证据，不能据此推断相反结论。'
@@ -660,8 +668,11 @@ export function DecisionScenarioWorkspace({
       {compact ? (
         <header className="decision-compact-chat-heading">
           <span className="decision-chat-spark" aria-hidden="true">✦</span>
-          <div><h2>Ask QuoteWise</h2><p>基于当前冻结结果回答</p></div>
-          <span className="decision-chat-state">{activeConversation?.status ?? 'READY'}</span>
+          <div className="decision-compact-chat-copy">
+            <h2>Ask QuoteWise</h2>
+            <p>基于当前冻结的报价、制度核验和决策结果，解释推荐依据、比较供应商差异，并模拟偏好变化对排序的影响。</p>
+          </div>
+          <span className="decision-chat-state">{conversationStatusLabel(activeConversation?.status)}</span>
         </header>
       ) : (
         <header className="decision-assistant-heading">
@@ -720,7 +731,7 @@ export function DecisionScenarioWorkspace({
           <header className="decision-chat-toolbar">
             <div>
               <strong>对话</strong>
-              <span>{activeConversation?.status ?? '尚未开始'}</span>
+              <span>{conversationStatusLabel(activeConversation?.status)}</span>
             </div>
             <div>
               {allConversations.length > 0 && (
@@ -736,7 +747,7 @@ export function DecisionScenarioWorkspace({
                 >
                   {allConversations.map((item) => (
                     <option key={item.conversation_id} value={item.conversation_id}>
-                      Rev {item.base_task_revision} · {item.title} · {item.status}
+                      Rev {item.base_task_revision} · {item.title} · {conversationStatusLabel(item.status)}
                     </option>
                   ))}
                 </select>

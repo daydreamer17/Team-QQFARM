@@ -43,12 +43,14 @@ test('compliance independently loads before results and requires per-item missin
   const confirm = vi.spyOn(api, 'confirmCompliance').mockResolvedValue({ task_revision: 4 } as never)
   const getResult = vi.spyOn(api, 'getResult')
   mount()
-  expect(await screen.findByText('Supplier One')).toBeInTheDocument()
+  const results = await screen.findByRole('table', { name: '供应商检查结果' })
+  expect(within(results).getByText('Supplier One')).toBeInTheDocument()
   expect(getResult).not.toHaveBeenCalled()
   expect(screen.getByLabelText('制度检查：等待确认')).not.toHaveClass('task-timeline-complete')
   const button = screen.getByRole('button', { name: '确认处理结果并进入决策' })
   expect(button).toBeDisabled()
-  await user.click(screen.getByLabelText(/暂不补充/))
+  await user.click(screen.getByLabelText('全选待补充事项'))
+  expect(screen.getByLabelText(/暂不补充/)).toBeChecked()
   await user.click(button)
   await waitFor(() => expect(confirm).toHaveBeenCalledWith('task-1', expect.objectContaining({
     expected_task_revision: 3, expected_assessment_id: 'assessment-1', acknowledged_missing_item_ids: ['missing-1'], acknowledge_no_policy: false,
@@ -135,16 +137,16 @@ test('bound policy summary and separate control columns preserve incomplete mult
   Object.assign(data.assessment, { amount_requirements: [{ quote_id: 'quote-1', execution_stage: 'AFTER_SELECTION', triggered: true, action: 'Manager review' }] })
   vi.mocked(api.getCompliance).mockResolvedValue(data as never)
   mount()
-  expect(await screen.findByText('Supplier Assurance Policy')).toBeInTheDocument()
-  expect(screen.getByText('2026.09')).toBeInTheDocument()
-  expect(screen.getByText('电子产品采购')).toBeInTheDocument()
-  expect(screen.getByText('新加坡')).toBeInTheDocument()
+  expect(await screen.findByText(/Supplier Assurance Policy · v2026\.09 · 电子产品采购 · 新加坡/)).toBeInTheDocument()
   expect(screen.getByRole('columnheader', { name: '供应商准入' })).toBeInTheDocument()
   expect(screen.getByRole('columnheader', { name: 'RoHS' })).toBeInTheDocument()
-  const row = screen.getByRole('row', { name: /Supplier One/ })
+  const row = within(screen.getByRole('table', { name: '供应商检查结果' })).getByRole('row', { name: /Supplier One/ })
   expect(within(row).getByRole('cell', { name: '待复核' })).toBeInTheDocument()
   expect(within(row).getByRole('cell', { name: '通过' })).toBeInTheDocument()
-  expect(screen.getByText(/Supplier One · 选择供应商后 · 已触发：Manager review/)).toBeInTheDocument()
+  const amountRow = within(screen.getByRole('table', { name: '金额条件与后续动作' })).getByRole('row', { name: /Supplier One/ })
+  expect(within(amountRow).getByText('选择供应商后')).toBeInTheDocument()
+  expect(within(amountRow).getByText('选择后将触发')).toBeInTheDocument()
+  expect(within(amountRow).getByText('Manager review')).toBeInTheDocument()
 })
 
 test('evidence dialog focuses its first field, traps focus and restores focus after Escape', async () => {
@@ -172,9 +174,11 @@ test('a specific check link chooses the supplier page and expands the requested 
     checks: [{ ...data.assessment.assessments[0].checks[0], reason_codes: ['EVIDENCE_EXPIRED'] }] }))
   vi.mocked(api.getCompliance).mockResolvedValue(data as never)
   mount(undefined, 'compliance', '#quote=quote-9&check=rohs-1')
-  expect(await screen.findByText('Supplier 9')).toBeInTheDocument()
+  const results = await screen.findByRole('table', { name: '供应商检查结果' })
+  expect(within(results).getByText('Supplier 9')).toBeInTheDocument()
   expect(screen.getByText('材料已过期')).toBeVisible()
-  expect(screen.getByText('材料已过期').closest('details')).toHaveAttribute('open')
+  expect(screen.getByRole('button', { name: '收起 Supplier 9 检查与材料' })).toHaveAttribute('aria-expanded', 'true')
+  expect(document.getElementById('compliance-quote-9-rohs-1')).toHaveFocus()
   expect(screen.getByText('2 / 2')).toBeInTheDocument()
 })
 
@@ -183,8 +187,17 @@ test('processed with missing evidence and disabled policy are never labelled as 
     status: 'PROCESSED', confirmed: true, can_compare: true, pending_count: 1 } } as never)
   mount()
   expect(await screen.findByLabelText('制度检查：已处理·有待补充')).toBeInTheDocument()
-  expect(screen.getByText(/1 项待补充/)).toBeInTheDocument()
+  expect(screen.getByText('1 个检查项')).toBeInTheDocument()
   expect(screen.getByLabelText('制度检查：已处理·有待补充')).toHaveClass('task-timeline-processed')
+})
+
+test('processing compliance shows an animated progress indicator', async () => {
+  vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, assessment: null,
+    stage: { status: 'PROCESSING', confirmed: false, can_confirm: false, can_compare: false } } as never)
+  mount()
+  const heading = await screen.findByText('正在进行制度检查')
+  const status = heading.closest('[role="status"]')!
+  expect(status.querySelector('.compliance-spinner')).toBeInTheDocument()
 })
 
 test('confirmed disabled policy remains explicitly not enabled', async () => {

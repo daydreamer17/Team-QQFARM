@@ -838,6 +838,9 @@ export interface ComplianceAmountRequirement {
   quote_id?: string
   supplier_name?: string
   clause_id?: string
+  amount?: string | null
+  currency?: string | null
+  threshold?: string | null
   execution_stage?: string
   status?: PolicyComplianceCheckStatus
   triggered?: boolean | null
