@@ -83,6 +83,7 @@ class UpdateRequirementRequest(ApiModel):
     model_config = ConfigDict(extra="forbid")
     expected_task_revision: int = Field(ge=1)
     requirement: ProcurementRequirement
+    policy_binding: PolicyBindingRequest | None = None
 
 
 class AbandonTaskRequest(ApiModel):
@@ -483,6 +484,13 @@ def create_app(
         body: CreateTaskRequest,
         idempotency_key: IdempotencyKey,
     ):
+        if body.policy_binding is not None and policy_file_import_service is not None:
+            policy_file_import_service.require_active_binding(
+                policy_set_version=body.policy_binding.policy_set_version,
+                policy_index_version=body.policy_binding.policy_index_version,
+                category=body.policy_binding.category,
+                region=body.policy_binding.region,
+            )
         return service.create_task(
             body.requirement,
             idempotency_key=idempotency_key,
@@ -559,11 +567,30 @@ def create_app(
         body: UpdateRequirementRequest,
         idempotency_key: IdempotencyKey,
     ):
+        if body.policy_binding is not None and policy_file_import_service is not None:
+            current_binding = service.get_task(task_id).get("policy_binding")
+            requested_binding = body.policy_binding.model_dump()
+            if current_binding != requested_binding:
+                policy_file_import_service.require_active_binding(
+                    policy_set_version=body.policy_binding.policy_set_version,
+                    policy_index_version=body.policy_binding.policy_index_version,
+                    category=body.policy_binding.category,
+                    region=body.policy_binding.region,
+                )
         return service.update_requirement(
             task_id,
             body.requirement,
             expected_task_revision=body.expected_task_revision,
             idempotency_key=idempotency_key,
+            update_policy_binding="policy_binding" in body.model_fields_set,
+            policy_set_version=(
+                body.policy_binding.policy_set_version if body.policy_binding else None
+            ),
+            policy_index_version=(
+                body.policy_binding.policy_index_version if body.policy_binding else None
+            ),
+            policy_category=(body.policy_binding.category if body.policy_binding else None),
+            policy_region=(body.policy_binding.region if body.policy_binding else None),
             provider=settings.supplier_model_provider,
             model_id=settings.supplier_model_model_id,
             environment=settings.supplier_model_environment,
@@ -1189,6 +1216,7 @@ def create_app(
         @app.get("/api/v1/policy-sets")
         def list_policy_sets(
             status: Literal["PUBLISHED"] = "PUBLISHED",
+            include_inactive: bool = False,
             category: Annotated[
                 str | None, Query(min_length=1, max_length=128)
             ] = None,
@@ -1198,10 +1226,26 @@ def create_app(
         ):
             return policy_file_import_service.list_policy_sets(
                 status=status,
+                include_inactive=include_inactive,
                 category=category,
                 region=region,
                 limit=limit,
                 offset=offset,
+            )
+
+        @app.post(
+            "/api/v1/policy-sets/{policy_set_id}/versions/"
+            "{policy_set_version}/deactivate"
+        )
+        def deactivate_policy_set(
+            policy_set_id: str,
+            policy_set_version: str,
+            idempotency_key: IdempotencyKey,
+        ):
+            return policy_file_import_service.deactivate_policy_set(
+                policy_set_id,
+                policy_set_version,
+                idempotency_key=idempotency_key,
             )
 
         @app.get("/api/v1/policy-imports")
@@ -1213,6 +1257,9 @@ def create_app(
                 "PUBLISHED",
             ]
             | None = None,
+            policy_set_id: Annotated[
+                str | None, Query(min_length=1, max_length=128)
+            ] = None,
             policy_set_version: Annotated[
                 str | None, Query(min_length=1, max_length=128)
             ] = None,
@@ -1225,6 +1272,7 @@ def create_app(
         ):
             return policy_file_import_service.list_imports(
                 status=status,
+                policy_set_id=policy_set_id,
                 policy_set_version=policy_set_version,
                 category=category,
                 region=region,
@@ -1253,10 +1301,16 @@ def create_app(
                         for item in exc.errors()
                     ],
                 ) from exc
+            suffix = Path(file.filename or "").suffix.lower()
+            media_type = {
+                ".pdf": "application/pdf",
+                ".txt": "text/plain",
+                ".md": "text/markdown",
+            }.get(suffix, file.content_type or "application/octet-stream")
             return policy_file_import_service.upload_stream(
                 metadata=parsed_metadata,
                 original_filename=file.filename or "policy",
-                media_type=file.content_type or "application/octet-stream",
+                media_type=media_type,
                 stream=file.file,
                 idempotency_key=idempotency_key,
             )

@@ -2,14 +2,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { PolicyImportStatus, PolicyImportUploadMetadata } from '../api/types'
+import type { PolicyImportStatus, PolicyImportUploadMetadata, PolicySetSummary } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 
 const MAX_POLICY_BYTES = 5 * 1024 * 1024
-const DIRECTORY_PAGE_SIZE = 8
 
 interface PolicyUploadForm {
-  title: string
+  policy_set_name: string
   effective_from: string
   effective_to: string
   categories: string
@@ -17,20 +16,17 @@ interface PolicyUploadForm {
 }
 
 interface UploadSubmission {
-  metadata: PolicyImportUploadMetadata
-  file: File
-  idempotencyKey: string
+  items: Array<{
+    metadata: PolicyImportUploadMetadata
+    file: File
+    idempotencyKey: string
+  }>
 }
 
-interface ImportFilters {
-  status: '' | PolicyImportStatus
-  policy_set_version: string
-  category: string
-  region: string
-}
+type PolicyUploadMode = 'NEW' | 'UPDATE'
 
 const initialForm: PolicyUploadForm = {
-  title: '',
+  policy_set_name: '',
   effective_from: new Date().toISOString().slice(0, 10),
   effective_to: '',
   categories: 'Electronics',
@@ -49,10 +45,14 @@ function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     const messages: Record<string, string> = {
       policy_metadata_invalid: '制度信息未通过校验，请检查标题、生效时间、分类和地区。',
-      unsupported_policy_media_type: '只支持 PDF 或 UTF-8 TXT 制度文件。',
+      unsupported_policy_media_type: '只支持 PDF、UTF-8 TXT 或 Markdown 制度文件。',
       file_too_large: '制度文件不能超过 5 MiB。',
       policy_pdf_requires_ocr: '该 PDF 没有可提取文字，当前策略上传不支持 OCR。',
       policy_document_no_text: '制度文件没有可用正文。',
+      policy_document_not_policy: 'README 是说明文件，不属于制度正文，请只上传实际制度文件。',
+      policy_set_not_found: '没有找到该制度版本，请刷新后重试。',
+      policy_set_not_published: '该制度版本尚未发布，不能停用。',
+      policy_set_index_unavailable: '该制度版本没有可用的发布索引。',
     }
     return messages[error.code] ?? error.message
   }
@@ -88,11 +88,32 @@ function statusClass(status: PolicyImportStatus) {
   return 'status-muted'
 }
 
-const emptyFilters: ImportFilters = {
-  status: '',
-  policy_set_version: '',
-  category: '',
-  region: '',
+function policyKey(policy: PolicySetSummary) {
+  return JSON.stringify([
+    policy.policy_set_id,
+    policy.policy_set_version,
+    policy.policy_index_version,
+  ])
+}
+
+function groupPolicySets(items: PolicySetSummary[]) {
+  const groups = new Map<string, PolicySetSummary[]>()
+  for (const item of items) {
+    const versions = groups.get(item.policy_set_id) ?? []
+    versions.push(item)
+    groups.set(item.policy_set_id, versions)
+  }
+  return [...groups.values()].map((versions) => {
+    versions.sort((left, right) => {
+      const published = (right.published_at ?? '').localeCompare(left.published_at ?? '')
+      return published || right.policy_set_version.localeCompare(left.policy_set_version)
+    })
+    const current = versions.find((item) => item.status === 'PUBLISHED') ?? versions[0]
+    return {
+      current,
+      history: versions.filter((item) => item !== current),
+    }
+  })
 }
 
 export function ResourcePage() {
@@ -100,63 +121,84 @@ export function ResourcePage() {
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
   const [form, setForm] = useState(initialForm)
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [localError, setLocalError] = useState('')
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [lastSubmission, setLastSubmission] = useState<UploadSubmission | null>(null)
-  const [filterForm, setFilterForm] = useState<ImportFilters>(emptyFilters)
-  const [filters, setFilters] = useState<ImportFilters>(emptyFilters)
-  const [importOffset, setImportOffset] = useState(0)
-  const [policySetOffset, setPolicySetOffset] = useState(0)
+  const [showUpload, setShowUpload] = useState(false)
+  const [showInactivePolicies, setShowInactivePolicies] = useState(false)
+  const [uploadMode, setUploadMode] = useState<PolicyUploadMode>('NEW')
+  const [basePolicy, setBasePolicy] = useState<PolicySetSummary | null>(null)
 
   const imports = useQuery({
-    queryKey: ['policy-imports', 'list', filters, importOffset],
-    queryFn: () => api.listPolicyImports({
-      status: filters.status || undefined,
-      policy_set_version: filters.policy_set_version.trim() || undefined,
-      category: filters.category.trim() || undefined,
-      region: filters.region.trim() || undefined,
-      limit: DIRECTORY_PAGE_SIZE,
-      offset: importOffset,
-    }),
+    queryKey: ['policy-imports', 'list', 'pending'],
+    queryFn: async () => {
+      const responses = await Promise.all(
+        (['REVIEW_REQUIRED', 'READY_TO_PUBLISH', 'PUBLISHING'] as PolicyImportStatus[])
+          .map((status) => api.listPolicyImports({ status, limit: 100, offset: 0 })),
+      )
+      return responses
+        .flatMap((response) => response.items)
+        .sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+    },
   })
 
   const policySets = useQuery({
-    queryKey: ['policy-sets', 'list', policySetOffset],
+    queryKey: ['policy-sets', 'list'],
     queryFn: () => api.listPolicySets({
-      limit: DIRECTORY_PAGE_SIZE,
-      offset: policySetOffset,
+      include_inactive: true,
+      limit: 100,
+      offset: 0,
     }),
   })
 
   const upload = useMutation({
-    mutationFn: (submission: UploadSubmission) =>
-      api.uploadPolicy(
-        { metadata: submission.metadata, file: submission.file },
-        submission.idempotencyKey,
-      ),
-    onSuccess: async (result) => {
+    mutationFn: async (submission: UploadSubmission) => {
+      const results = []
+      for (const item of submission.items) {
+        results.push(await api.uploadPolicy(
+          { metadata: item.metadata, file: item.file },
+          item.idempotencyKey,
+        ))
+      }
+      return results
+    },
+    onSuccess: async (results) => {
       await queryClient.invalidateQueries({ queryKey: ['policy-imports', 'list'] })
-      void navigate(`/resources/policies/${result.policy_import_id}`)
+      void navigate(`/resources/policies/${results[0].policy_import_id}`)
     },
   })
 
-  function applyFilters(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setImportOffset(0)
-    setFilters({
-      ...filterForm,
-      policy_set_version: filterForm.policy_set_version.trim(),
-      category: filterForm.category.trim(),
-      region: filterForm.region.trim(),
-    })
-  }
+  const updatePolicySets = useQuery({
+    queryKey: ['policy-sets', 'update-options'],
+    queryFn: () => api.listPolicySets({
+      include_inactive: true,
+      limit: 100,
+      offset: 0,
+    }),
+    enabled: showUpload && uploadMode === 'UPDATE',
+  })
 
-  function clearFilters() {
-    setFilterForm(emptyFilters)
-    setFilters(emptyFilters)
-    setImportOffset(0)
-  }
+  const deactivate = useMutation({
+    mutationFn: (policy: PolicySetSummary) => api.deactivatePolicySet(
+      policy.policy_set_id,
+      policy.policy_set_version,
+      createIdempotencyKey(),
+    ),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['policy-sets', 'list'] })
+    },
+  })
+
+  const policySetGroups = groupPolicySets(policySets.data?.items ?? [])
+  const inactivePolicySetCount = policySetGroups.filter(
+    (group) => group.current.status === 'INACTIVE',
+  ).length
+  const visiblePolicySetGroups = showInactivePolicies
+    ? policySetGroups
+    : policySetGroups.filter((group) => group.current.status === 'PUBLISHED')
+  const updateBasePolicies = groupPolicySets(updatePolicySets.data?.items ?? [])
+    .map((group) => group.current)
 
   function update(field: keyof PolicyUploadForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -164,47 +206,111 @@ export function ResourcePage() {
     upload.reset()
   }
 
-  function selectFile(selected: File | null) {
+  function selectFiles(selected: File[]) {
     setLocalError('')
     upload.reset()
-    if (!selected) {
-      setFile(null)
+    if (selected.length === 0) {
+      setFiles([])
       return
     }
-    const extension = selected.name.split('.').pop()?.toLowerCase()
-    if (extension !== 'pdf' && extension !== 'txt') {
-      setFile(null)
-      setLocalError('后端只支持单个 PDF 或 UTF-8 TXT 文件。')
-      if (fileInput.current) fileInput.current.value = ''
+    const prepared: File[] = []
+    for (const selectedFile of selected) {
+      const extension = selectedFile.name.split('.').pop()?.toLowerCase()
+      if (['readme.md', 'readme.txt'].includes(selectedFile.name.toLowerCase())) {
+        setFiles([])
+        setLocalError(`“${selectedFile.name}”是说明文件，不属于制度正文，请不要上传。`)
+        if (fileInput.current) fileInput.current.value = ''
+        return
+      }
+      if (extension !== 'pdf' && extension !== 'txt' && extension !== 'md') {
+        setFiles([])
+        setLocalError(`“${selectedFile.name}”格式不支持，只能上传 PDF、UTF-8 TXT 或 Markdown。`)
+        if (fileInput.current) fileInput.current.value = ''
+        return
+      }
+      if (selectedFile.size > MAX_POLICY_BYTES) {
+        setFiles([])
+        setLocalError(`“${selectedFile.name}”超过 5 MiB。`)
+        if (fileInput.current) fileInput.current.value = ''
+        return
+      }
+      if (selectedFile.size === 0) {
+        setFiles([])
+        setLocalError(`“${selectedFile.name}”是空文件。`)
+        if (fileInput.current) fileInput.current.value = ''
+        return
+      }
+      const mediaType = extension === 'pdf'
+        ? 'application/pdf'
+        : extension === 'md' ? 'text/markdown' : 'text/plain'
+      prepared.push(selectedFile.type === mediaType
+        ? selectedFile
+        : new File([selectedFile], selectedFile.name, { type: mediaType, lastModified: selectedFile.lastModified }))
+    }
+    setFiles(prepared)
+    if (!form.policy_set_name && prepared.length === 1) {
+      update('policy_set_name', prepared[0].name.replace(/\.[^.]+$/, ''))
+    }
+  }
+
+  function resetUploadFiles() {
+    setFiles([])
+    setLocalError('')
+    setLastSubmission(null)
+    upload.reset()
+    if (fileInput.current) fileInput.current.value = ''
+  }
+
+  function toggleBlankUpload() {
+    if (showUpload) {
+      setShowUpload(false)
       return
     }
-    if (selected.size > MAX_POLICY_BYTES) {
-      setFile(null)
-      setLocalError('策略文件不能超过 5 MiB。')
-      if (fileInput.current) fileInput.current.value = ''
-      return
-    }
-    if (selected.size === 0) {
-      setFile(null)
-      setLocalError('不能上传空策略文件。')
-      if (fileInput.current) fileInput.current.value = ''
-      return
-    }
-    const mediaType = extension === 'pdf' ? 'application/pdf' : 'text/plain'
-    const prepared = selected.type === mediaType
-      ? selected
-      : new File([selected], selected.name, { type: mediaType, lastModified: selected.lastModified })
-    setFile(prepared)
-    if (!form.title) update('title', selected.name.replace(/\.[^.]+$/, ''))
+    setForm(initialForm)
+    setUploadMode('NEW')
+    setBasePolicy(null)
+    resetUploadFiles()
+    setShowUpload(true)
+  }
+
+  function selectBasePolicy(policy: PolicySetSummary | null) {
+    setBasePolicy(policy)
+    setForm({
+      ...initialForm,
+      policy_set_name: policy?.policy_set_id ?? '',
+      categories: policy?.categories.join(', ') ?? initialForm.categories,
+      regions: policy?.regions.join(', ') ?? initialForm.regions,
+    })
+    resetUploadFiles()
+  }
+
+  function changeUploadMode(mode: PolicyUploadMode) {
+    setUploadMode(mode)
+    selectBasePolicy(null)
+  }
+
+  function beginNewVersion(policy: PolicySetSummary) {
+    setUploadMode('UPDATE')
+    selectBasePolicy(policy)
+    setShowUpload(true)
+  }
+
+  function deactivateVersion(policy: PolicySetSummary) {
+    if (!window.confirm(`停用制度 ${policy.policy_set_id} · 版本 ${policy.policy_set_version}？\n停用后新采购任务将不能再绑定该版本，历史任务不受影响。`)) return
+    deactivate.mutate(policy)
   }
 
   function buildSubmission(): UploadSubmission | null {
-    if (!file) {
-      setLocalError('请选择一个 PDF 或 TXT 策略文件。')
+    if (uploadMode === 'UPDATE' && basePolicy === null) {
+      setLocalError('请选择需要更新的已有制度版本。')
+      return null
+    }
+    if (files.length === 0) {
+      setLocalError('请至少选择一个 PDF、TXT 或 Markdown 制度文件。')
       return null
     }
     const required: (keyof PolicyUploadForm)[] = [
-      'title', 'effective_from', 'categories', 'regions',
+      'policy_set_name', 'effective_from', 'categories', 'regions',
     ]
     if (required.some((field) => !form[field].trim())) {
       setLocalError('请填写所有必填元数据。')
@@ -220,16 +326,30 @@ export function ResourcePage() {
       setLocalError('失效日期必须晚于生效日期。')
       return null
     }
+    const policySetId = form.policy_set_name.trim()
+    const now = new Date()
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const policySetVersion = `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
     return {
-      file,
-      idempotencyKey: createIdempotencyKey(),
-      metadata: {
-        title: form.title.trim(),
-        effective_from: dateToIso(form.effective_from),
-        effective_to: form.effective_to ? dateToIso(form.effective_to) : null,
-        categories,
-        regions,
-      },
+      items: files.map((selectedFile) => {
+        const suffix = createIdempotencyKey().replace(/-/g, '').slice(0, 12).toUpperCase()
+        return {
+          file: selectedFile,
+          idempotencyKey: createIdempotencyKey(),
+          metadata: {
+            policy_set_id: policySetId,
+            policy_set_version: policySetVersion,
+            policy_id: `POL-${suffix}`,
+            document_id: `DOC-${suffix}`,
+            document_version: '1.0.0',
+            title: selectedFile.name.replace(/\.[^.]+$/, ''),
+            effective_from: dateToIso(form.effective_from),
+            effective_to: form.effective_to ? dateToIso(form.effective_to) : null,
+            categories,
+            regions,
+          },
+        }
+      }),
     }
   }
 
@@ -241,94 +361,83 @@ export function ResourcePage() {
     upload.mutate(submission)
   }
 
-  const hasActiveImportFilters = Object.values(filters).some(Boolean)
-  const showImportFilters = hasActiveImportFilters || (imports.data?.total ?? 0) > 0
-
   return (
     <div className="page-stack resource-page">
       <section className="page-heading resource-heading">
         <div>
-          <h1>规则资源库</h1>
-          <p>填写制度信息，上传文件，审核条款后发布。</p>
+          <h1>制度管理</h1>
+          <p>查看已发布制度，处理待审核文件，并按需发布新版本。</p>
         </div>
+        <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? '收起上传' : '上传制度版本'}</button>
       </section>
-
-      <form className="card policy-upload-form" onSubmit={submit}>
-        <div className="section-heading">
-          <div><h2>上传制度文件</h2></div>
-        </div>
-
-        <div className="policy-form-grid">
-          <label className="field policy-field-wide"><span>制度标题</span><input required value={form.title} onChange={(event) => update('title', event.target.value)} /></label>
-          <label className="field"><span>分类 <small>逗号分隔</small></span><input required value={form.categories} onChange={(event) => update('categories', event.target.value)} /></label>
-          <label className="field"><span>地区 <small>逗号分隔</small></span><input required value={form.regions} onChange={(event) => update('regions', event.target.value)} /></label>
-          <label className="field"><span>生效日期</span><input required type="date" value={form.effective_from} onChange={(event) => update('effective_from', event.target.value)} /></label>
-          <label className="field"><span>失效日期 <small>可选</small></span><input type="date" value={form.effective_to} onChange={(event) => update('effective_to', event.target.value)} /></label>
-        </div>
-
-        <label className="resource-dropzone policy-dropzone">
-          <span className="resource-dropzone-icon" aria-hidden="true">↑</span>
-          <strong>{file ? file.name : '选择一个策略文件'}</strong>
-          <small>{file ? formatBytes(file.size) : 'PDF 或 UTF-8 TXT · 最大 5 MiB'}</small>
-          <input ref={fileInput} type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={(event) => selectFile(event.target.files?.[0] ?? null)} />
-        </label>
-
-        <details className="policy-generated-settings">
-          <summary>更多设置</summary>
-          <p>策略集 ID、策略集版本、Policy ID、文档 ID 和文档版本将在上传时自动生成。</p>
-        </details>
-
-        {file && (
-          <div className="policy-selected-file">
-            <span><strong>{file.name}</strong><small>{file.type || '按扩展名识别'} · {formatBytes(file.size)}</small></span>
-            <button type="button" onClick={() => setPreview({ name: file.name, mediaType: file.type, sizeBytes: file.size, file })}>本地预览</button>
-          </div>
-        )}
-
-        {(localError || upload.isError) && (
-          <div className="form-error compact-error" role="alert">
-            {localError || errorMessage(upload.error)}
-          </div>
-        )}
-
-        <div className="policy-form-actions">
-          {upload.isError && lastSubmission && (
-            <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>重试相同请求</button>
-          )}
-          <button className="button button-submit" type="submit" disabled={upload.isPending}>
-            {upload.isPending ? '正在上传并解析…' : '上传并审核'}
-          </button>
-        </div>
-      </form>
 
       <section className="card policy-directory">
         <div className="section-heading">
-          <div><h2>制度导入记录</h2></div>
-          {imports.data && imports.data.total > 0 && <span>{imports.data.total} 条记录</span>}
+          <div><h2>已发布制度</h2><p className="section-helper">每个制度集只展示当前版本；旧版本保留在历史记录中。</p></div>
+          <div className="policy-directory-heading-actions">
+            {visiblePolicySetGroups.length > 0 && <span>{visiblePolicySetGroups.length} 个制度集</span>}
+            {inactivePolicySetCount > 0 && (
+              <button
+                className="button button-secondary"
+                type="button"
+                aria-pressed={showInactivePolicies}
+                onClick={() => setShowInactivePolicies((current) => !current)}
+              >
+                {showInactivePolicies ? '隐藏已停用制度' : `显示已停用制度（${inactivePolicySetCount}）`}
+              </button>
+            )}
+          </div>
         </div>
-
-        {showImportFilters && <form className="policy-directory-filters" onSubmit={applyFilters}>
-          <label><span>状态</span><select value={filterForm.status} onChange={(event) => setFilterForm((current) => ({ ...current, status: event.target.value as ImportFilters['status'] }))}><option value="">全部状态</option><option value="REVIEW_REQUIRED">待审核</option><option value="READY_TO_PUBLISH">待发布</option><option value="PUBLISHING">发布中</option><option value="PUBLISHED">已发布</option></select></label>
-          <label><span>策略版本</span><input value={filterForm.policy_set_version} onChange={(event) => setFilterForm((current) => ({ ...current, policy_set_version: event.target.value }))} placeholder="例如 2026.09.1" /></label>
-          <label><span>分类</span><input value={filterForm.category} onChange={(event) => setFilterForm((current) => ({ ...current, category: event.target.value }))} placeholder="例如 Electronics" /></label>
-          <label><span>地区</span><input value={filterForm.region} onChange={(event) => setFilterForm((current) => ({ ...current, region: event.target.value }))} placeholder="例如 SG" /></label>
-          <div className="policy-filter-actions"><button className="button button-secondary" type="button" onClick={clearFilters}>清除</button><button className="button button-submit" type="submit">筛选</button></div>
-        </form>}
-
-        {imports.isPending && <div className="policy-directory-state">正在读取制度导入记录…</div>}
-        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>导入记录读取失败，不影响上传新制度。</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>重试</button></div>}
-        {imports.data && imports.data.items.length === 0 && (
-          <div className="policy-directory-state">{hasActiveImportFilters ? '没有符合条件的记录。' : '暂无导入记录。'}</div>
+        {policySets.isPending && <div className="policy-directory-state">正在读取已发布制度…</div>}
+        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>已发布制度读取失败。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
+        {policySets.data && visiblePolicySetGroups.length === 0 && (
+          <div className="policy-directory-state">
+            {inactivePolicySetCount > 0
+              ? `暂无可用制度；${inactivePolicySetCount} 个已停用制度已隐藏。`
+              : '暂无已发布制度。'}
+          </div>
         )}
-        {imports.data && imports.data.items.length > 0 && (
+        {visiblePolicySetGroups.length > 0 && (
+          <div className="published-policy-grid">{visiblePolicySetGroups.map(({ current: item, history }) => (
+            <article key={`${item.policy_set_id}:${item.policy_set_version}:${item.policy_index_version}`} className="published-policy-card">
+              <header><div><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></div><span className={`status-pill ${item.status === 'PUBLISHED' ? 'status-ready' : 'status-muted'}`}>{item.status === 'PUBLISHED' ? '可使用' : '已停用'}</span></header>
+              <dl><div><dt>文件 / 条款</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>采购类别</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>地区</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>发布时间</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
+              {history.length > 0 && <details className="published-policy-history">
+                <summary>查看历史版本（{history.length}）</summary>
+                <div className="published-policy-history-list">{history.map((version) => (
+                  <div className="published-policy-history-row" key={`${version.policy_set_version}:${version.policy_index_version}`}>
+                    <span><strong>版本 {version.policy_set_version}</strong><small>{formatDate(version.published_at)}</small></span>
+                    <span className="status-pill status-muted">{version.status === 'PUBLISHED' ? '已被替代' : '已停用'}</span>
+                  </div>
+                ))}</div>
+              </details>}
+              <div className="published-policy-actions">
+                <button className="button button-secondary" type="button" onClick={() => beginNewVersion(item)}>发布新版本</button>
+                {item.status === 'PUBLISHED' && <button className="button button-danger" type="button" disabled={deactivate.isPending} onClick={() => deactivateVersion(item)}>停用制度版本</button>}
+              </div>
+            </article>
+          ))}</div>
+        )}
+        {deactivate.isError && <div className="form-error compact-error" role="alert">{errorMessage(deactivate.error)}</div>}
+      </section>
+
+      <section className="card policy-directory">
+        <div className="section-heading">
+          <div><h2>待审核与发布</h2><p className="section-helper">这里只显示尚未完成发布的制度文件。</p></div>
+          {imports.data && imports.data.length > 0 && <span>{imports.data.length} 个文件</span>}
+        </div>
+        {imports.isPending && <div className="policy-directory-state">正在读取待处理文件…</div>}
+        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>待处理文件读取失败。</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>重试</button></div>}
+        {imports.data && imports.data.length === 0 && <div className="policy-directory-state">当前没有待处理文件。</div>}
+        {imports.data && imports.data.length > 0 && (
           <div className="policy-directory-table-wrap">
             <table className="policy-directory-table">
-              <thead><tr><th>制度</th><th>状态</th><th>策略版本</th><th>范围</th><th>条款</th><th>更新时间</th><th /></tr></thead>
-              <tbody>{imports.data.items.map((item) => (
+              <thead><tr><th>制度文件</th><th>状态</th><th>制度集</th><th>适用范围</th><th>条款</th><th>更新时间</th><th /></tr></thead>
+              <tbody>{imports.data.map((item) => (
                 <tr key={item.policy_import_id}>
-                  <td><strong>{item.title}</strong><span>{item.original_filename} · {formatBytes(item.size_bytes)}</span><small>{item.document_id} v{item.document_version}</small></td>
+                  <td><strong>{item.title}</strong><span>{item.original_filename} · {formatBytes(item.size_bytes)}</span></td>
                   <td><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><small>第 {item.revision} 版</small></td>
-                  <td><strong>{item.policy_set_id}</strong><span>{item.policy_set_version}</span>{item.policy_index_version && <small>{item.policy_index_version}</small>}</td>
+                  <td><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></td>
                   <td><span>{item.categories.join(' / ') || '—'}</span><small>{item.regions.join(' / ') || '—'}</small></td>
                   <td>{item.clause_count}</td>
                   <td>{formatDate(item.updated_at)}</td>
@@ -338,31 +447,32 @@ export function ResourcePage() {
             </table>
           </div>
         )}
-        {imports.data && imports.data.total > 0 && (
-          <div className="policy-pagination"><span>第 {imports.data.offset + 1}–{Math.min(imports.data.offset + imports.data.items.length, imports.data.total)} 条，共 {imports.data.total} 条</span><div><button className="button button-secondary" type="button" disabled={importOffset === 0} onClick={() => setImportOffset(Math.max(0, importOffset - DIRECTORY_PAGE_SIZE))}>上一页</button><button className="button button-secondary" type="button" disabled={importOffset + DIRECTORY_PAGE_SIZE >= imports.data.total} onClick={() => setImportOffset(importOffset + DIRECTORY_PAGE_SIZE)}>下一页</button></div></div>
-        )}
       </section>
 
-      <section className="card policy-directory">
-        <div className="section-heading">
-          <div><h2>可绑定的制度版本</h2></div>
-          {policySets.data && policySets.data.total > 0 && <span>{policySets.data.total} 个版本</span>}
+      {showUpload && <form className="card policy-upload-form" onSubmit={submit}>
+        <div className="section-heading"><div><h2>上传制度版本</h2><p className="section-helper">{basePolicy ? `正在更新 ${basePolicy.policy_set_id} 的版本 ${basePolicy.policy_set_version}；请上传新版本使用的完整文件集。` : uploadMode === 'UPDATE' ? '请选择需要更新的已有制度，再上传新版本完整文件集。' : '创建全新制度集；上传并审核完成后才能供采购任务使用。'}</p></div><button className="button button-secondary" type="button" onClick={() => setShowUpload(false)}>取消上传</button></div>
+        <div className="policy-form-grid">
+          <label className="field"><span>上传方式</span><select value={uploadMode} onChange={(event) => changeUploadMode(event.target.value as PolicyUploadMode)}><option value="NEW">新建制度集</option><option value="UPDATE">更新已有制度</option></select></label>
+          {uploadMode === 'UPDATE' && <label className="field policy-field-wide"><span>选择已有制度</span><select required value={basePolicy ? policyKey(basePolicy) : ''} onChange={(event) => selectBasePolicy(updateBasePolicies.find((policy) => policyKey(policy) === event.target.value) ?? null)}><option value="">请选择制度</option>{updateBasePolicies.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · 当前版本 {policy.policy_set_version}{policy.status === 'INACTIVE' ? '（已停用）' : ''}</option>)}</select>{updatePolicySets.isPending && <small>正在读取制度…</small>}{updatePolicySets.isError && <small className="field-error">制度读取失败，请稍后重试。</small>}</label>}
+          <label className="field policy-field-wide"><span>制度集名称</span><input required readOnly={uploadMode === 'UPDATE'} value={form.policy_set_name} onChange={(event) => update('policy_set_name', event.target.value)} placeholder="例如：电子元器件采购制度" /></label>
+          <label className="field"><span>适用采购类别 <small>多项用逗号分隔</small></span><input required value={form.categories} onChange={(event) => update('categories', event.target.value)} /></label>
+          <label className="field"><span>适用地区 <small>多项用逗号分隔</small></span><input required value={form.regions} onChange={(event) => update('regions', event.target.value)} /></label>
+          <label className="field"><span>生效日期</span><input required type="date" value={form.effective_from} onChange={(event) => update('effective_from', event.target.value)} /></label>
+          <label className="field"><span>失效日期 <small>可选</small></span><input type="date" value={form.effective_to} onChange={(event) => update('effective_to', event.target.value)} /></label>
         </div>
-        {policySets.isPending && <div className="policy-directory-state">正在读取已发布制度…</div>}
-        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>已发布制度读取失败。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
-        {policySets.data && policySets.data.items.length === 0 && <div className="policy-directory-state">暂无已发布制度。</div>}
-        {policySets.data && policySets.data.items.length > 0 && (
-          <div className="published-policy-grid">{policySets.data.items.map((item) => (
-            <article key={`${item.policy_set_id}:${item.policy_set_version}:${item.policy_index_version}`} className="published-policy-card">
-              <header><div><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></div><span className="status-pill status-ready">已发布</span></header>
-              <dl><div><dt>索引版本</dt><dd>{item.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>分类</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>地区</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>发布时间</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
-            </article>
-          ))}</div>
-        )}
-        {policySets.data && policySets.data.total > 0 && (
-          <div className="policy-pagination"><span>第 {policySets.data.offset + 1}–{Math.min(policySets.data.offset + policySets.data.items.length, policySets.data.total)} 个，共 {policySets.data.total} 个</span><div><button className="button button-secondary" type="button" disabled={policySetOffset === 0} onClick={() => setPolicySetOffset(Math.max(0, policySetOffset - DIRECTORY_PAGE_SIZE))}>上一页</button><button className="button button-secondary" type="button" disabled={policySetOffset + DIRECTORY_PAGE_SIZE >= policySets.data.total} onClick={() => setPolicySetOffset(policySetOffset + DIRECTORY_PAGE_SIZE)}>下一页</button></div></div>
-        )}
-      </section>
+        <label className="resource-dropzone policy-dropzone">
+          <span className="resource-dropzone-icon" aria-hidden="true">↑</span>
+          <strong>{files.length > 0 ? `已选择 ${files.length} 个文件` : '选择本版本的全部制度文件'}</strong>
+          <small>{files.length > 0 ? `共 ${formatBytes(files.reduce((sum, item) => sum + item.size, 0))}` : '支持多选 PDF / UTF-8 TXT / Markdown · 单个文件最大 5 MiB'}</small>
+          <input ref={fileInput} multiple type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" onChange={(event) => selectFiles(Array.from(event.target.files ?? []))} />
+        </label>
+        {files.length > 0 && <div className="policy-selected-files"><p>发布新版本时，请上传该版本使用的完整文件集。</p>{files.map((selectedFile) => <div className="policy-selected-file" key={`${selectedFile.name}:${selectedFile.lastModified}`}><span><strong>{selectedFile.name}</strong><small>{formatBytes(selectedFile.size)}</small></span><button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>预览</button></div>)}</div>}
+        {(localError || upload.isError) && <div className="form-error compact-error" role="alert">{localError || errorMessage(upload.error)}</div>}
+        <div className="policy-form-actions">
+          {upload.isError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>重试相同请求</button>}
+          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? '正在上传并解析…' : files.length > 0 ? `上传 ${files.length} 个文件并审核` : '上传文件并审核'}</button>
+        </div>
+      </form>}
 
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>

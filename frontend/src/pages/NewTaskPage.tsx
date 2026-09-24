@@ -449,7 +449,7 @@ export function NewTaskPage() {
     <div className="page-stack new-task-page">
       <section className="page-heading">
         <div>
-          <h1>创建采购任务</h1>
+          <h1>新建任务</h1>
           <p>上传采购需求文件，或直接填写采购信息。</p>
         </div>
         <Link className="button button-secondary" to="/">返回工作台</Link>
@@ -518,7 +518,7 @@ export function NewTaskPage() {
               {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>当前没有已发布制度。请先到规则资源库完成发布，或选择不绑定。</span><Link to="/resources">前往规则资源库</Link></div>}
               {policySets.data && policySets.data.items.length > 0 && (
                 <>
-                  <label className="field policy-picker-wide"><span>已发布制度</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择制度及索引版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · {policy.policy_set_version} · {policy.policy_index_version}</option>)}</select></label>
+                  <label className="field policy-picker-wide"><span>已发布制度</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择制度版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · 版本 {policy.policy_set_version}</option>)}</select></label>
                   {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">已选制度已从服务端目录消失，请重新选择后再提交。</div>}
                   {selectedPolicy && (
                     <>
@@ -526,7 +526,7 @@ export function NewTaskPage() {
                         <label className="field"><span>适用分类</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体分类</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
                         <label className="field"><span>适用地区</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体地区</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
                       </div>
-                      <dl className="policy-picker-summary"><div><dt>索引版本</dt><dd>{selectedPolicy.policy_index_version}</dd></div><div><dt>文档 / 条款</dt><dd>{selectedPolicy.document_count} / {selectedPolicy.clause_count}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
+                      <dl className="policy-picker-summary"><div><dt>文件</dt><dd>{selectedPolicy.document_count}</dd></div><div><dt>制度条款</dt><dd>{selectedPolicy.clause_count}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
                     </>
                   )}
                   {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">目录共有 {policySets.data.total} 个版本，当前显示最近的 {policySets.data.items.length} 个。</small>}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -130,26 +131,199 @@ def test_txt_upload_is_immutable_idempotent_and_does_not_expose_storage_path(
     )
 
     assert first == second
-    assert first["status"] == "REVIEW_REQUIRED"
+    assert first["status"] == "READY_TO_PUBLISH"
     assert first["revision"] == 1
     assert first["original_filename"] == "policy.txt"
     assert first["extracted_text"] == content.decode()
-    assert first["clauses"] == [
-        {
-            "clause_id": "DRAFT-001",
-            "title": "Uploaded Electronics Policy",
-            "text": content.decode(),
-            "control_code": None,
-            "rule_parameters": {},
-            "position": 1,
-        }
-    ]
+    assert len(first["clauses"]) == 1
+    assert first["clauses"][0] == {
+        "clause_id": first["clauses"][0]["clause_id"],
+        "title": "Uploaded Electronics Policy",
+        "text": content.decode(),
+        "control_code": "ROHS_COMPLIANCE",
+        "rule_parameters": {},
+        "classification": {
+            "status": "AUTO_ACCEPTED",
+            "base_status": "AUTO_ACCEPTED",
+            "method": "CONTENT_RULE",
+            "reason_codes": [],
+            "conflicts_with": [],
+        },
+        "position": 1,
+    }
+    assert first["clauses"][0]["clause_id"].startswith("DRAFT-")
     assert "storage_path" not in first
     stored_files = [path for path in (tmp_path / "policy-files").rglob("*") if path.is_file()]
     assert len(stored_files) == 1
     assert stored_files[0].read_bytes() == content
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(PolicyFileImport)) == 1
+
+
+def test_markdown_upload_preserves_utf8_text_and_media_type(
+    sessions, tmp_path: Path
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    content = "# 供应商资质制度\n\n## [QUAL-001] 资质证明\n供应商必须提供有效证明。"
+
+    uploaded = service.upload_stream(
+        metadata=_metadata(),
+        original_filename="supplier_qualification.md",
+        media_type="text/markdown",
+        stream=BytesIO(content.encode("utf-8")),
+        idempotency_key="upload-policy-markdown-1",
+    )
+
+    assert uploaded["media_type"] == "text/markdown"
+    assert uploaded["original_filename"] == "supplier_qualification.md"
+    assert uploaded["extracted_text"] == content
+    assert uploaded["extraction_metadata"] == {
+        "parser": "utf-8-markdown/1.0",
+        "page_count": None,
+    }
+    assert uploaded["clauses"][0]["clause_id"] == "QUAL-001"
+
+
+@pytest.mark.parametrize(
+    "version_directory",
+    [
+        "electronics-components/v1",
+        "electronics-components/v2",
+        "industrial-automation/v1",
+        "industrial-automation/v2",
+        "data-center-hardware/v1",
+        "data-center-hardware/v2",
+    ],
+)
+def test_upload_classification_matches_supported_demo_manifests(
+    sessions, tmp_path: Path, version_directory: str
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    policy_root = Path(__file__).parents[2] / "data" / "policies" / version_directory
+    manifest = json.loads((policy_root / "manifest.json").read_text(encoding="utf-8"))
+
+    for document in manifest["documents"]:
+        path = policy_root / document["path"]
+        uploaded = service.upload_stream(
+            metadata=_metadata().model_copy(
+                update={
+                    "policy_set_id": manifest["policy_set_id"],
+                    "policy_set_version": manifest["policy_set_version"],
+                    "policy_id": document["policy_id"],
+                    "document_id": document["document_id"],
+                    "document_version": document["document_version"],
+                    "title": path.stem,
+                }
+            ),
+            original_filename=path.name,
+            media_type="text/markdown",
+            stream=BytesIO(path.read_bytes()),
+            idempotency_key=f"upload-{version_directory}-{document['document_id']}",
+        )
+
+        assert uploaded["status"] == "READY_TO_PUBLISH"
+        assert {
+            clause["clause_id"]: {
+                "control_code": clause["control_code"],
+                "rule_parameters": clause["rule_parameters"],
+            }
+            for clause in uploaded["clauses"]
+        } == document["clauses"]
+        assert all(
+            clause["classification"]["status"] == "AUTO_ACCEPTED"
+            for clause in uploaded["clauses"]
+        )
+
+
+def test_unsupported_clause_is_routed_to_admin_review(sessions, tmp_path: Path) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    content = (
+        "# 供应商网络安全制度\n\n"
+        "## [SEC-001] 网络安全评估\n"
+        "供应商必须提交渗透测试和漏洞扫描报告。"
+    )
+
+    uploaded = service.upload_stream(
+        metadata=_metadata(),
+        # A familiar filename must not override a capability the system cannot run.
+        original_filename="spend_approval.md",
+        media_type="text/markdown",
+        stream=BytesIO(content.encode("utf-8")),
+        idempotency_key="unsupported-policy",
+    )
+
+    assert uploaded["status"] == "REVIEW_REQUIRED"
+    assert uploaded["clauses"][0]["control_code"] is None
+    assert uploaded["clauses"][0]["classification"] == {
+        "status": "UNSUPPORTED",
+        "base_status": "UNSUPPORTED",
+        "method": "CAPABILITY_REGISTRY",
+        "reason_codes": ["UNSUPPORTED_CAPABILITY"],
+        "unsupported_capability": "CYBERSECURITY_ASSESSMENT",
+        "conflicts_with": [],
+    }
+
+
+def test_missing_executable_parameter_is_routed_to_admin_review(
+    sessions, tmp_path: Path
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    content = (
+        "# 采购审批制度\n\n"
+        "## [APR-001] 金额审批门槛\n"
+        "大额采购必须取得采购经理批准。"
+    )
+
+    uploaded = service.upload_stream(
+        metadata=_metadata(),
+        original_filename="spend_approval.md",
+        media_type="text/markdown",
+        stream=BytesIO(content.encode("utf-8")),
+        idempotency_key="missing-threshold",
+    )
+
+    assert uploaded["status"] == "REVIEW_REQUIRED"
+    clause = uploaded["clauses"][0]
+    assert clause["control_code"] == "AMOUNT_APPROVAL"
+    assert clause["classification"]["status"] == "ADMIN_REVIEW"
+    assert clause["classification"]["reason_codes"] == [
+        "MISSING_REQUIRED_PARAMETER"
+    ]
+
+
+def test_conflicting_structured_rules_mark_both_files_for_review(
+    sessions, tmp_path: Path
+) -> None:
+    service, _embedding = _service(sessions, tmp_path)
+    uploaded_ids = []
+    for number, threshold in enumerate(("7,000.00", "8,000.00"), start=1):
+        content = (
+            f"# 采购审批制度 {number}\n\n"
+            f"## [APR-00{number}] 金额审批门槛\n"
+            f"采购总成本达到 SGD {threshold} 时必须取得经理审批。"
+        )
+        uploaded = service.upload_stream(
+            metadata=_metadata().model_copy(
+                update={
+                    "policy_id": f"POL-CONFLICT-{number}",
+                    "document_id": f"DOC-CONFLICT-{number}",
+                    "title": f"采购审批制度 {number}",
+                }
+            ),
+            original_filename=f"spend_approval_{number}.md",
+            media_type="text/markdown",
+            stream=BytesIO(content.encode("utf-8")),
+            idempotency_key=f"conflicting-threshold-{number}",
+        )
+        uploaded_ids.append(uploaded["policy_import_id"])
+
+    records = [service.get(policy_import_id) for policy_import_id in uploaded_ids]
+    assert {record["status"] for record in records} == {"REVIEW_REQUIRED"}
+    for record in records:
+        analysis = record["clauses"][0]["classification"]
+        assert analysis["status"] == "ADMIN_REVIEW"
+        assert "CONFLICTING_RULE" in analysis["reason_codes"]
+        assert len(analysis["conflicts_with"]) == 1
 
 
 def test_upload_generates_missing_technical_identifiers(
@@ -209,7 +383,9 @@ def test_pdf_upload_extracts_native_text_and_page_count(sessions, tmp_path: Path
     ("filename", "media_type", "content", "code"),
     [
         ("policy.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", b"x", "unsupported_policy_media_type"),
+        ("README.md", "text/markdown", b"# Documentation", "policy_document_not_policy"),
         ("policy.txt", "text/plain", b"\xff\xfe", "policy_txt_not_utf8"),
+        ("policy.md", "text/markdown", b"\xff\xfe", "policy_markdown_not_utf8"),
         ("policy.pdf", "application/pdf", b"not-a-pdf", "invalid_policy_pdf"),
     ],
 )
@@ -353,6 +529,187 @@ def test_publish_requires_reviewed_clauses(sessions, tmp_path: Path) -> None:
         )
 
     assert error.value.code == "policy_import_not_ready"
+
+
+def test_policy_set_files_are_reviewed_and_published_as_one_version(
+    sessions, tmp_path: Path
+) -> None:
+    first_text = "Approved suppliers must be used."
+    second_text = "Policy evidence must be reviewed before use."
+    service, _embedding = _service(
+        sessions,
+        tmp_path,
+        {first_text: [0.1] * 1024, second_text: [0.2] * 1024},
+    )
+
+    uploads = []
+    for number, text in enumerate((first_text, second_text), start=1):
+        metadata = _metadata().model_copy(
+            update={
+                "policy_id": f"POL-UPLOAD-00{number}",
+                "document_id": f"DOC-UPLOAD-00{number}",
+                "title": f"Policy document {number}",
+            }
+        )
+        uploads.append(
+            service.upload_stream(
+                metadata=metadata,
+                original_filename=f"policy-{number}.txt",
+                media_type="text/plain",
+                stream=BytesIO(text.encode()),
+                idempotency_key=f"upload-set-file-{number}",
+            )
+        )
+
+    first_review = service.replace_clauses(
+        uploads[0]["policy_import_id"],
+        expected_revision=1,
+        clauses=[
+            PolicyDraftClauseInput(
+                clause_id="APPROVED-001",
+                title="Approved supplier",
+                text=first_text,
+                control_code="APPROVED_SUPPLIER",
+            )
+        ],
+        idempotency_key="review-set-file-1",
+    )
+    with pytest.raises(ConflictError) as incomplete:
+        service.publish(
+            uploads[0]["policy_import_id"],
+            expected_revision=first_review["revision"],
+            idempotency_key="publish-incomplete-set",
+        )
+    assert incomplete.value.code == "policy_set_review_incomplete"
+
+    second_review = service.replace_clauses(
+        uploads[1]["policy_import_id"],
+        expected_revision=1,
+        clauses=[
+            PolicyDraftClauseInput(
+                clause_id="ROHS-001",
+                title="RoHS evidence",
+                text=second_text,
+                control_code="ROHS_COMPLIANCE",
+            )
+        ],
+        idempotency_key="review-set-file-2",
+    )
+    published = service.publish(
+        uploads[1]["policy_import_id"],
+        expected_revision=second_review["revision"],
+        idempotency_key="publish-complete-set",
+    )
+
+    assert published["status"] == "PUBLISHED"
+    grouped = service.list_imports(
+        policy_set_id="uploaded-electronics-policy",
+        policy_set_version="2026.09.1",
+    )
+    assert grouped["total"] == 2
+    assert {item["status"] for item in grouped["items"]} == {"PUBLISHED"}
+    assert len({item["policy_index_version"] for item in grouped["items"]}) == 1
+    policy_sets = service.list_policy_sets()
+    assert policy_sets["items"][0]["document_count"] == 2
+    assert policy_sets["items"][0]["clause_count"] == 2
+    binding = policy_sets["items"][0]
+    service.require_active_binding(
+        policy_set_version=binding["policy_set_version"],
+        policy_index_version=binding["policy_index_version"],
+        category="Electronics",
+        region="SG",
+    )
+
+    deactivated = service.deactivate_policy_set(
+        binding["policy_set_id"],
+        binding["policy_set_version"],
+        idempotency_key="deactivate-policy-set-1",
+    )
+    repeated = service.deactivate_policy_set(
+        binding["policy_set_id"],
+        binding["policy_set_version"],
+        idempotency_key="deactivate-policy-set-1",
+    )
+
+    assert repeated == deactivated
+    assert deactivated["status"] == "INACTIVE"
+    assert service.list_policy_sets()["total"] == 0
+    inactive_sets = service.list_policy_sets(include_inactive=True)
+    assert inactive_sets["total"] == 1
+    assert inactive_sets["items"][0]["status"] == "INACTIVE"
+    with pytest.raises(ConflictError) as unavailable:
+        service.require_active_binding(
+            policy_set_version=binding["policy_set_version"],
+            policy_index_version=binding["policy_index_version"],
+            category="Electronics",
+            region="SG",
+        )
+    assert unavailable.value.code == "policy_binding_unavailable"
+
+
+def test_publishing_new_version_supersedes_previous_active_version(
+    sessions, tmp_path: Path
+) -> None:
+    texts = {
+        "First version policy text.": [0.1] * 1024,
+        "Second version policy text.": [0.2] * 1024,
+    }
+    service, _embedding = _service(sessions, tmp_path, texts)
+
+    for number, (text, version) in enumerate(
+        (("First version policy text.", "2026.09.1"),
+         ("Second version policy text.", "2026.09.2")),
+        start=1,
+    ):
+        metadata = _metadata().model_copy(
+            update={
+                "policy_set_version": version,
+                "policy_id": f"POL-UPLOAD-V{number}",
+                "document_id": f"DOC-UPLOAD-V{number}",
+                "title": f"Policy version {number}",
+            }
+        )
+        uploaded = service.upload_stream(
+            metadata=metadata,
+            original_filename=f"policy-v{number}.txt",
+            media_type="text/plain",
+            stream=BytesIO(text.encode()),
+            idempotency_key=f"upload-version-{number}",
+        )
+        reviewed = service.replace_clauses(
+            uploaded["policy_import_id"],
+            expected_revision=uploaded["revision"],
+            clauses=[
+                PolicyDraftClauseInput(
+                    clause_id=f"INFO-{number:03d}",
+                    title=f"Policy version {number}",
+                    text=text,
+                    control_code="INFORMATIONAL",
+                )
+            ],
+            idempotency_key=f"review-version-{number}",
+        )
+        service.publish(
+            uploaded["policy_import_id"],
+            expected_revision=reviewed["revision"],
+            idempotency_key=f"publish-version-{number}",
+        )
+
+    active = service.list_policy_sets()
+    assert active["total"] == 1
+    assert active["items"][0]["policy_set_version"] == "2026.09.2"
+    assert active["items"][0]["status"] == "PUBLISHED"
+
+    all_versions = service.list_policy_sets(include_inactive=True)
+    assert all_versions["total"] == 2
+    statuses = {
+        item["policy_set_version"]: item["status"]
+        for item in all_versions["items"]
+    }
+    assert statuses == {
+        "2026.09.1": "INACTIVE",
+        "2026.09.2": "PUBLISHED",
+    }
 
 
 def test_same_reviewed_file_version_reuploaded_as_new_draft_reuses_published_index(

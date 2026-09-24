@@ -181,7 +181,7 @@ def test_explain_plan_cli_records_success_or_fail_closed(tmp_path, monkeypatch, 
                 "evidence_quotes": {c.citation_id: c.text}} for c in citations])
     monkeypatch.setattr(cli, "LiveExplanationClient", lambda _: Client())
     args = ["explain-plan", "--bundle", str(bundle_file), "--facts", str(facts_file),
-            "--manifest", "data/policies/electronics-v2/manifest.json", "--output", str(output)]
+            "--manifest", "data/policies/electronics-components/v2/manifest.json", "--output", str(output)]
     assert cli.main(args) == int(fail)
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["status"] == ("ERROR" if fail else "OK")

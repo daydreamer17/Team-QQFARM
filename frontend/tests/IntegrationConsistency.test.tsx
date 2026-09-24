@@ -531,6 +531,13 @@ describe('frontend and backend version consistency', () => {
 
     expect(await screen.findByText(/1 家待确认 · 1 家已排除/)).toBeInTheDocument()
     expect(screen.getByText(/当前 2 份有效报价中，1 份进入比较，1 份按设置排除（SUP-030）/)).toBeInTheDocument()
+    expect(screen.getByText('当前未绑定制度。')).toBeInTheDocument()
+    expect(screen.getAllByText('当前第 6 版').length).toBeGreaterThan(0)
+    expect(screen.queryByText('确定性比较')).not.toBeInTheDocument()
+    expect(screen.queryByText('第 1 版')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看报价原文' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看选择依据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看补充信息' })).not.toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: '重新分析' }))
     await waitFor(() => expect(startRun).toHaveBeenCalledWith('task-1', 6, expect.any(String)))
     expect(await screen.findByText('决策页')).toBeInTheDocument()
@@ -624,7 +631,7 @@ describe('frontend and backend version consistency', () => {
     expect(backendFieldErrors(error, ['budget_amount'])).toEqual({ budget_amount: '预算格式无效。' })
   })
 
-  test('policy upload asks for business fields and hides empty history filters', async () => {
+  test('policy management prioritizes published and pending lists before upload', async () => {
     vi.spyOn(api, 'listPolicyImports').mockResolvedValue({
       items: [], total: 0, limit: 8, offset: 0,
     })
@@ -634,12 +641,208 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    expect(await screen.findByRole('heading', { name: '规则资源库' })).toBeInTheDocument()
-    expect(screen.getByLabelText('制度标题')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '制度管理' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '已发布制度' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '待审核与发布' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('制度集名称')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '上传制度版本' }))
+    expect(screen.getByLabelText('上传方式')).toHaveValue('NEW')
+    expect(screen.getByLabelText('制度集名称')).toBeInTheDocument()
+    expect(screen.getByText('选择本版本的全部制度文件')).toBeInTheDocument()
+    const policyFileInput = screen.getByLabelText(/选择本版本的全部制度文件/)
+    expect(policyFileInput).toHaveAttribute('multiple')
+    expect(policyFileInput).toHaveAttribute(
+      'accept',
+      '.pdf,.txt,.md,application/pdf,text/plain,text/markdown',
+    )
+    await userEvent.upload(
+      policyFileInput,
+      new File(['# Documentation'], 'README.md', { type: 'text/markdown' }),
+    )
+    expect(screen.getByText(/README\.md.*说明文件/)).toBeInTheDocument()
+    expect(screen.getByText(/PDF \/ UTF-8 TXT \/ Markdown/)).toBeInTheDocument()
     expect(screen.queryByLabelText('策略集 ID')).not.toBeInTheDocument()
     expect(screen.queryByText('KNOWLEDGE RESOURCES')).not.toBeInTheDocument()
-    expect(await screen.findByText('暂无导入记录。')).toBeInTheDocument()
+    expect(await screen.findByText('当前没有待处理文件。')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '筛选' })).not.toBeInTheDocument()
+  })
+
+  test('published policy versions can start a replacement version or be deactivated', async () => {
+    vi.spyOn(api, 'listPolicyImports').mockResolvedValue({
+      items: [], total: 0, limit: 100, offset: 0,
+    })
+    vi.spyOn(api, 'listPolicySets').mockResolvedValue({
+      items: [{
+        policy_set_id: 'electronics-sg-procurement',
+        policy_set_version: '2026.09.1',
+        policy_index_version: 'pidx-1',
+        status: 'PUBLISHED',
+        categories: ['Electronics'],
+        regions: ['SG'],
+        document_count: 3,
+        clause_count: 30,
+        provider: 'fixed',
+        embedding_model: 'BAAI/bge-m3',
+        embedding_dimension: 1024,
+        preprocessing_version: 'policy-text/v1',
+        published_at: '2026-09-24T00:00:00Z',
+      }],
+      total: 1,
+      limit: 8,
+      offset: 0,
+    })
+    const deactivate = vi.spyOn(api, 'deactivatePolicySet').mockResolvedValue({
+      policy_set_id: 'electronics-sg-procurement',
+      policy_set_version: '2026.09.1',
+      status: 'INACTIVE',
+    })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    renderRoute('/resources', '/resources', <ResourcePage />)
+
+    await userEvent.click(await screen.findByRole('button', { name: '发布新版本' }))
+    expect(screen.getByLabelText('上传方式')).toHaveValue('UPDATE')
+    expect(screen.getByLabelText('选择已有制度')).toHaveValue(
+      JSON.stringify(['electronics-sg-procurement', '2026.09.1', 'pidx-1']),
+    )
+    expect(screen.getByLabelText('制度集名称')).toHaveValue('electronics-sg-procurement')
+    expect(screen.getByLabelText('制度集名称')).toHaveAttribute('readonly')
+    expect(screen.getByLabelText(/适用采购类别/)).toHaveValue('Electronics')
+    expect(screen.getByLabelText(/适用地区/)).toHaveValue('SG')
+    expect(screen.getByText(/正在更新 electronics-sg-procurement 的版本 2026\.09\.1/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '停用制度版本' }))
+    await waitFor(() => expect(deactivate).toHaveBeenCalledWith(
+      'electronics-sg-procurement',
+      '2026.09.1',
+      expect.any(String),
+    ))
+  })
+
+  test('policy management groups old versions under the current policy set', async () => {
+    vi.spyOn(api, 'listPolicyImports').mockResolvedValue({
+      items: [], total: 0, limit: 100, offset: 0,
+    })
+    vi.spyOn(api, 'listPolicySets').mockResolvedValue({
+      items: [
+        {
+          policy_set_id: 'regional-electronics-ui-test',
+          policy_set_version: '2026.09.24-123928',
+          policy_index_version: 'pidx-3',
+          status: 'PUBLISHED',
+          categories: ['Electronics'],
+          regions: ['SG'],
+          document_count: 5,
+          clause_count: 25,
+          provider: 'fixed',
+          embedding_model: 'BAAI/bge-m3',
+          embedding_dimension: 1024,
+          preprocessing_version: 'policy-text/v1',
+          published_at: '2026-09-24T04:39:00Z',
+        },
+        {
+          policy_set_id: 'regional-electronics-ui-test',
+          policy_set_version: '2026.09.24-122203',
+          policy_index_version: 'pidx-2',
+          status: 'PUBLISHED',
+          categories: ['Electronics'],
+          regions: ['SG'],
+          document_count: 5,
+          clause_count: 25,
+          provider: 'fixed',
+          embedding_model: 'BAAI/bge-m3',
+          embedding_dimension: 1024,
+          preprocessing_version: 'policy-text/v1',
+          published_at: '2026-09-24T04:38:00Z',
+        },
+        {
+          policy_set_id: 'regional-electronics-ui-test',
+          policy_set_version: '2026.09.24-121015',
+          policy_index_version: 'pidx-1',
+          status: 'INACTIVE',
+          categories: ['Electronics'],
+          regions: ['SG'],
+          document_count: 5,
+          clause_count: 25,
+          provider: 'fixed',
+          embedding_model: 'BAAI/bge-m3',
+          embedding_dimension: 1024,
+          preprocessing_version: 'policy-text/v1',
+          published_at: '2026-09-24T04:17:00Z',
+        },
+      ],
+      total: 3,
+      limit: 100,
+      offset: 0,
+    })
+
+    renderRoute('/resources', '/resources', <ResourcePage />)
+
+    expect(await screen.findByText('1 个制度集')).toBeInTheDocument()
+    expect(screen.getAllByText('regional-electronics-ui-test')).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '发布新版本' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: '停用制度版本' })).toHaveLength(1)
+    expect(screen.getByText('版本 2026.09.24-123928')).toBeVisible()
+
+    await userEvent.click(screen.getByText('查看历史版本（2）'))
+    expect(screen.getByText('版本 2026.09.24-122203')).toBeVisible()
+    expect(screen.getByText('版本 2026.09.24-121015')).toBeVisible()
+    expect(screen.getByText('已被替代')).toBeVisible()
+  })
+
+  test('inactive policy sets stay hidden until the user asks to show them', async () => {
+    vi.spyOn(api, 'listPolicyImports').mockResolvedValue({
+      items: [], total: 0, limit: 100, offset: 0,
+    })
+    vi.spyOn(api, 'listPolicySets').mockResolvedValue({
+      items: [
+        {
+          policy_set_id: 'active-electronics-policy',
+          policy_set_version: '2026.09.2',
+          policy_index_version: 'pidx-active',
+          status: 'PUBLISHED',
+          categories: ['Electronics'],
+          regions: ['SG'],
+          document_count: 3,
+          clause_count: 18,
+          provider: 'fixed',
+          embedding_model: 'BAAI/bge-m3',
+          embedding_dimension: 1024,
+          preprocessing_version: 'policy-text/v1',
+          published_at: '2026-09-24T05:00:00Z',
+        },
+        {
+          policy_set_id: 'inactive-electronics-policy',
+          policy_set_version: '2026.08.1',
+          policy_index_version: 'pidx-inactive',
+          status: 'INACTIVE',
+          categories: ['Electronics'],
+          regions: ['SG'],
+          document_count: 3,
+          clause_count: 15,
+          provider: 'fixed',
+          embedding_model: 'BAAI/bge-m3',
+          embedding_dimension: 1024,
+          preprocessing_version: 'policy-text/v1',
+          published_at: '2026-08-01T00:00:00Z',
+        },
+      ],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    })
+
+    renderRoute('/resources', '/resources', <ResourcePage />)
+
+    expect(await screen.findByText('active-electronics-policy')).toBeVisible()
+    expect(screen.queryByText('inactive-electronics-policy')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '显示已停用制度（1）' }))
+    expect(screen.getByText('inactive-electronics-policy')).toBeVisible()
+    expect(screen.getByRole('button', { name: '隐藏已停用制度' })).toHaveAttribute('aria-pressed', 'true')
+
+    await userEvent.click(screen.getByRole('button', { name: '隐藏已停用制度' }))
+    expect(screen.queryByText('inactive-electronics-policy')).not.toBeInTheDocument()
   })
 
   test('new task form starts empty and clear form removes every selected default', async () => {
@@ -649,7 +852,7 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/new', '/tasks/new', <NewTaskPage />)
 
-    expect(await screen.findByRole('heading', { name: '创建采购任务' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '新建任务' })).toBeInTheDocument()
     for (const label of [
       '制造商', '制造商料号', '封装', '物料版本', '物料状态',
       '数量单位', '币种', '成本比较口径', '计划下单日期 可选',
@@ -705,16 +908,60 @@ test('policy editor locks fields during save and permits editing after completio
   let finish!: (value: PolicyImportResponse) => void
   vi.spyOn(api, 'reviewPolicyClauses').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
   const client = renderPolicy()
+  await userEvent.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
   const field = await screen.findByRole('textbox', { name: /条款正文/ })
   const user = userEvent.setup()
   await user.clear(field); await user.type(field, 'Submitted')
-  await user.click(screen.getByRole('button', { name: '保存条款审核' }))
+  await user.click(screen.getByRole('button', { name: '保存确认结果' }))
   expect(field).toBeDisabled()
   expect(screen.getByRole('button', { name: '删除' })).toBeDisabled()
   await user.type(field, 'Must not append')
   await act(async () => finish({ ...data, revision: 3, status: 'READY_TO_PUBLISH', clauses: [{ ...data.clauses[0], text: 'Submitted' }] }))
   expect(field).toHaveValue('Submitted')
   expect(field).not.toBeDisabled()
+  client.clear()
+})
+test('unrecognized policy clauses keep technical controls out of the normal workflow', async () => {
+  vi.restoreAllMocks()
+  const data = {
+    ...policyFixture(),
+    clauses: [{ ...policyFixture().clauses[0], control_code: null }],
+  }
+  vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
+  const client = renderPolicy()
+
+  expect(await screen.findByText(/系统无法判断该条款属于哪类采购检查/)).toBeInTheDocument()
+  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: '保存确认结果' })).not.toBeInTheDocument()
+
+  await userEvent.click(screen.getByRole('button', { name: '进入高级审核（1 条）' }))
+  expect(screen.getByLabelText('检查类型')).toBeInTheDocument()
+  expect(screen.getByRole('option', { name: '供应商准入' })).toHaveValue('APPROVED_SUPPLIER')
+  client.clear()
+})
+test('unsupported policy clauses explain the capability gap without asking ordinary users for codes', async () => {
+  vi.restoreAllMocks()
+  const data = {
+    ...policyFixture(),
+    clauses: [{
+      ...policyFixture().clauses[0],
+      control_code: null,
+      classification: {
+        status: 'UNSUPPORTED' as const,
+        base_status: 'UNSUPPORTED' as const,
+        method: 'CAPABILITY_REGISTRY',
+        reason_codes: ['UNSUPPORTED_CAPABILITY'],
+        conflicts_with: [],
+        unsupported_capability: 'CYBERSECURITY_ASSESSMENT',
+      },
+    }],
+  }
+  vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
+  const client = renderPolicy()
+
+  expect(await screen.findByText('当前不支持自动执行')).toBeInTheDocument()
+  expect(screen.getByText(/当前系统没有对应的检查器或数据来源/)).toBeInTheDocument()
+  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
   client.clear()
 })
 test('interrupted policy publication can be retried after reopening the page', async () => {
@@ -724,7 +971,7 @@ test('interrupted policy publication can be retried after reopening the page', a
   const publish = vi.spyOn(api, 'publishPolicy').mockResolvedValue({ ...data, revision: 3, status: 'PUBLISHED', policy_index_version: 'pidx-restored' })
   const client = renderPolicy()
   await userEvent.click(await screen.findByRole('button', { name: '重试恢复发布' }))
-  expect(await screen.findByText('制度索引已发布')).toBeInTheDocument()
+  expect(await screen.findByText('制度已发布，可绑定采购任务')).toBeInTheDocument()
   expect(publish).toHaveBeenCalledWith('policy-test', 2, expect.any(String))
   client.clear()
 })

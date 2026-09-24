@@ -834,6 +834,62 @@ def test_requirement_update_and_soft_abandon_are_versioned(
     assert audit["revisions"][-1]["details"]["reason"] == "采购需求已经取消"
 
 
+def test_policy_binding_can_change_or_be_removed_as_a_new_task_revision(
+    client: tuple[TestClient, BackendService],
+) -> None:
+    http, _service = client
+    original_binding = {
+        "policy_set_version": "2026.09.1",
+        "policy_index_version": "pidx-original",
+        "category": "Electronics",
+        "region": "SG",
+    }
+    task = http.post(
+        "/api/v1/tasks",
+        headers={"Idempotency-Key": "create-policy-edit"},
+        json={"requirement": REQUIREMENT, "policy_binding": original_binding},
+    ).json()
+    replacement = {
+        "policy_set_version": "2026.09.2",
+        "policy_index_version": "pidx-replacement",
+        "category": "Electronics",
+        "region": "SG",
+    }
+
+    changed = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        headers={"Idempotency-Key": "replace-policy-binding"},
+        json={
+            "expected_task_revision": 1,
+            "requirement": REQUIREMENT,
+            "policy_binding": replacement,
+        },
+    )
+    assert changed.status_code == 202
+    assert changed.json()["task_revision"] == 2
+    assert changed.json()["policy_binding_changed"] is True
+    assert http.get(f"/api/v1/tasks/{task['task_id']}").json()["policy_binding"] == replacement
+
+    removed = http.put(
+        f"/api/v1/tasks/{task['task_id']}/requirement",
+        headers={"Idempotency-Key": "remove-policy-binding"},
+        json={
+            "expected_task_revision": 2,
+            "requirement": REQUIREMENT,
+            "policy_binding": None,
+        },
+    )
+    assert removed.status_code == 202
+    assert removed.json()["task_revision"] == 3
+    assert http.get(f"/api/v1/tasks/{task['task_id']}").json()["policy_binding"] is None
+    audit = http.get(f"/api/v1/tasks/{task['task_id']}/revisions").json()
+    assert [item["change_type"] for item in audit["revisions"]] == [
+        "TASK_CREATED",
+        "POLICY_BINDING_UPDATED",
+        "POLICY_BINDING_UPDATED",
+    ]
+
+
 def test_requirement_update_with_quote_queues_full_recalculation(
     client: tuple[TestClient, BackendService],
 ) -> None:

@@ -80,7 +80,7 @@ class SQLPolicyRepository:
                         PolicyIndex.policy_index_version == request.policy_index_version,
                         PolicyIndex.status == "PUBLISHED",
                         PolicySet.policy_set_version == request.policy_set_version,
-                        PolicySet.status == "PUBLISHED",
+                        PolicySet.status.in_(("PUBLISHED", "INACTIVE")),
                     )
                 )
             )

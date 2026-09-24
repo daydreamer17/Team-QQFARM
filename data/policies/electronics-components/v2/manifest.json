@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0.0",
+  "policy_set_id": "electronics-components-procurement",
+  "policy_set_version": "2026.07.1",
+  "documents": [
+    {
+      "policy_id": "POL-ECP-APPROVAL", "document_id": "DOC-ECP-APPROVAL", "document_version": "2.0.0",
+      "title": "电子元器件采购金额审批制度 V2", "path": "spend_approval.md",
+      "effective_from": "2026-07-01T00:00:00+08:00", "effective_to": null,
+      "categories": ["Electronics"], "regions": ["SG"],
+      "clauses": {
+        "ECP-APR-001": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "ECP-APR-002": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {"rule_key": "approval_threshold:金额审批门槛", "currency": "SGD", "threshold": "7000.00", "operator": ">="}},
+        "ECP-APR-003": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "ECP-APR-004": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "ECP-APR-005": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "ECP-APR-006": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}}
+      }
+    },
+    {
+      "policy_id": "POL-ECP-SUPPLIER", "document_id": "DOC-ECP-SUPPLIER", "document_version": "2.0.0",
+      "title": "电子元器件供应商准入制度 V2", "path": "supplier_due_diligence.md",
+      "effective_from": "2026-07-01T00:00:00+08:00", "effective_to": null,
+      "categories": ["Electronics"], "regions": ["SG"],
+      "clauses": {
+        "ECP-SUP-001": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "ECP-SUP-002": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "ECP-SUP-003": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "ECP-SUP-004": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "ECP-SUP-005": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "ECP-SUP-006": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}}
+      }
+    },
+    {
+      "policy_id": "POL-ECP-ROHS", "document_id": "DOC-ECP-ROHS", "document_version": "2.0.0",
+      "title": "电子元器件 RoHS 合规制度 V2", "path": "environmental_compliance.md",
+      "effective_from": "2026-07-01T00:00:00+08:00", "effective_to": null,
+      "categories": ["Electronics"], "regions": ["SG"],
+      "clauses": {
+        "ECP-ECO-001": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "ECP-ECO-002": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "ECP-ECO-003": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "ECP-ECO-004": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "ECP-ECO-005": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "ECP-ECO-006": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}}
+      }
+    }
+  ]
+}

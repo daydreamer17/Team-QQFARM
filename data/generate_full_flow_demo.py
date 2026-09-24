@@ -23,12 +23,12 @@ SOURCE_REQUIREMENT = (
     / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.pdf"
 )
 SOURCE_QUOTES = ROOT / "data/generated/inputs/development/quote_V1"
-SOURCE_POLICY_ROOT = ROOT / "data/policies/electronics-v1"
+SOURCE_POLICY_ROOT = ROOT / "data/policies/electronics-components/v2"
 
 POLICY_DOCUMENTS = (
-    ("approved_supplier.md", "APPROVED_SUPPLIER"),
-    ("electronics_rohs.md", "ROHS_COMPLIANCE"),
-    ("amount_approval.md", "AMOUNT_APPROVAL"),
+    ("supplier_due_diligence.md", "APPROVED_SUPPLIER"),
+    ("environmental_compliance.md", "ROHS_COMPLIANCE"),
+    ("spend_approval.md", "AMOUNT_APPROVAL"),
 )
 CLAUSE_HEADING = re.compile(r"^## \[([^\]]+)\]\s+(.+?)\s*$", re.MULTILINE)
 

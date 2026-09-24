@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "policy_set_id": "data-center-hardware-procurement",
+  "policy_set_version": "2026.03.1",
+  "documents": [
+    {
+      "policy_id": "POL-DCH-APPROVAL", "document_id": "DOC-DCH-APPROVAL", "document_version": "1.0.0",
+      "title": "数据中心硬件采购金额审批制度 V1", "path": "spend_approval.md",
+      "effective_from": "2026-03-01T00:00:00+08:00", "effective_to": "2026-09-30T23:59:59+08:00",
+      "categories": ["IT Hardware"], "regions": ["SG"],
+      "clauses": {
+        "DCH-APR-001": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "DCH-APR-002": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {"rule_key": "approval_threshold:金额审批门槛", "currency": "SGD", "threshold": "50000.00", "operator": ">="}},
+        "DCH-APR-003": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "DCH-APR-004": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}},
+        "DCH-APR-005": {"control_code": "AMOUNT_APPROVAL", "rule_parameters": {}}
+      }
+    },
+    {
+      "policy_id": "POL-DCH-SUPPLIER", "document_id": "DOC-DCH-SUPPLIER", "document_version": "1.0.0",
+      "title": "数据中心硬件供应商准入制度 V1", "path": "supplier_due_diligence.md",
+      "effective_from": "2026-03-01T00:00:00+08:00", "effective_to": "2026-09-30T23:59:59+08:00",
+      "categories": ["IT Hardware"], "regions": ["SG"],
+      "clauses": {
+        "DCH-SUP-001": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "DCH-SUP-002": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "DCH-SUP-003": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "DCH-SUP-004": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}},
+        "DCH-SUP-005": {"control_code": "APPROVED_SUPPLIER", "rule_parameters": {}}
+      }
+    },
+    {
+      "policy_id": "POL-DCH-ROHS", "document_id": "DOC-DCH-ROHS", "document_version": "1.0.0",
+      "title": "数据中心硬件环境合规制度 V1", "path": "environmental_compliance.md",
+      "effective_from": "2026-03-01T00:00:00+08:00", "effective_to": "2026-09-30T23:59:59+08:00",
+      "categories": ["IT Hardware"], "regions": ["SG"],
+      "clauses": {
+        "DCH-ECO-001": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "DCH-ECO-002": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "DCH-ECO-003": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "DCH-ECO-004": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}},
+        "DCH-ECO-005": {"control_code": "ROHS_COMPLIANCE", "rule_parameters": {}}
+      }
+    }
+  ]
+}

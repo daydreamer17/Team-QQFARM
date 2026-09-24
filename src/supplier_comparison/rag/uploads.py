@@ -37,7 +37,17 @@ from .models import (
 
 
 _CLAUSE_HEADING = re.compile(r"^## \[([^\]]+)\]\s+(.+?)\s*$", re.MULTILINE)
-_SUPPORTED_MEDIA = {"application/pdf": ".pdf", "text/plain": ".txt"}
+_AMOUNT_VALUE = re.compile(
+    r"\b(SGD|USD|EUR|CNY|MYR)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+    re.IGNORECASE,
+)
+_SUPPORTED_MEDIA = {
+    "application/pdf": ".pdf",
+    "text/plain": ".txt",
+    "text/markdown": ".md",
+}
+_NON_POLICY_FILENAMES = {"readme.md", "readme.txt"}
+_CONFLICT_REASON_CODES = {"CONFLICTING_RULE", "DUPLICATE_CLAUSE_ID"}
 _LOCAL_PUBLISH_LOCKS: WeakValueDictionary = WeakValueDictionary()
 _LOCAL_PUBLISH_GUARD = Lock()
 
@@ -143,10 +153,15 @@ class PolicyFileImportService:
             raise BackendError(
                 "policy_filename_invalid", "Policy filename is missing or too long."
             )
+        if safe_name.casefold() in _NON_POLICY_FILENAMES:
+            raise BackendError(
+                "policy_document_not_policy",
+                "README is documentation and cannot be uploaded as policy content.",
+            )
         if extension is None or Path(safe_name).suffix.lower() != extension:
             raise BackendError(
                 "unsupported_policy_media_type",
-                "Only PDF and UTF-8 TXT policy files are supported.",
+                "Only PDF, UTF-8 TXT, and Markdown policy files are supported.",
             )
         staging = self._storage_root / ".staging"
         staging.mkdir(parents=True, exist_ok=True)
@@ -228,11 +243,24 @@ class PolicyFileImportService:
                             "Generated policy storage location already exists.",
                         )
                     staged_path.rename(final_path)
+                    draft_clauses = _draft_clauses(
+                        extracted_text,
+                        fallback_title=metadata.title,
+                        fallback_id_prefix=identifier_suffix[:8].upper(),
+                        document_hint=safe_name,
+                    )
                     record = PolicyFileImport(
                         policy_import_id=policy_import_id,
                         actor_id=self._actor_id,
                         revision=1,
-                        status="REVIEW_REQUIRED",
+                        status=(
+                            "READY_TO_PUBLISH"
+                            if all(
+                                clause["classification"]["status"] == "AUTO_ACCEPTED"
+                                for clause in draft_clauses
+                            )
+                            else "REVIEW_REQUIRED"
+                        ),
                         original_filename=safe_name,
                         media_type=normalized_media,
                         size_bytes=size,
@@ -244,9 +272,7 @@ class PolicyFileImportService:
                     )
                     session.add(record)
                     session.flush()
-                    for position, clause in enumerate(
-                        _draft_clauses(extracted_text, fallback_title=metadata.title), start=1
-                    ):
+                    for position, clause in enumerate(draft_clauses, start=1):
                         session.add(
                             PolicyFileImportClause(
                                 policy_file_import_clause_id=_id("pfic"),
@@ -256,6 +282,7 @@ class PolicyFileImportService:
                             )
                         )
                     session.flush()
+                    self._reanalyze_policy_group(session, record)
                     response = self._serialize(session, record)
                     self._save_idempotent(
                         session,
@@ -283,6 +310,7 @@ class PolicyFileImportService:
         self,
         *,
         status: str | None = None,
+        policy_set_id: str | None = None,
         policy_set_version: str | None = None,
         category: str | None = None,
         region: str | None = None,
@@ -296,6 +324,10 @@ class PolicyFileImportService:
             )
             if status is not None:
                 statement = statement.where(PolicyFileImport.status == status)
+            if policy_set_id is not None:
+                statement = statement.where(
+                    PolicyFileImport.policy_set_id == policy_set_id
+                )
             if policy_set_version is not None:
                 statement = statement.where(
                     PolicyFileImport.policy_set_version == policy_set_version
@@ -347,6 +379,7 @@ class PolicyFileImportService:
         self,
         *,
         status: str = "PUBLISHED",
+        include_inactive: bool = False,
         category: str | None = None,
         region: str | None = None,
         limit: int = 50,
@@ -354,6 +387,9 @@ class PolicyFileImportService:
     ) -> dict[str, Any]:
         """List published policy set/index bindings that tasks can safely freeze."""
         with self._sessions() as session:
+            policy_statuses = (
+                [status, "INACTIVE"] if include_inactive else [status]
+            )
             published_pairs = list(
                 session.execute(
                     select(PolicySet, PolicyIndex)
@@ -363,8 +399,8 @@ class PolicyFileImportService:
                         == PolicySet.policy_set_record_id,
                     )
                     .where(
-                        PolicySet.status == status,
-                        PolicyIndex.status == status,
+                        PolicySet.status.in_(policy_statuses),
+                        PolicyIndex.status == "PUBLISHED",
                     )
                     .order_by(
                         PolicyIndex.published_at.desc(),
@@ -425,7 +461,7 @@ class PolicyFileImportService:
                         "policy_set_id": policy_set.policy_set_id,
                         "policy_set_version": policy_set.policy_set_version,
                         "policy_index_version": index.policy_index_version,
-                        "status": status,
+                        "status": policy_set.status,
                         "categories": categories,
                         "regions": regions,
                         "document_count": len(documents),
@@ -449,6 +485,121 @@ class PolicyFileImportService:
                 "limit": limit,
                 "offset": offset,
             }
+
+    def deactivate_policy_set(
+        self,
+        policy_set_id: str,
+        policy_set_version: str,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        """Prevent new bindings while retaining immutable policy history."""
+        request_sha256 = content_hash(
+            {
+                "policy_set_id": policy_set_id,
+                "policy_set_version": policy_set_version,
+            }
+        )
+        operation = f"deactivate_policy_set:{policy_set_id}:{policy_set_version}"
+        with self._sessions.begin() as session:
+            repeated = self._existing_idempotent(
+                session, operation, idempotency_key, request_sha256
+            )
+            if repeated is not None:
+                return repeated
+            policy_set = session.scalar(
+                select(PolicySet)
+                .where(
+                    PolicySet.policy_set_id == policy_set_id,
+                    PolicySet.policy_set_version == policy_set_version,
+                )
+                .with_for_update()
+            )
+            if policy_set is None:
+                raise NotFoundError(
+                    "policy_set_not_found", "Policy set version was not found."
+                )
+            if policy_set.status not in {"PUBLISHED", "INACTIVE"}:
+                raise ConflictError(
+                    "policy_set_not_published",
+                    "Only a published policy set version can be deactivated.",
+                    status=policy_set.status,
+                )
+            published_index_count = session.scalar(
+                select(func.count())
+                .select_from(PolicyIndex)
+                .where(
+                    PolicyIndex.policy_set_record_id
+                    == policy_set.policy_set_record_id,
+                    PolicyIndex.status == "PUBLISHED",
+                )
+            )
+            if not published_index_count:
+                raise ConflictError(
+                    "policy_set_index_unavailable",
+                    "Published policy index was not found.",
+                )
+            policy_set.status = "INACTIVE"
+            response = {
+                "policy_set_id": policy_set.policy_set_id,
+                "policy_set_version": policy_set.policy_set_version,
+                "status": policy_set.status,
+            }
+            self._save_idempotent(
+                session,
+                operation,
+                idempotency_key,
+                request_sha256,
+                response,
+                status_code=200,
+            )
+            return response
+
+    def require_active_binding(
+        self,
+        *,
+        policy_set_version: str,
+        policy_index_version: str,
+        category: str,
+        region: str,
+    ) -> None:
+        """Reject new bindings to missing, inactive, or out-of-scope versions."""
+        with self._sessions() as session:
+            policy_set = session.scalar(
+                select(PolicySet)
+                .join(
+                    PolicyIndex,
+                    PolicyIndex.policy_set_record_id
+                    == PolicySet.policy_set_record_id,
+                )
+                .where(
+                    PolicySet.policy_set_version == policy_set_version,
+                    PolicySet.status == "PUBLISHED",
+                    PolicyIndex.policy_index_version == policy_index_version,
+                    PolicyIndex.status == "PUBLISHED",
+                )
+            )
+            if policy_set is None:
+                raise ConflictError(
+                    "policy_binding_unavailable",
+                    "The selected policy version is inactive or unavailable.",
+                )
+            documents = list(
+                session.scalars(
+                    select(PolicyDocument).where(
+                        PolicyDocument.policy_set_record_id
+                        == policy_set.policy_set_record_id
+                    )
+                )
+            )
+            if not any(
+                category in document.categories and region in document.regions
+                for document in documents
+            ):
+                raise ConflictError(
+                    "policy_binding_scope_mismatch",
+                    "The selected policy version does not cover this category and region.",
+                )
 
     def replace_clauses(
         self,
@@ -498,13 +649,20 @@ class PolicyFileImportService:
                         policy_file_import_clause_id=_id("pfic"),
                         policy_import_id=policy_import_id,
                         position=position,
+                        classification={
+                            "status": "AUTO_ACCEPTED",
+                            "base_status": "AUTO_ACCEPTED",
+                            "method": "MANUAL",
+                            "reason_codes": ["MANUAL_CONFIRMED"],
+                            "conflicts_with": [],
+                        },
                         **clause.model_dump(),
                     )
                 )
             record.revision += 1
-            record.status = "READY_TO_PUBLISH"
             record.updated_at = utc_now()
             session.flush()
+            self._reanalyze_policy_group(session, record)
             response = self._serialize(session, record)
             self._save_idempotent(
                 session,
@@ -519,13 +677,16 @@ class PolicyFileImportService:
     @contextmanager
     def _publication_lock(self, policy_import_id: str):
         with self._sessions() as session:
-            self._owned_record(session, policy_import_id, lock=False)
+            record = self._owned_record(session, policy_import_id, lock=False)
             engine = session.get_bind()
+            # Publishing two versions of one policy set must be serialized so
+            # that only the latest completed publication remains active.
+            publication_key = record.policy_set_id
         if engine.dialect.name == "postgresql":
             # Session locks survive importer commits, but are released when a
             # killed process loses its connection. No stale lease can hide a
             # still-running publisher or allow a second importer to overtake it.
-            key = int.from_bytes(hashlib.sha256(("policy-publish:" + policy_import_id).encode()).digest()[:8], "big", signed=True)
+            key = int.from_bytes(hashlib.sha256(("policy-publish:" + publication_key).encode()).digest()[:8], "big", signed=True)
             with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
                 if not connection.scalar(sql_text("SELECT pg_try_advisory_lock(:key)"), {"key": key}):
                     raise ConflictError("policy_publish_in_progress", "Policy publication is already running; retry after it finishes or the interrupted process exits.")
@@ -539,7 +700,7 @@ class PolicyFileImportService:
                         raise
         else:
             # SQLite is used only by the single-process test/local adapter.
-            key = (id(engine), policy_import_id)
+            key = (id(engine), publication_key)
             with _LOCAL_PUBLISH_GUARD:
                 lock = _LOCAL_PUBLISH_LOCKS.setdefault(key, Lock())
             if not lock.acquire(blocking=False):
@@ -581,18 +742,46 @@ class PolicyFileImportService:
                     "Policy clauses must be reviewed before publication.",
                     status=record.status,
                 )
-            manifest = self._build_manifest(session, record)
-            record.status = "PUBLISHING"
-            record.updated_at = utc_now()
+            group_records = self._publication_group(session, record, lock=True)
+            incomplete = [
+                item.original_filename
+                for item in group_records
+                if item.status not in {"READY_TO_PUBLISH", "PUBLISHING"}
+            ]
+            if incomplete:
+                raise ConflictError(
+                    "policy_set_review_incomplete",
+                    "Every file in the policy set must be reviewed before publication.",
+                    filenames=incomplete,
+                )
+            manifest = self._build_manifest(session, group_records)
+            group_revisions = {
+                item.policy_import_id: item.revision for item in group_records
+            }
+            publishing_at = utc_now()
+            for item in group_records:
+                item.status = "PUBLISHING"
+                item.updated_at = publishing_at
 
         try:
             outcome = self._importer.import_loaded(manifest, publish=True)
         except PolicyImportError as exc:
             with self._sessions.begin() as session:
-                record = self._owned_record(session, policy_import_id, lock=True)
-                if record.revision == expected_revision:
-                    record.status = "READY_TO_PUBLISH"
-                    record.updated_at = utc_now()
+                records = list(
+                    session.scalars(
+                        select(PolicyFileImport)
+                        .where(
+                            PolicyFileImport.policy_import_id.in_(group_revisions),
+                            PolicyFileImport.actor_id == self._actor_id,
+                        )
+                        .with_for_update()
+                    )
+                )
+                failed_at = utc_now()
+                for item in records:
+                    if item.revision == group_revisions[item.policy_import_id]:
+                        item.status = "READY_TO_PUBLISH"
+                        item.updated_at = failed_at
             if "same version has different content" in str(exc):
                 raise ConflictError(
                     "policy_version_content_mismatch",
@@ -608,14 +797,33 @@ class PolicyFileImportService:
             )
             if repeated is not None:
                 return repeated
-            record = self._owned_record(session, policy_import_id, lock=True)
-            self._require_revision(record, expected_revision)
-            record.status = "PUBLISHED"
-            record.revision += 1
-            record.policy_index_version = outcome.index_version
-            record.published_import_run_id = outcome.import_run_id
-            record.updated_at = utc_now()
+            records = list(
+                session.scalars(
+                    select(PolicyFileImport)
+                    .where(
+                        PolicyFileImport.policy_import_id.in_(group_revisions),
+                        PolicyFileImport.actor_id == self._actor_id,
+                    )
+                    .with_for_update()
+                )
+            )
+            if len(records) != len(group_revisions):
+                raise ConflictError(
+                    "policy_import_revision_conflict",
+                    "Policy set files changed during publication.",
+                )
+            published_at = utc_now()
+            for item in records:
+                self._require_revision(item, group_revisions[item.policy_import_id])
+                item.status = "PUBLISHED"
+                item.revision += 1
+                item.policy_index_version = outcome.index_version
+                item.published_import_run_id = outcome.import_run_id
+                item.updated_at = published_at
             session.flush()
+            record = next(
+                item for item in records if item.policy_import_id == policy_import_id
+            )
             response = self._serialize(session, record)
             self._save_idempotent(
                 session,
@@ -628,19 +836,38 @@ class PolicyFileImportService:
             return response
 
     def _extract(self, path: Path, media_type: str) -> tuple[str, dict[str, Any]]:
-        if media_type == "text/plain":
+        if media_type in {"text/plain", "text/markdown"}:
             try:
                 text = path.read_bytes().decode("utf-8-sig")
             except UnicodeDecodeError as exc:
+                format_name = "Markdown" if media_type == "text/markdown" else "TXT"
+                error_code = (
+                    "policy_markdown_not_utf8"
+                    if media_type == "text/markdown"
+                    else "policy_txt_not_utf8"
+                )
                 raise BackendError(
-                    "policy_txt_not_utf8", "TXT policy files must be UTF-8 encoded."
+                    error_code,
+                    f"{format_name} policy files must be UTF-8 encoded.",
                 ) from exc
             if "\x00" in text:
-                raise BackendError("policy_txt_binary", "TXT policy file contains binary data.")
+                error_code = (
+                    "policy_markdown_binary"
+                    if media_type == "text/markdown"
+                    else "policy_txt_binary"
+                )
+                raise BackendError(
+                    error_code, "Policy text file contains binary data."
+                )
             text = text.strip()
             if not text:
                 raise BackendError("policy_document_no_text", "Policy document contains no text.")
-            return text, {"parser": "utf-8-text/1.0", "page_count": None}
+            parser = (
+                "utf-8-markdown/1.0"
+                if media_type == "text/markdown"
+                else "utf-8-text/1.0"
+            )
+            return text, {"parser": parser, "page_count": None}
 
         with path.open("rb") as handle:
             if handle.read(5) != b"%PDF-":
@@ -728,11 +955,133 @@ class PolicyFileImportService:
                     "text": clause.text,
                     "control_code": clause.control_code,
                     "rule_parameters": dict(clause.rule_parameters),
+                    "classification": dict(clause.classification),
                     "position": clause.position,
                 }
                 for clause in clauses
             ],
         }
+
+    @staticmethod
+    def _reanalyze_policy_group(
+        session: Session, anchor: PolicyFileImport
+    ) -> None:
+        records = list(
+            session.scalars(
+                select(PolicyFileImport).where(
+                    PolicyFileImport.actor_id == anchor.actor_id,
+                    PolicyFileImport.policy_set_id == anchor.policy_set_id,
+                    PolicyFileImport.policy_set_version == anchor.policy_set_version,
+                    PolicyFileImport.status != "PUBLISHED",
+                )
+            )
+        )
+        record_by_id = {record.policy_import_id: record for record in records}
+        clauses = list(
+            session.scalars(
+                select(PolicyFileImportClause)
+                .where(
+                    PolicyFileImportClause.policy_import_id.in_(record_by_id)
+                )
+                .order_by(
+                    PolicyFileImportClause.policy_import_id,
+                    PolicyFileImportClause.position,
+                )
+            )
+        )
+        for clause in clauses:
+            analysis = dict(clause.classification or {})
+            base_status = analysis.get("base_status") or analysis.get("status") or (
+                "AUTO_ACCEPTED" if clause.control_code else "ADMIN_REVIEW"
+            )
+            reasons = [
+                reason
+                for reason in analysis.get("reason_codes", [])
+                if reason not in _CONFLICT_REASON_CODES
+            ]
+            clause.classification = {
+                **analysis,
+                "status": base_status,
+                "base_status": base_status,
+                "reason_codes": reasons,
+                "conflicts_with": [],
+            }
+
+        def mark_conflict(
+            conflicting: list[PolicyFileImportClause], reason_code: str
+        ) -> None:
+            identities = {
+                clause.policy_file_import_clause_id: (
+                    f"{record_by_id[clause.policy_import_id].original_filename}:"
+                    f"{clause.clause_id}"
+                )
+                for clause in conflicting
+            }
+            for clause in conflicting:
+                analysis = dict(clause.classification)
+                reasons = list(analysis.get("reason_codes", []))
+                if reason_code not in reasons:
+                    reasons.append(reason_code)
+                analysis.update(
+                    {
+                        "status": "ADMIN_REVIEW",
+                        "reason_codes": reasons,
+                        "conflicts_with": [
+                            identity
+                            for clause_id, identity in identities.items()
+                            if clause_id != clause.policy_file_import_clause_id
+                        ],
+                    }
+                )
+                clause.classification = analysis
+
+        clauses_by_id: dict[str, list[PolicyFileImportClause]] = {}
+        for clause in clauses:
+            clauses_by_id.setdefault(clause.clause_id, []).append(clause)
+        for duplicates in clauses_by_id.values():
+            if len(duplicates) > 1:
+                mark_conflict(duplicates, "DUPLICATE_CLAUSE_ID")
+
+        rules: dict[tuple[str, str], list[PolicyFileImportClause]] = {}
+        for clause in clauses:
+            rule_key = clause.rule_parameters.get("rule_key")
+            if clause.control_code and isinstance(rule_key, str) and rule_key:
+                rules.setdefault((clause.control_code, rule_key), []).append(clause)
+        for candidates in rules.values():
+            signatures = {
+                json.dumps(
+                    {
+                        key: value
+                        for key, value in clause.rule_parameters.items()
+                        if key != "rule_key"
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                for clause in candidates
+            }
+            if len(candidates) > 1 and len(signatures) > 1:
+                mark_conflict(candidates, "CONFLICTING_RULE")
+
+        clauses_by_record: dict[str, list[PolicyFileImportClause]] = {
+            record.policy_import_id: [] for record in records
+        }
+        for clause in clauses:
+            clauses_by_record[clause.policy_import_id].append(clause)
+        for record in records:
+            if record.status in {"PUBLISHING", "PUBLISHED"}:
+                continue
+            record_clauses = clauses_by_record[record.policy_import_id]
+            record.status = (
+                "READY_TO_PUBLISH"
+                if record_clauses
+                and all(
+                    clause.control_code
+                    and clause.classification.get("status") == "AUTO_ACCEPTED"
+                    for clause in record_clauses
+                )
+                else "REVIEW_REQUIRED"
+            )
 
     @staticmethod
     def _serialize_summary(
@@ -759,61 +1108,115 @@ class PolicyFileImportService:
             "updated_at": _utc_isoformat(record.updated_at),
         }
 
+    def _publication_group(
+        self,
+        session: Session,
+        record: PolicyFileImport,
+        *,
+        lock: bool = False,
+    ) -> list[PolicyFileImport]:
+        statement = (
+            select(PolicyFileImport)
+            .where(
+                PolicyFileImport.actor_id == self._actor_id,
+                PolicyFileImport.policy_set_id == record.policy_set_id,
+                PolicyFileImport.policy_set_version == record.policy_set_version,
+                PolicyFileImport.status != "PUBLISHED",
+            )
+            .order_by(PolicyFileImport.document_id, PolicyFileImport.policy_import_id)
+        )
+        if lock:
+            statement = statement.with_for_update()
+        records = list(session.scalars(statement))
+        return records or [record]
+
     def _build_manifest(
-        self, session: Session, record: PolicyFileImport
+        self, session: Session, records: list[PolicyFileImport]
     ) -> LoadedPolicyManifest:
-        draft_clauses = list(
-            session.scalars(
-                select(PolicyFileImportClause)
-                .where(PolicyFileImportClause.policy_import_id == record.policy_import_id)
-                .order_by(PolicyFileImportClause.position)
+        if not records:
+            raise ConflictError("policy_import_not_ready", "Policy set has no files.")
+        documents: list[LoadedDocument] = []
+        seen_document_ids: set[str] = set()
+        seen_clause_ids: set[str] = set()
+        for record in records:
+            if record.document_id in seen_document_ids:
+                raise ConflictError(
+                    "duplicate_policy_document_id",
+                    "Document IDs must be unique within a policy set.",
+                    document_id=record.document_id,
+                )
+            seen_document_ids.add(record.document_id)
+            draft_clauses = list(
+                session.scalars(
+                    select(PolicyFileImportClause)
+                    .where(
+                        PolicyFileImportClause.policy_import_id
+                        == record.policy_import_id
+                    )
+                    .order_by(PolicyFileImportClause.position)
+                )
             )
-        )
-        if not draft_clauses or any(not clause.control_code for clause in draft_clauses):
-            raise ConflictError(
-                "policy_import_not_ready",
-                "Every policy clause must have a control code before publication.",
+            if not draft_clauses or any(
+                not clause.control_code
+                or clause.classification.get("status") != "AUTO_ACCEPTED"
+                for clause in draft_clauses
+            ):
+                raise ConflictError(
+                    "policy_import_not_ready",
+                    "Every policy clause must have a control code before publication.",
+                    filename=record.original_filename,
+                )
+            clauses: list[LoadedClause] = []
+            for clause in draft_clauses:
+                if clause.clause_id in seen_clause_ids:
+                    raise ConflictError(
+                        "duplicate_policy_clause_id",
+                        "Clause IDs must be unique across every file in a policy set.",
+                        clause_id=clause.clause_id,
+                    )
+                seen_clause_ids.add(clause.clause_id)
+                clauses.append(
+                    LoadedClause(
+                        clause_id=clause.clause_id,
+                        title=clause.title,
+                        text=clause.text,
+                        content_sha256=_sha256_text(clause.text),
+                        control_code=str(clause.control_code).upper(),
+                        rule_parameters=dict(clause.rule_parameters),
+                    )
+                )
+            extension = _SUPPORTED_MEDIA[record.media_type]
+            documents.append(
+                LoadedDocument(
+                    policy_id=record.policy_id,
+                    document_id=record.document_id,
+                    document_version=record.document_version,
+                    title=record.title,
+                    relative_path=f"uploads/{record.document_id}/source{extension}",
+                    effective_from=record.effective_from,
+                    effective_to=record.effective_to,
+                    categories=list(record.categories),
+                    regions=list(record.regions),
+                    content_sha256=record.source_sha256,
+                    clauses=clauses,
+                )
             )
-        clauses = [
-            LoadedClause(
-                clause_id=clause.clause_id,
-                title=clause.title,
-                text=clause.text,
-                content_sha256=_sha256_text(clause.text),
-                control_code=str(clause.control_code).upper(),
-                rule_parameters=dict(clause.rule_parameters),
-            )
-            for clause in draft_clauses
-        ]
-        extension = _SUPPORTED_MEDIA[record.media_type]
-        document = LoadedDocument(
-            policy_id=record.policy_id,
-            document_id=record.document_id,
-            document_version=record.document_version,
-            title=record.title,
-            relative_path=f"uploads/{record.document_id}/source{extension}",
-            effective_from=record.effective_from,
-            effective_to=record.effective_to,
-            categories=list(record.categories),
-            regions=list(record.regions),
-            content_sha256=record.source_sha256,
-            clauses=clauses,
-        )
+        first = records[0]
         canonical = {
             "schema_version": "1.0.0",
-            "policy_set_id": record.policy_set_id,
-            "policy_set_version": record.policy_set_version,
-            "documents": [document.model_dump(mode="json")],
+            "policy_set_id": first.policy_set_id,
+            "policy_set_version": first.policy_set_version,
+            "documents": [document.model_dump(mode="json") for document in documents],
         }
         return LoadedPolicyManifest(
             schema_version="1.0.0",
-            policy_set_id=record.policy_set_id,
-            policy_set_version=record.policy_set_version,
+            policy_set_id=first.policy_set_id,
+            policy_set_version=first.policy_set_version,
             content_sha256=_sha256_text(
                 json.dumps(canonical, sort_keys=True, separators=(",", ":"))
             ),
-            source_path=f"upload:{record.policy_import_id}",
-            documents=[document],
+            source_path=f"upload-set:{first.policy_set_id}:{first.policy_set_version}",
+            documents=documents,
         )
 
     def _existing_idempotent(
@@ -862,16 +1265,27 @@ class PolicyFileImportService:
         )
 
 
-def _draft_clauses(text: str, *, fallback_title: str) -> list[dict[str, Any]]:
+def _draft_clauses(
+    text: str,
+    *,
+    fallback_title: str,
+    fallback_id_prefix: str = "",
+    document_hint: str | None = None,
+) -> list[dict[str, Any]]:
+    fallback_clause_id = (
+        f"DRAFT-{fallback_id_prefix}-001" if fallback_id_prefix else "DRAFT-001"
+    )
     matches = list(_CLAUSE_HEADING.finditer(text))
     if not matches:
+        analysis = _analyze_clause(
+            fallback_title, text, document_hint or fallback_title
+        )
         return [
             {
-                "clause_id": "DRAFT-001",
+                "clause_id": fallback_clause_id,
                 "title": fallback_title,
                 "text": text.strip(),
-                "control_code": None,
-                "rule_parameters": {},
+                **analysis,
             }
         ]
     clauses: list[dict[str, Any]] = []
@@ -880,24 +1294,214 @@ def _draft_clauses(text: str, *, fallback_title: str) -> list[dict[str, Any]]:
         body_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         body = text[body_start:body_end].strip()
         if body:
+            title = match.group(2).strip()
+            analysis = _analyze_clause(
+                title, body, document_hint or fallback_title
+            )
             clauses.append(
                 {
                     "clause_id": match.group(1).strip(),
-                    "title": match.group(2).strip(),
+                    "title": title,
                     "text": body,
-                    "control_code": None,
-                    "rule_parameters": {},
+                    **analysis,
                 }
             )
+    fallback_analysis = _analyze_clause(
+        fallback_title, text, document_hint or fallback_title
+    )
     return clauses or [
         {
-            "clause_id": "DRAFT-001",
+            "clause_id": fallback_clause_id,
             "title": fallback_title,
             "text": text.strip(),
-            "control_code": None,
-            "rule_parameters": {},
+            **fallback_analysis,
         }
     ]
+
+
+def _document_control_code(document_title: str) -> str | None:
+    document = document_title.casefold().replace("-", "_").replace(" ", "_")
+    if any(
+        marker in document
+        for marker in (
+            "environmental_compliance",
+            "electronics_compliance",
+            "electronics_rohs",
+            "环境合规",
+            "rohs_证明",
+        )
+    ):
+        return "ROHS_COMPLIANCE"
+    if any(
+        marker in document
+        for marker in (
+            "supplier_due_diligence",
+            "supplier_qualification",
+            "approved_supplier",
+            "供应商准入",
+            "供应商资质",
+        )
+    ):
+        return "APPROVED_SUPPLIER"
+    if any(
+        marker in document
+        for marker in (
+            "spend_approval",
+            "procurement_approval",
+            "amount_approval",
+            "金额审批",
+            "采购审批",
+        )
+    ):
+        return "AMOUNT_APPROVAL"
+    return None
+
+
+def _control_code_scores(title: str, text: str) -> dict[str, int]:
+    title_value = title.casefold()
+    value = f"{title}\n{text}".casefold()
+    informational_markers = (
+        "报价版本冻结", "审计记录", "审计链", "人工覆盖", "证据留存",
+        "紧急采购认定", "事后复核", "例外关闭", "版本变更",
+        "记录修改前值", "业务影响",
+    )
+    if any(marker in title_value for marker in informational_markers):
+        return {"INFORMATIONAL": 2}
+    keyword_groups = (
+        (
+            "ROHS_COMPLIANCE",
+            ("rohs", "环境合规", "环境证明", "符合性声明", "物料字段变更"),
+        ),
+        (
+            "APPROVED_SUPPLIER",
+            (
+                "供应商准入", "供应商身份", "供应商编号", "收款账户", "主数据",
+                "临时供应商", "制裁筛查", "准入例外", "未完成常规准入",
+                "approved supplier", "supplier qualification", "supplier due diligence",
+                "supplier identity", "vendor master",
+            ),
+        ),
+        (
+            "AMOUNT_APPROVAL",
+            (
+                "金额审批", "审批金额", "总成本", "金额门槛", "采购金额", "金额字段变更",
+                "单价", "运费", "税费", "汇率", "币种", "预算",
+                "amount approval", "total cost", "approval threshold", "exchange rate", "budget",
+            ),
+        ),
+    )
+    return {
+        code: sum(1 for keyword in keywords if keyword in value)
+        for code, keywords in keyword_groups
+    }
+
+
+def _infer_control_code(title: str, text: str, document_title: str) -> str | None:
+    """Classify supported controls conservatively and leave real ambiguity visible."""
+    document_code = _document_control_code(document_title)
+    if document_code:
+        return document_code
+    value = f"{title}\n{text}".casefold()
+    scores = _control_code_scores(title, text)
+    best_code, best_score = max(scores.items(), key=lambda item: item[1])
+    if best_score > 0 and list(scores.values()).count(best_score) == 1:
+        return best_code
+    if "金额审批" in value:
+        return "AMOUNT_APPROVAL"
+
+    if any(
+        marker in value
+        for marker in (
+            "报价版本冻结", "审计记录", "审计链", "人工覆盖", "证据留存",
+            "紧急采购认定", "事后复核", "例外关闭", "版本变更",
+            "记录修改前值", "业务影响",
+        )
+    ):
+        return "INFORMATIONAL"
+    return None
+
+
+def _analyze_clause(title: str, text: str, document_title: str) -> dict[str, Any]:
+    document_code = _document_control_code(document_title)
+    unsupported_markers = {
+        "CYBERSECURITY_ASSESSMENT": (
+            "网络安全", "渗透测试", "漏洞扫描", "cybersecurity", "penetration test",
+        ),
+        "SUSTAINABILITY_SCORING": (
+            "碳排放评分", "esg 评分", "可持续性评分", "carbon scoring",
+        ),
+        "LABOR_PRACTICE_AUDIT": (
+            "劳工审计", "强迫劳动审查", "labor practice audit",
+        ),
+    }
+    value = f"{title}\n{text}".casefold()
+    for capability, markers in unsupported_markers.items():
+        if any(marker in value for marker in markers):
+            return {
+                "control_code": None,
+                "rule_parameters": {},
+                "classification": {
+                    "status": "UNSUPPORTED",
+                    "base_status": "UNSUPPORTED",
+                    "method": "CAPABILITY_REGISTRY",
+                    "reason_codes": ["UNSUPPORTED_CAPABILITY"],
+                    "unsupported_capability": capability,
+                    "conflicts_with": [],
+                },
+            }
+
+    control_code = _infer_control_code(title, text, document_title)
+    if control_code is None:
+        scores = _control_code_scores(title, text)
+        best_score = max(scores.values())
+        reasons = [
+            "AMBIGUOUS_CONTROL"
+            if best_score > 0 and list(scores.values()).count(best_score) > 1
+            else "UNRECOGNIZED_CONTROL"
+        ]
+        return {
+            "control_code": None,
+            "rule_parameters": {},
+            "classification": {
+                "status": "ADMIN_REVIEW",
+                "base_status": "ADMIN_REVIEW",
+                "method": "CONTENT_RULE",
+                "reason_codes": reasons,
+                "conflicts_with": [],
+            },
+        }
+
+    parameters: dict[str, Any] = {}
+    reasons: list[str] = []
+    title_value = title.casefold()
+    if control_code == "AMOUNT_APPROVAL" and any(
+        marker in title_value for marker in ("门槛", "阈值", "threshold")
+    ):
+        amount = _AMOUNT_VALUE.search(text)
+        if amount is None:
+            reasons.append("MISSING_REQUIRED_PARAMETER")
+        else:
+            parameters = {
+                "rule_key": "approval_threshold:" + re.sub(
+                    r"\s+", "_", title.strip().casefold()
+                ),
+                "currency": amount.group(1).upper(),
+                "threshold": amount.group(2).replace(",", ""),
+                "operator": ">=",
+            }
+
+    status = "ADMIN_REVIEW" if reasons else "AUTO_ACCEPTED"
+    return {
+        "control_code": control_code,
+        "rule_parameters": parameters,
+        "classification": {
+            "status": status,
+            "base_status": status,
+            "method": "DOCUMENT_PROFILE" if document_code else "CONTENT_RULE",
+            "reason_codes": reasons,
+            "conflicts_with": [],
+        },
+    }
 
 
 def _sha256_text(value: str) -> str:

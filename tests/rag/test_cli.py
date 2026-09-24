@@ -29,11 +29,11 @@ class FakeImporter:
 def test_import_cli_emits_only_safe_structured_outcome(capsys) -> None:
     importer = FakeImporter()
     exit_code = main(
-        ["import-policies", "--manifest", "data/policies/electronics-v1/manifest.json", "--publish"],
+        ["import-policies", "--manifest", "data/policies/electronics-components/v1/manifest.json", "--publish"],
         importer_factory=lambda: importer,
     )
     assert exit_code == 0
-    assert importer.calls == [("data/policies/electronics-v1/manifest.json", True)]
+    assert importer.calls == [("data/policies/electronics-components/v1/manifest.json", True)]
     output = json.loads(capsys.readouterr().out)
     assert output == {
         "clause_count": 24,

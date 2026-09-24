@@ -22,6 +22,7 @@ import type {
   PolicyImportResponse,
   PolicySetListQuery,
   PolicySetListResponse,
+  PolicySetDeactivateResponse,
   QuoteFieldsResponse,
   QuoteDraftCorrectionInput,
   QuoteDraftListResponse,
@@ -198,11 +199,15 @@ export const api = {
     ),
   listTasks: (values: number | { limit?: number; offset?: number; query?: string; status?: string; sort?: string } = 8) =>
     request<TaskListResponse>('/api/v1/tasks' + queryString(typeof values === 'number' ? { limit: values } : values)),
-  updateRequirement: (taskId: string, expectedTaskRevision: number, requirement: CreateTaskRequest['requirement'], idempotencyKey: string) =>
+  updateRequirement: (taskId: string, expectedTaskRevision: number, requirement: CreateTaskRequest['requirement'], idempotencyKey: string, policyBinding?: CreateTaskRequest['policy_binding']) =>
     request<TaskMutationResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/requirement`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ expected_task_revision: expectedTaskRevision, requirement }),
+      body: JSON.stringify({
+        expected_task_revision: expectedTaskRevision,
+        requirement,
+        ...(policyBinding !== undefined ? { policy_binding: policyBinding } : {}),
+      }),
     }),
   abandonTask: (taskId: string, expectedTaskRevision: number, reason: string, idempotencyKey: string) =>
     request<TaskMutationResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/abandon`, {
@@ -706,6 +711,17 @@ export const api = {
     request<PolicySetListResponse>(
       '/api/v1/policy-sets' + queryString(query),
     ),
+  deactivatePolicySet: (
+    policySetId: string,
+    policySetVersion: string,
+    idempotencyKey: string,
+  ) => request<PolicySetDeactivateResponse>(
+    `/api/v1/policy-sets/${encodeURIComponent(policySetId)}/versions/${encodeURIComponent(policySetVersion)}/deactivate`,
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+    },
+  ),
   getPolicyImport: (policyImportId: string) =>
     request<PolicyImportResponse>(
       `/api/v1/policy-imports/${encodeURIComponent(policyImportId)}`,

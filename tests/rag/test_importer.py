@@ -14,6 +14,7 @@ from supplier_comparison.rag.clients import (
     ModelClientError,
 )
 from supplier_comparison.rag.importer import PolicyImportError, PolicyImporter
+from supplier_comparison.rag.manifest import load_policy_manifest
 from supplier_comparison.rag.models import (
     PolicyClause,
     PolicyClauseEmbedding,
@@ -213,3 +214,43 @@ def test_model_or_preprocessing_change_creates_a_new_complete_index(
         assert session.scalar(select(func.count()).select_from(PolicySet)) == 1
         assert session.scalar(select(func.count()).select_from(PolicyIndex)) == 2
         assert session.scalar(select(func.count()).select_from(PolicyClauseEmbedding)) == 4
+
+
+def test_electronics_policy_dataset_has_two_immutable_executable_versions() -> None:
+    policy_root = Path(__file__).resolve().parents[2] / "data" / "policies"
+    historical = load_policy_manifest(
+        policy_root / "electronics-components" / "v1" / "manifest.json",
+        allowed_root=policy_root,
+    )
+    current = load_policy_manifest(
+        policy_root / "electronics-components" / "v2" / "manifest.json",
+        allowed_root=policy_root,
+    )
+
+    assert historical.policy_set_id == current.policy_set_id == "electronics-components-procurement"
+    assert historical.policy_set_version == "2026.01.1"
+    assert current.policy_set_version == "2026.07.1"
+    assert historical.content_sha256 != current.content_sha256
+    assert len(historical.documents) == len(current.documents) == 3
+    assert sum(len(document.clauses) for document in historical.documents) == 15
+    assert sum(len(document.clauses) for document in current.documents) == 18
+    assert {
+        clause.control_code
+        for document in current.documents
+        for clause in document.clauses
+    } == {"AMOUNT_APPROVAL", "APPROVED_SUPPLIER", "ROHS_COMPLIANCE"}
+
+    historical_threshold = next(
+        clause.rule_parameters["threshold"]
+        for document in historical.documents
+        for clause in document.clauses
+        if clause.clause_id == "ECP-APR-002"
+    )
+    current_threshold = next(
+        clause.rule_parameters["threshold"]
+        for document in current.documents
+        for clause in document.clauses
+        if clause.clause_id == "ECP-APR-002"
+    )
+    assert historical_threshold == "8000.00"
+    assert current_threshold == "7000.00"

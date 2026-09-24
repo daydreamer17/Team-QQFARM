@@ -8,10 +8,11 @@ import type {
   PolicyImportResponse,
 } from '../api/types'
 
-const CONTROL_CODES = [
-  'APPROVED_SUPPLIER',
-  'ROHS_COMPLIANCE',
-  'AMOUNT_APPROVAL',
+const CONTROL_CODE_OPTIONS = [
+  { value: 'APPROVED_SUPPLIER', label: '供应商准入' },
+  { value: 'ROHS_COMPLIANCE', label: 'RoHS 与环保合规' },
+  { value: 'AMOUNT_APPROVAL', label: '采购金额审批' },
+  { value: 'INFORMATIONAL', label: '流程说明与审计记录' },
 ]
 
 interface EditableClause {
@@ -43,6 +44,22 @@ function toEditable(clause: PolicyDraftClause): EditableClause {
   }
 }
 
+function clauseStatus(clause: PolicyDraftClause | EditableClause) {
+  if ('classification' in clause && clause.classification?.status) {
+    return clause.classification.status
+  }
+  return clause.control_code ? 'AUTO_ACCEPTED' : 'ADMIN_REVIEW'
+}
+
+const CLASSIFICATION_REASONS: Record<string, string> = {
+  UNRECOGNIZED_CONTROL: '系统无法判断该条款属于哪类采购检查。',
+  AMBIGUOUS_CONTROL: '该条款同时匹配多种检查用途，无法可靠自动归类。',
+  MISSING_REQUIRED_PARAMETER: '条款缺少执行所需的金额、币种或门槛参数。',
+  CONFLICTING_RULE: '该条款与本版本中的另一条结构化规则结论不一致。',
+  DUPLICATE_CLAUSE_ID: '本版本存在重复的条款编号。',
+  UNSUPPORTED_CAPABILITY: '当前系统没有对应的检查器或数据来源，不能自动执行该条款。',
+}
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024 / 1024).toFixed(2)} MiB`
@@ -64,6 +81,7 @@ function errorMessage(error: unknown) {
     published_policy_immutable: '该策略已经发布，内容不可再修改。',
     policy_publish_in_progress: '策略正在发布，请稍后刷新状态。',
     policy_import_not_ready: '请先保存条款审核，再发布策略。',
+    policy_set_review_incomplete: '同一制度集仍有文件未完成审核，请逐份审核后再统一发布。',
     policy_version_content_mismatch: '相同策略版本已经发布了不同内容，请使用新的版本号重新上传。',
     policy_publish_failed: 'Embedding 或索引发布失败，条款仍保留，可直接重试发布。',
   }
@@ -73,7 +91,7 @@ function errorMessage(error: unknown) {
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
     REVIEW_REQUIRED: '等待条款审核',
-    READY_TO_PUBLISH: '审核完成，等待发布',
+    READY_TO_PUBLISH: '自动识别完成，等待发布',
     PUBLISHING: '正在生成索引',
     PUBLISHED: '已发布',
   }
@@ -96,12 +114,24 @@ export function PolicyImportPage() {
   const [revisionConflict, setRevisionConflict] = useState(false)
   const [lastReview, setLastReview] = useState<ReviewSubmission | null>(null)
   const [lastPublish, setLastPublish] = useState<PublishSubmission | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const policy = useQuery({
     queryKey: ['policy-imports', policyImportId],
     queryFn: () => api.getPolicyImport(policyImportId),
     enabled: Boolean(policyImportId),
     refetchInterval: (query) => query.state.data?.status === 'PUBLISHING' ? 2_000 : false,
+  })
+
+  const policySetFiles = useQuery({
+    queryKey: ['policy-imports', 'set', policy.data?.policy_set_id, policy.data?.policy_set_version],
+    queryFn: () => api.listPolicyImports({
+      policy_set_id: policy.data!.policy_set_id,
+      policy_set_version: policy.data!.policy_set_version,
+      limit: 100,
+    }),
+    enabled: Boolean(policy.data),
+    refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PUBLISHING') ? 2_000 : false,
   })
 
   useEffect(() => {
@@ -130,6 +160,7 @@ export function PolicyImportPage() {
     onSuccess: (result) => {
       queryClient.setQueryData(['policy-imports', policyImportId], result)
       void queryClient.invalidateQueries({ queryKey: ['policy-imports', 'list'] })
+      void queryClient.invalidateQueries({ queryKey: ['policy-imports', 'set'] })
       acceptServerVersion(result)
       setLastReview(null)
     },
@@ -148,6 +179,7 @@ export function PolicyImportPage() {
     onSuccess: (result) => {
       queryClient.setQueryData(['policy-imports', policyImportId], result)
       void queryClient.invalidateQueries({ queryKey: ['policy-imports', 'list'] })
+      void queryClient.invalidateQueries({ queryKey: ['policy-imports', 'set'] })
       void queryClient.invalidateQueries({ queryKey: ['policy-sets', 'list'] })
       acceptServerVersion(result)
       setLastPublish(null)
@@ -284,56 +316,87 @@ export function PolicyImportPage() {
         <p className="eyebrow">POLICY IMPORT ERROR</p>
         <h1>无法读取策略</h1>
         <p>{errorMessage(policy.error)}</p>
-        <Link className="button button-secondary" to="/resources">返回规则资源库</Link>
+        <Link className="button button-secondary" to="/resources">返回制度资源库</Link>
       </section>
     )
   }
 
   const data = policy.data
   const readonly = data.status === 'PUBLISHED' || data.status === 'PUBLISHING'
+  const setFiles = policySetFiles.data?.items ?? []
+  const allFilesReviewed = setFiles.length > 0 && setFiles.every((item) =>
+    item.status === 'READY_TO_PUBLISH' || item.status === 'PUBLISHING' || item.status === 'PUBLISHED'
+  )
+  const sourceClauses = data.clauses
+  const unresolvedIndexes = new Set(
+    sourceClauses
+      .map((clause, index) => clauseStatus(clause) === 'AUTO_ACCEPTED' ? -1 : index)
+      .filter((index) => index >= 0),
+  )
+  const unresolvedCount = unresolvedIndexes.size
+  const recognizedCount = clauses.length - unresolvedCount
 
   return (
     <div className="page-stack policy-review-page">
       <section className="page-heading policy-review-heading">
         <div>
-          <Link className="back-link" to="/resources">← 返回规则资源库</Link>
-          <p className="eyebrow">POLICY REVIEW &amp; PUBLISH</p>
-          <h1>{data.title}</h1>
-          <p>{data.policy_id} · 文档 {data.document_id} / {data.document_version}</p>
+          <Link className="back-link" to="/resources">← 返回制度资源库</Link>
+          <h1>{data.policy_set_id}</h1>
+          <p>正在审核：{data.original_filename}</p>
         </div>
         <div className="workspace-state-stack">
           <span className={`status-pill ${statusClass(data.status)}`}>{statusLabel(data.status)}</span>
-          <span>Policy Rev {data.revision}</span>
         </div>
       </section>
 
       <section className="policy-metadata-grid" aria-label="策略元数据">
-        <article><span>策略集版本</span><strong>{data.policy_set_id}</strong><small>{data.policy_set_version}</small></article>
-        <article><span>适用范围</span><strong>{data.categories.join('、')}</strong><small>{data.regions.join('、')}</small></article>
+        <article><span>制度版本</span><strong>{data.policy_set_version}</strong><small>{setFiles.length || 1} 个文件</small></article>
+        <article><span>适用范围</span><strong>{data.categories.join('、')}</strong><small>地区：{data.regions.join('、')}</small></article>
         <article><span>有效期</span><strong>{displayDate(data.effective_from)}</strong><small>至 {displayDate(data.effective_to)}</small></article>
         <article><span>来源文件</span><strong>{data.original_filename}</strong><small>{formatBytes(data.size_bytes)} · {data.media_type}</small></article>
       </section>
 
+      {setFiles.length > 0 && (
+        <section className="card policy-set-files">
+          <div className="section-heading">
+            <div><h2>本版本文件</h2><p>系统自动整理条款；只有无法识别的内容需要人工确认。</p></div>
+            <span>{setFiles.filter((item) => item.status === 'READY_TO_PUBLISH' || item.status === 'PUBLISHED').length} / {setFiles.length} 已就绪</span>
+          </div>
+          <div className="policy-set-file-list">
+            {setFiles.map((item) => (
+              <Link key={item.policy_import_id} className={item.policy_import_id === policyImportId ? 'is-current' : ''} to={`/resources/policies/${item.policy_import_id}`}>
+                <span><strong>{item.original_filename}</strong><small>{item.clause_count} 条条款</small></span>
+                <span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {data.status === 'PUBLISHED' && (
         <section className="card policy-published-summary">
-          <div><p className="eyebrow">PUBLISHED INDEX</p><h2>制度索引已发布</h2></div>
-          <dl>
-            <div><dt>Policy Index Version</dt><dd>{data.policy_index_version ?? '—'}</dd></div>
-            <div><dt>Import Run ID</dt><dd>{data.published_import_run_id ?? '—'}</dd></div>
-          </dl>
-          <p>发布内容不可修改；后续修改制度时应以新版本重新上传和发布。</p>
+          <div><h2>制度已发布，可绑定采购任务</h2></div>
+          <p>该版本内容已冻结。后续修改请上传完整文件集并发布为新版本。</p>
         </section>
       )}
 
       <details className="card policy-source-details">
-        <summary>查看来源与解析正文</summary>
-        <dl>
-          <div><dt>SHA-256</dt><dd>{data.source_sha256}</dd></div>
-          <div><dt>解析器</dt><dd>{String(data.extraction_metadata.parser ?? '—')}</dd></div>
-          <div><dt>页数</dt><dd>{data.extraction_metadata.page_count ?? '—'}</dd></div>
-        </dl>
+        <summary>查看文件解析结果</summary>
+        {data.extraction_metadata.page_count && <p>共 {data.extraction_metadata.page_count} 页</p>}
         <pre>{data.extracted_text}</pre>
       </details>
+
+      {!readonly && (
+        <section className="card policy-published-summary">
+          <div><h2>{unresolvedCount === 0 ? '当前文件已自动整理' : `还有 ${unresolvedCount} 条需要确认`}</h2></div>
+          <p>
+            已识别 {recognizedCount} / {clauses.length} 条检查规则。
+            {unresolvedCount === 0
+              ? ' 无需逐条填写；全部文件就绪后可直接发布。'
+              : ' 请只处理下方未识别条款，其他内容无需重复确认。'}
+          </p>
+        </section>
+      )}
 
       {revisionConflict && (
         <div className="policy-conflict-notice" role="alert">
@@ -356,21 +419,24 @@ export function PolicyImportPage() {
           </div>
         )}
         <div className="section-heading">
-          <div><p className="eyebrow">REVIEWED CLAUSES</p><h2>条款审核</h2></div>
-          {!readonly && <button className="button button-secondary" type="button" onClick={addClause}>＋ 添加条款</button>}
+          <div><h2>{showAdvanced ? '全部条款与高级设置' : '需要确认的条款'}</h2></div>
+          {!readonly && (
+            <div className="policy-clause-actions">
+              <button className="button button-secondary" type="button" onClick={() => setShowAdvanced((current) => !current)}>
+                {showAdvanced ? '退出高级审核' : `进入高级审核（${clauses.length} 条）`}
+              </button>
+              {showAdvanced && <button className="button button-secondary" type="button" onClick={addClause}>＋ 添加条款</button>}
+            </div>
+          )}
         </div>
-        <p className="section-helper">核对条款正文、控制代码和规则参数。排序即发布顺序。</p>
-
-        <datalist id="policy-control-codes">
-          {CONTROL_CODES.map((code) => <option value={code} key={code} />)}
-        </datalist>
+        <p className="section-helper">普通流程只处理系统无法识别的条款；如需修改自动结果，可进入高级审核。</p>
 
         <div className="policy-clause-list">
-          {clauses.map((clause, index) => (
+          {clauses.map((clause, index) => (!showAdvanced && !unresolvedIndexes.has(index) ? null : (
             <article className="card policy-clause-card" key={`${clause.clause_id}-${index}`}>
               <header>
-                <div><span>条款 {index + 1}</span><strong>{clause.clause_id || '未命名条款'}</strong></div>
-                {!readonly && (
+                <div><span>条款 {index + 1}</span><strong>{clause.title || '未命名条款'}</strong></div>
+                {!readonly && showAdvanced && (
                   <div className="policy-clause-actions">
                     <button type="button" disabled={index === 0} onClick={() => moveClause(index, -1)} aria-label="上移条款">↑</button>
                     <button type="button" disabled={index === clauses.length - 1} onClick={() => moveClause(index, 1)} aria-label="下移条款">↓</button>
@@ -379,14 +445,26 @@ export function PolicyImportPage() {
                 )}
               </header>
               <div className="policy-clause-grid">
-                <label className="field"><span>Clause ID</span><input required readOnly={readonly} value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>
-                <label className="field"><span>控制代码</span><input required readOnly={readonly} list="policy-control-codes" value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)} placeholder="选择或输入自定义代码" /></label>
-                <label className="field policy-field-wide"><span>标题</span><input required readOnly={readonly} value={clause.title} onChange={(event) => changeClause(index, 'title', event.target.value)} /></label>
-                <label className="field policy-field-wide"><span>条款正文</span><textarea required readOnly={readonly} rows={5} value={clause.text} onChange={(event) => changeClause(index, 'text', event.target.value)} /></label>
-                <label className="field policy-field-wide"><span>rule_parameters <small>JSON 对象</small></span><textarea required readOnly={readonly} rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label>
+                <label className="field policy-field-wide"><span>标题</span><input required readOnly={readonly || !showAdvanced} value={clause.title} onChange={(event) => changeClause(index, 'title', event.target.value)} /></label>
+                <label className="field policy-field-wide"><span>条款正文</span><textarea required readOnly={readonly || !showAdvanced} rows={5} value={clause.text} onChange={(event) => changeClause(index, 'text', event.target.value)} /></label>
+                {!showAdvanced && unresolvedIndexes.has(index) && <div className="policy-clause-needs-admin policy-field-wide">
+                  <strong>{clauseStatus(sourceClauses[index]) === 'UNSUPPORTED' ? '当前不支持自动执行' : '需要管理员处理'}</strong>
+                  {(sourceClauses[index].classification?.reason_codes ?? ['UNRECOGNIZED_CONTROL']).map((reason) => <span key={reason}>{CLASSIFICATION_REASONS[reason] ?? reason}</span>)}
+                  {(sourceClauses[index].classification?.conflicts_with?.length ?? 0) > 0 && <span>冲突对象：{sourceClauses[index].classification?.conflicts_with.join('、')}</span>}
+                  <span>普通用户无需填写技术代码；请由制度管理员进入高级审核处理。</span>
+                </div>}
+                {showAdvanced && <details className="policy-clause-rule-settings policy-field-wide" open={!clause.control_code}>
+                  <summary>检查规则设置{!clause.control_code ? '（发布前必填）' : ''}</summary>
+                  <div className="policy-clause-grid">
+                    <label className="field"><span>条款编号</span><input required readOnly={readonly} value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>
+                    <label className="field"><span>检查类型</span><select required disabled={readonly} value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)}><option value="">请选择条款用途</option>{CONTROL_CODE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+                    <label className="field policy-field-wide"><span>高级规则参数 <small>JSON</small></span><textarea required readOnly={readonly} rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label>
+                  </div>
+                </details>}
               </div>
             </article>
-          ))}
+          )))}
+          {!showAdvanced && unresolvedCount === 0 && <p className="policy-directory-state">当前文件没有需要人工处理的条款。</p>}
         </div>
 
         {(localError || review.isError || publish.isError) && (
@@ -400,11 +478,11 @@ export function PolicyImportPage() {
             {review.isError && lastReview && !revisionConflict && (
               <button className="button button-secondary" type="button" onClick={() => review.mutate(lastReview)}>重试相同保存请求</button>
             )}
-            <button className="button button-submit" type="submit" disabled={revisionConflict || review.isPending || publish.isPending}>
-              {review.isPending ? '正在保存…' : dirty || data.status === 'REVIEW_REQUIRED' ? '保存条款审核' : '重新保存审核'}
-            </button>
-            <button className="button button-submit" type="button" disabled={data.status !== 'READY_TO_PUBLISH' || dirty || review.isPending || publish.isPending} onClick={startPublish}>
-              {publish.isPending ? '正在生成 Embedding 与索引…' : '发布策略索引'}
+            {showAdvanced && (unresolvedCount > 0 || dirty || data.status === 'REVIEW_REQUIRED') && <button className="button button-submit" type="submit" disabled={revisionConflict || review.isPending || publish.isPending}>
+              {review.isPending ? '正在保存…' : '保存确认结果'}
+            </button>}
+            <button className="button button-submit" type="button" disabled={data.status !== 'READY_TO_PUBLISH' || !allFilesReviewed || dirty || review.isPending || publish.isPending} onClick={startPublish}>
+              {publish.isPending ? '正在发布制度…' : allFilesReviewed ? '确认并发布本版本' : '请先处理待确认条款'}
             </button>
             {publish.isError && lastPublish && !revisionConflict && (
               <button className="button button-secondary" type="button" onClick={() => publish.mutate(lastPublish)}>重试相同发布请求</button>

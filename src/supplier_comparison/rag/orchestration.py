@@ -16,7 +16,8 @@ from pydantic import Field, model_validator
 from .contracts import FrozenModel, PolicyRetriever, RetrievalRequest, RetrievalResult, RetrievalStatus
 from .manifest import LoadedPolicyManifest, load_policy_manifest
 
-REVIEWED_MANIFEST_SHA256 = "077ae4e27bec8b2551bb150942eafcb753948f4db434626f7b39503556580c03"
+REVIEWED_POLICY_VERSION = "2026.07.1"
+REVIEWED_MANIFEST_SHA256 = "c509e72538c92e02ba21a4807730fa29ade156d185ebef4b9a8aebd9afbed342"
 
 
 class PlanningContext(FrozenModel):
@@ -84,9 +85,11 @@ class PolicyEvidenceBundle(FrozenModel):
 
 class PolicyOrchestrator:
     def __init__(self, manifest: LoadedPolicyManifest, retriever: PolicyRetriever):
-        if (manifest.policy_set_version != "2026.09.2"
-            or manifest.content_sha256 != REVIEWED_MANIFEST_SHA256):
-            raise ValueError("only the reviewed 2026.09.2 policy catalog is supported")
+        if (
+            manifest.policy_set_version != REVIEWED_POLICY_VERSION
+            or manifest.content_sha256 != REVIEWED_MANIFEST_SHA256
+        ):
+            raise ValueError("only the reviewed electronics policy catalog is supported")
         self.manifest = manifest
         self.retriever = retriever
 
@@ -112,17 +115,37 @@ class PolicyOrchestrator:
                 ))
         if not requirements:
             reasons.append("POLICY_SCOPE_UNSUPPORTED")
-        if context.currency != "SGD" or context.tax_mode != "NOT_APPLICABLE":
+        if context.tax_mode != "NOT_APPLICABLE":
             reasons.append("COST_MODE_UNSUPPORTED")
         if context.total_cost is None:
             reasons.append("TOTAL_COST_UNKNOWN")
-        threshold = next((c.rule_parameters for d in self.manifest.documents for c in d.clauses
-                          if c.clause_id == "APR-001"), {})
-        if threshold != {"currency": "SGD", "threshold": "10000.00", "operator": ">="}:
+        thresholds = [
+            clause.rule_parameters
+            for document in self.manifest.documents
+            for clause in document.clauses
+            if clause.control_code == "AMOUNT_APPROVAL"
+            and {"currency", "threshold", "operator"} <= clause.rule_parameters.keys()
+        ]
+        threshold = thresholds[0] if len(thresholds) == 1 else {}
+        if (
+            threshold.get("currency") != context.currency
+            or threshold.get("operator") != ">="
+        ):
             reasons.append("APPROVAL_PARAMETER_INVALID")
-        manager = None if reasons else context.total_cost >= Decimal(threshold["threshold"])
+        try:
+            threshold_amount = Decimal(str(threshold["threshold"]))
+        except Exception:
+            threshold_amount = None
+            if "APPROVAL_PARAMETER_INVALID" not in reasons:
+                reasons.append("APPROVAL_PARAMETER_INVALID")
+        manager = (
+            None
+            if reasons or threshold_amount is None
+            else context.total_cost >= threshold_amount
+        )
         return ControlPlan(plan_id=f"PLAN-{uuid4().hex}", context=context,
-            catalog_version="catalog-2026.09.2/1", manifest_sha256=self.manifest.content_sha256,
+            catalog_version=f"{self.manifest.policy_set_id}/{self.manifest.policy_set_version}",
+            manifest_sha256=self.manifest.content_sha256,
             requirements=requirements, status="REVIEW_REQUIRED" if reasons else "READY",
             reasons=reasons, manager_approval_required=manager)
 
@@ -188,8 +211,11 @@ class PolicyOrchestrator:
 
 
 def load_reviewed_catalog(path: str | Path, *, allowed_root: str | Path) -> LoadedPolicyManifest:
+    """Load a repository policy catalog that already passed manifest validation."""
     manifest = load_policy_manifest(path, allowed_root=allowed_root)
-    if (manifest.policy_set_version != "2026.09.2"
-        or manifest.content_sha256 != REVIEWED_MANIFEST_SHA256):
+    if (
+        manifest.policy_set_version != REVIEWED_POLICY_VERSION
+        or manifest.content_sha256 != REVIEWED_MANIFEST_SHA256
+    ):
         raise ValueError("unreviewed policy version")
     return manifest

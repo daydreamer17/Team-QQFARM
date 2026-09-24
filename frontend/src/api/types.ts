@@ -102,6 +102,7 @@ export interface TaskMutationResponse {
   task_revision: number
   status: string
   changed_fields?: string[]
+  policy_binding_changed?: boolean
   graph_run_id?: string | null
   job_id?: string | null
   job_status?: string | null
@@ -1176,6 +1177,14 @@ export interface PolicyDraftClause {
   text: string
   control_code: string | null
   rule_parameters: Record<string, unknown>
+  classification?: {
+    status: 'AUTO_ACCEPTED' | 'ADMIN_REVIEW' | 'UNSUPPORTED'
+    base_status?: 'AUTO_ACCEPTED' | 'ADMIN_REVIEW' | 'UNSUPPORTED'
+    method?: string
+    reason_codes: string[]
+    conflicts_with: string[]
+    unsupported_capability?: string
+  }
   position: number
 }
 
@@ -1235,6 +1244,7 @@ export interface PolicyImportSummary {
 
 export interface PolicyImportListQuery {
   status?: PolicyImportStatus
+  policy_set_id?: string
   policy_set_version?: string
   category?: string
   region?: string
@@ -1253,7 +1263,7 @@ export interface PolicySetSummary {
   policy_set_id: string
   policy_set_version: string
   policy_index_version: string
-  status: 'PUBLISHED'
+  status: 'PUBLISHED' | 'INACTIVE'
   categories: string[]
   regions: string[]
   document_count: number
@@ -1268,6 +1278,7 @@ export interface PolicySetSummary {
 export interface PolicySetListQuery {
   category?: string
   region?: string
+  include_inactive?: boolean
   limit?: number
   offset?: number
 }
@@ -1277,6 +1288,12 @@ export interface PolicySetListResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface PolicySetDeactivateResponse {
+  policy_set_id: string
+  policy_set_version: string
+  status: 'INACTIVE'
 }
 
 export interface IssueHistoryItem extends CurrentIssue {

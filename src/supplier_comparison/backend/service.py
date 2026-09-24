@@ -3503,13 +3503,41 @@ class BackendService:
         *,
         expected_task_revision: int,
         idempotency_key: str,
+        update_policy_binding: bool = False,
+        policy_set_version: str | None = None,
+        policy_index_version: str | None = None,
+        policy_category: str | None = None,
+        policy_region: str | None = None,
         provider: str | None = None,
         model_id: str | None = None,
         environment: str | None = None,
         prompt_version: str | None = None,
     ) -> dict[str, Any]:
         payload = requirement.model_dump(mode="json")
-        request = {"task_id": task_id, "expected_task_revision": expected_task_revision, "requirement": payload}
+        requested_binding = (
+            policy_set_version,
+            policy_index_version,
+            policy_category,
+            policy_region,
+        )
+        if update_policy_binding and any(value is not None for value in requested_binding) and not all(
+            isinstance(value, str) and value.strip() for value in requested_binding
+        ):
+            raise BackendError(
+                "policy_binding_incomplete",
+                "Policy set, index, category, and region must be supplied together.",
+            )
+        normalized_binding = tuple(
+            value.strip() if isinstance(value, str) else None
+            for value in requested_binding
+        )
+        request = {
+            "task_id": task_id,
+            "expected_task_revision": expected_task_revision,
+            "requirement": payload,
+            "update_policy_binding": update_policy_binding,
+            "policy_binding": normalized_binding if update_policy_binding else None,
+        }
         request_sha = content_hash(request)
         operation = f"update_requirement:{task_id}"
         with self.session_factory.begin() as session:
@@ -3524,8 +3552,19 @@ class BackendService:
                 RequirementRecord.task_id == task_id
             ).order_by(RequirementRecord.requirement_version.desc()))
             old_payload = dict(current.payload) if current else {}
-            if old_payload == payload:
-                raise BackendError("requirement_unchanged", "Requirement contains no changes.")
+            old_binding = (
+                task.policy_set_version,
+                task.policy_index_version,
+                task.policy_category,
+                task.policy_region,
+            )
+            requirement_changed = old_payload != payload
+            binding_changed = update_policy_binding and old_binding != normalized_binding
+            if not requirement_changed and not binding_changed:
+                raise BackendError(
+                    "requirement_unchanged",
+                    "Task configuration contains no changes.",
+                )
             self._supersede_current_graph(session, task)
             for draft in session.scalars(select(QuoteDraft).where(
                 QuoteDraft.task_id == task_id,
@@ -3540,10 +3579,24 @@ class BackendService:
                     draft_job.status = "SUPERSEDED"
             next_revision = task.current_revision + 1
             changed_fields = sorted(name for name in set(old_payload) | set(payload) if old_payload.get(name) != payload.get(name))
+            change_type = (
+                "TASK_CONFIGURATION_UPDATED"
+                if requirement_changed and binding_changed
+                else "POLICY_BINDING_UPDATED"
+                if binding_changed
+                else "REQUIREMENT_UPDATED"
+            )
             session.add(TaskRevision(
                 revision_id=new_id("rev"), task_id=task_id, revision=next_revision,
-                change_type="REQUIREMENT_UPDATED", actor_id=self.actor_id,
-                request_sha256=request_sha, details={"changed_fields": changed_fields},
+                change_type=change_type, actor_id=self.actor_id,
+                request_sha256=request_sha, details={
+                    "changed_fields": changed_fields,
+                    "policy_binding_changed": binding_changed,
+                    **({
+                        "previous_policy_binding": old_binding,
+                        "policy_binding": normalized_binding,
+                    } if binding_changed else {}),
+                },
             ))
             session.add(RequirementRecord(
                 requirement_id=new_id("req"), task_id=task_id, task_revision=next_revision,
@@ -3551,6 +3604,13 @@ class BackendService:
                 payload=payload, content_sha256=content_hash(payload), source_artifact_id=None,
             ))
             task.current_revision = next_revision
+            if update_policy_binding:
+                (
+                    task.policy_set_version,
+                    task.policy_index_version,
+                    task.policy_category,
+                    task.policy_region,
+                ) = normalized_binding
             previous_binding = self._binding_at_revision(session, task_id, next_revision - 1)
             history_binding = self._new_history_binding(
                 task_id=task_id,
@@ -3597,6 +3657,7 @@ class BackendService:
                 "task_revision": next_revision,
                 "status": task.status,
                 "changed_fields": changed_fields,
+                "policy_binding_changed": binding_changed,
                 "graph_run_id": graph_run_id,
                 "job_id": job_id,
                 "job_status": "PENDING" if job_id else None,

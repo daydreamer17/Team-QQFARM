@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2] / "data/policies"
 
 def context(**changes):
     data = dict(task_id="task-demo", task_revision=1, snapshot_id="snap-demo",
-                policy_set_version="2026.09.2", policy_index_version="pidx-test",
+                policy_set_version="2026.07.1", policy_index_version="pidx-test",
                 category="Electronics", region="SG", evaluated_at=datetime(2026, 9, 16, tzinfo=timezone.utc),
                 total_cost="7000.00")
     return PlanningContext(**(data | changes))
@@ -43,30 +43,32 @@ class Retriever:
 
 
 def service(mode="OK"):
-    manifest = load_reviewed_catalog(ROOT / "electronics-v2/manifest.json", allowed_root=ROOT)
+    manifest = load_reviewed_catalog(
+        ROOT / "electronics-components/v2/manifest.json", allowed_root=ROOT
+    )
     retriever = Retriever(manifest, mode)
     return PolicyOrchestrator(manifest, retriever), retriever
 
 
-def test_all_six_controls_and_24_requirements_are_retrieved_with_bounded_supplement():
+def test_all_controls_and_requirements_are_retrieved_with_bounded_supplement():
     orchestrator, retriever = service()
     result = orchestrator.retrieve(context())
     assert result.status == "READY"
-    assert len(result.requirement_coverage) == 24
+    assert len(result.requirement_coverage) == 18
     assert all(c.status == "SUPPORTED" for c in result.requirement_coverage)
-    assert 6 < result.requests_used <= 30
+    assert 3 < result.requests_used <= 21
     assert all(len(r.required_control_codes) == 1 for r in retriever.calls)
-    assert result.plan.manager_approval_required is False
+    assert result.plan.manager_approval_required is True
 
 
-@pytest.mark.parametrize("amount,expected", [("9999.99", False), ("10000.00", True), ("10000.01", True)])
+@pytest.mark.parametrize("amount,expected", [("6999.99", False), ("7000.00", True), ("7000.01", True)])
 def test_manager_threshold_is_inclusive(amount, expected):
     orchestrator, _ = service()
     assert orchestrator.plan(context(total_cost=amount)).manager_approval_required is expected
 
 
 @pytest.mark.parametrize("changes", [{"total_cost": None}, {"currency": "USD"}, {"tax_mode": "UNKNOWN"},
-    {"region": "US"}, {"category": "Packaging"}, {"policy_set_version": "2026.09.1"},
+    {"region": "US"}, {"category": "Packaging"}, {"policy_set_version": "2026.01.1"},
     {"evaluated_at": datetime(2025, 1, 1, tzinfo=timezone.utc)}])
 def test_invalid_preconditions_do_not_call_models(changes):
     orchestrator, retriever = service()
@@ -81,13 +83,15 @@ def test_errors_and_untrusted_citations_fail_closed(mode):
     orchestrator, _ = service(mode)
     result = orchestrator.retrieve(context())
     assert result.status == "REVIEW_REQUIRED"
-    assert result.requests_used == 6
+    assert result.requests_used == 3
     assert result.reasons
 
 
 def test_old_and_changed_catalogs_are_rejected():
     with pytest.raises(ValueError):
-        load_reviewed_catalog(ROOT / "electronics-v1/manifest.json", allowed_root=ROOT)
+        load_reviewed_catalog(
+            ROOT / "electronics-components/v1/manifest.json", allowed_root=ROOT
+        )
     orchestrator, retriever = service()
     modified = orchestrator.manifest.model_copy(update={"content_sha256": "0" * 64})
     with pytest.raises(ValueError):

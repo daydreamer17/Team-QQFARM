@@ -239,6 +239,7 @@ class PolicyFileImportClause(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     control_code: Mapped[str | None] = mapped_column(String(128))
     rule_parameters: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    classification: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False, default=dict)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now

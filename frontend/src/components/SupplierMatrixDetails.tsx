@@ -13,9 +13,11 @@ export function MatrixPaymentTerm({ supplier }: { supplier: SupplierComparisonRe
     PAYMENT_START_EVENT_CONFLICT: '账期起算条件冲突，请核对',
   }
   const messages = [...new Set(term.reason_codes.map((code) => reasons[code]).filter(Boolean))]
+  const displayTerm = comparable && term.net_days !== null
+    ? `${term.payment_start_event === 'INVOICE_DATE' ? '发票日后 ' : ''}${term.net_days} 天`
+    : term.normalized_text || term.raw_text || '未提供'
   return <div className="matrix-cell-summary">
-    <strong>{term.normalized_text || term.raw_text || '未提供'}</strong>
-    {term.raw_text && term.raw_text !== term.normalized_text && <small>{term.raw_text}</small>}
+    <strong>{displayTerm}</strong>
     {!comparable && <small>{messages.join('；') || (term.parse_status === 'MISSING' ? '账期信息缺失' : '账期暂不可比，原因未记录')}</small>}
   </div>
 }

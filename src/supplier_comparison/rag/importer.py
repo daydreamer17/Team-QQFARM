@@ -220,6 +220,20 @@ class PolicyImporter:
             index.status = "PUBLISHED"
             index.published_at = now
             index.error_code = None
+            previous_versions = list(
+                session.scalars(
+                    select(PolicySet)
+                    .where(
+                        PolicySet.policy_set_id == manifest.policy_set_id,
+                        PolicySet.policy_set_record_id
+                        != policy_set.policy_set_record_id,
+                        PolicySet.status == "PUBLISHED",
+                    )
+                    .with_for_update()
+                )
+            )
+            for previous_version in previous_versions:
+                previous_version.status = "INACTIVE"
             policy_set.status = "PUBLISHED"
             policy_set.published_at = policy_set.published_at or now
             run.status = "SUCCEEDED"

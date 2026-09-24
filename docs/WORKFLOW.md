@@ -197,7 +197,7 @@ Q = ceil(max(需求数量, MOQ) / 订购步长) * 订购步长
 
 ## 9. 制度知识库导入
 
-制度知识库支持 Markdown manifest 导入，以及通过后端上传原生文本 PDF 或 UTF-8 TXT。文件上传流程为：
+制度知识库支持 Markdown manifest 导入，以及通过后端上传原生文本 PDF、UTF-8 TXT 或 Markdown。文件上传流程为：
 
 ```text
 上传并提取
@@ -213,12 +213,13 @@ Q = ceil(max(需求数量, MOQ) / 订购步长) * 订购步长
 
 - `GET /api/v1/policy-sets`：列出可以绑定任务的已发布制度和索引版本；
 - `GET /api/v1/policy-imports`：列出当前操作者的导入记录；
-- `POST /api/v1/policy-imports`：上传 PDF 或 TXT；
+- `POST /api/v1/policy-imports`：上传 PDF、UTF-8 TXT 或 Markdown；
 - `GET /api/v1/policy-imports/{policy_import_id}`：读取审核详情；
 - `PUT /api/v1/policy-imports/{policy_import_id}/clauses`：全量提交审核后的条款；
-- `POST /api/v1/policy-imports/{policy_import_id}/publish`：显式发布。
+- `POST /api/v1/policy-imports/{policy_import_id}/publish`：显式发布；
+- `POST /api/v1/policy-sets/{policy_set_id}/versions/{policy_set_version}/deactivate`：停用指定版本，禁止新任务绑定。
 
-扫描或空白制度 PDF 返回 `policy_pdf_requires_ocr`。上传不会自动推断可信的 control code；发布前必须人工审核。发布后的正文和索引不可原地覆盖，同版本不同内容哈希会被拒绝。
+扫描或空白制度 PDF 返回 `policy_pdf_requires_ocr`。上传不会自动推断可信的 control code；发布前必须人工审核。发布后的正文和索引不可原地覆盖，同版本不同内容哈希会被拒绝。停用不会删除制度或索引，历史任务仍可按冻结版本检索，但新任务无法再绑定该版本；替换内容必须发布新版本。
 
 ## 10. 当前 RAG 发布门禁
 

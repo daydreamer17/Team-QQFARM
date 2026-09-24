@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 import type { SupplierComparisonResult, SupplierHistorySnapshot } from '../src/api/types'
 import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../src/components/SupplierMatrixDetails'
+import { supplierSelectionExplanation } from '../src/lib/resultComparison'
 
 const base: SupplierComparisonResult = {
   quote_id: 'q1', quote_version: 1, supplier_name: 'Example', status: 'FEASIBLE',
@@ -16,13 +17,14 @@ const history: SupplierHistorySnapshot = {
 }
 
 describe('frozen supplier matrix details', () => {
-  test('shows normalized payment terms with original start-event wording', () => {
+  test('shows a single localized payment term without repeating raw text', () => {
     render(<MatrixPaymentTerm supplier={{ ...base, payment_term: {
       raw_text: 'Net 60 from invoice', normalized_text: 'Net 60', net_days: 60,
-      payment_start_event: 'INVOICE', parse_status: 'COMPARABLE', reason_codes: [],
+      payment_start_event: 'INVOICE_DATE', parse_status: 'COMPARABLE', reason_codes: [],
     } }} />)
-    expect(screen.getByText('Net 60')).toBeInTheDocument()
-    expect(screen.getByText('Net 60 from invoice')).toBeInTheDocument()
+    expect(screen.getByText('发票日后 60 天')).toBeInTheDocument()
+    expect(screen.queryByText('Net 60')).not.toBeInTheDocument()
+    expect(screen.queryByText('Net 60 from invoice')).not.toBeInTheDocument()
   })
   test('does not imply an unverified payment term is sortable', () => {
     render(<MatrixPaymentTerm supplier={{ ...base, payment_term: {
@@ -69,5 +71,69 @@ describe('frozen supplier matrix details', () => {
     } }} />)
     expect(screen.getByText(message)).toBeInTheDocument()
     expect(screen.queryByText('账期尚未核验，不参与排序')).not.toBeInTheDocument()
+  })
+})
+
+describe('supplier selection explanations', () => {
+  const recommendedSupplier: SupplierComparisonResult = {
+    ...base,
+    quote_id: 'recommended',
+    supplier_name: 'Recommended',
+    total_cost: '6900.00',
+    history_snapshot: {
+      ...history,
+      quote_id: 'recommended',
+      on_time: { rate: '1', numerator: 10, denominator: 10 },
+    },
+  }
+
+  test('states the active ranking reason for the recommended supplier', () => {
+    expect(supplierSelectionExplanation(
+      recommendedSupplier,
+      recommendedSupplier,
+      'HIGHEST_HISTORICAL_ON_TIME_RATE',
+      'SGD',
+      true,
+    )).toEqual({
+      label: '推荐依据',
+      detail: '历史准时率最高（100.0%）',
+      tone: 'good',
+    })
+  })
+
+  test('compares an unselected supplier with the recommendation and keeps the cost trade-off', () => {
+    const explanation = supplierSelectionExplanation(
+      {
+        ...base,
+        quote_id: 'alternative',
+        supplier_name: 'Alternative',
+        total_cost: '6700.00',
+        history_snapshot: {
+          ...history,
+          quote_id: 'alternative',
+          on_time: { rate: '0.86', numerator: 86, denominator: 100 },
+        },
+      },
+      recommendedSupplier,
+      'HIGHEST_HISTORICAL_ON_TIME_RATE',
+      'SGD',
+      false,
+    )
+
+    expect(explanation.label).toBe('未选原因')
+    expect(explanation.detail).toContain('历史准时率比推荐供应商低 14.0 个百分点')
+    expect(explanation.detail).toContain('总成本比推荐供应商低 SGD 200.00')
+  })
+
+  test('explains the cost difference when lowest confirmed cost is the ranking rule', () => {
+    const explanation = supplierSelectionExplanation(
+      { ...base, quote_id: 'higher-cost', total_cost: '7100.00' },
+      recommendedSupplier,
+      'LOWEST_CONFIRMED_TOTAL_COST',
+      'SGD',
+      false,
+    )
+
+    expect(explanation.detail).toBe('总成本比推荐供应商高 SGD 200.00')
   })
 })

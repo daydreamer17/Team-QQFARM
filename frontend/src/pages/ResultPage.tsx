@@ -7,7 +7,6 @@ import type {
   QuoteDecisionImpact,
   QuoteFieldsResponse,
   ResultReason,
-  SelectionGap,
   SupplierComparisonResult,
   TaskDetail,
 } from '../api/types'
@@ -15,6 +14,7 @@ import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspa
 import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../components/SupplierMatrixDetails'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
+import { supplierSelectionExplanation } from '../lib/resultComparison'
 import {
   fieldLabel,
   originLabel,
@@ -74,20 +74,8 @@ function evidenceLocation(evidence: FieldEvidence) {
   return parts.join(' · ') || evidence.kind || '来源位置'
 }
 
-function evidenceCount(fields: QuoteFieldsResponse | undefined) {
-  return fields?.fields.reduce((count, field) => count + field.evidence.length, 0) ?? 0
-}
-
-function supplierConclusion(supplier: SupplierComparisonResult, recommended: boolean) {
-  if (recommended) return '初步推荐'
-  if (supplier.failed_reasons.length > 0) return reasonText(supplier.failed_reasons[0])
-  if (supplier.pending_reasons.length > 0) return reasonText(supplier.pending_reasons[0])
-  return supplier.status === 'FEASIBLE' ? '可进入比较' : quoteStatusLabel(supplier.status)
-}
-
 function recommendationNarrative(
   primary: SupplierComparisonResult | undefined,
-  suppliers: SupplierComparisonResult[],
   currency: string | undefined,
   ranking: string | undefined,
 ) {
@@ -96,15 +84,7 @@ function recommendationNarrative(
   const arrival = primary.estimated_arrival_date
     ? `，预计于 ${primary.estimated_arrival_date} 到货`
     : ''
-  const first = `按照“${rankingText}”，${primary.supplier_name} 满足当前采购要求，以 ${moneyText(currency, primary.total_cost)} 的已确认总成本成为首选${arrival}。`
-  const alternatives = suppliers.filter((supplier) => supplier.quote_id !== primary.quote_id)
-  if (alternatives.length === 0) return first
-  const second = alternatives.slice(0, 2).map((supplier) => (
-    `${supplier.supplier_name}${supplier.status === 'FEASIBLE'
-      ? '仍可作为备选'
-      : `未入选，原因是${supplierConclusion(supplier, false).replace(/[。；，,.]+$/, '')}`}`
-  )).join('；')
-  return `${first} ${second}。`
+  return `按照“${rankingText}”，${primary.supplier_name} 满足当前采购要求，以 ${moneyText(currency, primary.total_cost)} 的已确认总成本成为首选${arrival}。`
 }
 
 function impactMessage(status: string, fallback: string) {
@@ -114,44 +94,22 @@ function impactMessage(status: string, fallback: string) {
   return fallback
 }
 
-function matrixGapSummary(
+function matrixSelectionSummary(
   supplier: SupplierComparisonResult,
-  gap: SelectionGap | undefined,
+  primary: SupplierComparisonResult | undefined,
+  ranking: string | undefined,
+  currency: string | undefined,
   impact: QuoteDecisionImpact | undefined,
   recommended: boolean,
-  loading: boolean,
 ) {
-  if (!gap && loading) return { label: '读取中…', detail: '正在整理差距与未知项', tone: 'neutral' }
-  if (!gap && impact?.unknown_fields.length) {
+  if (impact?.unknown_fields.length && impact.status !== 'NON_BLOCKING') {
     return {
-      label: `${impact.unknown_fields.length} 个未知字段`,
+      label: `${impact.unknown_fields.length} 项待确认`,
       detail: impactMessage(impact.status, impact.message),
       tone: 'warning',
     }
   }
-  if (!gap) return { label: '详情暂不可用', detail: '未能读取本版本的差距详情，不影响已展示的计算结果', tone: 'neutral' }
-  if (recommended) return { label: '无阻塞风险', detail: '满足当前硬性条件', tone: 'good' }
-  if (supplier.status === 'INFEASIBLE') {
-    return {
-      label: impact?.unknown_fields.length ? `${impact.unknown_fields.length} 个未知字段` : '存在硬性差距',
-      detail: impact?.unknown_fields.length ? '已有失败项，未知项当前不改变推荐' : supplierConclusion(supplier, false),
-      tone: impact?.unknown_fields.length ? 'warning' : 'danger',
-    }
-  }
-  if (supplier.status === 'PENDING') {
-    return {
-      label: impact?.unknown_fields.length ? `${impact.unknown_fields.length} 个待确认项` : '仍需确认',
-      detail: '确认后可能改变当前选择',
-      tone: 'warning',
-    }
-  }
-  return {
-    label: impact?.unknown_fields.length ? `${impact.unknown_fields.length} 个未知字段` : '无未知项',
-    detail: gap.cost_difference_vs_other === null
-      ? '满足要求，可作为备选'
-      : `与更优方案相差 ${moneyText(gap.currency, gap.cost_difference_vs_other)}`,
-    tone: impact?.unknown_fields.length ? 'warning' : 'good',
-  }
+  return supplierSelectionExplanation(supplier, primary, ranking, currency, recommended)
 }
 
 function Reasons({ title, reasons }: { title: string; reasons: ResultReason[] }) {
@@ -190,7 +148,7 @@ function EvidenceDrawer({
       <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} 字段证据`}>
         <header>
           <div>
-            <p className="eyebrow">报价证据</p>
+            <p className="eyebrow">报价原文</p>
             <h2>{supplier.supplier_name}</h2>
             <span>第 {supplier.quote_version} 版报价</span>
           </div>
@@ -215,7 +173,7 @@ function EvidenceDrawer({
         {fields && (
           <section className="drawer-fields">
             <div className="drawer-section-title">
-              <div><p className="eyebrow">NORMALIZED FIELDS</p><h3>解析字段与证据</h3></div>
+            <div><h3>解析字段与原文</h3></div>
               <span>{fields.fields.length} 个字段</span>
             </div>
             {fields.fields.map((field) => (
@@ -256,7 +214,7 @@ export function ResultPage() {
   const queryClient = useQueryClient()
   const [assistantExpanded, setAssistantExpanded] = useState(true)
   const [selectedSupplierIndex, setSelectedSupplierIndex] = useState<number | null>(null)
-  const [expandedGapQuoteId, setExpandedGapQuoteId] = useState<string | null | undefined>(undefined)
+  const [expandedGapQuoteId, setExpandedGapQuoteId] = useState<string | null>(null)
   const resultQuery = useQuery({
     queryKey: ['tasks', taskId, 'results', resultId],
     queryFn: () => api.getResult(taskId, resultId),
@@ -336,7 +294,6 @@ export function ResultPage() {
   const feasibleCount = suppliers.filter((supplier) => supplier.status === 'FEASIBLE').length
   const pendingCount = suppliers.filter((supplier) => supplier.status === 'PENDING').length
   const infeasibleCount = suppliers.filter((supplier) => supplier.status === 'INFEASIBLE').length
-  const loadedEvidenceCount = fieldQueries.filter((query) => Boolean(query.data)).length
   const task = taskQuery.data
   const canReanalyze = Boolean(task && task.quotes.length > 0 && task.task_revision > 1 && (
     (
@@ -362,6 +319,10 @@ export function ResultPage() {
   const currency = frozenRequirement?.currency
   const successfulPolicyRetrievals = policyRetrievals.filter((item) => item.status === 'OK').length
   const policyReviewCount = resultQuery.data.policy_compliance.counts.REVIEW_REQUIRED ?? 0
+  const hasPolicyBinding = Boolean(
+    resultQuery.data.input_snapshot?.policy_set_version
+    ?? (resultQuery.data.is_current ? task?.policy_binding?.policy_set_version : null),
+  )
   const currentRanking = frozenDecisionProfile?.preferences.primary_criterion
     ?? frozenRequirement?.ranking_preference
   const currentSecondaryRanking = frozenDecisionProfile?.preferences.secondary_criterion
@@ -372,15 +333,20 @@ export function ResultPage() {
   const clarificationDraftsByQuote = new Map(
     selectionGapsQuery.data?.clarification_drafts.map((draft) => [draft.quote_id, draft]) ?? [],
   )
-  const defaultExpandedGapQuoteId = selectionGapsQuery.data?.gaps.find((gap) => (
-    gap.failed_reasons.length > 0 || gap.pending_reasons.length > 0
-  ))?.quote_id ?? null
-  const activeGapQuoteId = expandedGapQuoteId === undefined ? defaultExpandedGapQuoteId : expandedGapQuoteId
+  const activeGapQuoteId = expandedGapQuoteId
   const activeGap = activeGapQuoteId ? selectionGapsByQuote.get(activeGapQuoteId) : undefined
   const activeGapSupplier = activeGapQuoteId ? suppliersByQuote.get(activeGapQuoteId) : undefined
   const activeGapImpact = activeGapQuoteId ? quoteImpactsByQuote.get(activeGapQuoteId) : undefined
   const activeGapDraft = activeGapQuoteId ? clarificationDraftsByQuote.get(activeGapQuoteId) : undefined
-  const activeGapReasons = activeGap ? [...activeGap.failed_reasons, ...activeGap.pending_reasons] : []
+  const activeGapReasons = activeGap
+    ? [...activeGap.failed_reasons, ...activeGap.pending_reasons]
+    : activeGapSupplier ? [...activeGapSupplier.failed_reasons, ...activeGapSupplier.pending_reasons] : []
+  const activeAdditionalReasons = activeGapReasons.slice(1)
+  const activeUnknownFields = activeGapImpact?.unknown_fields ?? []
+  const showCommunicationAdvice = Boolean(activeGapDraft && (activeGapReasons.length > 0 || activeUnknownFields.length > 0))
+  const activeHasSupplement = activeAdditionalReasons.length > 0
+    || activeUnknownFields.length > 0
+    || showCommunicationAdvice
   const headerProgress = resultQuery.data.is_current || !task
     ? task?.progress
     : {
@@ -448,7 +414,7 @@ export function ResultPage() {
         <div>
           <strong>{resultQuery.data.is_current ? '报价审核已完成，可以比较' : '正在查看历史决策结果'}</strong>
           <span>
-            当前仅使用正式提交且字段审核通过的报价；字段证据 {loadedEvidenceCount} / {suppliers.length} 已读取。
+            当前使用 {suppliers.length} 份正式提交且审核通过的报价。
             {infeasibleCount > 0 ? ' 不符合项仍保留在矩阵中，但不参与排序。' : ''}
             {excludedSupplierIds.length > 0
               ? ` ${resultQuery.data.is_current && task ? `当前 ${task.quotes.length} 份有效报价中，` : ''}${suppliers.length} 份进入比较，${excludedActiveQuoteCount} 份按设置排除（${excludedSupplierIds.join('、')}）。`
@@ -496,7 +462,7 @@ export function ResultPage() {
                   <span>已确认总成本</span>
                 </div>
                 <p>
-                  {recommendationNarrative(primaryRecommendation, suppliers, currency, currentRanking)}
+                  {recommendationNarrative(primaryRecommendation, currency, currentRanking)}
                 </p>
                 {frozenRequirement && (
                   <div className="decision-hero-context">
@@ -512,7 +478,7 @@ export function ResultPage() {
               <article className="decision-settings-signal">
                 <div>
                   <strong>当前决策设置</strong>
-                  <span className="signal-badge">Rev {resultQuery.data.task_revision}</span>
+                  <span className="signal-badge">当前第 {resultQuery.data.task_revision} 版</span>
                 </div>
                 <dl>
                   <div><dt>主指标</dt><dd>{rankingCriterionLabel(currentRanking)}</dd></div>
@@ -521,28 +487,26 @@ export function ResultPage() {
                   <div><dt>排除供应商</dt><dd>{frozenDecisionProfile?.preferences.excluded_supplier_ids.join('、') || '无'}</dd></div>
                 </dl>
               </article>
-              <article>
-                <div><strong>制度证据</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
-                <p>{policyState}；{policyReviewCount > 0 ? `${policyReviewCount} 家供应商仍需人工核验。` : '仍不等同于最终合规审批。'}</p>
-                {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
-              </article>
+              {hasPolicyBinding ? (
+                <article>
+                  <div><strong>制度检查</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
+                  <p>{policyState}{policyReviewCount > 0 ? `；${policyReviewCount} 家供应商仍需人工核验。` : '。'}</p>
+                  {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
+                </article>
+              ) : (
+                <article>
+                  <div><strong>制度检查</strong></div>
+                  <p>当前未绑定制度。</p>
+                </article>
+              )}
             </aside>
           </section>
 
           <section className="comparison-matrix-panel">
-            {selectionGapsQuery.isError && (
-              <div className="notice error-panel" role="alert">
-                <p>差距与沟通详情加载失败：{errorMessage(selectionGapsQuery.error)}</p>
-                <button className="button button-secondary" type="button" onClick={() => void selectionGapsQuery.refetch()}>重试加载详情</button>
-              </div>
-            )}
             <header>
-              <div><p className="eyebrow">确定性比较</p><h2>供应商比较矩阵</h2></div>
+              <div><h2>供应商比较</h2></div>
               <div>
-                {primaryRecommendation && (
-                  <button className="button button-secondary" type="button" onClick={() => setSelectedSupplierIndex(suppliers.indexOf(primaryRecommendation))}>解释推荐</button>
-                )}
-                {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/quotes/new`}>查看全部证据</Link>}
+                {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/quotes/new`}>查看全部报价原文</Link>}
               </div>
             </header>
             <div className="comparison-matrix-scroll">
@@ -553,7 +517,7 @@ export function ResultPage() {
                     {suppliers.map((supplier, index) => (
                       <th className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>
                         <button className="supplier-link" type="button" onClick={() => setSelectedSupplierIndex(index)}>{supplier.supplier_name}</button>
-                        <small>第 {supplier.quote_version} 版</small>
+                        {supplier.quote_version > 1 && <small>第 {supplier.quote_version} 版</small>}
                       </th>
                     ))}
                   </tr>
@@ -564,77 +528,80 @@ export function ResultPage() {
                   <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, frozenRequirement?.quantity_unit)}</td>)}</tr>
                   <tr><th scope="row">付款账期</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixPaymentTerm supplier={supplier} /></td>)}</tr>
                   <tr><th scope="row">供应商表现</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixSupplierPerformance supplier={supplier} /></td>)}</tr>
-                  <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>
-                  <tr><th>字段证据</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? '读取中…' : `查看 ${evidenceCount(fieldQueries[index]?.data)} 个来源`}</button></td>)}</tr>
-                  <tr><th>选择结论</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><div className="matrix-cell-summary"><strong>{supplierConclusion(supplier, recommended.has(supplier.quote_id))}</strong><small>{recommended.has(supplier.quote_id) ? '当前排序下优先' : supplier.status === 'FEASIBLE' ? '满足要求，可作为备选' : '未进入当前推荐'}</small></div></td>)}</tr>
+                  {suppliers.some((supplier) => supplier.status !== 'FEASIBLE') && <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>}
+                  <tr><th>报价原文</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? '读取中…' : '查看报价原文'}</button></td>)}</tr>
                   <tr>
-                    <th>差距与未知项</th>
+                    <th>推荐与未选原因</th>
                     {suppliers.map((supplier) => {
-                      const summary = matrixGapSummary(
+                      const gap = selectionGapsByQuote.get(supplier.quote_id)
+                      const reasons = gap
+                        ? [...gap.failed_reasons, ...gap.pending_reasons]
+                        : [...supplier.failed_reasons, ...supplier.pending_reasons]
+                      const impact = quoteImpactsByQuote.get(supplier.quote_id)
+                      const unknownFields = impact?.unknown_fields ?? []
+                      const draft = clarificationDraftsByQuote.get(supplier.quote_id)
+                      const hasCommunicationAdvice = Boolean(draft && (reasons.length > 0 || unknownFields.length > 0))
+                      const hasSupplement = reasons.length > 1
+                        || unknownFields.length > 0
+                        || hasCommunicationAdvice
+                      const summary = matrixSelectionSummary(
                         supplier,
-                        selectionGapsByQuote.get(supplier.quote_id),
-                        quoteImpactsByQuote.get(supplier.quote_id),
+                        primaryRecommendation,
+                        currentRanking,
+                        currency,
+                        impact,
                         recommended.has(supplier.quote_id),
-                        selectionGapsQuery.isFetching,
                       )
                       return (
                         <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>
                           <div className="matrix-cell-summary">
                             <span className={`matrix-gap-tag matrix-gap-${summary.tone}`}>{summary.label}</span>
                             <small>{summary.detail}</small>
+                            {hasSupplement && (
+                              <button
+                                className="matrix-detail-toggle"
+                                type="button"
+                                aria-expanded={activeGapQuoteId === supplier.quote_id}
+                                onClick={() => setExpandedGapQuoteId((current) => {
+                                  return current === supplier.quote_id ? null : supplier.quote_id
+                                })}
+                              >{activeGapQuoteId === supplier.quote_id ? '收起补充信息' : '查看补充信息'}</button>
+                            )}
                           </div>
                         </td>
                       )
                     })}
                   </tr>
-                  <tr>
-                    <th>解释与沟通</th>
-                    {suppliers.map((supplier) => (
-                      <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>
-                        <button
-                          className="matrix-detail-toggle"
-                          type="button"
-                          disabled={!selectionGapsQuery.data}
-                          aria-expanded={activeGapQuoteId === supplier.quote_id}
-                          onClick={() => setExpandedGapQuoteId((current) => {
-                            const resolvedCurrent = current === undefined ? defaultExpandedGapQuoteId : current
-                            return resolvedCurrent === supplier.quote_id ? null : supplier.quote_id
-                          })}
-                        >{activeGapQuoteId === supplier.quote_id ? '收起详情' : '展开详情'}</button>
-                      </td>
-                    ))}
-                  </tr>
-                  {activeGap && activeGapSupplier && (
+                  {activeGapSupplier && activeHasSupplement && (
                     <tr className="matrix-expanded-row">
                       <td colSpan={suppliers.length + 1}>
                         <div className="matrix-expanded-detail">
                           <header>
-                            <div><strong>{activeGapSupplier.supplier_name} · 详细说明</strong><small>第 {activeGap.quote_version} 版报价</small></div>
-                            <span className={`supplier-status supplier-status-${activeGap.status.toLowerCase()}`}>{quoteStatusLabel(activeGap.status)}</span>
+                            <div><strong>{activeGapSupplier.supplier_name} · 补充信息</strong>{activeGapSupplier.quote_version > 1 && <small>第 {activeGapSupplier.quote_version} 版报价</small>}</div>
+                            <span className={`supplier-status supplier-status-${activeGapSupplier.status.toLowerCase()}`}>{quoteStatusLabel(activeGapSupplier.status)}</span>
                           </header>
                           <div className="matrix-expanded-grid">
-                            <section>
-                              <h3>关键结论与{activeGapReasons.length > 0 ? '未入选原因' : '选择依据'}</h3>
-                              <p className="matrix-expanded-conclusion">{supplierConclusion(activeGapSupplier, recommended.has(activeGap.quote_id))}</p>
-                              {activeGapReasons.length > 0 ? (
-                                <ul>{activeGapReasons.map((reason, index) => <li key={`${reason.code}-${index}`}>{reasonText(reason)}</li>)}</ul>
-                              ) : <p>该报价满足当前采购硬性要求，可以进入排序比较。</p>}
-                            </section>
-                            <section>
-                              <h3>未知项对选择的影响</h3>
-                              <p>{activeGapImpact
-                                ? impactMessage(activeGapImpact.status, activeGapImpact.message)
-                                : '当前没有保存会影响选择的未知项说明。'}</p>
-                              {activeGapImpact && activeGapImpact.unknown_fields.length > 0 && (
+                            {activeAdditionalReasons.length > 0 && (
+                              <section>
+                                <h3>其他不符合或待确认事项</h3>
+                                <ul>{activeAdditionalReasons.map((reason, index) => <li key={`${reason.code}-${index}`}>{reasonText(reason)}</li>)}</ul>
+                              </section>
+                            )}
+                            {activeUnknownFields.length > 0 && (
+                              <section>
+                                <h3>待确认信息</h3>
+                                <p>{activeGapImpact && impactMessage(activeGapImpact.status, activeGapImpact.message)}</p>
                                 <div className="decision-impact-fields">
-                                  {activeGapImpact.unknown_fields.map((field) => <span key={field}>{fieldLabel(field)}</span>)}
+                                  {activeUnknownFields.map((field) => <span key={field}>{fieldLabel(field)}</span>)}
                                 </div>
-                              )}
-                            </section>
-                            <section>
-                              <h3>建议沟通策略</h3>
-                              <p>{activeGapDraft?.text ?? '当前没有需要向供应商补充确认的沟通事项。'}</p>
-                            </section>
+                              </section>
+                            )}
+                            {showCommunicationAdvice && (
+                              <section>
+                                <h3>建议沟通内容</h3>
+                                <p>{activeGapDraft?.text}</p>
+                              </section>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -646,7 +613,7 @@ export function ResultPage() {
           </section>
 
           <p className="result-boundary">
-            本版本的金额、数量、可行性和推荐于 {displayDate(payload.evaluated_at)} 计算生成；AI 只解释事实并提出需确认的情景变更。
+            结果更新于 {displayDate(payload.evaluated_at)}，详细计算记录可在版本记录中查看。
           </p>
         </main>
 
