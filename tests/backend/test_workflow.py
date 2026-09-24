@@ -21,7 +21,28 @@ from supplier_comparison.backend.models import (
 from supplier_comparison.backend.service import BackendService
 from supplier_comparison.backend.service import ConflictError
 from supplier_comparison.backend.service import BackendError, NotFoundError
-from supplier_comparison.backend.workflow import WorkflowRunner
+from supplier_comparison.backend.workflow import WorkflowRunner as BaseWorkflowRunner
+
+
+class WorkflowRunner(BaseWorkflowRunner):
+    """Existing quote/agent regressions explicitly perform the new no-policy user step.
+
+    Production behavior and stage blocking are tested with BaseWorkflowRunner in
+    test_compliance_workspace; this helper never confirms a bound policy.
+    """
+    def run_job(self, job_id):
+        outcome = super().run_job(job_id)
+        context = self.service.workflow_context(outcome['graph_run_id'])
+        workspace = self.service.compliance_workspace(context['task_id'])
+        if workspace['stage']['can_confirm'] and not workspace['policy_binding']:
+            queued = self.service.confirm_compliance(context['task_id'],
+                expected_task_revision=workspace['task_revision'],
+                expected_assessment_id=workspace['assessment']['assessment_id'],
+                acknowledged_missing_item_ids=workspace['assessment']['missing_item_ids'],
+                acknowledge_no_policy=True,
+                idempotency_key='test-confirm:' + workspace['assessment']['assessment_id'])
+            return super().run_job(queued['job_id'])
+        return outcome
 from supplier_comparison.extraction.adapters import ModelCallBudget
 from supplier_comparison.extraction.contracts import (
     DocumentContext,
@@ -174,7 +195,11 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         and not finding["resolved"]
         for finding in pending_fields["review_findings"]
     )
-    draft = service.list_results(task["task_id"])[0]["result"]
+    assert service.list_results(task['task_id']) == []  # No user-facing recommendation before compliance.
+    with sessions() as session:
+        draft = session.scalar(select(WorkflowArtifact).where(
+            WorkflowArtifact.task_id == task['task_id'], WorkflowArtifact.artifact_type == 'BASE_COMPARISON')
+            .order_by(WorkflowArtifact.created_at.desc())).payload
     assert draft["disposition"] == "PENDING_INPUT"
     assert draft["evaluated_at"] == "2026-09-14T01:00:00Z"
     assert draft["final_recommendation_allowed"] is False
@@ -285,9 +310,10 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     assert {artifact.schema_version for artifact in review_envelopes} == {
         "review-envelope/1.1.0"
     }
-    assert [change.change_type for change in revision_changes[-2:]] == [
+    assert [change.change_type for change in revision_changes[-3:]] == [
         "ISSUE_ANSWERED:CONFIRM_MISSING",
         "ISSUE_ANSWERED:SHIPPING_AMOUNT",
+        "COMPLIANCE_CONFIRMATION",
     ]
     assert len(document_executions) == 3
     assert {execution.status for execution in document_executions} == {"REVIEWED"}
@@ -318,20 +344,20 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
     ]
     correction = service.correct_fields(
         task_id=task["task_id"],
-        expected_task_revision=revision + 2,
+        expected_task_revision=revision + 3,
         corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
     repeated_correction = service.correct_fields(
         task_id=task["task_id"],
-        expected_task_revision=revision + 2,
+        expected_task_revision=revision + 3,
         corrections=batch_corrections,
         idempotency_key="correct-c-shipping",
     )
     assert repeated_correction == correction
     assert correction["correction_count"] == 2
     corrected_task = service.get_task(task["task_id"])
-    assert corrected_task["task_revision"] == revision + 3
+    assert corrected_task["task_revision"] == revision + 4
     assert corrected_task["current_job"]["has_corrections"] is True
     assert corrected_task["current_job"]["correction_batch_incomplete"] is False
     assert correction["graph_run_id"] != started["graph_run_id"]
@@ -449,6 +475,12 @@ def _run_impact_quotes(tmp_path, *, overrides=None, policy_retriever=None, polic
         )
         revision = uploaded["task_revision"]
     started = service.start_run(task["task_id"], expected_task_revision=revision, idempotency_key="run")
+    if policy_binding:
+        # These historical fixed-retriever fixtures predate the published catalogue.
+        # Keep testing resume compatibility for an already-running legacy graph.
+        from supplier_comparison.backend.models import Task
+        with sessions.begin() as session:
+            session.get(Task, task['task_id']).workflow_contract_version = 'legacy/1.0'
     rows = {"SUP-023": {"unit_price": "15.00"}, "SUP-024": {"shipping_fee_amount": "3400.00"}}
     for supplier, fields in (overrides or {}).items():
         rows.setdefault(supplier, {}).update(fields)
@@ -599,7 +631,7 @@ def test_impact_recomputed_after_cost_correction_old_proof_stays_historical(tmp_
     winner_quote_id = old["result"]["recommended_quote_ids"][0]
     correction = service.correct_field(
         task_id=task["task_id"], quote_id=winner_quote_id, field_name="shipping_fee_amount",
-        expected_task_revision=3, raw_value="S$10000.00", normalized_value="10000.00", unit="SGD",
+        expected_task_revision=service.get_task(task['task_id'])['task_revision'], raw_value="S$10000.00", normalized_value="10000.00", unit="SGD",
         reason="Correct a confirmed extraction error in the shipping amount.", idempotency_key="correct-shipping",
     )
     resumed = runner.run_job(correction["job_id"])

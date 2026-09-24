@@ -20,7 +20,8 @@ from uuid import uuid4
 
 from supplier_comparison.backend.models import Base, DocumentExecution, WorkflowArtifact, QuoteDraft
 from supplier_comparison.backend.service import BackendService
-from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
+from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
+from tests.backend.test_workflow import WorkflowRunner
 from supplier_comparison.extraction.adapters import OpenAICompatibleConfig
 from supplier_comparison.extraction.contracts import ExtractionBatch
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser

@@ -573,6 +573,10 @@ describe('frontend and backend version consistency', () => {
   })
 
   test('compliance page never falls back to a historical result', async () => {
+    vi.spyOn(api, 'getCompliance').mockResolvedValue({ task_id: 'task-1', task_revision: 6,
+      stage: { status: 'NOT_STARTED', confirmed: false, can_compare: false },
+      policy_binding: { policy_set_version: '2026.09.1', policy_index_version: 'index-1', category: 'Electronics', region: 'SG' },
+      plan: null, assessment: null, evidence: [], legacy_result: true })
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
       current_result_id: null,
       policy_binding: {
@@ -586,7 +590,7 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/compliance', '/tasks/:taskId/compliance', <CompliancePage />)
 
-    expect(await screen.findByRole('heading', { name: '当前版本没有有效决策结果' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '等待报价处理完成' })).toBeInTheDocument()
     expect(screen.getByText(/历史结果不会作为当前制度结论显示/)).toBeInTheDocument()
     expect(history).not.toHaveBeenCalled()
   })

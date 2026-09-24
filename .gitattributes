@@ -37,3 +37,5 @@ data/generated/inputs/development/full_flow_demo/**/*.json text eol=lf
 data/generated/inputs/development/full_flow_demo/**/*.txt text eol=lf
 data/generated/inputs/development/full_flow_demo2/** text eol=lf
 data/generated/inputs/development/full_flow_demo2/**/*.pdf binary
+data/policies/** text eol=lf
+data/generated/inputs/development/compliance_closure_demo/** text eol=lf

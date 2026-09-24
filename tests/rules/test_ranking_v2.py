@@ -100,6 +100,80 @@ def _request(primary, secondary=None, *, tolerance=None, b=None, c=None):
     )
 
 
+def test_policy_verified_first_preserves_feasibility_and_unknown_cost_gate():
+    from supplier_comparison.rules.contracts import PolicyEligibility
+    request = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST)
+    eligibility = {"QUOTE-B": PolicyEligibility(status="UNVERIFIED", reasons=("MISSING",)),
+                   "QUOTE-C": PolicyEligibility(status="VERIFIED")}
+    result = compare_suppliers(request.model_copy(update={"policy_eligibility": eligibility}))
+    assert result.recommended_quote_ids == ("QUOTE-C",)
+    assert all(item.status == "FEASIBLE" for item in result.supplier_results)
+    pending = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST,
+                       b=_supplier_b(shipping_status="UNKNOWN", shipping_amount=None))
+    blocked = compare_suppliers(pending.model_copy(update={"policy_eligibility": eligibility}))
+    assert not blocked.final_recommendation_allowed
+    assert blocked.blocking_pending_quote_ids == ("QUOTE-B",)
+
+
+def test_policy_all_unverified_and_all_excluded_are_not_empty_or_infeasible():
+    from supplier_comparison.rules.contracts import PolicyEligibility
+    request = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST)
+    unverified = compare_suppliers(request.model_copy(update={"policy_eligibility": {}}))
+    assert unverified.disposition == "POLICY_REVIEW_REQUIRED"
+    assert unverified.recommended_quote_ids == ()
+    assert unverified.ranked_quote_ids
+    excluded = compare_suppliers(request.model_copy(update={"policy_eligibility": {
+        quote.quote_id: PolicyEligibility(status="EXCLUDED", reasons=("HARD_FAIL",))
+        for quote in request.quotes}}))
+    assert excluded.disposition == "NO_POLICY_ELIGIBLE_QUOTES"
+    assert len(excluded.supplier_results) == 2
+    assert all(item.status == "FEASIBLE" for item in excluded.supplier_results)
+    assert excluded.ranking_trace.excluded_quote_ids == ()
+
+
+def test_policy_rerank_uses_same_cost_tolerance_and_secondary_rules():
+    from supplier_comparison.rules.contracts import PolicyEligibility
+    from supplier_comparison.rules.engine import apply_policy_eligibility
+    request = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST,
+                       RankingCriterion.HIGHEST_SUPPLIER_PERFORMANCE,
+                       tolerance=Decimal("1000"))
+    original = compare_suppliers(request)
+    result = apply_policy_eligibility(original, request.requirement,
+        {"QUOTE-B": PolicyEligibility(status="VERIFIED"),
+         "QUOTE-C": PolicyEligibility(status="VERIFIED")},
+        cost_tolerance_amount=request.cost_tolerance_amount,
+        history_dataset_context=request.history_dataset_context)
+    assert result.recommended_quote_ids == original.recommended_quote_ids
+    assert result.ranking_trace.cost_tolerance_applied
+
+
+def test_policy_eligibility_survives_decision_preference_boundary():
+    from supplier_comparison.rules.contracts import PolicyEligibility
+    from supplier_comparison.rules.decision_impact import DecisionImpactRequest, analyze_decision_impact
+    request = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST).model_copy(update={
+        "policy_eligibility": {"QUOTE-C": PolicyEligibility(status="VERIFIED")}})
+    result = analyze_decision_impact(DecisionImpactRequest(task_id="task", task_revision=1,
+                                                         comparison=request))
+    assert result.comparison.recommended_quote_ids == ("QUOTE-C",)
+
+
+def test_policy_unknown_cost_proof_uses_verified_cohort_not_unverified_bargain():
+    from supplier_comparison.rules.contracts import PolicyEligibility
+    from supplier_comparison.rules.decision_impact import DecisionImpactRequest, analyze_decision_impact
+    request = _request(RankingCriterion.LOWEST_CONFIRMED_TOTAL_COST,
+                       b=_supplier_b(shipping_status="UNKNOWN", shipping_amount=None))
+    cheap = _with_fields(_supplier_c(), unit_price="0.01")
+    cheap = cheap.model_copy(update={"quote_id": "CHEAP", "candidates": tuple(
+        item.model_copy(update={"quote_id": "CHEAP"}) for item in cheap.candidates)})
+    request = request.model_copy(update={"quotes": (*request.quotes, cheap),
+        "policy_eligibility": {"QUOTE-C": PolicyEligibility(status="VERIFIED")}})
+    result = analyze_decision_impact(DecisionImpactRequest(task_id="task", task_revision=1,
+                                                         comparison=request))
+    assert result.comparison.blocking_pending_quote_ids == ("QUOTE-B",)
+    assert result.blocking_quote_ids == ("QUOTE-B",)
+
+
+
 @pytest.mark.parametrize(
     ("criterion", "expected"),
     [

@@ -18,6 +18,7 @@ from .contracts import (
     ComparisonRequest,
     ComparisonResult,
     DecisionPreferences,
+    PolicyEligibility,
     ProcurementRequirement,
     QuoteInput,
     SupplierHistoryDatasetContext,
@@ -192,6 +193,7 @@ def reviewed_decision_impact_request(
     supplier_history_snapshots: tuple[SupplierHistorySnapshot, ...] = (),
     history_dataset_context: SupplierHistoryDatasetContext | None = None,
     payment_supplements: dict[str, dict[str, str | None]] | None = None,
+    policy_eligibility: dict[str, PolicyEligibility] | None = None,
 ) -> DecisionImpactRequest:
     """Version-bound preliminary scope; unsafe review findings still reject."""
     for envelope in envelopes:
@@ -233,6 +235,11 @@ def reviewed_decision_impact_request(
                 }
             ),
             history_dataset_context=history_dataset_context,
+            policy_eligibility=(None if policy_eligibility is None else {
+                key: value for key, value in policy_eligibility.items()
+                if key in {envelope.batch.parsed_input.context.quote_id
+                           for envelope in selected_envelopes if envelope.batch is not None}
+            }),
         ),
         policy_binding=policy_binding or {},
         review_bindings={
@@ -263,6 +270,7 @@ def analyze_reviewed_decision_impact(
     supplier_history_snapshots: tuple[SupplierHistorySnapshot, ...] = (),
     history_dataset_context: SupplierHistoryDatasetContext | None = None,
     payment_supplements: dict[str, dict[str, str | None]] | None = None,
+    policy_eligibility: dict[str, PolicyEligibility] | None = None,
 ) -> DecisionImpactResult:
     return analyze_decision_impact(reviewed_decision_impact_request(
         requirement, envelopes, task_id=task_id, task_revision=task_revision,
@@ -270,4 +278,5 @@ def analyze_reviewed_decision_impact(
         decision_preferences=decision_preferences,
         supplier_history_snapshots=supplier_history_snapshots,
         history_dataset_context=history_dataset_context, payment_supplements=payment_supplements,
+        policy_eligibility=policy_eligibility,
     ))

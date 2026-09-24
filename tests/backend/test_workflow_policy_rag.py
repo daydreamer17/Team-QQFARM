@@ -153,6 +153,10 @@ def _run_single_complete_quote(
         dictionary_path=DICTIONARY_PATH,
         evaluated_at=datetime(2026, 9, 17, 1, 0, tzinfo=timezone.utc),
     )
+    # Simulate an existing legacy run; new catalogue/evidence flow has its own suite.
+    from supplier_comparison.backend.models import Task
+    with sessions.begin() as session:
+        session.get(Task, task['task_id']).workflow_contract_version = 'legacy/1.0'
     outcome = runner.run_job(started["job_id"])
     return service, task, outcome, runner
 

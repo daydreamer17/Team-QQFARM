@@ -166,10 +166,21 @@ def analyze_decision_impact(request: DecisionImpactRequest) -> DecisionImpactRes
 
     effective = decision_comparison_request(request)
     comparison = compare_suppliers(effective)
-    confirmed_costs = [
-        result.total_cost for result in comparison.supplier_results
-        if result.status == FeasibilityStatus.FEASIBLE and result.total_cost is not None
-    ]
+    eligible_results = tuple(result for result in comparison.supplier_results
+                            if result.quote_id not in effective.excluded_quote_ids)
+    if effective.policy_eligibility is not None:
+        eligible_results = tuple(result for result in eligible_results
+            if effective.policy_eligibility.get(result.quote_id) is None
+            or effective.policy_eligibility[result.quote_id].status != "EXCLUDED")
+        verified = tuple(result for result in eligible_results
+            if result.status == FeasibilityStatus.FEASIBLE
+            and effective.policy_eligibility.get(result.quote_id) is not None
+            and effective.policy_eligibility[result.quote_id].status == "VERIFIED")
+        cost_cohort = verified or eligible_results
+    else:
+        cost_cohort = eligible_results
+    confirmed_costs = [result.total_cost for result in cost_cohort
+        if result.status == FeasibilityStatus.FEASIBLE and result.total_cost is not None]
     best = min(confirmed_costs) if confirmed_costs else None
     impacts = tuple(
         assess_quote_impact(effective.requirement, result, best)
@@ -225,4 +236,6 @@ def decision_comparison_request(
         excluded_quote_ids=excluded_quote_ids,
         supplier_history_snapshots=request.comparison.supplier_history_snapshots,
         history_dataset_context=request.comparison.history_dataset_context,
+        policy_eligibility=request.comparison.policy_eligibility,
+        policy_strategy=request.comparison.policy_strategy,
     )

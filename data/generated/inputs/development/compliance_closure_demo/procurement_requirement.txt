@@ -1,0 +1,9 @@
+SYNTHETIC PROCUREMENT DEMONSTRATION - NOT A REAL PURCHASE REQUEST
+Buy 1000 pieces of QQ Demo Components QW-MCU9-DEMO, package QFN-32, revision R1, condition NEW.
+Substitutes are not allowed. Base unit and requested quantity unit: piece.
+Budget: SGD 8000.00 including shipping and all applicable other fees. Tax is NOT_APPLICABLE for this fictional exercise.
+Planned order date: 2026-09-24. Delivery deadline: 2026-10-01. Delivery location: SG-DEMO-01.
+Primary ranking preference: LOWEST_CONFIRMED_TOTAL_COST.
+Secondary ranking preference: FASTEST_CONFIRMED_DELIVERY.
+Procurement category: Electronics. Region: SG.
+Use the explicitly selected synthetic compliance-closure demonstration policy version.

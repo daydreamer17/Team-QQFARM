@@ -261,12 +261,13 @@ def test_batch_answer_reaudits_and_preserves_historical_investigation(tmp_path):
     assert history[0]["stored_status"] == "WAITING_INPUT"
     assert len(planner.calls) == 1 and len(runner.processor.calls) == 2
     assert service.get_issue(first["issue"]["issue_id"])["status"] == "SUPERSEDED"
+    current = service.get_task(task['task_id'])
     tools = ScopedInvestigationTools(
-        service, task_id=task["task_id"], graph_run_id=corrected["graph_run_id"], task_revision=4,
+        service, task_id=task["task_id"], graph_run_id=current['current_graph_run_id'], task_revision=current['task_revision'],
         impact_artifact_id=None, evaluated_at=runner.evaluated_at,
     )
     old_case = planner.calls[0][0]
-    current_case = old_case.model_copy(update={"graph_run_id": corrected["graph_run_id"], "task_revision": 4,
+    current_case = old_case.model_copy(update={"graph_run_id": current['current_graph_run_id'], "task_revision": current['task_revision'],
                                              "impact_input_sha256": tools.input_sha256})
     records = tools.execute(current_case, "get_confirmed_quote_records", {
         "field_names": ["shipping_fee_status", "shipping_fee_amount"]

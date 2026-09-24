@@ -1,4 +1,6 @@
 import type {
+  ComplianceWorkspace,
+  ComplianceEvidenceFacts,
   ApiErrorEnvelope,
   ComparisonResultResponse,
   ConfirmDecisionIntentResponse,
@@ -74,6 +76,10 @@ export class ApiClientError extends Error {
     this.details = details
     this.requestId = requestId
   }
+}
+
+export function complianceEvidenceUrl(taskId: string, evidenceId: string, fileId: string) {
+  return `${apiBaseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/evidence/${encodeURIComponent(evidenceId)}/files/${encodeURIComponent(fileId)}/content?download=true`
 }
 
 function isApiErrorEnvelope(value: unknown): value is ApiErrorEnvelope {
@@ -207,6 +213,21 @@ export function decisionConversationEventsUrl(
 }
 
 export const api = {
+  getCompliance: (taskId: string) => request<ComplianceWorkspace>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance`),
+  saveComplianceEvidence: (taskId: string, input: { expectedTaskRevision: number; facts: ComplianceEvidenceFacts; file?: File | null; evidenceId?: string }, idempotencyKey: string) => {
+    const body = new FormData()
+    body.append('expected_task_revision', String(input.expectedTaskRevision))
+    body.append('facts', JSON.stringify(input.facts))
+    if (input.file) body.append('file', input.file)
+    const suffix = input.evidenceId ? `/${encodeURIComponent(input.evidenceId)}/revisions` : ''
+    return request<StartRunResponse & { evidence_id: string }>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/evidence${suffix}`, {
+      method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body,
+    })
+  },
+  confirmCompliance: (taskId: string, input: { expected_task_revision: number; expected_assessment_id: string; acknowledged_missing_item_ids: string[]; acknowledge_no_policy: boolean }, idempotencyKey: string) =>
+    request<StartRunResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/confirm`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(input),
+    }),
   healthLive: () => request<HealthResponse>('/health/live'),
   healthReady: () => request<HealthResponse>('/health/ready'),
   createTask: (body: CreateTaskRequest, idempotencyKey: string) =>

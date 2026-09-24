@@ -145,10 +145,23 @@ def test_repository_policy_families_have_two_complex_immutable_versions(
     )
 
 
-def test_policy_directory_contains_only_the_three_supported_families() -> None:
+def test_policy_directory_contains_supported_families_and_reviewed_demo() -> None:
     policy_root = Path(__file__).resolve().parents[2] / "data" / "policies"
     assert {path.name for path in policy_root.iterdir() if path.is_dir()} == {
         "electronics-components",
         "industrial-automation",
         "data-center-hardware",
+        "compliance-closure-demo",
     }
+
+
+def test_compliance_demo_contains_executable_reviewed_rules():
+    from supplier_comparison.rules.compliance import ExecutableRuleParameters
+    root = Path(__file__).resolve().parents[2] / "data" / "policies"
+    loaded = load_policy_manifest(root / "compliance-closure-demo/v1/manifest.json", allowed_root=root)
+    clauses = [clause for document in loaded.documents for clause in document.clauses]
+    assert len(clauses) == 3
+    for clause in clauses:
+        rule = ExecutableRuleParameters.model_validate(clause.rule_parameters)
+        assert rule.control_code == clause.control_code
+        assert "fictional" in rule.reviewed_by

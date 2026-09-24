@@ -34,6 +34,7 @@ class Task(Base):
     task_name: Mapped[str] = mapped_column(String(128), nullable=False)
     task_name_key: Mapped[str] = mapped_column(String(128), nullable=False)
     scenario_id: Mapped[str | None] = mapped_column(String(128))
+    workflow_contract_version: Mapped[str] = mapped_column(String(32), nullable=False, default="legacy/1.0", server_default="legacy/1.0")
     current_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
     current_graph_run_id: Mapped[str | None] = mapped_column(String(64))
@@ -270,6 +271,33 @@ class DecisionConversationEvent(Base):
     )
 
     __table_args__ = (UniqueConstraint("conversation_id", "sequence"),)
+
+
+class ComplianceEvidenceRecord(Base):
+    __tablename__ = "compliance_evidence_records"
+    evidence_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.task_id", ondelete="CASCADE"), index=True)
+    task_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    quote_id: Mapped[str] = mapped_column(ForeignKey("quotes.quote_id"), index=True)
+    control_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_evidence_id: Mapped[str | None] = mapped_column(ForeignKey("compliance_evidence_records.evidence_id"), unique=True)
+    facts: Mapped[dict] = mapped_column(JSON_VALUE, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    confirmed_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+
+
+class ComplianceEvidenceFile(Base):
+    __tablename__ = "compliance_evidence_files"
+    file_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    evidence_id: Mapped[str] = mapped_column(ForeignKey("compliance_evidence_records.evidence_id", ondelete="CASCADE"), index=True)
+    original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 
 class Quote(Base):

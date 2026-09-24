@@ -175,7 +175,8 @@ def test_publication_lock_releases_after_process_exit_and_publishing_resumes(tmp
             PolicyDraftClauseInput(clause_id="R1", title="RoHS", text=body, control_code="ROHS_COMPLIANCE")])
         with sessions.begin() as session:
             session.get(PolicyFileImport, ident).status = "PUBLISHING"
-        key = int.from_bytes(hashlib.sha256(("policy-publish:" + ident).encode()).digest()[:8], "big", signed=True)
+        # Publication is serialized across all versions of the policy set.
+        key = int.from_bytes(hashlib.sha256(("policy-publish:" + version).encode()).digest()[:8], "big", signed=True)
         code = ("import os,sys; from sqlalchemy import create_engine,text; "
                 "engine=create_engine(os.environ['TEST_PUBLICATION_DATABASE_URL']); "
                 "conn=engine.connect().execution_options(isolation_level='AUTOCOMMIT'); "

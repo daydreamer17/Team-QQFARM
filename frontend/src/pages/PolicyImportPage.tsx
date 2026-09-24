@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
+import { ExecutableRuleEditor } from '../components/ExecutableRuleEditor'
+import { validateExecutableRule } from '../lib/executableRule'
 import type {
   PolicyClauseInput,
   PolicyDraftClause,
@@ -269,6 +271,8 @@ export function PolicyImportPage() {
         setLocalError(`第 ${index + 1} 个条款的 rule_parameters 必须是 JSON 对象。`)
         return null
       }
+      const ruleError = validateExecutableRule(parameters as Record<string, unknown>, clause.control_code)
+      if (ruleError) { setLocalError(`第 ${index + 1} 个条款：${ruleError}`); return null }
       parsed.push({
         clause_id: clause.clause_id.trim(),
         title: clause.title.trim(),
@@ -390,9 +394,9 @@ export function PolicyImportPage() {
         <section className="card policy-published-summary">
           <div><h2>{unresolvedCount === 0 ? '当前文件已自动整理' : `还有 ${unresolvedCount} 条需要确认`}</h2></div>
           <p>
-            已识别 {recognizedCount} / {clauses.length} 条检查规则。
+            已识别 {recognizedCount} / {clauses.length} 条条款用途。
             {unresolvedCount === 0
-              ? ' 无需逐条填写；全部文件就绪后可直接发布。'
+              ? ' 用于自动检查前，请进入高级审核，配置并人工确认执行规则。'
               : ' 请只处理下方未识别条款，其他内容无需重复确认。'}
           </p>
         </section>
@@ -429,7 +433,7 @@ export function PolicyImportPage() {
             </div>
           )}
         </div>
-        <p className="section-helper">普通流程只处理系统无法识别的条款；如需修改自动结果，可进入高级审核。</p>
+        <p className="section-helper">分类结果不等于可执行规则。进入高级审核可逐项配置材料匹配、有效期处理和金额条件；旧参数不会自动执行。</p>
 
         <div className="policy-clause-list">
           {clauses.map((clause, index) => (!showAdvanced && !unresolvedIndexes.has(index) ? null : (
@@ -458,7 +462,8 @@ export function PolicyImportPage() {
                   <div className="policy-clause-grid">
                     <label className="field"><span>条款编号</span><input required readOnly={readonly} value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>
                     <label className="field"><span>检查类型</span><select required disabled={readonly} value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)}><option value="">请选择条款用途</option>{CONTROL_CODE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
-                    <label className="field policy-field-wide"><span>高级规则参数 <small>JSON</small></span><textarea required readOnly={readonly} rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label>
+                    <div className="policy-field-wide"><ExecutableRuleEditor controlCode={clause.control_code} value={clause.rule_parameters} onChange={(value) => changeClause(index, 'rule_parameters', value)} readonly={readonly} /></div>
+                    <details className="policy-field-wide"><summary>查看原始规则参数</summary><label className="field"><span>高级规则参数 <small>JSON</small></span><textarea required readOnly={readonly} rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label></details>
                   </div>
                 </details>}
               </div>

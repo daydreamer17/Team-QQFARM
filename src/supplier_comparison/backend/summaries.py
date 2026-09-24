@@ -15,7 +15,7 @@ from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.extraction.adapters import trusted_urlopen
 
 
-SUMMARY_PROMPT_VERSION = "procurement-summary/1.0.1"
+SUMMARY_PROMPT_VERSION = "procurement-summary/1.1.0"
 
 
 class SummarySectionOutput(BaseModel):
@@ -72,6 +72,8 @@ def generate_summary_narrative(
         "Copy every supplier name, status, monetary value, date, quote ID, and recommendation exactly from the supplied facts. "
         "Do not mention shipping, tax, unit price, MOQ, or payment terms because those details are intentionally not supplied. "
         "Give each quote its own section and cite that quote's QUOTE reference; never swap facts between quotes. "
+        "Use the frozen COMPLIANCE assessment for supported checks only. Human-confirmed evidence is not certificate authentication. "
+        "VERIFIED_FIRST is a product ranking strategy, not a policy clause. Policy matches never imply procurement approval. "
         "Return JSON only with keys title, overview, sections, disclaimer. sections is a non-empty list of "
         "{heading,text,reference_ids}; every reference ID must be supplied. If formal recommendation is not allowed, say so clearly."
     )
@@ -159,7 +161,7 @@ def _summary_model_facts(facts: dict[str, Any]) -> dict[str, Any]:
             for reference_id, value in references.items()
             if isinstance(value, dict)
             and value.get("type")
-            in {"COMPARISON_RESULT", "QUOTE_RESULT", "POLICY_CITATION"}
+            in {"COMPARISON_RESULT", "QUOTE_RESULT", "POLICY_CITATION", "COMPLIANCE_ASSESSMENT"}
         }
 
     return {
@@ -177,6 +179,7 @@ def _summary_model_facts(facts: dict[str, Any]) -> dict[str, Any]:
         "pending_quote_ids": facts.get("pending_quote_ids", []),
         "comparison_reasons": facts.get("comparison_reasons", []),
         "policy_binding": facts.get("policy_binding", {}),
+        "policy_compliance": facts.get("policy_compliance"),
         "references": compact_references,
         "scope": facts.get(
             "scope",

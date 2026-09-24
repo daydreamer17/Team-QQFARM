@@ -23,7 +23,8 @@ from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.models import Base
 from supplier_comparison.backend.service import BackendService, ConflictError
-from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner, WorkflowRunner
+from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
+from tests.backend.test_workflow import WorkflowRunner
 from supplier_comparison.extraction.contracts import CandidateProducer, DocumentContext, SourceCitation, ValidationStatus
 from supplier_comparison.extraction.hybrid_csv import RegisteredHybridCsvParser
 from supplier_comparison.extraction.csv_parser import FROZEN_CSV_COLUMNS, FixedCsvQuoteParser

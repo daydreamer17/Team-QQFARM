@@ -25,6 +25,7 @@ from supplier_comparison.backend.models import (
     DecisionProfile,
     DecisionScenario,
     Job,
+    Task,
     WorkflowArtifact,
 )
 
@@ -42,6 +43,19 @@ pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_TESTS") != "1",
     reason="set RUN_POSTGRES_TESTS=1 to run the PostgreSQL recovery test",
 )
+
+
+def _confirm_no_policy_with_new_connection(service, task_id, url, processor, evaluated_at):
+    view = service.compliance_workspace(task_id)
+    assert view['stage']['status'] == 'AWAITING_CONFIRMATION'
+    assert view['assessment']['policy_enabled'] is False
+    assert service.get_task(task_id)['current_result_id'] is None
+    queued = service.confirm_compliance(task_id, expected_task_revision=view['task_revision'],
+        expected_assessment_id=view['assessment']['assessment_id'], acknowledged_missing_item_ids=[],
+        acknowledge_no_policy=True, idempotency_key='compliance-' + uuid4().hex)
+    with PostgresSaver.from_conn_string(checkpoint_connection_string(url)) as saver:
+        return WorkflowRunner(service, processor=processor, checkpointer=saver,
+            dictionary_path=DICTIONARY_PATH, evaluated_at=evaluated_at).run_job(queued['job_id'])
 
 
 def test_pgvector_extension_is_enabled() -> None:
@@ -286,9 +300,12 @@ def test_postgres_checkpoint_resumes_with_a_new_connection(tmp_path: Path) -> No
                 evaluated_at=datetime(2026, 9, 15, 1, 0, tzinfo=timezone.utc),
             ).run_job(confirmation["job_id"])
         assert second["issue"]["issue_type"] == "SHIPPING_AMOUNT"
-        assert service.list_results(task["task_id"])[0]["result"]["evaluated_at"] == (
-            "2026-09-14T01:00:00Z"
-        )
+        assert service.list_results(task["task_id"]) == []
+        with sessions() as session:
+            preliminary = session.scalar(select(WorkflowArtifact).where(
+                WorkflowArtifact.graph_run_id == started['graph_run_id'],
+                WorkflowArtifact.artifact_type == 'BASE_COMPARISON'))
+            assert preliminary.payload['evaluated_at'] == '2026-09-14T01:00:00Z'
         shipping = service.answer_issue(
             task["task_id"],
             second["issue"]["issue_id"],
@@ -309,6 +326,9 @@ def test_postgres_checkpoint_resumes_with_a_new_connection(tmp_path: Path) -> No
                 dictionary_path=DICTIONARY_PATH,
                 evaluated_at=datetime(2026, 9, 16, 1, 0, tzinfo=timezone.utc),
             ).run_job(shipping["job_id"])
+        assert final['status'] == 'WAITING_INPUT'
+        final = _confirm_no_policy_with_new_connection(service, task['task_id'], database_url,
+            third_processor, datetime(2026, 9, 16, 1, 0, tzinfo=timezone.utc))
         assert final["status"] == "SUCCEEDED"
         result = service.list_results(task["task_id"])[0]["result"]
         supplier_c = next(
@@ -320,7 +340,7 @@ def test_postgres_checkpoint_resumes_with_a_new_connection(tmp_path: Path) -> No
             task_id=task["task_id"],
             quote_id=supplier_c["quote_id"],
             field_name="shipping_fee_amount",
-            expected_task_revision=revision + 2,
+            expected_task_revision=service.get_task(task['task_id'])['task_revision'],
             raw_value="S$0.00",
             normalized_value="0.00",
             unit="SGD",
@@ -336,6 +356,9 @@ def test_postgres_checkpoint_resumes_with_a_new_connection(tmp_path: Path) -> No
                 dictionary_path=DICTIONARY_PATH,
                 evaluated_at=datetime(2026, 9, 17, 1, 0, tzinfo=timezone.utc),
             ).run_job(correction["job_id"])
+        assert corrected['status'] == 'WAITING_INPUT'
+        corrected = _confirm_no_policy_with_new_connection(service, task['task_id'], database_url,
+            correction_processor, datetime(2026, 9, 17, 1, 0, tzinfo=timezone.utc))
         assert corrected["status"] == "SUCCEEDED"
         assert len(first_processor.calls) == 3
         assert second_processor.calls == []
@@ -410,6 +433,7 @@ def test_postgres_serializes_same_revision_quote_uploads(tmp_path: Path) -> None
 
 
 def test_postgres_workflow_persists_policy_gate_and_citations(tmp_path: Path) -> None:
+    """An existing legacy run retains its original retrieval-gate contract."""
     database_url = os.getenv("TEST_DATABASE_URL", settings.database_url)
     engine = create_engine(database_url)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -440,6 +464,8 @@ def test_postgres_workflow_persists_policy_gate_and_citations(tmp_path: Path) ->
         idempotency_key=f"run-{actor_id}",
     )
     connection_string = checkpoint_connection_string(database_url)
+    with sessions.begin() as session:
+        session.get(Task, task['task_id']).workflow_contract_version = 'legacy/1.0'
     try:
         with PostgresSaver.from_conn_string(connection_string) as saver:
             outcome = WorkflowRunner(
@@ -496,6 +522,10 @@ def postgres_agent_task(tmp_path):
         original_filename='synthetic-c.csv', media_type='text/csv', content=b'pg-agent-synthetic',
         idempotency_key='upload', is_synthetic=True)
     started = service.start_run(task['task_id'], expected_task_revision=upload['task_revision'], idempotency_key='start')
+    # Existing legacy checkpoints must still recover their bounded agent retries.
+    # New catalogue/material PostgreSQL acceptance is in test_compliance_workspace.
+    with service.session_factory.begin() as session:
+        session.get(Task, task['task_id']).workflow_contract_version = 'legacy/1.0'
     try:
         yield url, engine, service, task, started
     finally:

@@ -1128,6 +1128,20 @@ def _validate_compliance_claims(text: str, cited_payloads: list[Any]) -> None:
         for payload in cited_payloads
         if isinstance(payload, dict) and isinstance(payload.get("assessments"), list)
     ]
+    names = sorted({str(row.get("supplier_name", "")).strip()
+                    for payload in payloads for row in payload["assessments"]
+                    if isinstance(row, dict) and row.get("supplier_name")}, key=len, reverse=True)
+    if names:
+        boundary = (r"[，,；;]\s*(?:(?:而|但|同时|and|while|whereas)\s*)?"
+                    r"(?=(?:" + "|".join(re.escape(name) for name in names) + r"))")
+        clauses = re.split(boundary, text, flags=re.IGNORECASE)
+        if len(clauses) > 1:
+            for clause in clauses:
+                _validate_compliance_claims(clause, cited_payloads)
+            return
+    control_claim = "ROHS_COMPLIANCE" if "rohs" in text.casefold() else (
+        "APPROVED_SUPPLIER" if re.search(r"准入|approved.supplier", text, re.IGNORECASE) else None)
+    named_supplier = any(name.casefold() in text.casefold() for name in names)
     for payload in payloads:
         assessments = [row for row in payload["assessments"] if isinstance(row, dict)]
         if re.search(r"所有供应商.*(?:REVIEW_REQUIRED|需复核|待复核)", text, re.IGNORECASE):
@@ -1139,39 +1153,36 @@ def _validate_compliance_claims(text: str, cited_payloads: list[Any]) -> None:
             raise ValueError("unsupported no-compliant-supplier claim")
         for assessment in assessments:
             name = str(assessment.get("supplier_name", "")).strip()
-            if not name or name.casefold() not in text.casefold():
+            if not name or (name.casefold() not in text.casefold() and (named_supplier or not control_claim)):
                 continue
             status = str(assessment.get("status", ""))
             if re.search(r"(?:不合规|NON_COMPLIANT)", text, re.IGNORECASE) and status != "NON_COMPLIANT":
                 raise ValueError("unsupported supplier compliance status")
-            if re.search(r"(?:需复核|待复核|REVIEW_REQUIRED)", text, re.IGNORECASE) and status != "REVIEW_REQUIRED":
+            if not control_claim and re.search(r"(?:需复核|待复核|REVIEW_REQUIRED)", text, re.IGNORECASE) and status != "REVIEW_REQUIRED":
                 raise ValueError("unsupported supplier compliance status")
-            if re.search(r"(?:未评估|NOT_EVALUATED)", text, re.IGNORECASE) and status != "NOT_EVALUATED":
+            if not control_claim and re.search(r"(?:未评估|NOT_EVALUATED)", text, re.IGNORECASE) and status != "NOT_EVALUATED":
                 raise ValueError("unsupported supplier compliance status")
             if re.search(r"(?<!不)(?:已)?合规|\bCOMPLIANT\b", text, re.IGNORECASE) and not re.search(
                 r"不合规|NON_COMPLIANT", text, re.IGNORECASE
             ) and status != "COMPLIANT":
                 raise ValueError("unsupported supplier compliance status")
 
-            if "rohs" in text.casefold():
-                rohs = next(
-                    (
-                        check
-                        for check in assessment.get("checks", [])
-                        if isinstance(check, dict)
-                        and check.get("control_code") == "ROHS_COMPLIANCE"
-                    ),
-                    None,
-                )
-                if rohs is None:
-                    raise ValueError("RoHS claim has no frozen control assessment")
-                rohs_status = str(rohs.get("status", ""))
-                if re.search(r"(?:通过|PASS)", text, re.IGNORECASE) and rohs_status != "PASS":
-                    raise ValueError("unsupported RoHS pass claim")
-                if re.search(r"(?:失败|不通过|FAIL)", text, re.IGNORECASE) and rohs_status != "FAIL":
-                    raise ValueError("unsupported RoHS failure claim")
-                if re.search(r"(?:需复核|待复核|REVIEW_REQUIRED)", text, re.IGNORECASE) and rohs_status != "REVIEW_REQUIRED":
-                    raise ValueError("unsupported RoHS review claim")
+            if control_claim:
+                checks = [check for check in assessment.get("checks", [])
+                          if isinstance(check, dict) and check.get("control_code") == control_claim]
+                if not checks:
+                    raise ValueError("Control claim has no frozen control assessment")
+                statuses = {check.get("status") for check in checks}
+                # A control can contain several applicable clauses. One passing
+                # clause never establishes that the entire control passed.
+                if re.search(r"(?<!不)(?<!未)通过|(?<!NOT_)\bPASS\b", text, re.IGNORECASE) and statuses != {"PASS"}:
+                    raise ValueError("unsupported control pass claim")
+                if re.search(r"失败|不通过|\bFAIL\b", text, re.IGNORECASE) and "FAIL" not in statuses:
+                    raise ValueError("unsupported control failure claim")
+                if re.search(r"需复核|待复核|REVIEW_REQUIRED", text, re.IGNORECASE) and "REVIEW_REQUIRED" not in statuses:
+                    raise ValueError("unsupported control review claim")
+                if re.search(r"未评估|NOT_EVALUATED", text, re.IGNORECASE) and "NOT_EVALUATED" not in statuses:
+                    raise ValueError("unsupported control unevaluated claim")
 def _parse_count(value: str) -> int:
     if value.isdigit():
         return int(value)

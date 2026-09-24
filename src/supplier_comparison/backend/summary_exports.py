@@ -108,6 +108,7 @@ def _report_model(
         ],
         "disclaimer": str(narrative.get("disclaimer") or ""),
         "policy_binding": facts.get("policy_binding"),
+        "policy_compliance": facts.get("policy_compliance"),
         "scope": facts.get("scope"),
         "comparison_reasons": [
             dict(reason) for reason in facts.get("comparison_reasons") or []
@@ -197,6 +198,8 @@ def _render_markdown(report: dict[str, Any]) -> str:
         f"- 制度绑定：{_policy_text(report.get('policy_binding'))}。",
         "- 批准状态：尚未批准；本报告不具备下单、付款或采购批准权限。",
         "",
+        *_compliance_lines(report.get('policy_compliance')),
+        "",
         "## 6. 建议行动与留档",
         "",
         "1. 完成供应商沟通，并把回复作为新版本输入。",
@@ -280,6 +283,8 @@ def _render_docx(report: dict[str, Any]) -> bytes:
         ["制度绑定", _policy_text(report.get("policy_binding")), "制度引用不替代人工适用性判断。"],
         ["批准状态", "尚未批准", "本报告不具备下单、付款或采购批准权限。"],
     ]))
+    for line in _compliance_lines(report.get('policy_compliance')):
+        body.append(_w_paragraph(line))
     body.append(_w_heading("6. 建议行动与留档"))
     for text in [
         "1. 完成供应商沟通，并把回复作为新版本输入。",
@@ -395,6 +400,27 @@ def _policy_text(value: Any) -> str:
     if not isinstance(value, dict):
         return "未绑定制度"
     return f"{_text(value.get('policy_set_version'))} / {_text(value.get('policy_index_version'))}"
+
+
+def _compliance_lines(assessment: Any) -> list[str]:
+    if not isinstance(assessment, dict):
+        return ['旧流程结果：未执行新的材料核验，历史事实保持原样。']
+    if not assessment.get('policy_enabled'):
+        return ['制度检查：本次未启用；仅作采购比较，不代表合规或采购批准。']
+    lines = [f"核验单：{assessment.get('assessment_id')}；任务版本：{assessment.get('task_revision')}。",
+             '推荐策略：已核验候选优先；核验基于人工确认材料，不鉴定材料真伪。']
+    status_labels = {'COMPLIANT': '本次适用检查已核验', 'NON_COMPLIANT': '存在不满足的推荐前条件',
+                     'REVIEW_REQUIRED': '资料不足，待核验', 'NOT_EVALUATED': '未评估'}
+    for row in assessment.get('assessments', []):
+        lines.append(f"{row.get('supplier_name') or row.get('quote_id')}：{status_labels.get(row.get('status'), row.get('status'))}。")
+        for check in row.get('checks', []):
+            lines.append(f"条款 {check.get('clause_id')}：{check.get('status')}；原因 {', '.join(check.get('reason_codes', []))}；"
+                         f"材料 {', '.join(check.get('evidence_ids', [])) or '尚未提供'}；引用 {', '.join(check.get('citation_ids', [])) or '无'}。")
+    for amount in assessment.get('amount_requirements', []):
+        lines.append(f"金额要求 {amount.get('quote_id')}：{amount.get('currency')} {amount.get('amount')}；"
+                     f"门槛 {amount.get('threshold')}；后续动作 {amount.get('action') or '无已确认触发动作'}。未触发不等于获批。")
+    lines.append(f"待补充项：{len(assessment.get('missing_item_ids', []))} 项。")
+    return lines
 
 
 def _money(currency: str, value: Any) -> str:

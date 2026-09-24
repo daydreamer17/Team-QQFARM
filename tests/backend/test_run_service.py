@@ -278,6 +278,12 @@ def test_new_quote_supersedes_old_run_issue_job_and_current_result(
         question="Confirm missing shipping.",
         answer_schema={"answer_type": "CONFIRM_MISSING"},
     )
+    # Historical result exists before the new stage is deployed.
+    with service.session_factory.begin() as session:
+        stored = session.get(Task, task['task_id'])
+        stored.current_snapshot_id = 'snapshot-old'
+        stored.current_result_id = 'result-old'
+        stored.workflow_contract_version = 'legacy/1.0'
     service.publish_result(
         task_id=task["task_id"],
         graph_run_id=started["graph_run_id"],

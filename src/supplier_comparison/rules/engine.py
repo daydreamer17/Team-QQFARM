@@ -19,6 +19,7 @@ from .contracts import (
     HistoryAvailabilityStatus,
     IdentityMatchStatus,
     PaymentParseStatus,
+    PolicyEligibility,
     ProcurementRequirement,
     QuoteInput,
     RankingCriterion,
@@ -27,6 +28,7 @@ from .contracts import (
     RuleIssue,
     SupplierEvaluation,
     SupplierHistorySnapshot,
+    SupplierHistoryDatasetContext,
 )
 from .cost import calculate_cost
 from .decision_impact import ImpactStatus, assess_quote_impact
@@ -163,6 +165,38 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
         )
         for quote in request.quotes
     )
+    return _compare_evaluations(request, results)
+
+
+def apply_policy_eligibility(
+    result: ComparisonResult,
+    requirement: ProcurementRequirement,
+    policy_eligibility: dict[str, PolicyEligibility],
+    *,
+    cost_tolerance_amount: Decimal | None = None,
+    excluded_quote_ids: tuple[str, ...] | None = None,
+    history_dataset_context: SupplierHistoryDatasetContext | None = None,
+) -> ComparisonResult:
+    """Re-rank existing calculations with the same hard-fact and unknown-cost gates."""
+    excluded = excluded_quote_ids
+    if excluded is None:
+        excluded = result.ranking_trace.excluded_quote_ids if result.ranking_trace else ()
+    request = ComparisonRequest(
+        requirement=requirement, evaluated_at=result.evaluated_at,
+        quotes=tuple(QuoteInput(quote_id=item.quote_id, quote_version=item.quote_version,
+                               candidates=()) for item in result.supplier_results),
+        cost_tolerance_amount=cost_tolerance_amount,
+        excluded_quote_ids=tuple(key for key in excluded
+                                 if key in {item.quote_id for item in result.supplier_results}),
+        history_dataset_context=history_dataset_context,
+        policy_eligibility=policy_eligibility,
+    )
+    return _compare_evaluations(request, result.supplier_results)
+
+
+def _compare_evaluations(
+    request: ComparisonRequest, results: tuple[SupplierEvaluation, ...],
+) -> ComparisonResult:
     excluded = tuple(request.excluded_quote_ids)
     excluded_set = set(excluded)
     in_scope = tuple(result for result in results if result.quote_id not in excluded_set)
@@ -194,6 +228,15 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
             excluded=excluded,
             comparison_reasons=reasons,
         )
+
+    if request.policy_eligibility is not None:
+        in_scope = tuple(item for item in in_scope
+                         if _policy_status(request, item.quote_id) != "EXCLUDED")
+        if not in_scope:
+            return _comparison_result(request, results,
+                ComparisonDisposition.NO_POLICY_ELIGIBLE_QUOTES,
+                criteria=criteria, excluded=excluded,
+                blockers=("ALL_CANDIDATES_POLICY_EXCLUDED",))
 
     pending_results = tuple(
         result for result in in_scope if result.status == FeasibilityStatus.PENDING
@@ -235,6 +278,11 @@ def compare_suppliers(request: ComparisonRequest) -> ComparisonResult:
             excluded=excluded,
         )
 
+    if request.policy_eligibility is not None:
+        verified = tuple(item for item in feasible
+                         if _policy_status(request, item.quote_id) == "VERIFIED")
+        if verified:
+            feasible = verified
     best_costs = [item.total_cost for item in feasible if item.total_cost is not None]
     best_cost = min(best_costs) if best_costs else None
     if primary == COST_RANKING and request.cost_tolerance_amount is None:
@@ -657,6 +705,15 @@ def _comparison_result(
     secondary_applied: bool = False,
     tie_group: tuple[str, ...] = (),
 ) -> ComparisonResult:
+    if (request.policy_eligibility is not None
+            and disposition == ComparisonDisposition.RECOMMENDATION_AVAILABLE
+            and any(_policy_status(request, key) != "VERIFIED" for key in recommended)):
+        disposition = ComparisonDisposition.POLICY_REVIEW_REQUIRED
+        recommended = ()
+        blockers = (*blockers, "NO_VERIFIED_POLICY_CANDIDATE")
+        comparison_reasons = (*comparison_reasons, RuleIssue(
+            code="NO_VERIFIED_POLICY_CANDIDATE", fields=("policy_eligibility",),
+            message="Policy evidence must be verified before a final recommendation."))
     trace = RankingTrace(
         ordered_criteria=criteria,
         criterion_directions={item.value: DIRECTIONS[item] for item in criteria},
@@ -683,6 +740,8 @@ def _comparison_result(
         comparison_disposition=disposition,
         original_scope_count=len(results),
         excluded_quote_ids=excluded,
+        policy_eligibility=request.policy_eligibility,
+        policy_strategy=request.policy_strategy if request.policy_eligibility is not None else None,
     )
     public_results = () if disposition == ComparisonDisposition.EMPTY_SCOPE else results
     return ComparisonResult(
@@ -699,6 +758,11 @@ def _comparison_result(
         ),
         ranking_trace=trace,
     )
+
+
+def _policy_status(request: ComparisonRequest, quote_id: str) -> str:
+    entry = (request.policy_eligibility or {}).get(quote_id)
+    return entry.status if entry else "UNVERIFIED"
 
 
 def _criterion(

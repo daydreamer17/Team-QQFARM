@@ -235,6 +235,7 @@ export interface BatchReviewCard {
 }
 
 export interface TaskDetail extends TaskSummary {
+  workflow_contract_version?: string
   scenario_id: string | null
   current_graph_run_id: string | null
   current_snapshot_id: string | null
@@ -245,6 +246,7 @@ export interface TaskDetail extends TaskSummary {
     quote_review_completed: boolean
     decision_completed: boolean
     summary_completed: boolean
+    compliance?: ComplianceStage
   }
   policy_binding: PolicyBinding | null
   decision_profile: DecisionProfile
@@ -711,6 +713,7 @@ export interface SupplierInformationResponse {
 }
 
 export interface ComparisonResultResponse {
+  legacy_compliance?: boolean
   result_id: string
   snapshot_id: string | null
   input_snapshot: {
@@ -720,6 +723,8 @@ export interface ComparisonResultResponse {
     policy_index_version: string | null
     policy_category: string | null
     policy_region: string | null
+    workflow_contract_version?: string
+    compliance_assessment_id?: string | null
   } | null
   task_revision: number
   graph_run_id: string
@@ -731,17 +736,27 @@ export interface ComparisonResultResponse {
 }
 
 export type PolicyComplianceStatus = 'COMPLIANT' | 'NON_COMPLIANT' | 'REVIEW_REQUIRED' | 'NOT_EVALUATED'
-export type PolicyComplianceCheckStatus = 'PASS' | 'FAIL' | 'REVIEW_REQUIRED' | 'NOT_EVALUATED'
+export type PolicyComplianceCheckStatus = 'PASS' | 'FAIL' | 'REVIEW_REQUIRED' | 'NOT_EVALUATED' | 'NOT_APPLICABLE'
 
 export interface PolicyComplianceCheck {
+  clause_id?: string
+  item_id?: string
+  reason_codes?: string[]
+  evidence_ids?: string[]
+  source_refs?: string[]
+  execution_stage?: string
+  triggered?: boolean | null
+  action?: string | null
   control_code: string
   status: PolicyComplianceCheckStatus
-  reason_code: string
-  message: string
+  reason_code?: string
+  message?: string
   citation_ids: string[]
 }
 
 export interface PolicyComplianceSupplierAssessment {
+  supplier_id?: string | null
+  eligibility?: 'VERIFIED' | 'UNVERIFIED' | 'EXCLUDED'
   quote_id: string
   quote_version: number
   supplier_name: string | null
@@ -750,12 +765,94 @@ export interface PolicyComplianceSupplierAssessment {
 }
 
 export interface PolicyComplianceResult {
+  evidence?: ComplianceEvidenceRecord[]
+  assessment_id?: string
+  task_revision?: number
+  policy_enabled?: boolean
+  legacy_compliance?: boolean
+  missing_item_ids?: string[]
+  policy_errors?: Array<string | Record<string, unknown>>
+  publication_blocked?: boolean
+  strategy?: 'VERIFIED_FIRST'
+  amount_requirements?: ComplianceAmountRequirement[]
+  citations?: PolicyCitation[]
   schema_version: string
   disposition: 'COMPLIANT_SUPPLIERS_AVAILABLE' | 'NO_CONFIRMED_COMPLIANT_SUPPLIER' | 'NO_SUPPLIERS'
   recommendation_scope: 'COMPLIANCE_VERIFIED' | 'PROCUREMENT_COMPARISON_ONLY'
   requires_human_review: boolean
   counts: Record<PolicyComplianceStatus, number>
   assessments: PolicyComplianceSupplierAssessment[]
+}
+
+export interface ComplianceStage {
+  status: 'NOT_STARTED' | 'PROCESSING' | 'BLOCKED' | 'AWAITING_CONFIRMATION' | 'PROCESSED' | 'DISABLED'
+  assessment_id?: string | null
+  pending_count?: number
+  confirmed: boolean
+  can_confirm?: boolean
+  can_compare: boolean
+  workflow_contract_version?: string
+}
+export interface ComplianceClause {
+  clause_id: string
+  control_code: string
+  title?: string
+  section?: string
+  text: string
+  document_id: string
+  document_version: string
+  policy_id: string
+  content_sha256: string
+  rule_parameters: Record<string, unknown>
+}
+export interface ComplianceEvidenceFacts {
+  quote_id: string
+  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE'
+  supplier_id: string
+  manufacturer?: string | null
+  manufacturer_part_number?: string | null
+  material_number: string
+  coverage_confirmed: boolean
+  outcome: 'PASS' | 'FAIL'
+  effective_from: string | null
+  expires_on: string | null
+  permanent: boolean
+  source_refs: string[]
+  note: string
+}
+export interface ComplianceEvidenceRecord {
+  evidence_id: string
+  task_id: string
+  task_revision: number
+  quote_id: string
+  control_code: 'APPROVED_SUPPLIER' | 'ROHS_COMPLIANCE'
+  version: number
+  previous_evidence_id: string | null
+  facts: ComplianceEvidenceFacts
+  confirmed_by: string
+  confirmed_at: string
+  superseded?: boolean
+  files: Array<{ file_id: string; original_filename: string; media_type: string; size_bytes: number; sha256: string }>
+}
+export interface ComplianceAmountRequirement {
+  quote_id?: string
+  supplier_name?: string
+  clause_id?: string
+  execution_stage?: string
+  status?: PolicyComplianceCheckStatus
+  triggered?: boolean | null
+  action?: string | null
+  reason_codes?: string[]
+}
+export interface ComplianceWorkspace {
+  task_id: string
+  task_revision: number
+  stage: ComplianceStage
+  policy_binding: PolicyBinding | null
+  plan: { clauses: ComplianceClause[]; policy_errors: Array<string | Record<string, unknown>> } | null
+  assessment: PolicyComplianceResult | null
+  evidence: ComplianceEvidenceRecord[]
+  legacy_result?: boolean
 }
 
 export interface HypotheticalComparison {

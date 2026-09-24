@@ -1063,7 +1063,7 @@ body {
 .task-timeline {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(4, minmax(110px, 1fr));
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
   min-width: 600px;
   margin: 0;
   padding: 0;
@@ -1083,9 +1083,10 @@ body {
 }
 
 .task-timeline-stage-1 { --timeline-progress: 0%; }
-.task-timeline-stage-2 { --timeline-progress: 33.333%; }
-.task-timeline-stage-3 { --timeline-progress: 66.666%; }
-.task-timeline-stage-4 { --timeline-progress: 100%; }
+.task-timeline-stage-0 { --timeline-progress: 0%; }
+.task-timeline-stage-2 { --timeline-progress: 25%; }
+.task-timeline-stage-3 { --timeline-progress: 50%; }
+.task-timeline-stage-4 { --timeline-progress: 75%; }
 .task-timeline-stage-5 { --timeline-progress: 100%; }
 
 .task-timeline li {
@@ -7941,3 +7942,35 @@ body {
     padding-top: 12px;
   }
 }
+
+/* Independent compliance workspace and frozen assessment surfaces. */
+.compliance-page { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.compliance-page > * { min-width: 0; }
+.compliance-evidence-editor { width: min(760px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 24px; overflow-y: auto; box-sizing: border-box; }
+.compliance-evidence-editor::backdrop { background: rgb(24 37 60 / 55%); }
+.task-timeline-processed { color: #725727; }
+.task-timeline-processed span { background: #fff5dd; border-color: #c5a463; color: #725727; }
+.task-timeline li small { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; font-weight: 400; }
+.compliance-form-grid textarea { width: 100%; padding: 10px 12px; border: 1px solid #d7dfe9; border-radius: 7px; font: inherit; resize: vertical; }
+.compliance-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; border: 0; padding: 0; margin: 20px 0 0; min-width: 0; }
+.compliance-wide { grid-column: 1 / -1; }
+.compliance-checkbox { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; line-height: 1.6; font-size: 14px; }
+.compliance-checkbox input { flex: 0 0 auto; margin: 5px 0 0; width: 16px; height: 16px; accent-color: var(--blue, #315dc8); }
+.compliance-confirmation .button { margin-top: 18px; }
+.compliance-table-scroll { max-width: 100%; overflow-x: auto; }
+.compliance-table { min-width: 660px; }
+.compliance-table td { vertical-align: top; }
+.compliance-table td:first-child { min-width: 140px; }
+.compliance-table td:last-child { width: 46%; }
+.compliance-table small, .compliance-frozen-details small { display: block; color: #65738b; margin-top: 6px; }
+.compliance-add { margin: 0 8px 8px 0; }
+.compliance-check { padding: 14px 0; border-top: 1px solid #e3e8f0; overflow-wrap: anywhere; }
+.compliance-check p, .compliance-check li { font-size: 13px; line-height: 1.7; }
+.compliance-check blockquote { margin: 12px 0; padding: 12px; border-left: 3px solid #315dc8; background: #f4f7fc; white-space: pre-wrap; }
+.compliance-file { display: block; margin: 8px 0; }
+.compliance-frozen-details { border: 1px solid #dfe6ef; border-radius: 10px; padding: 16px; background: #fff; }
+.compliance-frozen-details summary { cursor: pointer; font-weight: 600; }
+.compliance-rule-editor { border: 1px solid #dfe6ef; border-radius: 8px; padding: 16px; min-width: 0; }
+.compliance-rule-editor legend { padding: 0 8px; font-weight: 600; }
+@media (max-width: 700px) { .compliance-form-grid { grid-template-columns: minmax(0, 1fr); } .compliance-page .section-heading { flex-wrap: wrap; gap: 12px; } }
+@media print { .compliance-frozen-details { break-inside: avoid; } .compliance-frozen-details > * { display: block !important; } }

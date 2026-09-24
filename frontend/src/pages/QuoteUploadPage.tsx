@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey, documentContentUrl, quoteDraftContentUrl } from '../api/client'
 import type { QuoteSupplierIdentification } from '../api/types'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
@@ -79,6 +79,7 @@ function uploadFailureNotice(error: unknown, localMessage?: string) {
 
 export function QuoteUploadPage() {
   const { taskId = '' } = useParams()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInput = useRef<HTMLInputElement>(null)
   const supplierIdManuallyEdited = useRef(false)
@@ -91,6 +92,16 @@ export function QuoteUploadPage() {
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
+  const nextStep = useMutation({ mutationFn: async () => {
+    if (!task.data) throw new Error('任务尚未加载。')
+    if (task.data.progress.compliance?.status === 'NOT_STARTED'
+      && !['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)) {
+      await api.startRun(taskId, task.data.task_revision, createIdempotencyKey())
+    }
+  }, onSuccess: async () => {
+    await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
+    navigate(`/tasks/${taskId}/compliance`)
+  } })
   const quoteHistory = useQuery({ queryKey: ['tasks', taskId, 'quotes'], queryFn: () => api.listQuotes(taskId), enabled: Boolean(taskId) })
   const drafts = useQuery({ queryKey: ['tasks', taskId, 'quote-drafts'], queryFn: () => api.listQuoteDrafts(taskId), enabled: Boolean(taskId), refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PROCESSING') ? 1_500 : false })
   const activeDraftSummary = drafts.data?.items.find((item) => ACTIVE_STATUSES.has(item.status))
@@ -242,6 +253,7 @@ export function QuoteUploadPage() {
       <section className="card run-notice"><strong>该任务已软废弃</strong><p>不能上传、修正或提交报价；历史文件仍可预览和下载。</p></section>
       <section>{quoteHistory.isPending ? <div className="card empty-upload-list">正在加载报价历史…</div> : submittedQuoteTable(true)}</section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
+      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>报价审核已完成</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? '正在进入制度检查…' : '下一步：制度检查'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
     </div>
   }
 

@@ -198,6 +198,19 @@ describe('DecisionScenarioWorkspace', () => {
     expect(screen.getByText('本次条件的确定性模拟（未应用）')).toBeInTheDocument()
   })
 
+  test('stale assistant messages keep their original content and cannot apply old proposals', async () => {
+    const response = await api.listDecisionConversations('task-1')
+    response.items[0].messages[0].status = 'STALE'
+    vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+    expect(await screen.findByText('可以生成一个提前交付的情景。')).toBeInTheDocument()
+    expect(screen.getByText(/依据已更新，此回复保留为历史记录/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并生成 Scenario' })).toBeDisabled()
+  })
+
   test('restores the conversation selected by a historical citation link', async () => {
     const response = await api.listDecisionConversations('task-1')
     const original = response.items[0]

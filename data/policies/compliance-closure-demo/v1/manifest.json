@@ -1,0 +1,117 @@
+{
+  "schema_version": "1.0.0",
+  "policy_set_id": "compliance-closure-demo",
+  "policy_set_version": "compliance-closure-demo-2026.09.1",
+  "documents": [
+    {
+      "policy_id": "POL-CCD-ADMISSION",
+      "document_id": "DOC-CCD-ADMISSION",
+      "document_version": "1.0.0",
+      "title": "Synthetic demonstration: Supplier admission",
+      "path": "admission.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "CCD-SUP-001": {
+          "control_code": "APPROVED_SUPPLIER",
+          "rule_parameters": {
+            "version": "compliance-rule/1.0",
+            "reviewed_by": "synthetic-demo-reviewer (fictional)",
+            "reviewed_at": "2026-09-01T00:00:00Z",
+            "date_basis": "EVALUATED_AT",
+            "missing_outcome": "REVIEW_REQUIRED",
+            "expired_outcome": "REVIEW_REQUIRED",
+            "mismatch_outcome": "REVIEW_REQUIRED",
+            "execution_stage": "BEFORE_RECOMMENDATION",
+            "allow_unspecified_validity": false,
+            "control_code": "APPROVED_SUPPLIER",
+            "matching_fields": [
+              "supplier_id"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "policy_id": "POL-CCD-ROHS",
+      "document_id": "DOC-CCD-ROHS",
+      "document_version": "1.0.0",
+      "title": "Synthetic demonstration: RoHS material coverage",
+      "path": "rohs.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "CCD-ROHS-001": {
+          "control_code": "ROHS_COMPLIANCE",
+          "rule_parameters": {
+            "version": "compliance-rule/1.0",
+            "reviewed_by": "synthetic-demo-reviewer (fictional)",
+            "reviewed_at": "2026-09-01T00:00:00Z",
+            "date_basis": "EVALUATED_AT",
+            "missing_outcome": "REVIEW_REQUIRED",
+            "expired_outcome": "REVIEW_REQUIRED",
+            "mismatch_outcome": "REVIEW_REQUIRED",
+            "execution_stage": "BEFORE_RECOMMENDATION",
+            "allow_unspecified_validity": false,
+            "control_code": "ROHS_COMPLIANCE",
+            "matching_fields": [
+              "supplier_id",
+              "manufacturer",
+              "manufacturer_part_number"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "policy_id": "POL-CCD-AMOUNT",
+      "document_id": "DOC-CCD-AMOUNT",
+      "document_version": "1.0.0",
+      "title": "Synthetic demonstration: Post-selection amount action",
+      "path": "amount.md",
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "categories": [
+        "Electronics"
+      ],
+      "regions": [
+        "SG"
+      ],
+      "clauses": {
+        "CCD-AMT-001": {
+          "control_code": "AMOUNT_APPROVAL",
+          "rule_parameters": {
+            "version": "compliance-rule/1.0",
+            "reviewed_by": "synthetic-demo-reviewer (fictional)",
+            "reviewed_at": "2026-09-01T00:00:00Z",
+            "date_basis": "EVALUATED_AT",
+            "missing_outcome": "REVIEW_REQUIRED",
+            "expired_outcome": "REVIEW_REQUIRED",
+            "mismatch_outcome": "REVIEW_REQUIRED",
+            "execution_stage": "AFTER_SELECTION",
+            "allow_unspecified_validity": false,
+            "control_code": "AMOUNT_APPROVAL",
+            "matching_fields": [],
+            "currency": "SGD",
+            "monetary_basis": "TOTAL_COST",
+            "threshold": "10000.00",
+            "operator": "GTE",
+            "action": "Obtain separate amount approval after selection and before ordering; this application does not grant approval."
+          }
+        }
+      }
+    }
+  ]
+}

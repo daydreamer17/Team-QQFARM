@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { ResultReason, SupplierComparisonResult } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import { supplierSelectionExplanation } from '../lib/resultComparison'
 import { cleanSummaryText, quoteStatusLabel, reasonText, summaryStatusLabel } from '../lib/presentation'
@@ -506,6 +507,7 @@ export function SummaryPage() {
             </ReportSection>
 
             <ReportSection number="05" title="风险、制度与决策门槛" id="summary-risk">
+              <ComplianceAssessmentDetails assessment={result.data?.policy_compliance} taskId={taskId} resultId={result.data?.result_id} historical={result.data?.is_current === false} legacy={result.data?.legacy_compliance} />
               <p>
                 当前共有 {feasibleCount} 份报价可行、{pendingCount} 份等待确认、{infeasibleCount} 份不符合要求。
                 下列门槛用于判断能否进入正式批准，不会把未知值自动当作零或当作合格。

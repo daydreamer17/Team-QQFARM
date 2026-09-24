@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { TaskDetail } from '../api/types'
 import { taskStatusLabel } from '../lib/presentation'
+import { complianceStageLabel } from '../lib/compliance'
 
 type WorkspaceSection = 'overview' | 'quotes' | 'review' | 'suppliers' | 'investigations' | 'decision' | 'gaps' | 'compliance' | 'summary' | 'audit'
 
@@ -35,16 +36,10 @@ export function TaskWorkspaceHeader({
   revisionContext = 'current',
   active,
 }: TaskWorkspaceHeaderProps) {
-  const completedStage = progress.summary_completed
-    ? 4
-    : progress.decision_completed
-      ? 3
-      : progress.quote_review_completed
-        ? 2
-        : progress.requirement_completed
-          ? 1
-          : 0
-  const stages = ['采购需求', '报价与审核', '决策比较', '采购总结']
+  const completed = [progress.requirement_completed, progress.quote_review_completed,
+    Boolean(progress.compliance?.confirmed), progress.decision_completed, progress.summary_completed]
+  const completedStage = completed.findIndex((value) => !value) === -1 ? 5 : completed.findIndex((value) => !value)
+  const stages = ['采购需求', '报价与审核', '制度检查', '决策比较', '采购总结']
 
   return (
     <section className="workspace-header">
@@ -63,11 +58,15 @@ export function TaskWorkspaceHeader({
         <ol className={`task-timeline task-timeline-stage-${completedStage}`} aria-label="任务完成进度">
           {stages.map((label, index) => {
             const stage = index + 1
-            const state = stage <= completedStage ? 'complete' : 'upcoming'
+            const incompletePolicy = index === 2 && progress.compliance?.confirmed
+              && (progress.compliance.status === 'DISABLED' || Boolean(progress.compliance.pending_count))
+            const state = incompletePolicy ? 'processed' : completed[index] ? 'complete' : 'upcoming'
+            const description = index === 2 ? complianceStageLabel(progress.compliance) : state === 'complete' ? '已完成' : '未完成'
             return (
-              <li className={`task-timeline-${state}`} key={label} aria-label={`${label}：${state === 'complete' ? '已完成' : '未完成'}`}>
+              <li className={`task-timeline-${state}`} key={label} aria-label={`${label}：${description}`}>
                 <span>{stage}</span>
                 <strong>{label}</strong>
+                {index === 2 && progress.compliance && <small>{description}{progress.compliance.pending_count ? ` · ${progress.compliance.pending_count} 项待补充` : ''}</small>}
               </li>
             )
           })}
@@ -78,9 +77,9 @@ export function TaskWorkspaceHeader({
         <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>报价与证据</Link>
         <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>待处理事项</Link>
         <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>供应商信息</Link>
+        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>制度检查</Link>
         <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策结果</Link>
         {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>差距详情</Link>}
-        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>制度检查</Link>
         <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>采购总结</Link>
         <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>版本记录</Link>
       </nav>

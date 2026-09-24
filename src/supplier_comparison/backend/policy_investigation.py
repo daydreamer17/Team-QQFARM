@@ -61,12 +61,20 @@ class ScopedPolicyInvestigationTools:
         with service.session_factory() as session:
             comparison = session.get(WorkflowArtifact, comparison_result_id)
             if (comparison is None or comparison.task_id != task_id or comparison.graph_run_id != graph_run_id
-                    or comparison.task_revision != task_revision or comparison.artifact_type != 'COMPARISON_RESULT'):
+                    or comparison.task_revision != task_revision or comparison.artifact_type not in ('COMPARISON_RESULT', 'BASE_COMPARISON')):
                 raise ConflictError('policy_investigation_scope_invalid', 'Comparison is outside the current task.')
+            scope_codes = {}
+            if comparison.artifact_type == 'BASE_COMPARISON':
+                plan = session.scalar(select(WorkflowArtifact).where(
+                    WorkflowArtifact.graph_run_id == graph_run_id,
+                    WorkflowArtifact.task_revision == task_revision,
+                    WorkflowArtifact.artifact_type == 'COMPLIANCE_PLAN',
+                ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc()))
+                scope_codes = {c['clause_id']: c['control_code'] for c in plan.payload['clauses']} if plan else {}
             for code, request in requests.items():
                 binding = self.task['policy_binding'] or {}
                 if (request.snapshot_id != comparison.parent_artifact_id
-                        or request.required_control_codes != [code]
+                        or request.required_control_codes != [scope_codes.get(code) if comparison.artifact_type == 'BASE_COMPARISON' else code]
                         or request.policy_set_version != binding.get('policy_set_version')
                         or request.policy_index_version != binding.get('policy_index_version')
                         or request.category != binding.get('category') or request.region != binding.get('region')):
@@ -78,7 +86,8 @@ class ScopedPolicyInvestigationTools:
                 WorkflowArtifact.artifact_type == 'POLICY_RETRIEVAL_RESULT',
             ).order_by(WorkflowArtifact.created_at.desc(), WorkflowArtifact.artifact_id.desc())).all()
             for code in self.artifact_ids:
-                latest = next((a for a in rows if code in a.payload.get('filters', {}).get('control_codes', [])), None)
+                latest = next((a for a in rows if a.payload.get('filters', {}).get('scope_key') == code or
+                    ('scope_key' not in a.payload.get('filters', {}) and code in a.payload.get('filters', {}).get('control_codes', []))), None)
                 if latest:
                     self.artifact_ids[code] = latest.artifact_id
         for code in self.artifact_ids:
@@ -91,6 +100,7 @@ class ScopedPolicyInvestigationTools:
 
     def _result(self, code: str) -> RetrievalResult:
         request = self.requests[code]
+        required_code = request.required_control_codes[0]
         with self.service.session_factory() as session:
             artifact = session.get(WorkflowArtifact, self.artifact_ids[code])
             if (artifact is None or artifact.task_id != self.task_id or artifact.graph_run_id != self.graph_run_id
@@ -103,8 +113,8 @@ class ScopedPolicyInvestigationTools:
                 or result.policy_index_version != request.policy_index_version
                 or any(c.policy_set_version != request.policy_set_version
                        or hashlib.sha256(c.text.encode('utf-8')).hexdigest() != c.content_sha256 for c in result.citations)
-                or (result.status == RetrievalStatus.OK and (code not in result.covered_control_codes
-                    or not any(c.control_code == code and c.policy_set_version == request.policy_set_version
+                or (result.status == RetrievalStatus.OK and (required_code not in result.covered_control_codes
+                    or not any(c.control_code == required_code and c.policy_set_version == request.policy_set_version
                                and c.retrieval_id == result.retrieval_id for c in result.citations)))):
             raise ConflictError('policy_investigation_contract_invalid', 'Policy result does not prove the required frozen control.')
         return result

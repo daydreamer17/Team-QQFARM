@@ -36,6 +36,8 @@ class ComparisonDisposition(StrEnum):
     PENDING_INPUT = "PENDING_INPUT"
     NO_FEASIBLE_QUOTES = "NO_FEASIBLE_QUOTES"
     EMPTY_SCOPE = "EMPTY_SCOPE"
+    POLICY_REVIEW_REQUIRED = "POLICY_REVIEW_REQUIRED"
+    NO_POLICY_ELIGIBLE_QUOTES = "NO_POLICY_ELIGIBLE_QUOTES"
 
 
 class RankingMode(StrEnum):
@@ -253,6 +255,11 @@ class QuoteInput(FrozenModel):
         return self
 
 
+class PolicyEligibility(FrozenModel):
+    status: Literal["VERIFIED", "UNVERIFIED", "EXCLUDED"]
+    reasons: tuple[str, ...] = ()
+
+
 class ComparisonRequest(FrozenModel):
     """Complete deterministic input supplied by D to C."""
 
@@ -263,6 +270,8 @@ class ComparisonRequest(FrozenModel):
     excluded_quote_ids: tuple[str, ...] = ()
     supplier_history_snapshots: tuple["SupplierHistorySnapshot", ...] = ()
     history_dataset_context: "SupplierHistoryDatasetContext | None" = None
+    policy_eligibility: dict[str, PolicyEligibility] | None = None
+    policy_strategy: Literal["VERIFIED_FIRST"] = "VERIFIED_FIRST"
 
     @field_validator("cost_tolerance_amount", mode="before")
     @classmethod
@@ -285,6 +294,8 @@ class ComparisonRequest(FrozenModel):
             raise ValueError("history snapshots must be unique by quote ID")
         if not set(snapshot_ids).issubset(set(quote_ids)):
             raise ValueError("history snapshot references a quote outside the scope")
+        if self.policy_eligibility is not None and not set(self.policy_eligibility).issubset(quote_ids):
+            raise ValueError("policy eligibility references a quote outside the scope")
         return self
 
 
@@ -385,6 +396,8 @@ class RankingTrace(FrozenModel):
     comparison_disposition: ComparisonDisposition
     original_scope_count: int = Field(ge=0)
     excluded_quote_ids: tuple[str, ...] = ()
+    policy_eligibility: dict[str, PolicyEligibility] | None = None
+    policy_strategy: Literal["VERIFIED_FIRST"] | None = None
 
 
 class RuleIssue(FrozenModel):
@@ -524,6 +537,7 @@ class ComparisonResult(FrozenModel):
     comparison_reasons: tuple[RuleIssue, ...] = ()
     final_recommendation_allowed: bool
     ranking_trace: RankingTrace | None = None
+    compliance_assessment: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def recommendation_matches_disposition(self) -> "ComparisonResult":

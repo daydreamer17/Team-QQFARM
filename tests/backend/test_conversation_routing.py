@@ -303,6 +303,35 @@ def test_superlative_is_checked_only_against_the_supplier_it_describes():
         )
 
 
+@pytest.mark.parametrize('other_status', ['FAIL', 'REVIEW_REQUIRED', 'NOT_EVALUATED'])
+@pytest.mark.parametrize('text', ['Redwood RoHS通过', '所有供应商的RoHS通过'])
+def test_control_pass_requires_every_applicable_clause(other_status, text):
+    payload = {'assessments': [{'supplier_name': 'Redwood', 'status': 'REVIEW_REQUIRED',
+        'checks': [{'clause_id': 'rohs-a', 'control_code': 'ROHS_COMPLIANCE', 'status': 'PASS'},
+                   {'clause_id': 'rohs-b', 'control_code': 'ROHS_COMPLIANCE', 'status': other_status}]}]}
+    with pytest.raises(ValueError, match='control pass'):
+        conversations._validate_compliance_claims(text, [payload])
+
+
+def test_control_claims_are_scoped_to_each_supplier_clause():
+    payload = {'assessments': [
+        {'supplier_name': 'Redwood', 'status': 'COMPLIANT',
+         'checks': [{'control_code': 'ROHS_COMPLIANCE', 'status': 'PASS'}]},
+        {'supplier_name': 'Sterling', 'status': 'REVIEW_REQUIRED',
+         'checks': [{'control_code': 'ROHS_COMPLIANCE', 'status': 'REVIEW_REQUIRED'}]},
+    ]}
+    conversations._validate_compliance_claims('Redwood RoHS通过，而 Sterling RoHS待复核', [payload])
+    with pytest.raises(ValueError, match='control pass'):
+        conversations._validate_compliance_claims('Redwood RoHS通过，而 Sterling RoHS通过', [payload])
+
+
+def test_control_failure_is_not_mistaken_for_pass_and_checks_all_clauses():
+    payload = {'assessments': [{'supplier_name': 'Redwood', 'status': 'NON_COMPLIANT',
+        'checks': [{'control_code': 'ROHS_COMPLIANCE', 'status': 'PASS'},
+                   {'control_code': 'ROHS_COMPLIANCE', 'status': 'FAIL'}]}]}
+    conversations._validate_compliance_claims('Redwood RoHS不通过', [payload])
+
+
 @pytest.mark.parametrize('messages,expected', [
     (['总价最低优先；如果比最低价最多贵10新币，就在这个范围内选最快到货的。', '就按刚才的来'],
      {'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST', 'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY', 'cost_tolerance_amount': '10'}),

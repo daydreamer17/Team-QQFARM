@@ -98,6 +98,17 @@ class PolicyDraftClauseInput(UploadModel):
     control_code: str = Field(min_length=1, max_length=128)
     rule_parameters: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def validate_declared_executable_rule(self) -> "PolicyDraftClauseInput":
+        # Legacy imported metadata remains readable; it is never executable.
+        # Declaring an executable version opts into the reviewed finite contract.
+        if "version" in self.rule_parameters:
+            from supplier_comparison.rules.compliance import ExecutableRuleParameters
+            rule = ExecutableRuleParameters.model_validate(self.rule_parameters)
+            if rule.control_code != self.control_code:
+                raise ValueError("executable rule control must match the clause control")
+        return self
+
     @field_validator("clause_id", "title", "text")
     @classmethod
     def strip_required_text(cls, value: str) -> str:

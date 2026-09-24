@@ -13,6 +13,7 @@ from .contracts import (
     FeasibilityStatus,
     HistoryAvailabilityStatus,
     IdentityMatchStatus,
+    PolicyEligibility,
     ProcurementRequirement,
     QuantityBreakdown,
     QuantityCalculation,
@@ -31,7 +32,10 @@ from .contracts import (
 )
 from .cost import calculate_cost
 from .delivery import check_delivery
-from .engine import compare_suppliers, evaluate_supplier
+from .engine import apply_policy_eligibility, compare_suppliers, evaluate_supplier
+from .compliance import (
+    ClauseEvaluation, ComplianceEvidence, ExecutableRuleParameters, evaluate_compliance_rule,
+)
 from .decision_impact import (
     DecisionImpactRequest, DecisionImpactResult, ImpactStatus, QuoteDecisionImpact,
     analyze_decision_impact, decision_comparison_request,
@@ -52,6 +56,8 @@ from .selection_gap import (
 )
 
 __all__ = [
+    "PolicyEligibility", "apply_policy_eligibility", "ClauseEvaluation",
+    "ComplianceEvidence", "ExecutableRuleParameters", "evaluate_compliance_rule",
     "RequirementChanges", "SelectionGapResult", "analyze_selection_gap",
     "simulate_requirement_change", "draft_clarification",
     "DecisionImpactRequest",

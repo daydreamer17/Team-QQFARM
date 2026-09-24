@@ -59,7 +59,8 @@ export function DecisionPage() {
   const normalResultReady = expectedGraphRunId === null
     && Boolean(task.data.current_result_id)
     && (expectedRevision === null || task.data.task_revision >= expectedRevision)
-  if (expectedRerunReady || normalResultReady) {
+  const complianceBlocked = task.data.workflow_contract_version === 'compliance/2.0' && !task.data.progress.compliance?.can_compare
+  if (!complianceBlocked && (expectedRerunReady || normalResultReady)) {
     return <Navigate to={`/tasks/${taskId}/results/${task.data.current_result_id}`} replace />
   }
 
@@ -99,7 +100,7 @@ export function DecisionPage() {
         </div>
       </section>
 
-      {data.quotes.length === 0 ? (
+      {complianceBlocked ? <section className="card decision-empty-state"><h2>请先处理制度检查</h2><p>核对材料并确认当前版本后，即可进入决策比较。</p><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>前往制度检查</Link></section> : data.quotes.length === 0 ? (
         <section className="card decision-empty-state">
           <div><h2>暂无可比较的报价</h2></div>
           <p>请先完成报价审核并正式提交。</p>

@@ -5,6 +5,7 @@ import { api, ApiClientError } from '../api/client'
 import type { SupplierInformationEntry } from '../api/types'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
 
 const percent = (value: string | null | undefined) => value === null || value === undefined
   ? null
@@ -192,6 +193,7 @@ export function SupplierInfoPage() {
       </section>
 
       {selected && <section className="card supplier-detail" aria-live="polite">
+        <ComplianceAssessmentDetails assessments={selected.quotes.flatMap((quote) => quote.policy_assessment ? [quote.policy_assessment] : [])} taskId={taskId} resultId={resultId} historical={Boolean(resultId && resultId !== task.current_result_id)} />
         <div className="section-heading"><div><p className="eyebrow">SELECTED SUPPLIER</p><h2>{selected.display_name}</h2><p>{selected.identity_match_status === 'MATCHED' ? '与当前版本化历史目录匹配' : '身份尚未完成可信匹配'}</p></div><span className="signal-badge">{selected.history_snapshot?.overall_grade ? `MCU-9 历史等级 ${selected.history_snapshot.overall_grade}` : availabilityLabel(selected.history_availability_status)}</span></div>
         <div className="supplier-detail-grid">
           <div><h3>历史表现</h3><dl><div><dt>准时率</dt><dd>{percent(selected.history_snapshot?.on_time?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>拒收订单行率</dt><dd>{percent(selected.history_snapshot?.rejected_lines?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>数据版本</dt><dd>{String(context.dataset_version ?? '未记录')}</dd></div></dl></div>

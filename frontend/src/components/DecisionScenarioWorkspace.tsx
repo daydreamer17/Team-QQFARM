@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { ComplianceAssessmentDetails } from './ComplianceAssessmentDetails'
 import {
   api,
   ApiClientError,
@@ -159,6 +160,8 @@ function MessageBubble({
   const citation = citationPresentation(message.content ?? '', message.reference_ids)
   const statusLabel = message.role === 'USER'
     ? null
+    : message.status === 'STALE'
+      ? '历史回复'
     : message.status === 'FAILED'
       ? '生成失败'
       : message.status === 'PENDING'
@@ -171,6 +174,7 @@ function MessageBubble({
         {statusLabel && <span>{statusLabel}</span>}
       </header>
       {message.content && <p><CitedText text={citation.displayContent} /></p>}
+      {message.status === 'STALE' && <p className="run-notice">依据已更新，此回复保留为历史记录；请根据当前结果重新提问。</p>}
       {message.status === 'FAILED' && (
         <p className="chat-message-error">生成失败：{message.error_message ?? message.error_code ?? '未知错误'}</p>
       )}
@@ -224,7 +228,7 @@ function MessageBubble({
             <button
               className="button button-submit"
               type="button"
-              disabled={readOnly || confirmed || confirming}
+              disabled={readOnly || message.status === 'STALE' || confirmed || confirming}
               onClick={() => onConfirm(message.decision_intent_id as string)}
             >
               {confirmed ? '已生成 Scenario' : confirming ? '确认中…' : '确认并生成 Scenario'}
@@ -965,6 +969,7 @@ export function DecisionScenarioWorkspace({
               ) : selectedCitationId.startsWith('COMPLIANCE:') ? (
                 <section className="drawer-fields">
                   <h3>合规检查状态</h3>
+                  <ComplianceAssessmentDetails assessment={result.policy_compliance} taskId={task.task_id} resultId={result.result_id} historical={!result.is_current} legacy={result.legacy_compliance} />
                   <p>{result.policy_compliance.disposition}</p>
                   <p>{result.policy_compliance.recommendation_scope === 'COMPLIANCE_VERIFIED'
                     ? '供应商合规状态已核验。'

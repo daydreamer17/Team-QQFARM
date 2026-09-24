@@ -50,6 +50,7 @@ from .service import BackendError, BackendService, ConflictError, NotFoundError
 from .settings import settings
 from .summaries import SUMMARY_PROMPT_VERSION, SummaryModelConfig
 from .worker_health import worker_heartbeat_status
+from .compliance import EvidenceInput
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -62,6 +63,14 @@ IdempotencyKey = Annotated[
 
 class ApiModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+
+class ComplianceConfirmationRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_task_revision: int = Field(ge=1)
+    expected_assessment_id: str = Field(min_length=1, max_length=64)
+    acknowledged_missing_item_ids: list[str] = Field(default_factory=list, max_length=1000)
+    acknowledge_no_policy: StrictBool = False
 
 
 class PolicyBindingRequest(ApiModel):
@@ -518,6 +527,40 @@ def create_app(
     @app.get("/api/v1/quote-field-schema")
     def quote_field_schema():
         return service.quote_field_schema()
+
+    @app.get('/api/v1/tasks/{task_id}/compliance')
+    def compliance_workspace(task_id: str):
+        return service.compliance_workspace(task_id)
+
+    def save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, previous=None):
+        try:
+            parsed = EvidenceInput.model_validate_json(facts)
+        except ValidationError:
+            raise BackendError('evidence_fields_invalid', '材料字段不完整或格式错误，请核对身份、日期与来源。')
+        return service.save_compliance_evidence(task_id, expected_task_revision=expected_task_revision,
+            facts=parsed, idempotency_key=idempotency_key, previous_evidence_id=previous,
+            file=file.file if file else None, filename=file.filename if file else None)
+
+    @app.post('/api/v1/tasks/{task_id}/compliance/evidence', status_code=202)
+    def create_compliance_evidence(task_id: str, idempotency_key: IdempotencyKey,
+            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...), file: UploadFile | None = File(None)):
+        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file)
+
+    @app.post('/api/v1/tasks/{task_id}/compliance/evidence/{evidence_id}/revisions', status_code=202)
+    def revise_compliance_evidence(task_id: str, evidence_id: str, idempotency_key: IdempotencyKey,
+            expected_task_revision: int = Form(..., ge=1), facts: str = Form(...), file: UploadFile | None = File(None)):
+        return save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, evidence_id)
+
+    @app.get('/api/v1/tasks/{task_id}/compliance/evidence/{evidence_id}/files/{file_id}/content')
+    def compliance_evidence_content(task_id: str, evidence_id: str, file_id: str, download: bool = False):
+        item = service.compliance_evidence_content(task_id, evidence_id, file_id)
+        return FileResponse(item['path'], media_type=item['media_type'], filename=item['filename'],
+            content_disposition_type='attachment' if download else 'inline',
+            headers={'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'", 'Cache-Control': 'no-store'})
+
+    @app.post('/api/v1/tasks/{task_id}/compliance/confirm', status_code=202)
+    def confirm_compliance(task_id: str, body: ComplianceConfirmationRequest, idempotency_key: IdempotencyKey):
+        return service.confirm_compliance(task_id, **body.model_dump(), idempotency_key=idempotency_key)
 
     @app.post("/api/v1/tasks", status_code=201)
     def create_task(

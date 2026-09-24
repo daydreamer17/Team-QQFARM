@@ -13,6 +13,7 @@ import type {
 import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspace'
 import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../components/SupplierMatrixDetails'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import { supplierSelectionExplanation } from '../lib/resultComparison'
 import {
@@ -284,6 +285,10 @@ export function ResultPage() {
   }
 
   const payload = resultQuery.data.result
+  if (resultQuery.data.is_current && taskQuery.data?.workflow_contract_version === 'compliance/2.0'
+      && !taskQuery.data.progress.compliance?.can_compare) {
+    return <section className="card"><h2>请先处理当前版本的制度检查</h2><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>前往制度检查</Link></section>
+  }
   const decisionImpact = resultQuery.data.decision_impact
   const policyRetrievals = resultQuery.data.policy_retrievals
   const recommended = new Set(payload.recommended_quote_ids)
@@ -354,6 +359,10 @@ export function ResultPage() {
         quote_review_completed: true,
         decision_completed: true,
         summary_completed: false,
+        compliance: resultQuery.data.input_snapshot?.compliance_assessment_id ? {
+          status: resultQuery.data.policy_compliance.policy_enabled === false ? 'DISABLED' as const : 'PROCESSED' as const,
+          confirmed: true, can_compare: true,
+        } : undefined,
       }
   let policyState = '未绑定制度'
   if (taskQuery.isPending) policyState = '正在读取制度绑定'
@@ -400,6 +409,8 @@ export function ResultPage() {
       {resultQuery.data.policy_compliance.recommendation_scope !== 'COMPLIANCE_VERIFIED' && (
         <div className="run-notice">该结果仅用于采购比较；供应商合规仍需单独核验。</div>
       )}
+      {resultQuery.data.legacy_compliance && <p className="run-notice">旧流程结果：当时未执行完整的材料确认阶段。</p>}
+      <ComplianceAssessmentDetails assessment={resultQuery.data.policy_compliance} taskId={taskId} resultId={resultId} historical={!resultQuery.data.is_current} legacy={resultQuery.data.legacy_compliance} />
 
       {reanalysis.isError && (
         <div className="form-error compact-error" role="alert">

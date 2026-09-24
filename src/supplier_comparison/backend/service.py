@@ -239,7 +239,10 @@ class NotFoundError(BackendError):
     pass
 
 
-class BackendService:
+from .compliance import ComplianceMixin, WORKFLOW_VERSION, latest_artifact, stage_payload
+
+
+class BackendService(ComplianceMixin):
     def __init__(
         self,
         session_factory: sessionmaker[Session],
@@ -387,6 +390,8 @@ class BackendService:
     @staticmethod
     def _supersede_current_graph(session: Session, task: Task) -> GraphRun | None:
         """Invalidate execution state when an external input changes."""
+
+        task.workflow_contract_version = WORKFLOW_VERSION
 
         for scenario in session.scalars(
             select(DecisionScenario).where(
@@ -665,6 +670,7 @@ class BackendService:
                     )
             task = Task(
                 task_id=task_id,
+                workflow_contract_version=WORKFLOW_VERSION,
                 owner_id=self.actor_id,
                 task_name=candidate_name,
                 task_name_key=candidate_key,
@@ -990,6 +996,7 @@ class BackendService:
                 "quote_review_completed": quote_review_completed,
                 "decision_completed": task.current_result_id is not None,
                 "summary_completed": summary_completed,
+                "compliance": stage_payload(session, task),
             }
             history_binding = self._binding_at_revision(
                 session, task.task_id, task.current_revision
@@ -999,6 +1006,7 @@ class BackendService:
                 "task_name": task.task_name,
                 "scenario_id": task.scenario_id,
                 "task_revision": task.current_revision,
+                "workflow_contract_version": task.workflow_contract_version,
                 "status": task.status,
                 "current_graph_run_id": task.current_graph_run_id,
                 "current_snapshot_id": task.current_snapshot_id,
@@ -4163,12 +4171,17 @@ class BackendService:
                 ).all()
                 if issue.quote_id and issue.answer_payload
             }
+            carry = session.scalar(select(WorkflowArtifact).where(WorkflowArtifact.graph_run_id == graph_run_id,
+                WorkflowArtifact.artifact_type == 'CARRIED_PAYMENT_SUPPLEMENTS').order_by(WorkflowArtifact.created_at.desc()))
+            if carry:
+                payment_supplements = {**carry.payload, **payment_supplements}
             return {
                 "task_id": task.task_id,
                 "scenario_id": task.scenario_id,
                 "task_revision": task.current_revision,
                 "started_revision": graph.started_revision,
                 "effective_revision": graph.effective_revision,
+                "workflow_contract_version": task.workflow_contract_version,
                 "graph_run_id": graph.graph_run_id,
                 "thread_id": graph.thread_id,
                 "policy_set_version": task.policy_set_version,
@@ -4453,6 +4466,15 @@ class BackendService:
                     current_revision=task.current_revision,
                     result_revision=task_revision,
                 )
+            if task.workflow_contract_version == WORKFLOW_VERSION:
+                assessment = latest_artifact(session, task, 'COMPLIANCE_ASSESSMENT')
+                confirmation = latest_artifact(session, task, 'COMPLIANCE_CONFIRMATION')
+                snapshot = session.get(WorkflowArtifact, snapshot_id)
+                if (not assessment or not confirmation or not snapshot
+                    or confirmation.payload.get('assessment_id') != assessment.artifact_id
+                    or snapshot.payload.get('compliance_assessment_id') != assessment.artifact_id
+                    or assessment.payload.get('policy_errors')):
+                    raise ConflictError('compliance_confirmation_required', 'compliance stage must be confirmed before publication.')
             task.current_snapshot_id = snapshot_id
             task.current_result_id = result_id
 
@@ -4766,12 +4788,14 @@ class BackendService:
             key: frozen.get(key)
             for key in (
                 "requirement", "decision_profile", "policy_set_version",
+                "workflow_contract_version", "compliance_assessment_id", "compliance_strategy",
                 "policy_index_version", "policy_category", "policy_region",
                 "supplier_history_binding", "supplier_history_dataset_context",
                 "supplier_history_snapshots", "documents", "evaluated_at",
             )
         } if snapshot else None
-        retrievals = self._policy_retrieval_payloads(session, artifact.artifact_id)
+        retrievals = ((result.get('compliance_assessment') or {}).get('retrievals')
+                      or self._policy_retrieval_payloads(session, artifact.artifact_id))
         return {
             "result_id": artifact.artifact_id,
             "snapshot_id": snapshot.artifact_id if snapshot else None,
@@ -4779,6 +4803,7 @@ class BackendService:
             "task_revision": artifact.task_revision,
             "graph_run_id": artifact.graph_run_id,
             "is_current": artifact.artifact_id == task.current_result_id,
+            "legacy_compliance": frozen.get('workflow_contract_version') != WORKFLOW_VERSION,
             "result": result,
             "decision_impact": self._decision_impact_payload(session, artifact.artifact_id),
             "policy_retrievals": retrievals,
@@ -4790,6 +4815,8 @@ class BackendService:
         comparison: dict[str, Any],
         retrievals: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        if comparison.get('compliance_assessment') is not None:
+            return comparison['compliance_assessment']
         control_definitions = {
             "APPROVED_SUPPLIER": (
                 "SUPPLIER_REGISTRY_EVIDENCE_MISSING",
@@ -5217,6 +5244,14 @@ class BackendService:
             evaluated_at = datetime.fromisoformat(stamp)
         history_context, history_snapshots = history_inputs(context, tuple(envelopes))
         preferences = DecisionPreferences.model_validate(task['decision_profile']['preferences'])
+        policy_eligibility = None
+        if task.get('workflow_contract_version') == WORKFLOW_VERSION:
+            from supplier_comparison.rules.contracts import PolicyEligibility
+            workspace = self.compliance_workspace(task_id)
+            assessment = workspace.get('assessment') or {}
+            if assessment.get('policy_enabled'):
+                policy_eligibility = {key: PolicyEligibility.model_validate(value)
+                    for key, value in assessment.get('policy_eligibility', {}).items()}
         scope_preferences = preferences
         if changes is not None and 'excluded_supplier_ids' in changes.model_fields_set:
             requested = set(changes.excluded_supplier_ids or ())
@@ -5239,6 +5274,7 @@ class BackendService:
                 policy_binding={key: context[key] for key in (
                     'policy_set_version', 'policy_index_version', 'policy_category', 'policy_region')},
                 decision_preferences=scope_preferences,
+                policy_eligibility=policy_eligibility,
             ).model_copy(update={'decision_preferences': preferences})
         except DownstreamNotReadyError as exc:
             raise ConflictError(
@@ -5252,6 +5288,7 @@ class BackendService:
 
     def selection_gaps(self, task_id: str, *, expected_task_revision: int,
                        expected_result_id: str | None = None):
+        self.require_compliance_stage(task_id)
         from supplier_comparison.rules import analyze_selection_gap, draft_clarification
         before = self.get_task(task_id)
         if expected_result_id is not None and before['current_result_id'] != expected_result_id:
@@ -5265,7 +5302,10 @@ class BackendService:
         return result.model_dump(mode='json') | {'clarification_drafts': [draft_clarification(gap) for gap in result.gaps]}
 
     def requirement_simulation(self, task_id: str, *, expected_task_revision: int, changes, user_authorized: bool):
+        self.require_compliance_stage(task_id)
         before = self.get_task(task_id)
+        assessment = (self.compliance_workspace(task_id).get('assessment')
+                      if before.get('workflow_contract_version') == WORKFLOW_VERSION else None)
         if before["status"] == "ABANDONED":
             raise ConflictError("task_abandoned", "Abandoned tasks are read-only.")
         request = self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision, changes=changes)
@@ -5284,6 +5324,9 @@ class BackendService:
         latest = self.get_task(task_id)
         if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != before['current_graph_run_id']:
             raise ConflictError('selection_input_stale', 'Input changed during simulation.')
+        if assessment:
+            from .compliance import bind_assessment_comparison
+            result = result.model_copy(update={'comparison': bind_assessment_comparison(result.comparison, assessment)})
         return {'task_id': task_id, 'task_revision': expected_task_revision,
                 'result': result.model_dump(mode='json')}
 
@@ -5356,6 +5399,11 @@ class BackendService:
         frozen_baseline = self.get_result(
             task_id, task_view["current_result_id"]
         )["result"]
+        if frozen_baseline.get('compliance_assessment'):
+            from .compliance import bind_assessment_comparison
+            from supplier_comparison.rules import ComparisonResult
+            baseline = bind_assessment_comparison(ComparisonResult.model_validate(baseline),
+                frozen_baseline['compliance_assessment']).model_dump(mode='json')
         if baseline != frozen_baseline:
             changed_sections = sorted(
                 key
@@ -5400,6 +5448,10 @@ class BackendService:
                 "The proposed scenario does not change the current requirement or decision preferences.",
             )
         simulated = trial.model_dump(mode="json")
+        if frozen_baseline.get('compliance_assessment'):
+            trial = trial.model_copy(update={'comparison': bind_assessment_comparison(
+                trial.comparison, frozen_baseline['compliance_assessment'])})
+            simulated = trial.model_dump(mode='json')
         delta = self._scenario_delta(baseline, simulated["comparison"])
         changes_payload = changes.model_dump(mode="json", exclude_unset=True)
         request_payload = {
@@ -6351,7 +6403,8 @@ class BackendService:
                 if quote_id in supplier_by_quote:
                     supplier_ids.add(supplier_by_quote[quote_id])
 
-        retrievals = self._policy_retrieval_payloads(session, result.artifact_id)
+        retrievals = ((comparison.get('compliance_assessment') or {}).get('retrievals')
+                      or self._policy_retrieval_payloads(session, result.artifact_id))
         references[f"COMPLIANCE:{result.artifact_id}"] = self._policy_compliance_payload(
             comparison, retrievals
         )
@@ -7893,6 +7946,7 @@ class BackendService:
             if repeated is not None:
                 return repeated
             self._require_revision(task, expected_task_revision)
+            self._compliance_mutable(task)
             if task.current_graph_run_id is not None:
                 current = session.get(GraphRun, task.current_graph_run_id)
                 if current is not None and current.status in {
@@ -7906,7 +7960,14 @@ class BackendService:
                     # A run waiting for user input is not actively computing. Allow an
                     # explicit rerun to replace it so updated rules or source data can
                     # clear an obsolete review interruption.
-                    self._supersede_current_graph(session, task)
+                    pass
+            if task.current_graph_run_id is not None or task.workflow_contract_version != WORKFLOW_VERSION:
+                self._supersede_current_graph(session, task)
+                task.current_revision += 1
+                session.add(TaskRevision(revision_id=new_id("revision"), task_id=task_id,
+                    revision=task.current_revision, change_type="COMPLIANCE_REANALYSIS",
+                    actor_id=self.actor_id, request_sha256=request_sha))
+            task.workflow_contract_version = WORKFLOW_VERSION
             history_binding = self._binding_at_revision(
                 session, task_id, task.current_revision
             )
@@ -8961,7 +9022,9 @@ class BackendService:
                         "quote_id": quote.quote_id,
                         **{key: source.get(key) for key in ("source_id", "kind", "raw_text", "page_number", "row_number", "column_name")},
                     }
-        for retrieval in self._policy_retrieval_payloads(session, result.artifact_id):
+        if comparison.get('compliance_assessment'):
+            references[f"COMPLIANCE:{comparison['compliance_assessment']['assessment_id']}"] = {'type': 'COMPLIANCE_ASSESSMENT', **comparison['compliance_assessment']}
+        for retrieval in ((comparison.get('compliance_assessment') or {}).get('retrievals') or self._policy_retrieval_payloads(session, result.artifact_id)):
             for citation in retrieval.get("citations", []):
                 citation_id = citation.get("citation_id")
                 if citation_id:
@@ -8975,6 +9038,8 @@ class BackendService:
         policy_binding = policy_values if all(policy_values.values()) else None
         return {
             "schema_version": "summary-facts/1.1.0",
+            "policy_compliance": comparison.get('compliance_assessment'),
+            "workflow_contract_version": frozen.get('workflow_contract_version', 'legacy/1.0'),
             "task_id": task.task_id,
             "task_revision": result.task_revision,
             "result_id": result.artifact_id,

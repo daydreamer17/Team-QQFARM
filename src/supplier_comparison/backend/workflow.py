@@ -66,6 +66,7 @@ from .investigation import CaseStatus, InvestigationRunner
 from .investigation_tools import ScopedInvestigationTools
 from .policy_investigation import ScopedPolicyInvestigationTools, diagnose_policy
 from .supplier_history import history_inputs
+from .compliance import WORKFLOW_VERSION, bind_assessment_comparison
 
 
 logger = logging.getLogger(__name__)
@@ -281,6 +282,9 @@ class DraftReviewRunner:
 
 
 class WorkflowState(TypedDict, total=False):
+    compliance_plan_id: str
+    compliance_assessment_id: str
+    compliance_confirmed: bool
     task_id: str
     graph_run_id: str
     task_revision: int
@@ -348,6 +352,9 @@ class WorkflowRunner:
         builder.add_node("apply_shipping_amount", self._apply_shipping_amount)
         builder.add_node("freeze_final_and_compare", self._freeze_final_and_compare)
         builder.add_node("retrieve_policies", self._retrieve_policies)
+        builder.add_node("prepare_compliance", self._prepare_compliance)
+        builder.add_node("assess_compliance", self._assess_compliance)
+        builder.add_node("await_compliance_confirmation", self._await_compliance_confirmation)
         builder.add_node('investigate_policies', self._investigate_policies)
         builder.add_node("await_policy_evidence_review", self._await_policy_evidence_review)
         builder.add_node("publish_final_result", self._publish_final_result)
@@ -372,17 +379,21 @@ class WorkflowRunner:
         builder.add_edge("freeze_draft_and_compare", "await_shipping_amount")
         builder.add_edge("await_shipping_amount", "apply_shipping_amount")
         builder.add_edge("apply_shipping_amount", "freeze_final_and_compare")
-        builder.add_edge("freeze_final_and_compare", "retrieve_policies")
+        builder.add_edge("freeze_final_and_compare", "prepare_compliance")
+        builder.add_edge("prepare_compliance", "retrieve_policies")
         builder.add_edge('retrieve_policies', 'investigate_policies')
         builder.add_conditional_edges(
-            "investigate_policies",
+            "assess_compliance",
             self._route_after_policy_retrieval,
             {
                 "ready": "publish_final_result",
                 "review_required": "await_policy_evidence_review",
+                "compliance_confirmation": "await_compliance_confirmation",
             },
         )
         builder.add_edge("publish_final_result", END)
+        builder.add_edge("investigate_policies", "assess_compliance")
+        builder.add_edge("await_compliance_confirmation", END)
         builder.add_edge("await_batch_review", END)
         builder.add_edge("await_policy_evidence_review", "freeze_final_and_compare")
         self.graph = builder.compile(checkpointer=checkpointer)
@@ -567,7 +578,7 @@ class WorkflowRunner:
             review_ids[quote_id] = artifact["artifact_id"]
         return {"review_artifact_ids": review_ids}
 
-    def _impact_report(self, state: WorkflowState) -> DecisionImpactResult:
+    def _impact_report(self, state: WorkflowState, *, policy_eligibility=None) -> DecisionImpactResult:
         context = self.service.workflow_context(state["graph_run_id"])
         envelopes = tuple(
             ReviewEnvelope.model_validate(self.service.artifact_payload(artifact_id))
@@ -606,6 +617,7 @@ class WorkflowRunner:
                 supplier_history_snapshots=history_snapshots,
                 history_dataset_context=history_context,
                 payment_supplements=context.get("payment_supplements", {}),
+                policy_eligibility=policy_eligibility,
             )
         except DownstreamNotReadyError as exc:
             raise BackendError(
@@ -1158,6 +1170,8 @@ class WorkflowRunner:
 
     def _freeze_compare_publish(self, state: WorkflowState) -> tuple[str, str]:
         snapshot_id, result_id = self._freeze_compare_artifacts(state)
+        if self.service.workflow_context(state['graph_run_id']).get('workflow_contract_version') == WORKFLOW_VERSION:
+            return snapshot_id, result_id
         self.service.publish_result(
             task_id=state["task_id"],
             graph_run_id=state["graph_run_id"],
@@ -1178,6 +1192,7 @@ class WorkflowRunner:
             payload=report.model_dump(mode="json"), graph_run_id=state["graph_run_id"],
         )
         snapshot = {
+            "workflow_contract_version": context.get('workflow_contract_version', 'legacy/1.0'),
             "task_id": state["task_id"],
             "task_revision": state["task_revision"],
             "graph_run_id": state["graph_run_id"],
@@ -1226,7 +1241,7 @@ class WorkflowRunner:
         result_artifact = self.service.append_artifact(
             task_id=state["task_id"],
             task_revision=state["task_revision"],
-            artifact_type="COMPARISON_RESULT",
+            artifact_type="BASE_COMPARISON" if context.get('workflow_contract_version') == WORKFLOW_VERSION else "COMPARISON_RESULT",
             schema_version="1.0",
             payload=result.model_dump(mode="json"),
             parent_artifact_id=snapshot_artifact["artifact_id"],
@@ -1234,8 +1249,86 @@ class WorkflowRunner:
         )
         return snapshot_artifact["artifact_id"], result_artifact["artifact_id"]
 
+    def _prepare_compliance(self, state: WorkflowState) -> WorkflowState:
+        context = self.service.workflow_context(state['graph_run_id'])
+        if context.get('workflow_contract_version') != WORKFLOW_VERSION:
+            return {}
+        workspace = self.service.compliance_workspace(state['task_id'])
+        plan = self.service.plan_compliance(context, evaluated_at=self._state_evaluated_at(state))
+        saved = self.service.append_artifact(task_id=state['task_id'], task_revision=state['task_revision'],
+            artifact_type='COMPLIANCE_PLAN', schema_version=WORKFLOW_VERSION, payload=plan, graph_run_id=state['graph_run_id'])
+        return {'compliance_plan_id': saved['artifact_id'], 'compliance_confirmed': workspace['stage']['confirmed'],
+                'compliance_assessment_id': (workspace.get('assessment') or {}).get('assessment_id')}
+
+    def _assess_compliance(self, state: WorkflowState) -> WorkflowState:
+        if self.service.workflow_context(state['graph_run_id']).get('workflow_contract_version') != WORKFLOW_VERSION:
+            return {}
+        plan = self.service.artifact_payload(state['compliance_plan_id'])
+        assessment_id = self.service.assess_compliance(state, plan)
+        confirmed = False
+        if state.get('compliance_confirmed'):
+            confirmed = self.service.revalidate_compliance_confirmation(state['task_id'],
+                old_assessment_id=state['compliance_assessment_id'], new_assessment_id=assessment_id,
+                graph_run_id=state['graph_run_id'], task_revision=state['task_revision'])
+        return {'compliance_assessment_id': assessment_id, 'compliance_confirmed': confirmed}
+
+    def _await_compliance_confirmation(self, state: WorkflowState) -> WorkflowState:
+        interrupt({'type': 'COMPLIANCE_STAGE', 'task_id': state['task_id'],
+                   'assessment_id': state['compliance_assessment_id'], 'task_revision': state['task_revision']})
+        raise ConflictError('compliance_new_run_required', 'Use the compliance confirmation endpoint to create a versioned run.')
+
+    def _freeze_qualified_comparison(self, state: WorkflowState) -> WorkflowState:
+        from .service import content_hash
+        from ..rules.contracts import PolicyEligibility
+        context = self.service.workflow_context(state['graph_run_id'])
+        assessment = self.service.artifact_payload(state['compliance_assessment_id'])
+        assessment = {**assessment, 'assessment_id': state['compliance_assessment_id']}
+        snapshot = self.service.artifact_payload(state['snapshot_id'])
+        input_hash = content_hash({k: snapshot.get(k) for k in ('requirement','decision_profile','documents','policy_set_version','policy_index_version')})
+        if assessment['task_revision'] != state['task_revision'] or assessment['input_hash'] != input_hash:
+            raise ConflictError('compliance_input_changed', 'Confirmed compliance inputs have changed; reassessment is required.')
+        result = ComparisonResult.model_validate(self.service.artifact_payload(state['comparison_result_id']))
+        eligibility = ({qid: PolicyEligibility.model_validate(value)
+            for qid, value in assessment['policy_eligibility'].items()} if assessment['policy_enabled'] else None)
+        # Recompute impact proofs against the same qualified cohort used for ranking.
+        # A pre-policy cheapest quote must not justify an obsolete dominance proof.
+        report = self._impact_report(state, policy_eligibility=eligibility)
+        result = bind_assessment_comparison(report.comparison, assessment)
+        impact = report.model_copy(update={'comparison': result}).model_dump(mode='json')
+        qualified_impact = self.service.append_artifact(task_id=state['task_id'], task_revision=state['task_revision'],
+            artifact_type='DECISION_IMPACT_RESULT', schema_version=impact.get('schema_version'), payload=impact,
+            parent_artifact_id=snapshot['decision_impact_artifact_id'], graph_run_id=state['graph_run_id'])
+        snapshot['decision_impact_artifact_id'] = qualified_impact['artifact_id']
+        snapshot.update(compliance_assessment_id=state['compliance_assessment_id'], workflow_contract_version=WORKFLOW_VERSION,
+                        compliance_strategy='VERIFIED_FIRST')
+        frozen = self.service.append_artifact(task_id=state['task_id'], task_revision=state['task_revision'],
+            artifact_type='INPUT_SNAPSHOT', schema_version=WORKFLOW_VERSION, payload=snapshot, graph_run_id=state['graph_run_id'])
+        saved = self.service.append_artifact(task_id=state['task_id'], task_revision=state['task_revision'],
+            artifact_type='COMPARISON_RESULT', schema_version=WORKFLOW_VERSION, payload=result.model_dump(mode='json'),
+            parent_artifact_id=frozen['artifact_id'], graph_run_id=state['graph_run_id'])
+        return {**state, 'snapshot_id': frozen['artifact_id'], 'comparison_result_id': saved['artifact_id']}
+
     def _retrieve_policies(self, state: WorkflowState) -> WorkflowState:
         context = self.service.workflow_context(state["graph_run_id"])
+        if context.get('workflow_contract_version') == WORKFLOW_VERSION:
+            if state.get('compliance_confirmed'):
+                old = self.service.artifact_payload(state['compliance_assessment_id'])
+                return {'policy_retrieval_artifact_ids': old.get('retrieval_artifact_ids', {})}
+            plan = self.service.artifact_payload(state['compliance_plan_id'])
+            artifacts = {}
+            for clause in plan['clauses']:
+                request = RetrievalRequest(task_id=state['task_id'], task_revision=state['task_revision'],
+                    snapshot_id=state['snapshot_id'], policy_set_version=context['policy_set_version'],
+                    policy_index_version=context['policy_index_version'], query=(clause['section'] + ': ' + clause['text'])[:4000],
+                    required_control_codes=[clause['control_code']], category=context['policy_category'],
+                    region=context['policy_region'], evaluated_at=self._state_evaluated_at(state))
+                result = self._safe_policy_retrieval(request, clause['control_code'])
+                saved = self.service.append_artifact(task_id=state['task_id'], task_revision=state['task_revision'],
+                    artifact_type='POLICY_RETRIEVAL_RESULT', schema_version='policy-retrieval/1.0.0',
+                    payload=result.model_dump(mode='json'), parent_artifact_id=state['comparison_result_id'],
+                    graph_run_id=state['graph_run_id'])
+                artifacts[clause['clause_id']] = saved['artifact_id']
+            return {'policy_retrieval_artifact_ids': artifacts}
         comparison = ComparisonResult.model_validate(
             self.service.artifact_payload(state["comparison_result_id"])
         )
@@ -1325,24 +1418,28 @@ class WorkflowRunner:
         return result
 
     def _investigate_policies(self, state: WorkflowState) -> WorkflowState:
+        if state.get('compliance_confirmed'):
+            return {}
         artifacts = state.get('policy_retrieval_artifact_ids', {})
         if self.investigator is None or not artifacts:
             return {}
         context = self.service.workflow_context(state['graph_run_id'])
+        clauses = {c['clause_id']: c for c in self.service.artifact_payload(state['compliance_plan_id'])['clauses']} if state.get('compliance_plan_id') else {}
         requests = {code: RetrievalRequest(
             task_id=state['task_id'], task_revision=state['task_revision'], snapshot_id=state['snapshot_id'],
             policy_set_version=context['policy_set_version'], policy_index_version=context['policy_index_version'],
-            query=POLICY_RETRIEVAL_QUERIES[code], required_control_codes=[code],
+            query=(clauses[code]['section'] + ': ' + clauses[code]['text'])[:4000] if code in clauses else POLICY_RETRIEVAL_QUERIES[code],
+            required_control_codes=[clauses[code]['control_code'] if code in clauses else code],
             category=context['policy_category'], region=context['policy_region'],
             evaluated_at=self._state_evaluated_at(state),
         ) for code in artifacts}
 
         def retry(request, code):
-            result = self._safe_policy_retrieval(request, code)
+            result = self._safe_policy_retrieval(request, request.required_control_codes[0])
             # Bind the frozen control scope in the audit trace even for adapters
             # that return minimal test/legacy filter metadata.
             payload = result.model_dump(mode='json')
-            payload['filters'] = dict(payload['filters']) | {'control_codes': [code]}
+            payload['filters'] = dict(payload['filters']) | {'control_codes': request.required_control_codes, 'scope_key': code}
             artifact = self.service.append_artifact(
                 task_id=state['task_id'], task_revision=state['task_revision'], graph_run_id=state['graph_run_id'],
                 artifact_type='POLICY_RETRIEVAL_RESULT', schema_version='policy-retrieval/1.0.0',
@@ -1387,6 +1484,13 @@ class WorkflowRunner:
         )
 
     def _route_after_policy_retrieval(self, state: WorkflowState) -> str:
+        if self.service.workflow_context(state['graph_run_id']).get('workflow_contract_version') == WORKFLOW_VERSION:
+            if state.get('compliance_confirmed'):
+                return 'ready'
+            assessment = self.service.artifact_payload(state['compliance_assessment_id'])
+            if assessment['policy_errors']:
+                return 'review_required'
+            return 'compliance_confirmation'
         artifact_ids = state.get("policy_retrieval_artifact_ids", {})
         if not artifact_ids:
             return "ready"
@@ -1440,6 +1544,8 @@ class WorkflowRunner:
         }
 
     def _publish_final_result(self, state: WorkflowState) -> WorkflowState:
+        if self.service.workflow_context(state['graph_run_id']).get('workflow_contract_version') == WORKFLOW_VERSION:
+            state = self._freeze_qualified_comparison(state)
         self.service.publish_result(
             task_id=state["task_id"],
             graph_run_id=state["graph_run_id"],
@@ -1447,7 +1553,8 @@ class WorkflowRunner:
             snapshot_id=state["snapshot_id"],
             result_id=state["comparison_result_id"],
         )
-        return {"final_result_id": state["comparison_result_id"]}
+        return {"final_result_id": state["comparison_result_id"],
+                "snapshot_id": state["snapshot_id"], "comparison_result_id": state["comparison_result_id"]}
 
     def _missing_shipping_quote(self, state: WorkflowState) -> str:
         matches: list[str] = []
