@@ -18,7 +18,7 @@ from supplier_comparison.rules import RequirementChanges, DecisionPreferences
 
 DECISION_INTENT_PROMPT_VERSION = "decision-intent/2.0.0"
 
-CONVERSATION_INTENT_VERSION = "conversation-intent/1.2.0"
+CONVERSATION_INTENT_VERSION = "conversation-intent/1.2.1"
 
 
 class ConversationIntent(BaseModel):
@@ -83,8 +83,10 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         "UNSPECIFIED MUST route CLARIFY with COST_LIMIT; adding LOWEST_CONFIRMED_TOTAL_COST as a secondary "
         "criterion does NOT implement an upper price bound. Example '快一点，但别太贵' must ask for COST_LIMIT, "
         "not SIMULATE fastest with cost as a tie-breaker. "
-        "EXPLAIN means asking about existing facts without hypothetical changes. SIMULATE means proposing or "
-        "asking what would happen with different supported conditions, including 如果 / 会怎样; it does NOT "
+        "EXPLAIN means asking about existing facts without hypothetical changes. "
+        "Do not confuse questions such as '为什么那天才到货？' or '那天收货的依据是什么？' with an exact-day "
+        "delivery requirement: questions about the existing arrival date are EXPLAIN. "
+        "SIMULATE means proposing or asking what would happen with different supported conditions, including 如果 / 会怎样; it does NOT "
         "require explicit application authorization. Mixed explanation/change requests are SIMULATE. "
         "SIMULATE requires a nonempty changes object; changes=null is not a valid simulation. "
         "CLARIFY requires clarification EXACT_DELIVERY_DAY (exact-day delivery, not a deadline), COST_LIMIT "

@@ -63,16 +63,54 @@ def test_more_than_two_requested_criteria_are_not_silently_dropped(monkeypatch, 
     assert turn['clarification'] == 'CHANGE_DETAILS'
 
 
-def test_exact_day_request_is_clarified_before_model_can_turn_it_into_deadline(monkeypatch):
+@pytest.mark.parametrize('prompt', [
+    '我只能在2026年11月8日当天收货，不能提前，也不能延后。',
+    '我只在那天有时间收货',
+    '我就想在10月18号那天收到货，我就那天有时间',
+    '请安排恰好当天送达',
+    '我那天才有时间收货',
+])
+def test_exact_day_request_is_clarified_before_model_can_turn_it_into_deadline(monkeypatch, prompt):
     def unexpected_call(*args, **kwargs):
         raise AssertionError('Exact-day request must be clarified before model routing')
     monkeypatch.setattr(conversations, '_call_conversation_model', unexpected_call)
     ctx = context()
-    ctx['recent_messages'] = [{'role': 'USER', 'content': '我只能在2026年11月8日当天收货，不能提前，也不能延后。'}]
+    ctx['recent_messages'] = [{'role': 'USER', 'content': prompt}]
     turn, calls = process_conversation_turn(ctx, CONFIG)
     assert calls == 0
     assert turn['changes'] is None
     assert turn['clarification'] == 'EXACT_DELIVERY_DAY'
+
+
+@pytest.mark.parametrize('prompt', [
+    '为什么那天才到货？',
+    '为什么当天收货会比较晚？',
+    '那天收货的依据是什么？',
+    '为什么就那天到货，不能提前吗？',
+])
+def test_delivery_explanation_reaches_routing_and_grounded_narration(monkeypatch, prompt):
+    ctx = context()
+    ctx['recent_messages'] = [{'role': 'USER', 'content': prompt}]
+    ctx['allowed_reference_ids'] = ['RESULT:delivery']
+    ctx['frozen_references'] = {
+        'RESULT:delivery': {'estimated_arrival_date': '2026-11-08'},
+    }
+    answer = {'assistant_text': '已确认预计到货日为2026-11-08（RESULT:delivery）。',
+              'reference_ids': ['RESULT:delivery'], 'changes': None, 'clarification': None}
+    captured = []
+
+    def call(config, messages, **kwargs):
+        captured.append(messages)
+        return payload({'route': 'EXPLAIN'} if len(captured) == 1 else answer), 1
+
+    monkeypatch.setattr(conversations, '_call_conversation_model', call)
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+    assert calls == len(captured) == 2
+    assert json.loads(captured[0][1]['content'])['latest_request'] == prompt
+    assert turn['assistant_text'] == answer['assistant_text']
+    assert turn['changes'] is None
+    assert turn['clarification'] is None
+    conversations.validate_conversation_turn(turn, ctx)
 
 
 @pytest.mark.parametrize("value", [

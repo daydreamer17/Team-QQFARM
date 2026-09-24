@@ -62,8 +62,14 @@ _CHANGE_PROPOSAL_LANGUAGE = re.compile(
     re.IGNORECASE,
 )
 _EXACT_DELIVERY_REQUEST = re.compile(
-    r"(?:就|只|仅|恰好|正好)(?:在)?(?:那天|当天|该日)|"
-    r"(?:那天|当天|该日)(?:才|有时间|收货)|exact(?:ly)?\s+(?:on|date)",
+    # A mention of receiving on a day (or asking why delivery is that late)
+    # does not impose an exact-day constraint. Only explicit restrictions
+    # bypass model routing; ambiguous mentions remain available for explanation.
+    r"(?:只(?:能)?|仅(?:能)?|必须)(?:在)?[^，。！？；,\n!?;]{0,32}"
+    r"(?:那天|当天|该日)(?:才)?(?:有时间)?(?:收货|收到货|到货|送达)|"
+    r"(?:恰好|正好)(?:在)?(?:那天|当天|该日)(?:收货|收到货|到货|送达)|"
+    r"(?:我|我们)(?:就)?(?:那天|当天|该日)(?:才)?有时间|"
+    r"exact(?:ly)?\s+(?:on|date)",
     re.IGNORECASE,
 )
 _DEADLINE_SEMANTICS_NOTICE = re.compile(

@@ -84,7 +84,7 @@ function recommendationNarrative(
   const arrival = primary.estimated_arrival_date
     ? `，预计于 ${primary.estimated_arrival_date} 到货`
     : ''
-  return `按照“${rankingText}”，${primary.supplier_name} 满足当前采购要求，以 ${moneyText(currency, primary.total_cost)} 的已确认总成本成为首选${arrival}。`
+  return `按照“${rankingText}”，${primary.supplier_name} 满足当前报价比较条件，以 ${moneyText(currency, primary.total_cost)} 的已确认总成本成为首选${arrival}。`
 }
 
 function impactMessage(status: string, fallback: string) {

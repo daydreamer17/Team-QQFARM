@@ -433,6 +433,34 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByRole('button', { name: 'Wrong Part Devices' })).toBeInTheDocument()
   })
 
+  test('recommended quote remains a comparison recommendation while compliance needs review', async () => {
+    const result = makeHistoricalResult()
+    Object.assign(result.result, {
+      disposition: 'RECOMMENDATION_AVAILABLE', ranked_quote_ids: ['quote-1'], recommended_quote_ids: ['quote-1'],
+      pending_quote_ids: [], blocking_pending_quote_ids: [], final_recommendation_allowed: true,
+    })
+    Object.assign(result.result.supplier_results[0], {
+      status: 'FEASIBLE', total_cost: '7000.00', known_cost_subtotal: '7000.00', pending_reasons: [],
+    })
+    result.policy_compliance.requires_human_review = true
+    result.policy_compliance.counts = { REVIEW_REQUIRED: 1 }
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    vi.spyOn(api, 'getResult').mockResolvedValue(result)
+    vi.spyOn(api, 'getQuoteFields').mockResolvedValue({
+      quote_id: 'quote-1', review_status: 'READY_FOR_DOWNSTREAM', review_findings: [], fields: [],
+    })
+    vi.spyOn(api, 'listDecisionConversations').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionScenarios').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+    vi.spyOn(api, 'listDecisionIntents').mockResolvedValue({ task_id: 'task-1', task_revision: 6, items: [] })
+
+    renderRoute('/tasks/task-1/results/result-old', '/tasks/:taskId/results/:resultId', <ResultPage />)
+
+    expect(await screen.findByRole('heading', { name: '建议优先：Supplier One' })).toBeInTheDocument()
+    expect(screen.getByText(/满足当前报价比较条件/)).toBeInTheDocument()
+    expect(screen.queryByText(/满足当前采购要求/)).not.toBeInTheDocument()
+    expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
+  })
+
   test('stale result can start analysis for the current quote version', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({
