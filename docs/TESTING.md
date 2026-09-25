@@ -1,5 +1,7 @@
 # 测试与交付验收
 
+简体中文 · [English](TESTING.en.md)
+
 本文是交付版本唯一的测试入口，覆盖自动化检查和 `full_flow_demo4` 人工全流程。数据契约见 [DATA.md](DATA.md)，启动方法见 [LOCAL_ENVIRONMENT.md](LOCAL_ENVIRONMENT.md)。
 
 ## 1. 快速验收顺序

@@ -1,5 +1,7 @@
 # Supplier Comparison 系统架构
 
+简体中文 · [English](ARCHITECTURE.en.md)
+
 本文描述当前交付版本的运行架构与权力边界。用户操作顺序见 [WORKFLOW.md](WORKFLOW.md)，数据边界见 [DATA.md](DATA.md)，启动与测试见 [LOCAL_ENVIRONMENT.md](LOCAL_ENVIRONMENT.md) 和 [TESTING.md](TESTING.md)。
 
 ## 1. 系统目标

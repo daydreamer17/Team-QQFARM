@@ -1,5 +1,7 @@
 # Supplier Comparison 用户流程
 
+简体中文 · [English](WORKFLOW.en.md)
+
 本文描述当前交付版本从制度准备到采购总结的完整流程。接口和存储边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 1. 主流程

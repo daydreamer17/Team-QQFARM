@@ -1,5 +1,7 @@
 # 本地运行环境
 
+简体中文 · [English](LOCAL_ENVIRONMENT.en.md)
+
 推荐使用仓库内的一键脚本。脚本会启动 PostgreSQL、执行迁移、初始化 LangGraph 检查点，并启动 API、Worker 和前端。
 
 ## 1. 前置条件
