@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
@@ -10,6 +11,7 @@ from pydantic import Field, ValidationError
 from supplier_comparison.rules.contracts import FrozenModel
 
 from .investigation import InvestigationCase, ToolObservation, ToolResult
+from .response_language import response_language
 from .service import BackendService, ConflictError, content_hash
 
 
@@ -33,6 +35,21 @@ DECISION_TOOLS = {
     "inspect_policy_evidence": (NoArguments, "Review frozen policy retrieval and compliance items requiring verification"),
     "compile_decision_brief": (NoArguments, "Summarise verified facts, limitations, and next steps; this does not constitute approval"),
 }
+
+
+def _supplier_name_mentioned(name: str, text: str) -> bool:
+    """Match a supplier's full name or a distinctive leading name token."""
+
+    normalized_name = name.casefold().strip()
+    normalized_text = text.casefold()
+    if normalized_name and normalized_name in normalized_text:
+        return True
+    generic = {"components", "circuits", "company", "limited", "ltd", "supplier"}
+    distinctive = [
+        token for token in re.findall(r"[a-z0-9]+", normalized_name)
+        if len(token) >= 4 and token not in generic
+    ]
+    return bool(distinctive and distinctive[0] in normalized_text)
 
 
 class DecisionInvestigationTools:
@@ -63,6 +80,7 @@ class DecisionInvestigationTools:
         )
 
     def _investigation_plan(self, question: str | None = None) -> dict[str, Any]:
+        language = response_language(question)
         criterion = self._ranking_preference()
         if criterion == "FASTEST_CONFIRMED_DELIVERY":
             plan = {
@@ -115,26 +133,131 @@ class DecisionInvestigationTools:
             }
 
         lowered = (question or "").casefold()
-        asks_cost = any(token in lowered for token in ("成本", "价格", "便宜", "金额", "运费", "税费"))
-        asks_delivery = any(token in lowered for token in ("交期", "到货", "交付"))
-        asks_terms = any(token in lowered for token in ("付款", "账期", "质保", "条款"))
-        asks_history = any(token in lowered for token in ("历史", "准时率", "拒收", "供应商表现", "评级"))
+        asks_cost = any(token in lowered for token in ("成本", "价格", "便宜", "总金额", "运费", "税费", "cost", "price", "freight", "tax"))
+        asks_delivery = any(token in lowered for token in ("交期", "到货", "交付", "delivery", "arrival", "lead time"))
+        asks_terms = any(token in lowered for token in ("付款", "账期", "质保", "条款", "payment", "warranty", "terms"))
+        asks_quote_source = any(token in lowered for token in (
+            "核对报价", "报价原文", "报价内容", "原始文件", "原文件", "source quotation",
+            "source quote", "original quotation", "original quote", "source document",
+        ))
+        asks_history = any(token in lowered for token in (
+            "历史", "准时率", "拒收", "供应商表现", "供应商记录", "履约风险", "评级",
+            "history", "historical", "on-time", "rejection", "performance", "rating", "supplier record", "fulfilment risk",
+        ))
+        asks_policy = any(token in lowered for token in (
+            "制度", "合规", "审批", "证明", "材料", "规则", "准入", "过期", "不匹配", "补传", "人工确认",
+            "policy", "compliance", "approval", "evidence", "rohs", "eligibility", "expired", "mismatch", "manual confirmation",
+        )) or any(token in lowered for token in (
+            "未被推荐", "没被推荐", "没有被推荐", "不能推荐", "not recommended", "not selected", "cannot be recommended",
+        ))
+        asks_conflict = any(token in lowered for token in (
+            "冲突", "矛盾", "不一致", "conflict", "contradiction", "inconsisten",
+        ))
+        asks_gaps = any(token in lowered for token in (
+            "缺失", "过期", "不匹配", "无法确认", "补传", "人工确认",
+            "missing", "expired", "mismatch", "cannot confirm", "manual confirmation",
+        ))
+        asks_delta = any(token in lowered for token in (
+            "贵多少", "便宜多少", "早多少", "晚多少", "差多少", "溢价",
+            "how much more", "how much less", "premium", "difference",
+        ))
+        asks_ranking = any(token in lowered for token in (
+            "哪家", "哪些", "哪两", "最好", "最快", "最低", "最值得比较",
+            "which", "best", "fastest", "earliest", "lowest", "compare most",
+        ))
+        asks_recommendation = any(token in lowered for token in (
+            "推荐", "未选", "没选", "recommend", "not selected",
+        ))
+        asks_validation = any(token in lowered for token in (
+            "核对", "查证", "可靠吗", "是否", "真的", "检查",
+            "verify", "reliable", "is the", "check", "validate",
+        ))
         requested_focuses = {
             focus for asked, focus in (
                 (asks_cost, "COST"), (asks_delivery, "DELIVERY"), (asks_terms, "TERMS")
             ) if asked
         }
-        if requested_focuses:
+        if requested_focuses or asks_quote_source:
             plan["requires_quote_evidence"] = True
-            current_focus = plan.get("quote_focus")
-            all_focuses = requested_focuses | ({str(current_focus)} if current_focus else set())
-            plan["quote_focus"] = next(iter(all_focuses)) if len(all_focuses) == 1 else "ALL"
+            plan["quote_focus"] = (
+                next(iter(requested_focuses)) if len(requested_focuses) == 1 and not asks_quote_source
+                else "ALL"
+            )
         if asks_history:
             plan["requires_supplier_history"] = True
-        if any(token in lowered for token in ("制度", "合规", "审批", "证明", "rohs")):
-            plan["requires_policy_evidence"] = True
+        # The user's explicit scope takes precedence over the current ranking
+        # criterion.  A history-only question should not reread quotation
+        # fields, and a policy-only question should not perform unrelated
+        # quotation/history calls.
+        if asks_history and not requested_focuses and not asks_quote_source:
+            plan["requires_quote_evidence"] = False
+            plan["quote_focus"] = None
+        if asks_policy and not requested_focuses and not asks_quote_source and not asks_history:
+            plan["requires_quote_evidence"] = False
+            plan["requires_supplier_history"] = False
+            plan["quote_focus"] = None
+        plan["requires_policy_evidence"] = asks_policy
+        if asks_gaps:
+            analysis_goal = "GAP_REVIEW"
+        elif asks_conflict:
+            analysis_goal = "CONFLICT_REVIEW"
+        elif asks_delta:
+            analysis_goal = "DELTA_COMPARISON"
+        elif asks_policy and not (asks_cost or asks_delivery or asks_history):
+            analysis_goal = "COMPLIANCE_REVIEW"
+        elif asks_ranking and not asks_recommendation:
+            analysis_goal = "RANKING_COMPARISON"
+        elif asks_recommendation:
+            analysis_goal = "RECOMMENDATION_EXPLANATION"
+        elif asks_validation:
+            analysis_goal = "EVIDENCE_VALIDATION"
         else:
-            plan["requires_policy_evidence"] = False
+            analysis_goal = "EVIDENCE_REVIEW"
+        plan["analysis_goal"] = analysis_goal
+        plan["dimensions"] = [
+            dimension for enabled, dimension in (
+                (asks_cost, "COST"),
+                (asks_delivery, "DELIVERY"),
+                (asks_history, "HISTORY"),
+                (asks_policy, "COMPLIANCE"),
+            ) if enabled
+        ]
+        plan["requests_two_candidates"] = bool(
+            any(token in lowered for token in (
+                "哪两家", "哪两份", "两家供应商", "两份报价",
+                "which two", "two suppliers", "two quotes", "two quotations",
+            ))
+        )
+        plan["response_language"] = language
+        if language == "zh":
+            topic_labels = {
+                "source delivery terms": "报价原文中的交付条款",
+                "historical on-time rate": "历史准时率",
+                "price": "价格",
+                "shipping fee": "运费",
+                "tax": "税费",
+                "supplier grade": "供应商评级",
+                "rejection rate": "拒收率",
+                "source payment terms": "报价原文中的付款条款",
+                "key quotation fields": "报价关键字段",
+                "supplier historical performance": "供应商历史表现",
+            }
+            plan["evidence_topics"] = [
+                topic_labels.get(str(topic), str(topic))
+                for topic in plan.get("evidence_topics", [])
+            ]
+            reason_labels = {
+                "FASTEST_CONFIRMED_DELIVERY": "最快到货需要同时核对当前交付承诺和历史履约可靠性。",
+                "LOWEST_CONFIRMED_TOTAL_COST": "最低成本需要核对总成本各组成项的原始依据。",
+                "HIGHEST_SUPPLIER_PERFORMANCE": "供应商表现排序需要核对历史表现记录及其数据可用性。",
+                "HIGHEST_HISTORICAL_ON_TIME_RATE": "历史准时率排序需要核对供应商历史履约记录。",
+                "LOWEST_HISTORICAL_REJECTED_LINE_RATE": "历史拒收率排序需要核对供应商历史质量记录。",
+                "LONGEST_CONFIRMED_PAYMENT_TERM": "付款账期排序需要核对报价原文中的付款条款。",
+            }
+            plan["reason"] = reason_labels.get(
+                criterion,
+                "当前排序依据不够明确，需要核对推荐项与备选项的关键证据。",
+            )
         return plan
 
     def requested_case(self, *, request_id: str, question: str | None = None) -> InvestigationCase:
@@ -142,17 +265,20 @@ class DecisionInvestigationTools:
         identity = content_hash([self.graph_run_id, self.result_id, self.task_revision, request_id])
         normalized_question = question.strip()[:400] if question and question.strip() else None
         plan = self._investigation_plan(normalized_question)
+        language = response_language(normalized_question)
         return InvestigationCase(
             case_id="decision_" + identity[:32], task_id=self.task_id,
             task_revision=self.task_revision, graph_run_id=self.graph_run_id,
             kind="DECISION", quote_id=None, quote_version=None,
             impact_input_sha256=self.input_sha256,
             policy_binding=task.get("policy_binding") or {},
-            goal=("Investigate this frozen decision in response to the user's question: " + normalized_question
+            goal=(("围绕用户问题核查当前冻结的决策结果：" if language == "zh" else
+                   "Investigate this frozen decision in response to the user's question: ") + normalized_question
                   if normalized_question else
                   "Review the current supplier recommendation and competitive alternatives, selecting quotation evidence, historical performance, or policy basis for identified differences to produce a traceable decision explanation."),
             known_facts={"requested_investigation": True, "result_id": self.result_id,
                          "quote_ids": list(self.rows), "question": normalized_question,
+                         "response_language": language,
                          "ranking_investigation_plan": plan},
             unknown_fields=(), impact_status="REQUIRES_INVESTIGATION",
         )
@@ -173,13 +299,15 @@ class DecisionInvestigationTools:
 
     def prepare_case(self, case: InvestigationCase) -> InvestigationCase:
         """Collect mandatory baseline facts before the model chooses follow-up checks."""
+        language = str(case.known_facts.get("response_language") or "en")
         for name in ("read_decision_overview", "compare_alternatives"):
             result = self.execute(case, name, {})
             if result.status != "OK":
                 raise ConflictError("investigation_baseline_unavailable", "Decision baseline is unavailable.")
             case = case.model_copy(update={"observations": case.observations + (
                 ToolObservation(sequence=len(case.observations) + 1,
-                                reason="System baseline review", arguments={}, result=result, latency_ms=0),
+                                reason=("系统基线核查" if language == "zh" else "System baseline review"),
+                                arguments={}, result=result, latency_ms=0),
             )})
             self.save(case)
         return case
@@ -200,14 +328,127 @@ class DecisionInvestigationTools:
             return None
         return self.execute(case, "compile_decision_brief", {})
 
+    def next_required_check(self, case: InvestigationCase) -> tuple[str, dict[str, Any], str] | None:
+        """Return one server-planned check when the model becomes unavailable.
+
+        The scope was already derived from the user's general intent before any
+        model call. This method only completes that declared scope; it does not
+        invent a new investigation plan.
+        """
+
+        available = self.available_schemas(case)
+        language = str(case.known_facts.get("response_language") or "en")
+        if "inspect_quote_evidence" in available:
+            schema = available["inspect_quote_evidence"]
+            quote_ids = schema.get("available_quote_ids") or []
+            if quote_ids:
+                return (
+                    "inspect_quote_evidence",
+                    {
+                        "quote_id": str(quote_ids[0]),
+                        "focus": str(schema.get("preferred_focus") or "ALL"),
+                    },
+                    "规划模型不可用，按已声明的核查范围继续读取报价证据"
+                    if language == "zh" else
+                    "The planning model is unavailable; continue reading quotation evidence within the declared scope",
+                )
+        if "inspect_supplier_history" in available:
+            quote_ids = available["inspect_supplier_history"].get("available_quote_ids") or []
+            if quote_ids:
+                return (
+                    "inspect_supplier_history",
+                    {"quote_id": str(quote_ids[0])},
+                    "规划模型不可用，按已声明的核查范围继续读取供应商历史"
+                    if language == "zh" else
+                    "The planning model is unavailable; continue reading supplier history within the declared scope",
+                )
+        if "inspect_policy_evidence" in available:
+            return (
+                "inspect_policy_evidence",
+                {},
+                "规划模型不可用，按已声明的核查范围继续读取制度与证明材料"
+                if language == "zh" else
+                "The planning model is unavailable; continue reading policy and evidence within the declared scope",
+            )
+        return None
+
     def _candidate_quote_ids(self, case: InvestigationCase) -> list[str]:
         """Keep a decision check focused on the recommendation and one useful challenger."""
+        question = str(case.known_facts.get("question") or "").casefold()
+        mentioned = [
+            quote_id for quote_id, row in self.rows.items()
+            if _supplier_name_mentioned(str(row.get("supplier_name") or ""), question)
+        ]
+        asks_lowest = any(token in question for token in (
+            "最低", "最便宜", "最低报价", "lowest", "cheapest", "lowest quote",
+        ))
+        if mentioned and asks_lowest:
+            lowest = min(
+                (
+                    row for row in self.rows.values()
+                    if str(row.get("status") or "").upper() == "FEASIBLE"
+                    and row.get("total_cost") is not None
+                ),
+                key=lambda row: (Decimal(str(row["total_cost"])), str(row.get("supplier_name") or "")),
+                default=None,
+            )
+            selected = mentioned + ([str(lowest["quote_id"])] if lowest else [])
+            return list(dict.fromkeys(selected))
+        if mentioned and not any(token in question for token in (
+            "推荐", "未选", "没选", "比较", "相比", "为什么",
+            "recommend", "not selected", "compare", "versus", "why",
+        )):
+            return mentioned
+
         candidates: list[str] = []
         for quote_id in self.result["result"].get("recommended_quote_ids", []):
             if quote_id in self.rows and quote_id not in candidates:
                 candidates.append(quote_id)
 
-        question = str(case.known_facts.get("question") or "").casefold()
+        requests_two_delivery_candidates = (
+            bool(any(token in question for token in (
+                "哪两家", "哪两份", "两家供应商", "两份报价",
+                "which two quotes", "which two quotations", "which two suppliers", "two quotes", "two quotations", "two suppliers",
+            )))
+            and any(token in question for token in (
+                "到货", "交期", "交付", "最快", "最早", "delivery", "arrival", "fastest", "earliest",
+            ))
+        )
+        if requests_two_delivery_candidates:
+            delivery_ranked = sorted(
+                (
+                    row for row in self.rows.values()
+                    if str(row.get("status") or "").upper() == "FEASIBLE"
+                    and row.get("estimated_arrival_date")
+                ),
+                key=lambda row: (
+                    str(row["estimated_arrival_date"]),
+                    Decimal(str(row.get("total_cost") or "Infinity")),
+                    str(row.get("supplier_name") or row.get("quote_id")),
+                ),
+            )
+            selected = [str(row["quote_id"]) for row in delivery_ranked[:2]]
+            if len(selected) == 2:
+                return selected
+        requests_all_suppliers = (
+            any(token in question for token in (
+                "哪家供应商", "哪些供应商", "所有供应商", "各家供应商", "四家供应商",
+                "which supplier", "which suppliers", "all suppliers", "each supplier", "among the suppliers",
+            ))
+            and not any(token in question for token in ("哪两家", "两家供应商", "which two", "two suppliers"))
+        )
+        if requests_all_suppliers:
+            ranked = [
+                str(quote_id)
+                for group in self.result["result"].get("ranked_quote_ids", [])
+                for quote_id in (group if isinstance(group, (list, tuple)) else [group])
+            ]
+            return list(dict.fromkeys(
+                ranked + [str(row["quote_id"]) for row in self.rows.values()]
+            ))
+        plan = case.known_facts.get("ranking_investigation_plan") or {}
+        if plan.get("analysis_goal") == "GAP_REVIEW" and not mentioned:
+            return [str(row["quote_id"]) for row in self.rows.values()]
         if candidates and question and any(
             token in question for token in ("当前推荐", "推荐报价", "推荐供应商")
         ) and not any(str(row.get("supplier_name") or "").casefold() in question for row in self.rows.values()):
@@ -216,7 +457,7 @@ class DecisionInvestigationTools:
         goal = case.goal.casefold()
         mentioned = [
             quote_id for quote_id, row in self.rows.items()
-            if str(row.get("supplier_name") or "").casefold() in goal
+            if _supplier_name_mentioned(str(row.get("supplier_name") or ""), goal)
         ]
         ranked = [
             str(quote_id)
@@ -260,6 +501,7 @@ class DecisionInvestigationTools:
         risks: list[dict[str, Any]] = []
         recommended = set(self.result["result"].get("recommended_quote_ids", []))
         criterion = str(plan.get("criterion") or "")
+        language = str(plan.get("response_language") or "en")
 
         for quote_id in recommended:
             row = self.rows.get(str(quote_id)) or {}
@@ -269,14 +511,22 @@ class DecisionInvestigationTools:
                     "category": "DELIVERY",
                     "quote_id": quote_id,
                     "supplier_name": supplier,
-                    "summary": f"{supplier} is the recommended option with the fastest confirmed delivery; estimated arrival is {row['estimated_arrival_date']}.",
+                    "summary": (
+                        f"{supplier} 是当前推荐项，确认交期最快，预计到货日期为 {row['estimated_arrival_date']}。"
+                        if language == "zh" else
+                        f"{supplier} is the recommended option with the fastest confirmed delivery; estimated arrival is {row['estimated_arrival_date']}."
+                    ),
                 })
             elif criterion == "LOWEST_CONFIRMED_TOTAL_COST" and row.get("total_cost") is not None:
                 advantages.append({
                     "category": "COST",
                     "quote_id": quote_id,
                     "supplier_name": supplier,
-                    "summary": f"{supplier} is the recommended option with the lowest confirmed total cost of {row['total_cost']}.",
+                    "summary": (
+                        f"{supplier} 是当前推荐项，确认总成本最低，为 {row['total_cost']}。"
+                        if language == "zh" else
+                        f"{supplier} is the recommended option with the lowest confirmed total cost of {row['total_cost']}."
+                    ),
                 })
 
         for observation in observations:
@@ -299,33 +549,37 @@ class DecisionInvestigationTools:
             favorable: list[str] = []
             adverse: list[str] = []
             if on_time_rate == "100.00%":
-                favorable.append("historical on-time rate 100.00%")
+                favorable.append("历史准时率为 100.00%" if language == "zh" else "historical on-time rate 100.00%")
             elif on_time_rate:
-                adverse.append(f"historical on-time rate {on_time_rate}")
+                adverse.append(f"历史准时率为 {on_time_rate}" if language == "zh" else f"historical on-time rate {on_time_rate}")
             if grade in {"A", "B"}:
-                favorable.append(f"overall grade {grade}")
+                favorable.append(f"综合评级为 {grade}" if language == "zh" else f"overall grade {grade}")
             elif grade in {"C", "D"}:
-                adverse.append(f"overall grade {grade}")
+                adverse.append(f"综合评级为 {grade}" if language == "zh" else f"overall grade {grade}")
             elif grade == "N" or availability in {"INSUFFICIENT_SAMPLE", "NO_DATA", "OUT_OF_SCOPE"}:
-                adverse.append("historical sample is insufficient or outside the applicable scope")
+                adverse.append(
+                    "历史样本不足或不在适用范围内"
+                    if language == "zh" else
+                    "historical sample is insufficient or outside the applicable scope"
+                )
             if rejected_rate and rejected_rate != "0.00%":
-                adverse.append(f"historical rejection rate {rejected_rate}")
+                adverse.append(f"历史拒收率为 {rejected_rate}" if language == "zh" else f"historical rejection rate {rejected_rate}")
             elif rejected_rate == "0.00%":
-                favorable.append("historical rejection rate 0.00%")
+                favorable.append("历史拒收率为 0.00%" if language == "zh" else "historical rejection rate 0.00%")
 
             if favorable:
                 advantages.append({
                     "category": "SUPPLIER_HISTORY",
                     "quote_id": quote_id,
                     "supplier_name": supplier_name,
-                    "summary": f"{supplier_name}: {', '.join(favorable)}.",
+                    "summary": f"{supplier_name}：{'、'.join(favorable)}。" if language == "zh" else f"{supplier_name}: {', '.join(favorable)}.",
                 })
             if adverse:
                 risks.append({
                     "category": "SUPPLIER_HISTORY",
                     "quote_id": quote_id,
                     "supplier_name": supplier_name,
-                    "summary": f"{supplier_name}: {', '.join(adverse)}.",
+                    "summary": f"{supplier_name}：{'、'.join(adverse)}。" if language == "zh" else f"{supplier_name}: {', '.join(adverse)}.",
                 })
 
         for observation in observations:
@@ -342,7 +596,11 @@ class DecisionInvestigationTools:
                         "category": "QUOTE_FEASIBILITY",
                         "quote_id": quote_id,
                         "supplier_name": supplier_name,
-                        "summary": f"{supplier_name} has a confirmed non-compliant item.",
+                        "summary": (
+                            f"{supplier_name} 存在已确认的不合规项。"
+                            if language == "zh" else
+                            f"{supplier_name} has a confirmed non-compliant item."
+                        ),
                     })
 
         unique_advantages = list({item["summary"]: item for item in advantages}.values())
@@ -378,30 +636,39 @@ class DecisionInvestigationTools:
         """Choose one safe evidence read when a model stops before observing any evidence."""
         available = self.available_schemas(case)
         question = str(case.known_facts.get("question") or "").casefold()
+        language = str(case.known_facts.get("response_language") or "en")
         plan = case.known_facts.get("ranking_investigation_plan") or self._investigation_plan(question)
         if "inspect_policy_evidence" in available and any(
-            token in question for token in ("制度", "合规", "审批", "证明", "rohs")
+            token in question for token in ("制度", "合规", "审批", "证明", "policy", "compliance", "approval", "evidence", "rohs")
         ):
-            return "inspect_policy_evidence", {}, "The model stopped too early; review frozen policy and compliance evidence relevant to the question"
+            reason = ("模型过早停止；继续核对与问题相关的冻结制度及合规证据" if language == "zh" else
+                      "The model stopped too early; review frozen policy and compliance evidence relevant to the question")
+            return "inspect_policy_evidence", {}, reason
         if "inspect_supplier_history" in available and any(
-            token in question for token in ("历史", "准时率", "拒收", "供应商表现")
+            token in question for token in ("历史", "准时率", "拒收", "供应商表现", "history", "on-time", "rejection", "performance")
         ):
             quote_id = available["inspect_supplier_history"]["available_quote_ids"][0]
-            return "inspect_supplier_history", {"quote_id": quote_id}, "The model stopped too early; review supplier historical performance relevant to the question"
+            reason = ("模型过早停止；继续核对与问题相关的供应商历史表现" if language == "zh" else
+                      "The model stopped too early; review supplier historical performance relevant to the question")
+            return "inspect_supplier_history", {"quote_id": quote_id}, reason
         if "inspect_quote_evidence" in available:
-            if any(token in question for token in ("交期", "到货", "交付")):
+            if any(token in question for token in ("交期", "到货", "交付", "delivery", "arrival", "lead time")):
                 focus = "DELIVERY"
-            elif any(token in question for token in ("付款", "质保", "条款")):
+            elif any(token in question for token in ("付款", "质保", "条款", "payment", "warranty", "terms")):
                 focus = "TERMS"
-            elif any(token in question for token in ("成本", "价格", "便宜", "金额")):
+            elif any(token in question for token in ("成本", "价格", "便宜", "金额", "cost", "price")):
                 focus = "COST"
             else:
                 focus = str(plan.get("quote_focus") or "ALL")
             quote_id = available["inspect_quote_evidence"]["available_quote_ids"][0]
-            return "inspect_quote_evidence", {"quote_id": quote_id, "focus": focus}, "The model stopped too early; add one review of the most relevant quotation evidence"
+            reason = ("模型过早停止；继续核对最相关的报价原文证据" if language == "zh" else
+                      "The model stopped too early; add one review of the most relevant quotation evidence")
+            return "inspect_quote_evidence", {"quote_id": quote_id, "focus": focus}, reason
         if "inspect_supplier_history" in available and plan.get("requires_supplier_history"):
             quote_id = available["inspect_supplier_history"]["available_quote_ids"][0]
-            return "inspect_supplier_history", {"quote_id": quote_id}, "The model stopped too early; review supplier historical performance required by the current ranking basis"
+            reason = ("模型过早停止；继续核对当前排序依据要求的供应商历史表现" if language == "zh" else
+                      "The model stopped too early; review supplier historical performance required by the current ranking basis")
+            return "inspect_supplier_history", {"quote_id": quote_id}, reason
         return None
 
     def available_schemas(self, case: InvestigationCase) -> dict[str, dict]:
@@ -460,6 +727,7 @@ class DecisionInvestigationTools:
     def execute(self, case: InvestigationCase, name: str, arguments: dict) -> ToolResult:
         common = dict(tool_name=name, task_id=self.task_id, task_revision=self.task_revision,
                       quote_id=None, input_sha256=self.input_sha256)
+        language = str(case.known_facts.get("response_language") or "en")
         if not self.current():
             return ToolResult(**common, status="STALE", error_code="input_changed")
         if (case.kind != "DECISION" or case.task_id != self.task_id or case.task_revision != self.task_revision
@@ -480,8 +748,7 @@ class DecisionInvestigationTools:
             data = {
                 "recommended_quote_ids": payload["recommended_quote_ids"],
                 "final_recommendation_allowed": payload["final_recommendation_allowed"],
-                "ranking_preference": (self.result.get("input_snapshot") or {}).get("decision_profile", {}).get("preferences", {}).get("primary_criterion")
-                if (self.result.get("input_snapshot") or {}).get("decision_profile") else None,
+                "ranking_preference": self._ranking_preference() or None,
                 "investigation_plan": case.known_facts.get("ranking_investigation_plan") or self._investigation_plan(),
                 "suppliers": [{key: row.get(key) for key in ("quote_id", "supplier_name", "status", "total_cost", "estimated_arrival_date")}
                               for row in self.rows.values()],
@@ -505,11 +772,36 @@ class DecisionInvestigationTools:
                 "DELIVERY": ("lead", "delivery", "valid", "quantity", "moq"),
                 "TERMS": ("payment", "warranty", "condition", "substitut", "package", "revision"),
             }
-            selected = [f for f in fields if args.focus == "ALL" or any(
-                token in f["field_name"] for token in topics[args.focus]
-            )]
+            by_name = {str(field.get("field_name")): field for field in fields}
+            essential_by_focus = {
+                "ALL": (
+                    "supplier_name", "manufacturer_part_number", "currency", "unit_price",
+                    "price_basis_quantity", "shipping_fee_amount", "other_fees_amount", "tax_mode",
+                    "lead_time_days", "delivery_semantics", "payment_terms", "valid_until",
+                ),
+                "COST": (
+                    "currency", "unit_price", "price_basis_quantity", "price_basis_unit",
+                    "shipping_fee_status", "shipping_fee_amount", "other_fees_status",
+                    "other_fees_amount", "tax_mode", "tax_rate", "discount_amount",
+                ),
+                "DELIVERY": (
+                    "lead_time_days", "lead_time_unit", "delivery_semantics",
+                    "estimated_arrival_date", "valid_until", "moq_quantity",
+                ),
+                "TERMS": (
+                    "payment_terms", "warranty_terms", "commercial_conditions",
+                    "substitution_terms", "package_terms", "quote_revision",
+                ),
+            }
+            essential = essential_by_focus.get(args.focus, ())
+            if essential:
+                selected = [by_name[name] for name in essential if name in by_name]
+            else:
+                selected = [f for f in fields if any(
+                    token in f["field_name"] for token in topics[args.focus]
+                )]
             matching_count = len(selected)
-            selected = selected[:12 if args.focus == "ALL" else 8]
+            selected = selected[:12]
             return ToolResult(**common, status="OK" if selected else "NOT_FOUND", data={
                 "quote_id": quote_id,
                 "supplier_name": self.rows[quote_id].get("supplier_name"),
@@ -538,6 +830,15 @@ class DecisionInvestigationTools:
 
         if name == "inspect_policy_evidence":
             compliance = self.result["policy_compliance"]
+            candidate_quote_ids = set(self._candidate_quote_ids(case))
+            assessments = [
+                item for item in compliance.get("assessments", [])
+                if str(item.get("quote_id") or "") in candidate_quote_ids
+            ]
+            scoped_counts = {
+                status: sum(1 for item in assessments if item.get("status") == status)
+                for status in ("COMPLIANT", "NON_COMPLIANT", "REVIEW_REQUIRED", "NOT_EVALUATED")
+            }
             return ToolResult(**common, status="OK", data={
                 "retrievals": [{
                     "status": retrieval.get("status"),
@@ -547,12 +848,19 @@ class DecisionInvestigationTools:
                                   for citation in retrieval.get("citations", [])[:3]],
                 } for retrieval in self.result["policy_retrievals"][:10]],
                 "compliance": {"recommendation_scope": compliance.get("recommendation_scope"),
-                               "requires_human_review": compliance.get("requires_human_review"),
-                               "counts": compliance.get("counts"),
+                               "requires_human_review": any(
+                                   check.get("status") == "REVIEW_REQUIRED"
+                                   for item in assessments for check in item.get("checks", [])
+                               ),
+                               "counts": scoped_counts,
                                "assessments": [{"quote_id": item.get("quote_id"), "status": item.get("status"),
-                                                "checks": [{key: check.get(key) for key in ("control_code", "status", "reason_code", "citation_ids")}
+                                                "checks": [{key: check.get(key) for key in (
+                                                    "control_code", "status", "reason_code", "reason_codes",
+                                                    "citation_ids", "evidence_ids", "source_refs", "execution_stage",
+                                                    "triggered", "approval_confirmed",
+                                                )}
                                                            for check in item.get("checks", [])]}
-                                               for item in compliance.get("assessments", [])]},
+                                               for item in assessments]},
             })
 
         observations = [o for o in case.observations if o.result.status in {"OK", "NOT_FOUND"}]
@@ -581,7 +889,8 @@ class DecisionInvestigationTools:
                             "supplier_name": self.rows.get(str(assessment.get("quote_id")), {}).get("supplier_name"),
                             "control_code": check.get("control_code"),
                             "reason_code": check.get("reason_code"),
-                            "action": "Add the corresponding evidence or approval record, then analyse again",
+                            "action": ("补充对应的证明或审批记录后重新分析" if language == "zh" else
+                                       "Add the corresponding evidence or approval record, then analyse again"),
                         })
             elif observation.result.status == "NOT_FOUND":
                 quote = str(observation.arguments.get("quote_id") or "")
@@ -593,7 +902,8 @@ class DecisionInvestigationTools:
                         "quote_id": quote or None,
                         "supplier_name": self.rows.get(quote, {}).get("supplier_name"),
                         "source": observation.result.tool_name,
-                        "action": "Add missing data, then analyse again",
+                        "action": ("补充缺失数据后重新分析" if language == "zh" else
+                                   "Add missing data, then analyse again"),
                     })
 
         facts: list[dict[str, Any]] = []
@@ -610,9 +920,17 @@ class DecisionInvestigationTools:
         plan = case.known_facts.get("ranking_investigation_plan") or self._investigation_plan()
         verified_advantages, verified_risks = self._verified_findings(observations, plan)
         if unresolved:
-            stop_reason = "Required checks are complete. Remaining items need external evidence or manual records and cannot be resolved by repeatedly calling the available tools."
+            stop_reason = (
+                "所需核查已经完成；剩余事项需要外部证据或人工记录，重复调用现有工具无法解决。"
+                if language == "zh" else
+                "Required checks are complete. Remaining items need external evidence or manual records and cannot be resolved by repeatedly calling the available tools."
+            )
         else:
-            stop_reason = "Checks required by the current ranking basis are complete. No missing or conflicting evidence was found; verified risks remain in the conclusion."
+            stop_reason = (
+                "当前排序依据要求的核查已经完成；未发现证据缺失或冲突，已核实风险仍保留在结论中。"
+                if language == "zh" else
+                "Checks required by the current ranking basis are complete. No missing or conflicting evidence was found; verified risks remain in the conclusion."
+            )
 
         return ToolResult(**common, status="OK", data={
             "recommended_quote_ids": self.result["result"]["recommended_quote_ids"],
@@ -624,5 +942,9 @@ class DecisionInvestigationTools:
             "requires_follow_up": bool(unresolved),
             "unresolved_items": unresolved,
             "stop_reason": stop_reason,
-            "boundary": "Explain only the frozen procurement comparison; do not change requirements, quotations, policy, or approval status.",
+            "boundary": (
+                "仅解释冻结的采购比较结果，不修改需求、报价、制度或审批状态。"
+                if language == "zh" else
+                "Explain only the frozen procurement comparison; do not change requirements, quotations, policy, or approval status."
+            ),
         })

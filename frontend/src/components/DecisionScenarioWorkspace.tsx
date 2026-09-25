@@ -32,13 +32,33 @@ const changeLabels: Record<string, string> = {
   cost_tolerance_amount: 'Cost Tolerance',
 }
 
-const investigationToolLabels: Record<string, string> = {
-  read_decision_overview: 'Review current recommendation',
-  compare_alternatives: 'Compare alternatives',
-  inspect_quote_evidence: 'Review quotation evidence',
-  inspect_supplier_history: 'Review supplier history',
-  inspect_policy_evidence: 'Review policy evidence',
-  compile_decision_brief: 'Compile investigation findings',
+type ResponseLanguage = 'zh' | 'en'
+
+const investigationToolLabels: Record<ResponseLanguage, Record<string, string>> = {
+  en: {
+    read_decision_overview: 'Review current recommendation',
+    compare_alternatives: 'Compare alternatives',
+    inspect_quote_evidence: 'Review quotation evidence',
+    inspect_supplier_history: 'Review supplier history',
+    inspect_policy_evidence: 'Review policy evidence',
+    compile_decision_brief: 'Compile investigation findings',
+  },
+  zh: {
+    read_decision_overview: '核对当前推荐',
+    compare_alternatives: '比较备选方案',
+    inspect_quote_evidence: '核对报价原文',
+    inspect_supplier_history: '核对供应商历史',
+    inspect_policy_evidence: '核对制度证据',
+    compile_decision_brief: '整理核查结论',
+  },
+}
+
+function responseLanguage(text?: string | null): ResponseLanguage {
+  return text && /[\u3400-\u4dbf\u4e00-\u9fff]/.test(text) ? 'zh' : 'en'
+}
+
+function investigationToolLabel(toolName: string, language: ResponseLanguage) {
+  return investigationToolLabels[language][toolName] ?? toolName
 }
 
 function conversationStatusLabel(status?: string) {
@@ -61,36 +81,62 @@ function conversationOptionLabel(item: DecisionConversation, currentResultId: st
   return `${version} · ${conversationTitle(item.title)}${history}`
 }
 
-function investigationObservationText(observation: InvestigationCase['observations'][number]) {
+function investigationObservationText(
+  observation: InvestigationCase['observations'][number],
+  language: ResponseLanguage,
+) {
   const data = observation.result.data
-  if (observation.result.status === 'NOT_FOUND') return 'No usable evidence was found. This does not support the opposite conclusion.'
-  if (observation.result.status !== 'OK') return 'This step did not produce a usable result.'
+  if (observation.result.status === 'NOT_FOUND') return language === 'zh' ? '未找到可用证据；这不能证明相反结论。' : 'No usable evidence was found. This does not support the opposite conclusion.'
+  if (observation.result.status !== 'OK') return language === 'zh' ? '这一步没有产生可用结果。' : 'This step did not produce a usable result.'
   if (observation.result.tool_name === 'read_decision_overview') {
-    return `Reviewed ${Array.isArray(data.suppliers) ? data.suppliers.length : 0} suppliers and the current ranking basis.`
+    const count = Array.isArray(data.suppliers) ? data.suppliers.length : 0
+    return language === 'zh' ? `已核对 ${count} 家供应商及当前排序依据。` : `Reviewed ${count} suppliers and the current ranking basis.`
   }
   if (observation.result.tool_name === 'compare_alternatives') {
-    return `Compared cost, delivery, and blocking differences for ${Array.isArray(data.gaps) ? data.gaps.length : 0} suppliers.`
+    const count = Array.isArray(data.gaps) ? data.gaps.length : 0
+    return language === 'zh' ? `已比较 ${count} 家供应商的成本、交期和阻碍差异。` : `Compared cost, delivery, and blocking differences for ${count} suppliers.`
   }
   if (observation.result.tool_name === 'inspect_quote_evidence') {
-    const focus = { COST: 'cost', DELIVERY: 'delivery', TERMS: 'commercial terms', ALL: 'key' }[String(data.focus)] ?? 'key'
-    const supplier = String(data.supplier_name || data.quote_id || 'this supplier')
-    return `Reviewed ${Array.isArray(data.fields) ? data.fields.length : 0} ${focus} quotation evidence items for ${supplier}.`
+    const focus = (language === 'zh'
+      ? { COST: '成本', DELIVERY: '交期', TERMS: '商务条款', ALL: '关键字段' }
+      : { COST: 'cost', DELIVERY: 'delivery', TERMS: 'commercial terms', ALL: 'key' })[String(data.focus)] ?? (language === 'zh' ? '关键字段' : 'key')
+    const supplier = String(data.supplier_name || data.quote_id || (language === 'zh' ? '该供应商' : 'this supplier'))
+    const count = Array.isArray(data.fields) ? data.fields.length : 0
+    return language === 'zh' ? `已核对 ${supplier} 的 ${count} 项${focus}报价证据。` : `Reviewed ${count} ${focus} quotation evidence items for ${supplier}.`
   }
   if (observation.result.tool_name === 'inspect_supplier_history') {
-    return `Reviewed historical performance and data availability for ${String(data.supplier_name || data.quote_id || 'this supplier')}.`
+    const supplier = String(data.supplier_name || data.quote_id || (language === 'zh' ? '该供应商' : 'this supplier'))
+    return language === 'zh' ? `已核对 ${supplier} 的历史表现及数据可用性。` : `Reviewed historical performance and data availability for ${supplier}.`
   }
-  if (observation.result.tool_name === 'inspect_policy_evidence') return 'Reviewed the policy retrieval and compliance status frozen with this result.'
+  if (observation.result.tool_name === 'inspect_policy_evidence') return language === 'zh' ? '已核对当前结果冻结的制度检索和合规状态。' : 'Reviewed the policy retrieval and compliance status frozen with this result.'
   if (observation.result.tool_name === 'compile_decision_brief') {
     const pending = Array.isArray(data.unresolved_items) ? data.unresolved_items.length : 0
     const risks = Array.isArray(data.verified_risks) ? data.verified_risks.length : 0
+    if (language === 'zh') {
+      if (pending > 0) return `已整理结论，保留 ${risks} 项已核实风险和 ${pending} 项待补事项。`
+      return risks > 0 ? `已整理结论并保留 ${risks} 项已核实风险；当前没有待补事项。` : '已整理本次核查的事实和结论。'
+    }
     if (pending > 0) return `Compiled the findings, retaining ${risks} verified risks and ${pending} follow-up items.`
     return risks > 0 ? `Compiled the findings and retained ${risks} verified risks; there are no current follow-up items.` : 'Compiled the facts and conclusions from this investigation.'
   }
-  return 'Compiled the facts, limitations, and follow-up items from this investigation.'
+  return language === 'zh' ? '已整理本次核查的事实、限制和待补事项。' : 'Compiled the facts, limitations, and follow-up items from this investigation.'
 }
 
 function mutationError(error: unknown) {
   return error instanceof ApiClientError ? error.message : 'Operation failed. Try again later.'
+}
+
+function conversationErrorText(message: DecisionMessage, language: ResponseLanguage) {
+  if (language === 'en') return message.error_message ?? message.error_code ?? 'Unknown error'
+  const known: Record<string, string> = {
+    conversation_model_output_invalid: '回答未通过事实与引用校验，正式结果未发生变化。请重新生成。',
+    conversation_intent_invalid: '系统无法可靠识别这次请求。请明确要核对的内容后重试。',
+    conversation_intent_mismatch: '生成的回答与识别出的请求不一致，因此未保存。请重新生成。',
+    conversation_stale: '该对话基于的决策结果已经过期，请基于当前结果重新提问。',
+    selection_review_required: '相关报价仍有待审核字段，请先完成待处理事项。',
+    conversation_processing_failed: '对话处理时出现意外错误，正式结果未发生变化。请重新生成。',
+  }
+  return known[message.error_code ?? ''] ?? message.error_message ?? message.error_code ?? '未知错误'
 }
 
 function changeValue(key: string, value: unknown, currency: string) {
@@ -175,6 +221,7 @@ function MessageBubble({
   onConfirm,
   onOpenCitation,
   investigation,
+  language,
   onRetry,
   retrying,
 }: {
@@ -187,6 +234,7 @@ function MessageBubble({
   onConfirm: (intentId: string) => void
   onOpenCitation: (referenceId: string) => void
   investigation?: InvestigationCase
+  language: ResponseLanguage
   onRetry?: () => void
   retrying: boolean
 }) {
@@ -195,23 +243,23 @@ function MessageBubble({
   const statusLabel = message.role === 'USER'
     ? null
     : message.status === 'STALE'
-      ? 'Historical response'
+      ? (language === 'zh' ? '历史回答' : 'Historical response')
     : message.status === 'FAILED'
-      ? 'Failed'
+      ? (language === 'zh' ? '生成失败' : 'Failed')
       : message.status === 'PENDING'
-        ? 'Generating'
+        ? (language === 'zh' ? '正在生成' : 'Generating')
         : null
   return (
     <article className={`decision-chat-message chat-role-${message.role.toLowerCase()}`}>
       {statusLabel && <header className="chat-message-status"><span>{statusLabel}</span></header>}
       {message.content && <p><CitedText text={citation.displayContent} /></p>}
-      {message.status === 'STALE' && <p className="run-notice">The underlying evidence has changed. This response is retained for history; please ask again using the current result.</p>}
+      {message.status === 'STALE' && <p className="run-notice">{language === 'zh' ? '底层证据已经变化。本回答仅作为历史记录保留；请基于当前结果重新提问。' : 'The underlying evidence has changed. This response is retained for history; please ask again using the current result.'}</p>}
       {message.status === 'FAILED' && (
-        <p className="chat-message-error">Generation failed: {message.error_message ?? message.error_code ?? 'Unknown error'}</p>
+        <p className="chat-message-error">{language === 'zh' ? '生成失败：' : 'Generation failed: '}{conversationErrorText(message, language)}</p>
       )}
       {citation.citations.length > 0 && (
         <details className="chat-citations">
-          <summary>View {citation.citations.length} sources</summary>
+          <summary>{language === 'zh' ? `查看 ${citation.citations.length} 个来源` : `View ${citation.citations.length} sources`}</summary>
           <ol>
             {citation.citations.map((item) => (
               <li key={item.id}>
@@ -231,14 +279,16 @@ function MessageBubble({
       )}
       {investigation && (
         <details className="decision-investigation-trace">
-          <summary>View investigation steps and tool results</summary>
-          <p>Status: {investigation.status === 'RESOLVED' ? 'Completed' : 'Incomplete; findings are for reference only'}</p>
+          <summary>{language === 'zh' ? '查看本次核查步骤与工具结果' : 'View investigation steps and tool results'}</summary>
+          <p>{language === 'zh' ? '状态：' : 'Status: '}{investigation.status === 'RESOLVED'
+            ? (language === 'zh' ? '已完成' : 'Completed')
+            : (language === 'zh' ? '未完成；结果仅供参考' : 'Incomplete; findings are for reference only')}</p>
           <ol>{investigation.observations.map((observation) => (
             <li key={observation.sequence}>
-              <strong>{investigationToolLabels[observation.result.tool_name] ?? observation.result.tool_name}</strong>
-              <span>{investigationObservationText(observation)}</span>
-              {observation.plan && observation.plan.length > 0 && <small>Public plan: {observation.plan.join(' → ')}</small>}
-              {observation.reason && <small>Selection reason: {observation.reason}</small>}
+              <strong>{investigationToolLabel(observation.result.tool_name, language)}</strong>
+              <span>{investigationObservationText(observation, language)}</span>
+              {observation.plan && observation.plan.length > 0 && <small>{language === 'zh' ? '公开计划：' : 'Public plan: '}{observation.plan.join(' → ')}</small>}
+              {observation.reason && <small>{language === 'zh' ? '选择原因：' : 'Selection reason: '}{observation.reason}</small>}
             </li>
           ))}</ol>
         </details>
@@ -251,13 +301,13 @@ function MessageBubble({
               void navigator.clipboard.writeText(message.content as string)
                 .then(() => setCopied(true))
                 .catch(() => undefined)
-            }}>{copied ? 'Copied' : 'Copy answer'}</button>
+            }}>{copied ? (language === 'zh' ? '已复制' : 'Copied') : (language === 'zh' ? '复制回答' : 'Copy answer')}</button>
           )}
           {message.status === 'FAILED' && message.error_code === 'selection_review_required' ? (
             <Link className="button button-secondary" to={`/tasks/${taskId}/review#excluded-review`}>Go to action items</Link>
           ) : message.status === 'FAILED' && onRetry ? (
             <button className="button button-secondary" type="button" disabled={readOnly || retrying} onClick={onRetry}>
-              {retrying ? 'Regenerating…' : 'Regenerate'}
+              {retrying ? (language === 'zh' ? '正在重新生成…' : 'Regenerating…') : (language === 'zh' ? '重新生成' : 'Regenerate')}
             </button>
           ) : null}
         </footer>
@@ -365,7 +415,11 @@ export function DecisionScenarioWorkspace({
   const [streamError, setStreamError] = useState('')
   const [processingStage, setProcessingStage] = useState('Interpreting your question and preferences')
   const [toolProgress, setToolProgress] = useState<string[]>([])
-  const [queuedTurn, setQueuedTurn] = useState<{ conversationId: string; messageId: string } | null>(null)
+  const [queuedTurn, setQueuedTurn] = useState<{
+    conversationId: string
+    messageId: string
+    language: ResponseLanguage
+  } | null>(null)
   const [confirmedIntents, setConfirmedIntents] = useState<Set<string>>(() => new Set())
   const [primaryCriterion, setPrimaryCriterion] = useState('')
   const [secondaryCriterion, setSecondaryCriterion] = useState('')
@@ -444,6 +498,10 @@ export function DecisionScenarioWorkspace({
   const pendingReplyTo = queuedTurn && queuedTurn.conversationId === selectedConversationId
     ? queuedTurn.messageId
     : lastMessage?.role === 'USER' ? lastMessage.message_id : null
+  const pendingUserMessage = activeConversation?.messages.find((item) => item.message_id === pendingReplyTo)
+  const pendingLanguage = queuedTurn?.messageId === pendingReplyTo
+    ? queuedTurn.language
+    : responseLanguage(pendingUserMessage?.content)
 
   useEffect(() => {
     const transcript = transcriptRef.current
@@ -455,7 +513,9 @@ export function DecisionScenarioWorkspace({
     if (!selectedConversationId || !pendingReplyTo || conversationReadOnly) return
     let turnStarted = false
     let waitWarning = window.setTimeout(() => {
-      setStreamError('This is taking longer than expected. Confirm that the worker is running; the task will remain queued.')
+      setStreamError(pendingLanguage === 'zh'
+        ? '处理时间超过预期。请确认 Worker 正在运行；任务会继续排队等待。'
+        : 'This is taking longer than expected. Confirm that the worker is running; the task will remain queued.')
     }, 45_000)
     const source = new EventSource(
       decisionConversationEventsUrl(task.task_id, selectedConversationId),
@@ -467,7 +527,9 @@ export function DecisionScenarioWorkspace({
         turnStarted = true
         window.clearTimeout(waitWarning)
         waitWarning = window.setTimeout(() => {
-          setStreamError('Model processing is taking longer than expected. The system is still waiting for a complete, fact-checked answer.')
+          setStreamError(pendingLanguage === 'zh'
+            ? '模型处理时间超过预期，系统仍在等待完整且通过事实校验的回答。'
+            : 'Model processing is taking longer than expected. The system is still waiting for a complete, fact-checked answer.')
         }, 130_000)
         setStreamingText('')
         setStreamError('')
@@ -482,20 +544,33 @@ export function DecisionScenarioWorkspace({
     const stageChanged = (event: Event) => {
       const payload = parse(event)
       if (payload.reply_to_message_id !== pendingReplyTo) return
-      const labels: Record<string, string> = {
-        intent: 'Interpreting your question and preferences',
-        investigation: 'Reviewing quotation, historical, or policy evidence',
-        simulation: 'Running a deterministic simulation with the new conditions; the official result will not change',
-        narration: 'Generating a factual explanation and validating citations',
-        persist: 'Saving this response',
+      const labels: Record<ResponseLanguage, Record<string, string>> = {
+        en: {
+          intent: 'Interpreting your question and preferences',
+          investigation: 'Reviewing quotation, historical, or policy evidence',
+          simulation: 'Running a deterministic simulation with the new conditions; the official result will not change',
+          narration: 'Generating a factual explanation and validating citations',
+          persist: 'Saving this response',
+        },
+        zh: {
+          intent: '正在识别你的问题和偏好',
+          investigation: '正在核对报价、历史或制度证据',
+          simulation: '正在按新条件进行确定性模拟；正式结果不会改变',
+          narration: '正在生成事实说明并校验引用',
+          persist: '正在保存回答',
+        },
       }
-      setProcessingStage(labels[String(payload.stage)] ?? 'Processing this request')
+      setProcessingStage(labels[pendingLanguage][String(payload.stage)] ?? (pendingLanguage === 'zh' ? '正在处理请求' : 'Processing this request'))
     }
     const toolObserved = (event: Event) => {
       const payload = parse(event)
       if (payload.reply_to_message_id !== pendingReplyTo || typeof payload.tool_name !== 'string') return
-      const label = investigationToolLabels[payload.tool_name] ?? payload.tool_name
-      const status = payload.status === 'OK' ? 'Completed' : payload.status === 'NOT_FOUND' ? 'No evidence found' : 'No result obtained'
+      const label = investigationToolLabel(payload.tool_name, pendingLanguage)
+      const status = payload.status === 'OK'
+        ? (pendingLanguage === 'zh' ? '已完成' : 'Completed')
+        : payload.status === 'NOT_FOUND'
+          ? (pendingLanguage === 'zh' ? '未找到证据' : 'No evidence found')
+          : (pendingLanguage === 'zh' ? '未获得结果' : 'No result obtained')
       const reason = typeof payload.reason === 'string' && payload.reason ? `; ${payload.reason}` : ''
       setToolProgress((current) => [...current, `${label}: ${status}${reason}`])
     }
@@ -534,7 +609,7 @@ export function DecisionScenarioWorkspace({
       window.clearTimeout(waitWarning)
       source.close()
     }
-  }, [conversationReadOnly, pendingReplyTo, queryClient, selectedConversationId, task.task_id])
+  }, [conversationReadOnly, pendingLanguage, pendingReplyTo, queryClient, selectedConversationId, task.task_id])
 
   const createConversation = useMutation({
     mutationFn: () => api.createDecisionConversation(
@@ -563,7 +638,7 @@ export function DecisionScenarioWorkspace({
         content,
         createIdempotencyKey(),
       ),
-    onSuccess: (response) => {
+    onSuccess: (response, variables) => {
       setMessage('')
       setStreamingText('')
       setStreamError('')
@@ -571,6 +646,7 @@ export function DecisionScenarioWorkspace({
       setQueuedTurn({
         conversationId: response.conversation_id,
         messageId: response.message.message_id,
+        language: responseLanguage(variables.content),
       })
       void queryClient.invalidateQueries({
         queryKey: ['tasks', task.task_id, 'decision-conversations'],
@@ -804,8 +880,11 @@ export function DecisionScenarioWorkspace({
                 >Start a conversation</button>
               </div>
             )}
-            {activeConversation?.messages.map((item) => (
-              <MessageBubble
+            {activeConversation?.messages.map((item) => {
+              const originalUserMessage = item.role === 'USER'
+                ? item
+                : activeConversation.messages.find((entry) => entry.message_id === item.reply_to_message_id)
+              return <MessageBubble
                 taskId={task.task_id}
                 key={item.message_id}
                 message={item}
@@ -819,6 +898,7 @@ export function DecisionScenarioWorkspace({
                 onConfirm={(intentId) => confirmIntent.mutate(intentId)}
                 onOpenCitation={openCitation}
                 investigation={investigations.data?.find((record) => item.reference_ids.includes(`INVESTIGATION:${record.artifact_id}`))}
+                language={responseLanguage(originalUserMessage?.content)}
                 onRetry={item.status === 'FAILED' && item.reply_to_message_id
                   ? (() => {
                       const original = activeConversation.messages.find((entry) => entry.message_id === item.reply_to_message_id)
@@ -827,10 +907,10 @@ export function DecisionScenarioWorkspace({
                   : undefined}
                 retrying={sendMessage.isPending}
               />
-            ))}
+            })}
             {(streamingText || activeTurn) && (
               <article className="decision-chat-message chat-role-assistant chat-streaming">
-                <header className="chat-message-status"><span>Generating and validating</span></header>
+                <header className="chat-message-status"><span>{pendingLanguage === 'zh' ? '正在生成并校验' : 'Generating and validating'}</span></header>
                 <p>{streamingText || processingStage}</p>
                 {toolProgress.length > 0 && <ol className="decision-chat-tool-progress">
                   {toolProgress.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}
@@ -976,17 +1056,20 @@ export function DecisionScenarioWorkspace({
               ) : selectedCitationId.startsWith('INVESTIGATION:') ? (
                 <section className="drawer-fields">
                   {(() => {
-                    const record = investigations.data?.find((item) => `INVESTIGATION:${item.artifact_id}` === selectedCitationId)
-                    if (!record) return <p>Loading this investigation record, or the record is no longer associated with the task currently being viewed.</p>
-                    return <>
-                      <h3>Investigation record</h3>
-                      <p>{record.status === 'RESOLVED' ? 'Investigation completed; this does not constitute procurement approval.' : 'Investigation incomplete. Do not treat missing evidence as a pass.'}</p>
+                     const record = investigations.data?.find((item) => `INVESTIGATION:${item.artifact_id}` === selectedCitationId)
+                     if (!record) return <p>Loading this investigation record, or the record is no longer associated with the task currently being viewed.</p>
+                     const language = record.known_facts.response_language === 'zh' ? 'zh' : 'en'
+                     return <>
+                      <h3>{language === 'zh' ? '核查记录' : 'Investigation record'}</h3>
+                      <p>{record.status === 'RESOLVED'
+                        ? (language === 'zh' ? '核查已完成；这不构成采购审批。' : 'Investigation completed; this does not constitute procurement approval.')
+                        : (language === 'zh' ? '核查未完成；不能把缺少证据视为通过。' : 'Investigation incomplete. Do not treat missing evidence as a pass.')}</p>
                       <ol>{record.observations.map((observation) => <li key={observation.sequence}>
-                        <strong>{investigationToolLabels[observation.result.tool_name] ?? observation.result.tool_name}</strong>
-                        <span>{investigationObservationText(observation)}</span>
-                        {observation.plan && observation.plan.length > 0 && <small>Public plan: {observation.plan.join(' → ')}</small>}
-                        {observation.reason && <small>Selection reason: {observation.reason}</small>}
-                        <details><summary>View structured tool results</summary><pre>{JSON.stringify(observation.result.data, null, 2)}</pre></details>
+                        <strong>{investigationToolLabel(observation.result.tool_name, language)}</strong>
+                        <span>{investigationObservationText(observation, language)}</span>
+                        {observation.plan && observation.plan.length > 0 && <small>{language === 'zh' ? '公开计划：' : 'Public plan: '}{observation.plan.join(' → ')}</small>}
+                        {observation.reason && <small>{language === 'zh' ? '选择原因：' : 'Selection reason: '}{observation.reason}</small>}
+                        <details><summary>{language === 'zh' ? '查看结构化工具结果' : 'View structured tool results'}</summary><pre>{JSON.stringify(observation.result.data, null, 2)}</pre></details>
                       </li>)}</ol>
                     </>
                   })()}

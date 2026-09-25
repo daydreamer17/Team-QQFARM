@@ -86,6 +86,7 @@ from .conversations import (
     validate_conversation_turn,
 )
 from .decision_intents import DecisionIntentParser, confirmation_text
+from .response_language import conversation_response_language
 from .quote_review_schema import (
     GROUP_IDS,
     QUOTE_REVIEW_SCHEMA_VERSION,
@@ -6643,13 +6644,7 @@ class BackendService(ComplianceMixin):
                 "conversation_model_output_invalid",
                 "Conversation proposal does not satisfy the output contract.",
             ) from exc
-        text = str(turn["assistant_text"])
         reference_ids = list(turn.get("reference_ids", []))
-        if text.strip() and not re.search(r"[\u4e00-\u9fff]", text):
-            raise BackendError(
-                "conversation_model_output_invalid",
-                "Conversation output must contain validated Chinese narration.",
-            )
         if len(reference_ids) != len(set(reference_ids)):
             raise BackendError(
                 "conversation_model_output_invalid",
@@ -6731,16 +6726,34 @@ class BackendService(ComplianceMixin):
                     "Conversation output failed persistence validation: "
                     + str(exc)[:500],
                 ) from exc
-            text = render_conversation_turn(validated_turn)
+            turn_language = conversation_response_language({
+                "recent_messages": [
+                    {"role": "USER", "content": user_message.content}
+                ],
+            })
+            text = render_conversation_turn(
+                validated_turn,
+                turn_language,
+            )
             if no_effect:
                 changes = None
                 text = "\n\n".join(part for part in (
                     validated_turn.assistant_text.strip(),
-                    "This preference matches the current settings, so a new simulation scenario is unnecessary. You can continue adjusting other conditions.",
+                    ("该偏好与当前设置一致，因此无需生成新的模拟情景。你可以继续调整其他条件。"
+                     if turn_language == "zh" else
+                     "This preference matches the current settings, so a new simulation scenario is unnecessary. You can continue adjusting other conditions."),
                 ) if part)
             reference_ids = list(validated_turn.reference_ids)
             if changes is not None and not no_effect:
                 from .decision_narrative import render_decision_preview
+                if result.payload.get("compliance_assessment"):
+                    from .compliance import bind_assessment_comparison
+                    trial = trial.model_copy(update={
+                        "comparison": bind_assessment_comparison(
+                            trial.comparison,
+                            result.payload["compliance_assessment"],
+                        ),
+                    })
 
                 preview_id = new_id("artifact")
                 preview_payload = {
@@ -6765,6 +6778,7 @@ class BackendService(ComplianceMixin):
                     trial, currency=analysis_input.comparison.requirement.currency,
                     supplier_bindings=analysis_input.supplier_bindings,
                     reference=reference_ids[0],
+                    language=turn_language,
                 )
             intent_id = None
             confirmation = None

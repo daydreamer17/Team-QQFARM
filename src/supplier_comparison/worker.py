@@ -14,6 +14,7 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from .backend.checkpoints import checkpoint_connection_string
 from .backend.conversations import CONVERSATION_PROMPT_VERSION, ConversationModelConfig, process_conversation_turn
 from .backend.decision_intents import CONVERSATION_INTENT_VERSION
+from .backend.response_language import conversation_response_language
 from .backend.database import create_session_factory
 from .backend.service import BackendError, BackendService
 from .backend.settings import settings
@@ -141,6 +142,7 @@ def _run_decision_conversation_job(
     service: BackendService, job_id: str
 ) -> dict:
     context = service.conversation_job_context(job_id)
+    response_language = conversation_response_language(context)
     attempts = 0
     started_at = time.monotonic()
     stage = "intent"
@@ -217,11 +219,18 @@ def _run_decision_conversation_job(
         )
     except ModelClientError as exc:
         attempts += exc.attempts
-        message = {
+        messages = {
             "conversation_model_output_invalid": "This explanation did not pass factual and citation validation. The official result was not changed. You may regenerate the explanation.",
             "conversation_intent_invalid": "The request could not be interpreted reliably and no simulation was generated. Specify primary and secondary criteria, tolerance, or supplier names and try again.",
             "conversation_intent_mismatch": "The answer did not match the interpreted request. It was not saved and the official result was not changed. Try again.",
-        }.get(exc.error_code, str(exc))
+        }
+        if response_language == "zh":
+            messages = {
+                "conversation_model_output_invalid": "回答未通过事实与引用校验，正式结果未发生变化。请重新生成。",
+                "conversation_intent_invalid": "系统无法可靠识别这次请求，因此没有生成模拟结果。请明确主要、次要指标，成本容差或供应商名称后重试。",
+                "conversation_intent_mismatch": "生成的回答与识别出的请求不一致，因此未保存，也未修改正式结果。请重试。",
+            }
+        message = messages.get(exc.error_code, str(exc))
         service.fail_conversation_job(
             job_id,
             code=exc.error_code,
@@ -237,6 +246,13 @@ def _run_decision_conversation_job(
             "selection_input_stale": "The task revision changed during calculation, so this attempt was not saved. Refresh the latest result and try again.",
             "conversation_model_output_invalid": "This response failed validation before saving and did not change the official result. Try again; if the issue persists, provide the task ID.",
         }
+        if response_language == "zh":
+            messages = {
+                "selection_review_required": "本次模拟包含仍需审核的报价字段。请先在“待处理事项 / 集中审核”中确认字段并重新分析；此前被排除的报价也必须通过审核后才能恢复。",
+                "conversation_stale": "该对话基于的决策结果已经过期。请打开最新决策结果后重新提交请求。",
+                "selection_input_stale": "计算过程中任务版本发生变化，本次结果未保存。请刷新最新结果后重试。",
+                "conversation_model_output_invalid": "回答在保存前未通过校验，正式结果未发生变化。请重新生成；如果仍然失败，请提供任务 ID。",
+            }
         service.fail_conversation_job(
             job_id, code=exc.code,
             message=messages.get(exc.code, "This simulation or save operation did not complete. Check the current revision and fields requiring review, then try again."),
@@ -245,15 +261,26 @@ def _run_decision_conversation_job(
         )
         raise
     except Exception as exc:
+        message = (
+            "对话处理时出现意外错误，正式结果未发生变化。请重新生成；如果仍然失败，请提供任务 ID。"
+            if response_language == "zh"
+            else
+            "Conversation processing failed unexpectedly. The official result was not changed. "
+            "Regenerate the answer; if it still fails, provide the task ID."
+        )
         service.fail_conversation_job(
             job_id,
             code="conversation_processing_failed",
-            message="Conversation processing failed unexpectedly.",
+            message=message,
             attempts=attempts,
+            diagnostic=(
+                f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; "
+                f"{exc.__class__.__name__}: {str(exc)}"
+            )[:1000],
         )
         raise BackendError(
             "conversation_processing_failed",
-            "Conversation processing failed unexpectedly.",
+            message,
         ) from exc
 
 

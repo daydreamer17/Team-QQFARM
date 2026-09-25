@@ -1485,6 +1485,48 @@ def test_decision_agent_reserves_final_call_instead_of_exhausting_tool_budget(ba
     assert len(brief["facts"]) == 3
 
 
+def test_decision_agent_compiles_verified_evidence_when_late_planner_call_fails(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-late-planner-failure",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    recommended = tools.result["result"]["recommended_quote_ids"][0]
+    case = tools.prepare_case(tools.requested_case(
+        request_id="late-planner-failure",
+        question="请核对当前推荐供应商的报价与历史表现。",
+    ))
+
+    class FailingAfterEvidencePlanner:
+        model_id = "scripted-late-failure-agent"
+
+        def __init__(self):
+            self.calls = 0
+
+        def choose(self, _case, _schemas, *, timeout_seconds):
+            self.calls += 1
+            if self.calls == 1:
+                return call("inspect_quote_evidence", {"quote_id": recommended, "focus": "ALL"})
+            if self.calls == 2:
+                return call("inspect_supplier_history", {"quote_id": recommended})
+            raise RuntimeError("provider returned malformed output")
+
+    completed = InvestigationRunner(FailingAfterEvidencePlanner()).run((case,), tools, tools.save)[0]
+    names = [observation.result.tool_name for observation in completed.observations]
+    assert completed.status == "RESOLVED"
+    assert completed.stop_reason == "REQUEST_COMPLETED"
+    assert names[-1] == "compile_decision_brief"
+    assert completed.error_code is None
+    assert completed.observations[-1].result.data["facts"]
+
+
 def test_decision_agent_treats_refocused_quote_read_as_duplicate(batch_review):
     _http, service, task, runner, _review, body = batch_review
     updated = service.correct_fields(
@@ -1632,6 +1674,71 @@ def test_decision_agent_recovers_from_premature_stop_for_narrow_evidence_questio
         "inspect_quote_evidence", "compile_decision_brief",
     ]
     assert completed.observations[2].arguments["focus"] == "COST"
+
+
+def test_decision_agent_uses_explicit_question_scope_before_primary_ranking(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="question-scope-overrides-primary-ranking",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+
+    history_case = tools.requested_case(
+        request_id="all-supplier-history",
+        question="哪家供应商历史表现最好？请综合评级、准时率和拒收率后判断。",
+    )
+    history_plan = history_case.known_facts["ranking_investigation_plan"]
+    assert history_plan["requires_supplier_history"] is True
+    assert history_plan["requires_quote_evidence"] is False
+    assert set(tools._candidate_quote_ids(history_case)) == set(tools.rows)
+
+    english_history_case = tools.requested_case(
+        request_id="all-supplier-history-en",
+        question="Which supplier has the best historical performance? Judge using rating, on-time rate, and rejection rate.",
+    )
+    english_history_plan = english_history_case.known_facts["ranking_investigation_plan"]
+    assert english_history_plan["response_language"] == "en"
+    assert english_history_plan["requires_supplier_history"] is True
+    assert english_history_plan["requires_quote_evidence"] is False
+    assert set(tools._candidate_quote_ids(english_history_case)) == set(tools.rows)
+
+    delivery_pair_case = tools.requested_case(
+        request_id="two-delivery-candidates-en",
+        question=(
+            "If fastest delivery is prioritised, which two suppliers are most worth comparing? "
+            "Verify their delivery evidence and historical fulfilment performance."
+        ),
+    )
+    delivery_pair_plan = delivery_pair_case.known_facts["ranking_investigation_plan"]
+    expected_delivery_pair = [
+        str(row["quote_id"])
+        for row in sorted(
+            (
+                row for row in tools.rows.values()
+                if row.get("status") == "FEASIBLE" and row.get("estimated_arrival_date")
+            ),
+            key=lambda row: (str(row["estimated_arrival_date"]), str(row.get("total_cost"))),
+        )[:2]
+    ]
+    assert delivery_pair_plan["quote_focus"] == "DELIVERY"
+    assert delivery_pair_plan["requires_supplier_history"] is True
+    assert tools._candidate_quote_ids(delivery_pair_case) == expected_delivery_pair
+
+    policy_case = tools.requested_case(
+        request_id="policy-only",
+        question="哪些供应商因制度检查未通过而不能推荐？",
+    )
+    policy_plan = policy_case.known_facts["ranking_investigation_plan"]
+    assert policy_plan["requires_policy_evidence"] is True
+    assert policy_plan["requires_quote_evidence"] is False
+    assert policy_plan["requires_supplier_history"] is False
 
 
 @pytest.mark.skipif(__import__('os').getenv('RUN_AGENT_LIVE_TESTS') != '1',
@@ -2747,20 +2854,20 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
     cases = [
         ('我就想在10月18号那天收到货，我就那天有时间',
          {'assistant_text': '', 'reference_ids': [], 'changes': None, 'clarification': 'EXACT_DELIVERY_DAY'},
-         'cannot guarantee delivery on one exact day', False),
+         '不能保证只在某一天到货', False),
         ('我想要成本最低',
          {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST'}},
-         'matches the current settings', False),
+         '与当前设置一致', False),
         ('改成到货最快优先',
          {'assistant_text': '错误说明：总成本为 SGD 1（RESULT:fake）。', 'reference_ids': ['RESULT:fake'], 'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'}},
-         'awaiting confirmation', True),
+         '等待确认', True),
         ('总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。',
          {'assistant_text': '错误说明：候选上限为 SGD 1（RESULT:fake）。',
           'reference_ids': ['RESULT:fake'], 'changes': {
               'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST',
               'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
               'cost_tolerance_amount': '10'}},
-         'candidate ceiling is SGD 7,010.00', True),
+         '候选上限为 SGD 7,010.00', True),
     ]
     for index, (question, response, expected_text, has_intent) in enumerate(cases):
         routed_response = {

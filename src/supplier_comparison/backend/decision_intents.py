@@ -45,6 +45,86 @@ class ConversationIntent(BaseModel):
         return self
 
 
+def _explicit_scenario_change(message: str) -> RequirementChanges | None:
+    """Parse only unambiguous budget/deadline what-if requests.
+
+    These two common scenario controls should not depend on a model merely to
+    identify a number already supplied by the user.  All recommendation and
+    compliance consequences are still calculated by the deterministic engine.
+    """
+
+    if not re.search(
+        r"如果|假如|试算|会(?:怎样|如何|发生什么|改变|变化)|"
+        r"\bif\b|\bwhat\s+if\b|\bsimulat(?:e|ion)\b|\bwould\b",
+        message,
+        re.IGNORECASE,
+    ):
+        return None
+
+    patch: dict[str, str] = {}
+    budget = re.search(
+        r"(?:预算|budget)[^\d]{0,24}(?:SGD\s*)?([0-9][0-9,]*(?:\.[0-9]+)?)",
+        message,
+        re.IGNORECASE,
+    )
+    if budget:
+        patch["budget_amount"] = budget.group(1).replace(",", "")
+
+    if re.search(r"到货|交付|交期|delivery|arrival", message, re.IGNORECASE):
+        deadline = re.search(r"(?<!\d)(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?!\d)", message)
+        if deadline:
+            patch["delivery_deadline"] = (
+                f"{int(deadline.group(1)):04d}-{int(deadline.group(2)):02d}-{int(deadline.group(3)):02d}"
+            )
+    return RequirementChanges.model_validate(patch) if patch else None
+
+
+def _requests_evidence_investigation(message: str) -> bool:
+    """Recognise explicit evidence questions in Chinese and English."""
+
+    return bool(re.search(
+        r"(?:核查|核对|核验|查证|验证|检查|追查|引用)[^\n]{0,120}"
+        r"(?:依据|证据|原文|原始文件|报价|交期|到货|历史|履约|制度|规则|条款|证明|材料|记录|冲突|缺失|过期|编号|要求|成本|费用|风险)|"
+        r"(?:依据|证据|原文|原始文件|报价|交期|到货|历史|履约|制度|规则|条款|证明|材料|记录|成本|费用|风险)"
+        r"[^\n]{0,120}(?:核查|核对|核验|查证|验证|检查|追查)|"
+        r"(?:查证后回答|发现异常继续追查|无法通过现有工具确认)|"
+        r"(?:历史表现|历史记录|历史准时率|拒收率|履约风险|制度检查|供应商准入|"
+        r"RoHS|金额审批|证明材料|供应商编号|证据缺失|证据过期|不匹配|前后矛盾|存在冲突)|"
+        r"(?:verify|check|audit|investigate|trace|cite|review)[^\n]{0,140}"
+        r"(?:basis|evidence|source|original|quotation|quote|delivery|arrival|history|performance|policy|rule|requirement|"
+        r"record|conflict|missing|expired|mismatch|cost|fee|tax|compliance|approval|risk)|"
+        r"(?:source\s+(?:quotation|document)|historical\s+(?:performance|record|on-time\s+rate)|rejection\s+rate|"
+        r"fulfilment\s+risk|supplier\s+eligibility|amount\s+approval|supporting\s+evidence|policy\s+check|"
+        r"evidence\s+(?:conflict|missing|expired|mismatch)|cannot\s+be\s+confirmed\s+with\s+(?:the\s+)?(?:available|current)\s+tools)|"
+        r"(?:missing|expired|mismatched)[^\n]{0,32}(?:evidence|supplier\s+ids?)",
+        message,
+        re.IGNORECASE,
+    ))
+
+
+def _requests_two_delivery_candidates(message: str) -> bool:
+    """Distinguish a two-quote comparison from a ranking-change request."""
+
+    asks_two = bool(re.search(
+        r"哪两(?:家|份)|两(?:家供应商|份报价)|"
+        r"\bwhich\s+two\s+(?:quotes?|quotations?|suppliers?)\b|"
+        r"\btwo\s+(?:quotes?|quotations?|suppliers?)\b",
+        message,
+        re.IGNORECASE,
+    ))
+    asks_compare = bool(re.search(
+        r"比较|对比|最值得|最应该|compare|compared|comparison|closest|closely",
+        message,
+        re.IGNORECASE,
+    ))
+    asks_delivery = bool(re.search(
+        r"到货|交期|交付|最快|最早|delivery|arrival|fastest|earliest",
+        message,
+        re.IGNORECASE,
+    ))
+    return asks_two and asks_compare and asks_delivery
+
+
 def route_conversation_intent(context: dict[str, Any], config: Any, *,
                               opener: Callable[..., object] = trusted_urlopen,
                               sleeper: Callable[[float], None] = time.sleep,
@@ -63,6 +143,12 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         latest,
     ):
         return ConversationIntent(route="UNSUPPORTED"), 0
+    if changes := _explicit_scenario_change(latest):
+        return ConversationIntent(route="SIMULATE", changes=changes), 0
+    if _requests_evidence_investigation(latest):
+        return ConversationIntent(route="INVESTIGATE"), 0
+    if _requests_two_delivery_candidates(latest):
+        return ConversationIntent(route="EXPLAIN"), 0
     if re.search(
         r"(?:请|帮我|先)?(?:深入)?(?:核查|核对|查证|验证).{0,80}(?:依据|证据|原文|历史|样本|制度|条款|可靠|来源)|"
         r"(?:依据|证据|历史|样本|制度|条款|准时率|价格|到货日期).{0,80}(?:可靠|真实吗|有来源|能否证明|是否足以)|"

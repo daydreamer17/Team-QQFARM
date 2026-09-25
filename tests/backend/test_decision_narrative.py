@@ -43,6 +43,7 @@ def test_tolerance_preview_uses_engine_pool_and_actual_winner():
     assert 'candidate ceiling is SGD 9,663.75' in text
     assert 'Sterling Components (SUP-024): SGD 9,660.00, estimated arrival 2026-10-17' in text
     assert 'Sterling Semitech (SUP-030): SGD 9,660.00, estimated arrival 2026-10-15' in text
+    assert all(mark not in text for mark in ('：', '（', '）', '。'))
     assert text.endswith('Generate a scenario using these conditions?')
 
 
@@ -68,3 +69,30 @@ def test_history_missing_and_empty_scope_never_invent_winner():
     trial, text = trial_for(excluded_supplier_ids=('SUP-023', 'SUP-024', 'SUP-030'))
     assert not trial.comparison.recommended_quote_ids
     assert 'current scope is empty' in text
+
+
+def test_budget_preview_does_not_call_a_non_compliant_quote_policy_eligible():
+    trial, _text = trial_for(budget_amount='10000')
+    non_compliant_id = trial.comparison.supplier_results[0].quote_id
+    comparison = trial.comparison.model_copy(update={
+        'compliance_assessment': {
+            'assessments': [{
+                'quote_id': non_compliant_id,
+                'status': 'NON_COMPLIANT',
+            }],
+        },
+    })
+    trial = trial.model_copy(update={'comparison': comparison})
+
+    text = render_decision_preview(
+        trial,
+        currency='SGD',
+        supplier_bindings={row.quote_id: row.quote_id for row in comparison.supplier_results},
+        reference='SIMULATION:test-policy-filter',
+    )
+
+    eligible_line = next(
+        line for line in text.splitlines()
+        if 'policy-eligible quotations that remain in the ranking' in line
+    )
+    assert non_compliant_id not in eligible_line
