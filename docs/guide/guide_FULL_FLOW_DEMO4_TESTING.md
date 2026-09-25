@@ -4,14 +4,14 @@
 
 ## 1. 先跑哪一套
 
-上传目录：`data/generated/inputs/development/full_flow_demo4/`。
+上传目录：`data/generated/demos/full_flow_demo4/`。
 
-1. 创建新任务，场景编号可填 `MCU-TRADEOFF-004`。
+1. 若要跑最新版完整流程，先按第 5 节发布 Electronics/SG 制度；然后创建新任务并绑定它，场景编号可填 `MCU-TRADEOFF-004`。
 2. 上传 `requirement/procurement_requirement.txt`，核对 `confirmed_requirement.json`。也提供相同内容的 PDF/MD，不要重复上传。
-3. 首轮不绑定 Policy。核对：1,000 颗、预算 SGD 8,000（未税、包含运费及其他费用）、2026-11-02 下单、2026-11-15 最晚到货、禁止替代料、成本优先、无次要偏好。
+3. 核对：1,000 颗、预算 SGD 8,000（未税、包含运费及其他费用）、2026-11-02 下单、2026-11-15 最晚到货、禁止替代料、成本优先、无次要偏好。
 4. 上传 `quotes/pdf/` 四份文件。想先隔离模型问题，可在另一任务上传 `quotes/csv/` 四份固定模板。两种格式不要混传，同一供应商不要创建两个独立报价。
 5. 使用准确供应商 ID：Great Wall `SUP-029`、Redwood `SUP-022`、Schwarzwald `SUP-023`、Sterling `SUP-024`。
-6. 完成字段审核并正式提交全部报价，再手动运行比较。系统若提示具体字段待确认，应查看原文并确认，而不是反复重启。
+6. 完成字段审核并正式提交全部报价，随后按第 5 节处理制度材料、确认制度检查，再进入决策比较。系统若提示具体字段待确认，应查看原文并确认，而不是反复重启。
 
 固定 CSV 主报价采用 `Net N from invoice`，当前注册解析器可直接处理；改成更复杂自然语言的 CSV 也可能触发模型，不能认为所有 CSV 都不调用模型。
 
@@ -85,18 +85,47 @@
 
 歧义/语义提示与硬错误必须分开：人工可以确认原值或修正语义，不能认可不存在的来源、越权文档、非法数字或不一致的费用状态金额组合。
 
-## 5. Policy 两轮测试
+## 5. 制度检查前置与 RAG 核验测试
 
-先完成无 Policy 基线，再建第二个任务：
+最新版完整流程使用一个**从创建时就绑定制度**的新任务。旧的无 Policy 基线仍可另建任务回归，但它不能展示制度核验效果。
+
+### 5.1 发布并绑定可执行制度
 
 1. 在制度资源页上传 `policy/electronics_sg/policy.txt`，按 `upload_metadata.json` 核对适用范围 Electronics/SG。
-2. 人工核对三个条款，参考 `reviewed_clauses.json` 配置 APPROVED_SUPPLIER、ROHS_COMPLIANCE、AMOUNT_APPROVAL 控制项。该文件用于管理员核对，不作为供应商证明。
-3. 发布并等待索引可用；创建任务时绑定实际发布版本/index，不猜 index ID。
-4. 上传同样四家报价。应能展示适用制度证据；没有供应商证明时保持待人工核验。制度文字不是合规证明，推荐也不是采购审批。
-5. Sterling 总成本7100，达到7000审批阈值；其他三家未达到。阈值只测试支持的现有控制语义，不承诺新增审批功能。
-6. 单独发布 `unrelated_office_eu/`，其范围是 Office Furniture/EU、金额币种EUR。SG电子采购不能误套用它。不要把两组元数据合并成相同 scope。
+2. 人工核对三个条款，使用 `reviewed_clauses.json` 中完整的可执行参数：供应商准入与 RoHS 在推荐前执行；金额门槛在选定后执行。新版制度版本为 `2026.11-compliance-v2`，不要继续绑定旧的 `2026.11-demo`。
+3. 发布并等待索引可用；创建新任务时选择实际发布版本/index，不手填或猜测 index ID。
+4. 上传四家主报价并完成报价审核。下一步应进入“制度检查”，而不是直接把当前页面位置当作完成进度。
 
-真实 Embedding/Rerank 发布检索与固定适配器的契约测试分开记结果。
+制度文字回答“要检查什么”，供应商材料回答“这家是否满足”。两者缺一不可；RAG 引用制度条款，但不会把制度原文本身当作供应商证明。
+
+### 5.2 第一轮：故意保留四种核验结果
+
+打开 `compliance_evidence/entry_guide.json`，逐项读取 `initial/` 下八份 TXT，在制度检查页为每家供应商上传两份材料并确认事实。`entry_guide.json` 是人工录入辅助，不能替代打开原文核对。
+
+| 供应商 | 准入材料 | RoHS 材料 | 制度资格 | 用户应看到 |
+|---|---|---|---|---|
+| Great Wall / SUP-029 | 有效、通过 | 证明写的是 `QW-MCU8-DEMO`，与需求料号不符 | UNVERIFIED | 料号范围错配，待复核 |
+| Redwood / SUP-022 | 有效、通过 | 精确覆盖 `QW-MCU9-DEMO` | VERIFIED | 合规，可进入优先集合 |
+| Schwarzwald / SUP-023 | 明确不通过 | 有效、通过 | EXCLUDED | 制度不通过，不参与优先推荐 |
+| Sterling / SUP-024 | 有效、通过 | 2026-08-31 到期 | UNVERIFIED | 在演示测试窗口开始前已过期，待复核 |
+
+第一轮确认制度检查后，只有 Redwood 属于 VERIFIED，因此 `VERIFIED_FIRST` 应先在 Redwood 中产生推荐；不能仍因为 Great Wall 成本最低就把它宣布为正式首选。
+
+### 5.3 第二轮：替换材料并观察推荐变化
+
+依次使用 `corrections/`：
+
+1. 用 `rohs_SUP-029_correct.txt` 点击“替换材料”，替换 Great Wall 的错料号 RoHS 记录。Great Wall 与 Redwood 都变为 VERIFIED，成本优先应回到 Great Wall。
+2. 用 `admission_SUP-023_reinstated.txt` 替换 Schwarzwald 的不通过准入记录；其状态由 EXCLUDED 变为 VERIFIED。
+3. 用 `rohs_SUP-024_current.txt` 替换 Sterling 的过期声明；其状态由 UNVERIFIED 变为 VERIFIED。
+
+每次替换都应保留旧材料历史，但只用最新、未被替换的记录参与本次判定。不要把纠正版作为一条并列新材料提交，否则新旧事实冲突时系统应要求人工处理，而不是“最新文件自动赢”。
+
+全部纠正后四家都 VERIFIED，成本优先仍是 Great Wall。Sterling 总成本 7100，达到 7000 的 AFTER_SELECTION 金额门槛；其他三家未达到。该状态只表示“若最终选择 Sterling，需要额外金额审批”，不表示系统已经审批，也不应在尚未选择 Sterling 时阻断其他供应商。
+
+### 5.4 范围隔离
+
+单独发布 `policy/unrelated_office_eu/`，其范围是 Office Furniture/EU、金额币种 EUR。SG 电子采购不能误套用它，也不要把两组元数据改成相同 scope。真实 Embedding/Rerank 发布检索与固定适配器的契约测试要分开记录结果。
 
 ## 6. 对话与异常恢复
 
@@ -140,7 +169,7 @@ PYTHONPATH=src .venv/bin/python -m dotenv -f .env run -- \
 
 每次保留独立目录 `evaluation/results/local/full_flow_demo4/<UTC时间>/`，记录原始候选、审查结果、模型/环境和调用次数。失败也保留；没有静默切换模型；输出不提交 Git。`EXTRACTED` 仅表示提取调用完成，不代表每字段正确，也不代表已经完成全部人工审核。
 
-留出文件位于 `data/generated/inputs/holdout/full_flow_demo4/`，是未参与模型调优的版式重排测试，不代表新器件或跨领域泛化。使用后若据此改规则/提示词，必须转为开发样本。真实提取准确率与人工修正后业务正确性分别统计。
+留出文件位于 `data/generated/fixtures/extraction/full-flow-demo4-layout-holdout/`，是未参与模型调优的版式重排测试，不代表新器件或跨领域泛化。使用后若据此改规则/提示词，必须转为开发样本。真实提取准确率与人工修正后业务正确性分别统计。
 
 对已保存提取结果做离线评分（不会调用模型）：
 

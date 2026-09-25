@@ -217,7 +217,7 @@ def test_quote_supplier_identification_is_read_only_and_task_scoped(
 
 def test_supplier_history_binding_is_frozen_and_refresh_is_explicit(tmp_path: Path) -> None:
     history_root = tmp_path / "history"
-    source = Path(__file__).resolve().parents[2] / "data/purchase_orders.csv"
+    source = Path(__file__).resolve().parents[2] / "data/source/purchase_orders.csv"
     for version in ("history-v1", "history-v2"):
         generate_supplier_history(
             source,

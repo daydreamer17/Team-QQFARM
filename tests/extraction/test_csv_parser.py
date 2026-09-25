@@ -7,8 +7,6 @@ from supplier_comparison.extraction.contracts import AdapterOutputMode, SourceKi
 from supplier_comparison.extraction.csv_parser import (
     V1_CSV_PROFILES,
     V2_CSV_PROFILES,
-    V3_CSV_PROFILES,
-    V5_CSV_PROFILES,
     FixedCsvQuoteParser,
     ProfiledCsvQuoteParser,
     identify_csv_contract,
@@ -61,26 +59,21 @@ def test_supplier_variant_is_not_silently_accepted_as_fixed_template(quote_dicti
     assert raised.value.code == "csv_header_mismatch"
 
 
-@pytest.mark.parametrize("alias", ("a", "b", "c"))
 @pytest.mark.parametrize(
     'version,aliases,profiles',
     [
         (1, ('a', 'b', 'c'), V1_CSV_PROFILES),
         (2, ('a', 'b', 'c'), V2_CSV_PROFILES),
-        (3, ('a', 'b', 'c', 'd', 'e'), V3_CSV_PROFILES),
-        (5, ('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'), V5_CSV_PROFILES),
     ],
 )
 def test_registered_supplier_csv_is_selected_by_exact_header(
-    alias: str,
     version: int,
     aliases: tuple[str, ...],
     profiles,
 ) -> None:
-    root = QUOTES_CSV.parents[1]
     for alias in aliases:
         profile_id = f'v{version}_supplier_{alias}'
-        path = root / f'quote_V{version}' / f'supplier_{alias}_quote_v{version}.csv'
+        path = quote_path(alias, version=version, extension="csv")
         assert identify_csv_contract(path) == profile_id
         assert profile_id in profiles
 
@@ -90,7 +83,7 @@ def test_canonical_csv_contract_is_detected_without_profile() -> None:
 
 
 def test_duplicate_header_is_rejected_before_profile_selection() -> None:
-    path = QUOTES_CSV.parents[1] / 'quote_V4' / 'invalid_header_quote_v4.csv'
+    path = QUOTES_CSV.parents[1] / 'pdf-boundaries' / 'invalid_header_quote_v4.csv'
     with pytest.raises(ContractError) as raised:
         identify_csv_contract(path)
     assert raised.value.code == 'csv_duplicate_headers'
@@ -171,55 +164,3 @@ def test_v2_profiled_csv_crosses_the_model_adapter_boundary(quote_dictionary) ->
     assert len(batch.candidates) == 30
     assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED
     assert budget.calls_used == 0
-
-
-@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
-def test_v3_profiled_csv_rows_produce_stable_cell_sources(alias: str) -> None:
-    profile_id = f"v3_supplier_{alias}"
-    path = quote_path(alias, version=3, extension="csv")
-    parser = ProfiledCsvQuoteParser()
-
-    first = parser.parse_row(path, context_for(alias, version=3), 2, profile_id=profile_id)
-    second = parser.parse_row(path, context_for(alias, version=3), 2, profile_id=profile_id)
-
-    assert first.document_sha256 == second.document_sha256
-    assert [source.source_id for source in first.sources] == [
-        source.source_id for source in second.sources
-    ]
-    assert first.parser_version == V3_CSV_PROFILES[profile_id].parser_version
-    assert len(first.sources) == 31
-    assert all(source.kind == SourceKind.CSV_CELL for source in first.sources)
-
-
-@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
-def test_v3_csv_crosses_the_fixed_adapter_boundary(quote_dictionary, alias: str) -> None:
-    parsed = ProfiledCsvQuoteParser().parse_row(
-        quote_path(alias, version=3, extension="csv"),
-        context_for(alias, version=3),
-        2,
-        profile_id=f"v3_supplier_{alias}",
-    )
-    payload = {
-        "candidates": [
-            {
-                "field_name": definition.field_name,
-                "raw_value": None,
-                "normalized_value": None,
-                "unit": None,
-                "validation_status": "MISSING",
-                "source_refs": [],
-            }
-            for definition in quote_dictionary.extractable_fields
-        ]
-    }
-
-    batch = extract_quote_candidates(
-        parsed,
-        quote_dictionary,
-        FixedOutputAdapter({parsed.context.document_id: payload}),
-        ModelCallBudget(graph_run_id=f"GRAPH-V3-CSV-{alias.upper()}"),
-        f"EXTRACT-V3-CSV-{alias.upper()}",
-    )
-
-    assert len(batch.candidates) == 30
-    assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED

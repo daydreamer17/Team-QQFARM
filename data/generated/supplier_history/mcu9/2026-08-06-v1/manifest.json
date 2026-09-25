@@ -37,7 +37,7 @@
   "generated_at": "2026-08-07T00:00:00Z",
   "generator_version": "supplier-history-generator/1.0.0",
   "schema_version": "supplier-history/1.0.0",
-  "source_path": "data/purchase_orders.csv",
+  "source_path": "data/source/purchase_orders.csv",
   "source_record_count": 47128,
   "source_sha256": "fba22a467e5dd800a0af960930d2ca5e2ecbd9d2bc747e37304867d8d031ae21"
 }

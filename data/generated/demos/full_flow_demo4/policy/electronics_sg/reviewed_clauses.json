@@ -1,0 +1,72 @@
+{
+  "clauses": [
+    {
+      "clause_id": "FF4-ASL",
+      "title": "Supplier identity evidence",
+      "text": "For SG electronics procurement, approved supplier status requires an exact supplier ID and a current registry record. A quotation or a similar supplier name alone is insufficient.",
+      "control_code": "APPROVED_SUPPLIER",
+      "rule_parameters": {
+        "version": "compliance-rule/1.0",
+        "reviewed_by": "synthetic-demo-reviewer",
+        "reviewed_at": "2026-01-15T00:00:00Z",
+        "date_basis": "EVALUATED_AT",
+        "missing_outcome": "REVIEW_REQUIRED",
+        "expired_outcome": "REVIEW_REQUIRED",
+        "mismatch_outcome": "REVIEW_REQUIRED",
+        "allow_unspecified_validity": false,
+        "control_code": "APPROVED_SUPPLIER",
+        "matching_fields": [
+          "supplier_id"
+        ],
+        "execution_stage": "BEFORE_RECOMMENDATION"
+      }
+    },
+    {
+      "clause_id": "FF4-ROHS",
+      "title": "Part-level compliance evidence",
+      "text": "For SG electronics procurement, RoHS compliance requires valid evidence for the offered manufacturer part number. Missing evidence remains REVIEW_REQUIRED, not compliant and not automatically rejected.",
+      "control_code": "ROHS_COMPLIANCE",
+      "rule_parameters": {
+        "version": "compliance-rule/1.0",
+        "reviewed_by": "synthetic-demo-reviewer",
+        "reviewed_at": "2026-01-15T00:00:00Z",
+        "date_basis": "EVALUATED_AT",
+        "missing_outcome": "REVIEW_REQUIRED",
+        "expired_outcome": "REVIEW_REQUIRED",
+        "mismatch_outcome": "REVIEW_REQUIRED",
+        "allow_unspecified_validity": false,
+        "control_code": "ROHS_COMPLIANCE",
+        "matching_fields": [
+          "supplier_id",
+          "manufacturer",
+          "manufacturer_part_number"
+        ],
+        "execution_stage": "BEFORE_RECOMMENDATION"
+      }
+    },
+    {
+      "clause_id": "FF4-APP",
+      "title": "Amount approval threshold",
+      "text": "For SG electronics procurement, a selected quotation with confirmed total cost of SGD 7000.00 or more requires recorded approval after selection. A model recommendation is not approval.",
+      "control_code": "AMOUNT_APPROVAL",
+      "rule_parameters": {
+        "version": "compliance-rule/1.0",
+        "reviewed_by": "synthetic-demo-reviewer",
+        "reviewed_at": "2026-01-15T00:00:00Z",
+        "date_basis": "EVALUATED_AT",
+        "missing_outcome": "REVIEW_REQUIRED",
+        "expired_outcome": "REVIEW_REQUIRED",
+        "mismatch_outcome": "REVIEW_REQUIRED",
+        "allow_unspecified_validity": false,
+        "control_code": "AMOUNT_APPROVAL",
+        "matching_fields": [],
+        "execution_stage": "AFTER_SELECTION",
+        "currency": "SGD",
+        "monetary_basis": "TOTAL_COST",
+        "threshold": "7000.00",
+        "operator": "GTE",
+        "action": "Obtain separate amount approval after selection and before ordering; this application does not grant approval."
+      }
+    }
+  ]
+}

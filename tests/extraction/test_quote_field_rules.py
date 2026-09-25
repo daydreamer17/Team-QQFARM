@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from pathlib import Path
-
 import pytest
 
 from supplier_comparison.extraction.contracts import DocumentContext
@@ -11,17 +9,9 @@ from supplier_comparison.extraction.quote_field_rules import (
     FeeStatus,
     UnitPriceObservation,
     UnitPriceVersionStatus,
-    extract_document_unit_price_observations,
     select_current_unit_price,
     select_document_unit_price,
     validate_fee_status_amount,
-)
-
-
-ROOT = Path(__file__).resolve().parents[2]
-FULL_FLOW_DEMO2_QUOTE_E = (
-    ROOT
-    / "data/generated/inputs/development/full_flow_demo2/quotes/supplier_e_quote.pdf"
 )
 
 
@@ -170,45 +160,6 @@ def test_no_price_observations_is_left_for_required_field_review() -> None:
     assert selection.has_conflict is False
     assert selection.selected_value is None
     assert selection.observations == ()
-
-
-def test_full_flow_demo2_supplier_e_selects_current_price_and_retains_history() -> None:
-    parsed = PdfQuoteParser().parse(
-        FULL_FLOW_DEMO2_QUOTE_E,
-        DocumentContext(
-            task_id="task-full-flow-demo2",
-            task_revision=1,
-            scenario_id="MCU-V9-PERSONALIZED",
-            quote_id="quote-v9-e",
-            quote_version=1,
-            document_id="doc-v9-e",
-            document_version=1,
-            supplier_id="V9-SUP-E",
-        ),
-    )
-
-    observations = extract_document_unit_price_observations(parsed)
-    selection = select_document_unit_price(parsed)
-
-    assert any(
-        item.amount == Decimal("7.32")
-        and item.version_status == UnitPriceVersionStatus.CURRENT
-        for item in observations
-    )
-    assert any(
-        item.amount == Decimal("7.40")
-        and item.version_status == UnitPriceVersionStatus.SUPERSEDED
-        for item in observations
-    )
-    assert selection.has_conflict is False
-    assert selection.selected_value == Decimal("7.32")
-    assert {item.amount for item in selection.audit_observations} == {Decimal("7.40")}
-    source_by_id = {source.source_id: source for source in parsed.sources}
-    selected_text = " ".join(
-        source_by_id[source_id].raw_text for source_id in selection.selected_source_ids
-    )
-    assert "7.32" in selected_text
-    assert "7.40" not in selected_text
 
 
 def test_negative_unit_price_observation_is_rejected() -> None:

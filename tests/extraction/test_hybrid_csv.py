@@ -19,7 +19,7 @@ from supplier_comparison.extraction.hybrid_csv import (
 from .conftest import DATA_ROOT
 
 
-INPUTS_ROOT = DATA_ROOT / "generated" / "inputs"
+INPUTS_ROOT = DATA_ROOT / "generated" / "fixtures" / "extraction" / "hybrid-csv"
 
 
 def _context(case_id: str) -> DocumentContext:
@@ -38,7 +38,7 @@ def _context(case_id: str) -> DocumentContext:
 
 
 def _path(split: str, filename: str) -> Path:
-    return INPUTS_ROOT / split / "quote_V6" / filename
+    return INPUTS_ROOT / filename
 
 
 def test_clean_registered_csv_maps_all_fields_without_semantic_review(

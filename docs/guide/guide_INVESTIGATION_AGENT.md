@@ -111,7 +111,7 @@ POST /api/v1/tasks/{task_id}/investigations
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-覆盖不同工具顺序、真实调用记录、无影响未知无需调用模型、多报价集中补问、人工纠正重算、历史失效、模型非法返回/故障、重复与越权调用、输入变化、共享调用/时间预算及制度门禁。8 个隔离验收场景见 `data/generated/inputs/development/agent_investigation_demo/manifest.json`，参考预期独立保存在 `evaluation/reference/agent_investigation_demo/cases.json`，避免把正确答案泄漏给 Agent。
+覆盖不同工具顺序、真实调用记录、无影响未知无需调用模型、多报价集中补问、人工纠正重算、历史失效、模型非法返回/故障、重复与越权调用、输入变化、共享调用/时间预算及制度门禁。8 个隔离验收场景见 `data/generated/demos/agent_investigation_demo/manifest.json`，参考预期独立保存在 `evaluation/reference/agent_investigation_demo/cases.json`，避免把正确答案泄漏给 Agent。
 
 ```powershell
 # 固定回归，不调用外部模型

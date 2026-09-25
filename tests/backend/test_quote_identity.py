@@ -6,7 +6,7 @@ from supplier_comparison.backend.quote_identity import identify_supplier_id
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEMO = ROOT / "data/generated/inputs/development/full_flow_demo4/quotes"
+DEMO = ROOT / "data/generated/demos/full_flow_demo4/quotes"
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,10 @@
+SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
+Material number: FF4-ASL-SUP023-002
+Control: APPROVED_SUPPLIER
+Supplier ID: SUP-023
+Supplier name: Schwarzwald Circuits
+Registry / declaration outcome: PASS
+Effective from: 2026-09-01
+Expires on: 2027-12-31
+Supersedes: FF4-ASL-SUP023-001
+Statement: This replacement synthetic registry record reinstates the exact supplier ID before evaluation.

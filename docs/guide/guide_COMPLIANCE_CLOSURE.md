@@ -62,7 +62,7 @@ v2 金额条件为 `TOTAL_COST / SGD / GTE / 6500.00 / BEFORE_PUBLICATION`。达
 4. **确认后比较：**可以补齐材料，也可以明确确认仍缺的项目。全部候选资料不足时得到暂定比较，没有已核验正式推荐；存在已核验候选时，先在该资格范围按采购偏好排序。制度资格不改变报价的可行性含义，也不写入用户排除名单。
 5. **采购总结：**生成后检查其核验版本、引用和待办与所选结果一致。旧结果、旧总结和旧 AI 消息保留原依据，不随新材料改写。
 
-单供应商基础材料包：`data/generated/inputs/development/compliance_closure_demo/`。多供应商异常与版本替换材料包：`data/generated/compliance_evidence/`，其中 `supplier-approval`、`rohs-certificates`、`amount-approvals` 三类各有 `v1` 和 `v2`。完整文件与预期见该目录的 `README.md`。
+单供应商基础材料包：`data/generated/fixtures/compliance/closure-demo/`。多供应商异常与版本替换材料包：`data/generated/fixtures/compliance/material-regression/`，其中 `supplier-approval`、`rohs-certificates`、`amount-approvals` 三类各有 `v1` 和 `v2`。完整文件与预期见该目录的 `README.md`。
 
 本目录也提供一份**新生成的合成采购需求与单供应商报价**，可在 2026-09-24 演示，无需延长旧 V1 报价：
 

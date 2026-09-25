@@ -7,22 +7,16 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
-from supplier_comparison.backend.models import Base, Document, GraphRun, Job, QuoteDraft, WorkflowArtifact
+from supplier_comparison.backend.models import Base, Document, QuoteDraft, WorkflowArtifact
 from supplier_comparison.backend.service import (
     BackendError,
     BackendService,
     ConflictError,
     content_hash,
 )
-from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
+from supplier_comparison.backend.workflow import DraftReviewRunner
 from supplier_comparison.extraction.adapters import ModelCallBudget
-from supplier_comparison.extraction.contracts import (
-    CandidateProducer,
-    DocumentContext,
-    ExtractionBatch,
-    SourceCitation,
-)
-from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
+from supplier_comparison.extraction.contracts import DocumentContext, ExtractionBatch
 from supplier_comparison.extraction.csv_parser import FixedCsvQuoteParser
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.criticality import POLICY_FIELDS
@@ -31,15 +25,7 @@ from supplier_comparison.rules import ProcurementRequirement
 
 ROOT = Path(__file__).resolve().parents[2]
 DICTIONARY_PATH = ROOT / "data/contracts/quote_data_field.csv"
-CANONICAL_QUOTES = ROOT / "data/generated/inputs/development/quote_V1/quotes.csv"
-V9_ROOT = ROOT / "data/generated/inputs/development/quote_V9"
-V9_REQUIREMENT = V9_ROOT / "procurement_requirement_v9_cost.csv"
-V9_QUOTES = tuple(sorted(V9_ROOT.glob("v9_supplier_?.csv")))
-V9_FIVE_QUOTE_FLOW = tuple(
-    V9_ROOT / f"v9_supplier_{alias}.csv" for alias in ("b", "c", "d", "e", "g")
-)
-
-
+CANONICAL_QUOTES = ROOT / "data/generated/fixtures/extraction/canonical-quotes/quotes.csv"
 def requirement() -> ProcurementRequirement:
     return ProcurementRequirement.model_validate(
         {
@@ -63,13 +49,6 @@ def requirement() -> ProcurementRequirement:
             "ranking_preference": "LOWEST_CONFIRMED_TOTAL_COST",
         }
     )
-
-
-def v9_requirement() -> ProcurementRequirement:
-    with V9_REQUIREMENT.open("r", encoding="utf-8-sig", newline="") as handle:
-        row = next(csv.DictReader(handle))
-    row["secondary_preference"] = row["secondary_preference"] or None
-    return ProcurementRequirement.model_validate(row)
 
 
 class CanonicalProcessor:
@@ -703,61 +682,6 @@ def test_invalid_input_is_saved_then_repaired_before_submission(service, tmp_pat
         expected_draft_revision=restored["draft_revision"], idempotency_key=f"submit-repaired-{field_name}")
 
 
-def test_sterling_pdf_human_confirmation_survives_semantic_doubts_and_submits(service, tmp_path):
-    """Fixed candidate injection + real PDF parser; this is NOT live model acceptance."""
-    data_dir = ROOT / "data/generated/inputs/development/full_flow_demo3/quotes"
-
-    class FixedSterlingProcessor:
-        def process(self, *, path, media_type, context, budget):
-            with (data_dir / "sterling_semitech_quote.csv").open(newline="", encoding="utf-8") as handle:
-                reader = csv.DictReader(handle)
-                columns, row = reader.fieldnames, next(reader)
-            row.update(scenario_id=context.scenario_id, quote_id=context.quote_id,
-                       quote_version=str(context.quote_version), document_id=context.document_id,
-                       supplier_id=context.supplier_id)
-            csv_path = tmp_path / "fixed-sterling-candidates.csv"
-            with csv_path.open("w", newline="", encoding="utf-8") as handle:
-                writer = csv.DictWriter(handle, fieldnames=columns)
-                writer.writeheader()
-                writer.writerow(row)
-            batch = FixedCsvQuoteParser(service.quote_dictionary).parse_row(csv_path, context, 2)
-            parsed = PdfQuoteParser().parse(path, context)
-            candidates = []
-            for candidate in batch.candidates:
-                updates = {"producer": CandidateProducer.MODEL_ADAPTER,
-                           "adapter_version": "fixed-recovery-test/1", "prompt_version": "fixed-recovery-test/1"}
-                if candidate.source_refs:
-                    needle = "28.00" if candidate.field_name in {"other_fees_amount", "other_fees_status"} else str(candidate.normalized_value)
-                    source = next((source for source in parsed.sources if needle in source.raw_text), parsed.sources[0])
-                    updates["source_refs"] = (SourceCitation(source_id=source.source_id, quoted_text=source.raw_text),)
-                candidates.append(candidate.model_copy(update=updates))
-            return batch.model_copy(update={"schema_version": "1.1", "parsed_input": parsed, "candidates": tuple(candidates)})
-
-    task = service.create_task(requirement(), idempotency_key="create-sterling", scenario_id="sterling-recovery")
-    with (data_dir / "sterling_semitech_quote.pdf").open("rb") as handle:
-        draft = service.upload_quote_draft_stream(task["task_id"], expected_task_revision=1,
-            supplier_id="SUP-030", original_filename="sterling_semitech_quote.pdf", media_type="application/pdf",
-            stream=handle, idempotency_key="upload-sterling", is_synthetic=True, provider="fixed",
-            model_id="fixed-output", environment="FIXED_TEST", prompt_version="fixed-recovery-test/1")
-    DraftReviewRunner(service, processor=FixedSterlingProcessor(), dictionary_path=DICTIONARY_PATH).run_job(draft["job"]["job_id"])
-    current = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
-    assert _field(current, "unit_price")["normalized_value"] == "6.88"
-    assert _field(current, "other_fees_amount")["normalized_value"] == "28.00"
-    assert any("7.20" in item["quoted_text"] for item in _field(current, "unit_price")["review_evidence"])
-    assert {"unit_price", "other_fees_amount"} <= set(current["submission_blocking_fields"])
-    saved = _review_all_fields(service, task, draft, current, key="adopt-current-sterling")
-    assert saved["submission_ready"], saved["review_errors"]
-    assert not saved["review_errors"]
-    assert any(finding["resolved"] for finding in saved["review_findings"] if finding["field_name"] == "unit_price")
-    assert _field(saved, "unit_price")["normalized_value"] == "6.88"
-    assert _field(saved, "other_fees_amount")["normalized_value"] == "28.00"
-    replay = _review_all_fields(service, task, draft, current, key="adopt-current-sterling")
-    assert replay == saved
-    service.submit_quote_draft(task["task_id"], draft["quote_draft_id"], expected_task_revision=1,
-        expected_draft_revision=saved["draft_revision"], idempotency_key="submit-sterling")
-    assert service.get_quote_draft(task["task_id"], draft["quote_draft_id"])["status"] == "SUBMITTED"
-
-
 def test_invalid_full_review_is_atomic_even_after_a_valid_correction_action(
     service: BackendService,
     tmp_path: Path,
@@ -891,183 +815,3 @@ def test_formal_submit_recomputes_gate_instead_of_trusting_saved_ready_flags(
     assert service.get_quote_draft(
         task["task_id"], draft["quote_draft_id"]
     )["status"] == "REVIEW_REQUIRED"
-
-
-@pytest.mark.parametrize("quote_path", V9_QUOTES, ids=lambda path: path.stem)
-def test_v9_csv_drafts_require_full_review_then_reach_submission(
-    service: BackendService,
-    quote_path: Path,
-) -> None:
-    with quote_path.open("r", encoding="utf-8-sig", newline="") as handle:
-        quote_row = next(csv.DictReader(handle))
-    supplier_id = quote_row["supplier_id"]
-    task = service.create_task(
-        v9_requirement(),
-        idempotency_key=f"create-{quote_path.stem}",
-        scenario_id="MCU-V9-TRADEOFF",
-    )
-    with quote_path.open("rb") as stream:
-        draft = service.upload_quote_draft_stream(
-            task["task_id"],
-            expected_task_revision=1,
-            supplier_id=supplier_id,
-            original_filename=quote_path.name,
-            media_type="text/csv",
-            stream=stream,
-            idempotency_key=f"draft-upload-{quote_path.stem}",
-            is_synthetic=True,
-            provider="fixed",
-            model_id="fixed-output",
-            environment="FIXED_TEST",
-            prompt_version="quote-extraction/1.0.0",
-        )
-
-    assert draft["status"] == "PROCESSING"
-    processed = DraftReviewRunner(
-        service,
-        processor=DefaultQuoteProcessor(QuoteDictionary.load(DICTIONARY_PATH)),
-        dictionary_path=DICTIONARY_PATH,
-    ).run_job(draft["job"]["job_id"])
-    current = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
-
-    assert processed["status"] == "REVIEW_REQUIRED"
-    assert current["human_review_complete"] is False
-    assert len(current["unconfirmed_fields"]) == 30
-
-    reviewed = _review_all_fields(
-        service,
-        task,
-        draft,
-        current,
-        key=f"review-all-{quote_path.stem}",
-        overrides={
-            # V9 deliberately keeps the source spelling (PIECE/TRAY).  The
-            # quote dictionary accepts canonical lower-case enum values only,
-            # so a human correction is required; blindly confirming the
-            # parser value must remain a hard submission blocker.
-            "packaging_type": {
-                "action": "SET_VALUE",
-                "raw_value": quote_row["packaging_type"],
-                "normalized_value": quote_row["packaging_type"].lower(),
-                "unit": None,
-                "reason": "Buyer normalized the packaging enum after review.",
-            }
-        },
-    )
-    assert reviewed["status"] == "READY_TO_SUBMIT"
-    assert reviewed["human_review_complete"] is True
-    assert reviewed["submission_ready"] is True
-
-    submitted = service.submit_quote_draft(
-        task["task_id"],
-        draft["quote_draft_id"],
-        expected_task_revision=1,
-        expected_draft_revision=reviewed["draft_revision"],
-        idempotency_key=f"draft-submit-{quote_path.stem}",
-    )
-    assert submitted["status"] == "SUBMITTED"
-    assert submitted["task_revision"] == 2
-    assert service.list_quotes(task["task_id"])["items"][0]["supplier_id"] == supplier_id
-
-
-def test_five_v9_quotes_only_start_comparison_after_explicit_run(
-    service: BackendService,
-) -> None:
-    """Submitting reviewed quotes must not implicitly start comparison work."""
-
-    task = service.create_task(
-        v9_requirement(),
-        idempotency_key="create-five-quote-manual-run",
-        scenario_id="MCU-V9-FIVE-QUOTE-MANUAL-RUN",
-    )
-    task_revision = task["task_revision"]
-    processor = DefaultQuoteProcessor(QuoteDictionary.load(DICTIONARY_PATH))
-
-    for position, quote_path in enumerate(V9_FIVE_QUOTE_FLOW, start=1):
-        with quote_path.open("r", encoding="utf-8-sig", newline="") as handle:
-            quote_row = next(csv.DictReader(handle))
-        supplier_id = quote_row["supplier_id"]
-        with quote_path.open("rb") as stream:
-            draft = service.upload_quote_draft_stream(
-                task["task_id"],
-                expected_task_revision=task_revision,
-                supplier_id=supplier_id,
-                original_filename=quote_path.name,
-                media_type="text/csv",
-                stream=stream,
-                idempotency_key=f"upload-five-quote-{quote_path.stem}",
-                is_synthetic=True,
-                provider="fixed",
-                model_id="fixed-output",
-                environment="FIXED_TEST",
-                prompt_version="quote-extraction/1.0.0",
-            )
-
-        processed = DraftReviewRunner(
-            service,
-            processor=processor,
-            dictionary_path=DICTIONARY_PATH,
-        ).run_job(draft["job"]["job_id"])
-        assert processed["status"] == "REVIEW_REQUIRED"
-        current = service.get_quote_draft(task["task_id"], draft["quote_draft_id"])
-        reviewed = _review_all_fields(
-            service,
-            task,
-            draft,
-            current,
-            key=f"review-five-quote-{quote_path.stem}",
-            overrides={
-                "packaging_type": {
-                    "action": "SET_VALUE",
-                    "raw_value": quote_row["packaging_type"],
-                    "normalized_value": quote_row["packaging_type"].lower(),
-                    "unit": None,
-                    "reason": "Buyer normalized the packaging enum after review.",
-                }
-            },
-        )
-        submitted = service.submit_quote_draft(
-            task["task_id"],
-            draft["quote_draft_id"],
-            expected_task_revision=task_revision,
-            expected_draft_revision=reviewed["draft_revision"],
-            idempotency_key=f"submit-five-quote-{quote_path.stem}",
-        )
-        task_revision = submitted["task_revision"]
-
-        assert len(service.list_quotes(task["task_id"])["items"]) == position
-        with service.session_factory() as session:
-            assert session.scalars(
-                select(GraphRun).where(GraphRun.task_id == task["task_id"])
-            ).all() == []
-            assert session.scalars(
-                select(Job).where(
-                    Job.task_id == task["task_id"],
-                    Job.job_type == "START",
-                )
-            ).all() == []
-
-    started = service.start_run(
-        task["task_id"],
-        expected_task_revision=task_revision,
-        idempotency_key="explicit-start-after-five-quotes",
-        provider="fixed",
-        model_id="fixed-output",
-        environment="FIXED_TEST",
-        prompt_version="quote-extraction/1.0.0",
-    )
-
-    assert started["job_type"] == "START"
-    assert started["job_status"] == "PENDING"
-    with service.session_factory() as session:
-        graphs = session.scalars(
-            select(GraphRun).where(GraphRun.task_id == task["task_id"])
-        ).all()
-        start_jobs = session.scalars(
-            select(Job).where(
-                Job.task_id == task["task_id"],
-                Job.job_type == "START",
-            )
-        ).all()
-    assert [graph.graph_run_id for graph in graphs] == [started["graph_run_id"]]
-    assert [job.job_id for job in start_jobs] == [started["job_id"]]

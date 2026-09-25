@@ -21,7 +21,15 @@ from supplier_comparison.rag.models import PolicySet, PolicyIndex, PolicyDocumen
 
 
 def test_paired_demo_evidence_is_complete_and_auto_parseable():
-    root = Path(__file__).resolve().parents[2] / 'data' / 'generated' / 'compliance_evidence' / 'paired-scenarios'
+    root = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "generated"
+        / "fixtures"
+        / "compliance"
+        / "material-regression"
+        / "paired-scenarios"
+    )
     supplier_dirs = sorted(path for path in root.iterdir() if path.is_dir())
     assert [path.name.split('-', 2)[:2] for path in supplier_dirs] == [
         ['SUP', '022'], ['SUP', '023'], ['SUP', '024'], ['SUP', '029'],

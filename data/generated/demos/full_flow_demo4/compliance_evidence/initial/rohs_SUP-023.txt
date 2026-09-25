@@ -1,0 +1,11 @@
+SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
+Material number: FF4-ROHS-SUP023-001
+Control: ROHS_COMPLIANCE
+Supplier ID: SUP-023
+Supplier name: Schwarzwald Circuits
+Manufacturer: QQ Demo Components
+Manufacturer part number: QW-MCU9-DEMO
+Registry / declaration outcome: PASS
+Effective from: 2026-01-01
+Expires on: 2027-12-31
+Statement: The synthetic declaration covers the exact offered manufacturer and part number.

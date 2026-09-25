@@ -29,7 +29,7 @@ def main():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("run_dir", type=Path)
     args = cli.parse_args()
-    data = ROOT / "data/generated/inputs/development/full_flow_demo4"
+    data = ROOT / "data/generated/demos/full_flow_demo4"
     manifest = json.loads((data / "manifest.json").read_text())
     expectation = json.loads((ROOT / "evaluation/reference/full_flow_demo4/parsing_expectations.json").read_text())
     dictionary = QuoteDictionary.load(ROOT / "data/contracts/quote_data_field.csv")

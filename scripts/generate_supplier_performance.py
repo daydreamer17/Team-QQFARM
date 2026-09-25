@@ -12,7 +12,7 @@ from supplier_comparison.supplier_history import generate_supplier_history
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=Path, default=Path("data/purchase_orders.csv"))
+    parser.add_argument("--source", type=Path, default=Path("data/source/purchase_orders.csv"))
     parser.add_argument(
         "--output-root",
         type=Path,

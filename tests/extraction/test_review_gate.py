@@ -33,7 +33,7 @@ from supplier_comparison.extraction.review_contracts import (
 )
 from supplier_comparison.extraction.contracts import AdapterEnvironment
 
-from .conftest import DEVELOPMENT_ROOT, context_for, quotes_csv_path
+from .conftest import FIXTURE_ROOT, context_for, quotes_csv_path
 
 
 NOW = datetime(2026, 9, 11, 12, 0, tzinfo=timezone.utc)
@@ -956,7 +956,7 @@ def test_distinct_document_unit_prices_block_single_selected_value(
     quote_dictionary,
 ) -> None:
     parsed = PdfQuoteParser().parse(
-        DEVELOPMENT_ROOT / "quote_V7/dev_03.pdf",
+        FIXTURE_ROOT / "pdf-layout/review_gate_quote.pdf",
         context_for("a", version=7),
     )
     price_source = next(

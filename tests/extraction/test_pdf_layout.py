@@ -21,11 +21,11 @@ from supplier_comparison.extraction.pdf_layout import PdfLayoutConfig
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.extraction.service import extract_quote_candidates
 
-from .conftest import DEVELOPMENT_ROOT, context_for, quote_path
+from .conftest import FIXTURE_ROOT, context_for, quote_path
 
 
 def _v5_path(alias: str):
-    return DEVELOPMENT_ROOT / "quote_V5" / f"supplier_{alias.lower()}_quote_v5.pdf"
+    return FIXTURE_ROOT / "pdf-layout" / f"supplier_{alias.lower()}_quote_v5.pdf"
 
 
 def _v5_context(alias: str) -> DocumentContext:
@@ -128,7 +128,7 @@ def test_ruled_key_value_table_links_header_without_fabricating_source_text() ->
 
 
 def test_repeated_headers_keep_cross_page_table_identity() -> None:
-    path = DEVELOPMENT_ROOT / "quote_V6" / "dev_03_multipage_repeated.pdf"
+    path = FIXTURE_ROOT / "pdf-layout" / "dev_03_multipage_repeated.pdf"
     parsed = PdfQuoteParser().parse(path, context_for("a", version=6))
     headers = [source for source in parsed.sources if source.raw_text == "Field"]
 
@@ -141,7 +141,7 @@ def test_repeated_headers_keep_cross_page_table_identity() -> None:
 
 
 def test_conflicting_prices_on_different_pages_are_both_preserved() -> None:
-    path = DEVELOPMENT_ROOT / "quote_V6" / "dev_04_internal_price_conflict.pdf"
+    path = FIXTURE_ROOT / "pdf-layout" / "dev_04_internal_price_conflict.pdf"
     parsed = PdfQuoteParser().parse(path, context_for("a", version=6))
     price_sources = [
         source
@@ -159,7 +159,7 @@ def test_conflicting_prices_on_different_pages_are_both_preserved() -> None:
 
 
 def test_v7_unruled_two_column_rows_have_atomic_cells_and_contexts() -> None:
-    path = DEVELOPMENT_ROOT / "quote_V7" / "dev_01.pdf"
+    path = FIXTURE_ROOT / "pdf-layout" / "unruled_two_column.pdf"
     parsed = PdfQuoteParser().parse(path, context_for("a", version=7))
     groups = _group_texts(parsed, EvidenceContextPurpose.FIELD_AND_VALUE)
     source_by_text = {source.raw_text: source for source in parsed.sources}

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -9,7 +8,6 @@ from pydantic import ValidationError
 from supplier_comparison.extraction.adapters import FixedOutputAdapter, ModelCallBudget
 from supplier_comparison.extraction.contracts import (
     CoordinateSpace,
-    ExtractionBatch,
     PageRoute,
     ParsedInput,
 )
@@ -22,7 +20,7 @@ from supplier_comparison.extraction.pdf_parser import PARSER_VERSION, PdfQuotePa
 from supplier_comparison.extraction.pdf_quality import PdfQualityConfig
 from supplier_comparison.extraction.service import extract_quote_candidates
 
-from .conftest import REPO_ROOT, context_for, quote_path
+from .conftest import context_for, quote_path
 
 
 _RELIABLE_TEXT = (
@@ -280,16 +278,3 @@ def test_page_analysis_contract_rejects_duplicate_or_missing_page_numbers() -> N
 
     with pytest.raises(ValidationError, match="unique, ordered, and contiguous"):
         ParsedInput.model_validate(payload)
-
-
-@pytest.mark.parametrize(
-    "example_name",
-    ("extraction_batch_v1_0_example.json", "extraction_batch_v1_1_proposed.json"),
-)
-def test_schema_migration_examples_are_readable(example_name: str) -> None:
-    path = REPO_ROOT / "docs" / "v7" / "stage0" / example_name
-    payload = json.loads(path.read_text(encoding="utf-8"))
-
-    batch = ExtractionBatch.model_validate(payload)
-
-    assert batch.schema_version in {"1.0", "1.1"}

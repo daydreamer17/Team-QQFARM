@@ -57,12 +57,12 @@ from supplier_comparison.rules import ProcurementRequirement
 
 ROOT = Path(__file__).resolve().parents[2]
 DICTIONARY_PATH = ROOT / "data/contracts/quote_data_field.csv"
-CANONICAL_QUOTES = ROOT / "data/generated/inputs/development/quote_V1/quotes.csv"
+CANONICAL_QUOTES = ROOT / "data/generated/fixtures/extraction/canonical-quotes/quotes.csv"
 
 
 def _requirement() -> ProcurementRequirement:
     with (
-        ROOT / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.csv"
+        ROOT / "data/generated/fixtures/extraction/requirements/procurement_requirement_v2.csv"
     ).open("r", encoding="utf-8-sig", newline="") as handle:
         row = next(csv.DictReader(handle))
     row["secondary_preference"] = row["secondary_preference"] or None

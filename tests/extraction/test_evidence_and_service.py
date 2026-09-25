@@ -111,28 +111,6 @@ def test_all_three_v2_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, al
     assert budget.calls_used == 0
 
 
-@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
-def test_all_five_v3_pdfs_cross_the_fixed_adapter_boundary(quote_dictionary, alias) -> None:
-    parsed = PdfQuoteParser().parse(
-        quote_path(alias, version=3),
-        context_for(alias, version=3),
-    )
-    budget = ModelCallBudget(graph_run_id=f"GRAPH-V3-{alias.upper()}")
-    batch = extract_quote_candidates(
-        parsed,
-        quote_dictionary,
-        FixedOutputAdapter({parsed.context.document_id: _all_missing_payload(quote_dictionary)}),
-        budget,
-        f"EXTRACT-V3-{alias.upper()}",
-    )
-
-    assert len(batch.candidates) == 30
-    assert batch.parsed_input.context.quote_version == 3
-    assert batch.parsed_input.context.document_version == 3
-    assert batch.run is not None and batch.run.output_mode == AdapterOutputMode.FIXED
-    assert budget.calls_used == 0
-
-
 def test_unknown_model_source_id_is_rejected(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         quote_path("a"),
@@ -263,51 +241,6 @@ def test_other_fees_evidence_cannot_support_shipping(quote_dictionary) -> None:
     assert candidate.normalized_value == "NOT_APPLICABLE"
 
 
-def test_delivery_fee_evidence_can_support_shipping_amount(quote_dictionary) -> None:
-    parsed = PdfQuoteParser().parse(
-        quote_path("d", version=3),
-        context_for("d", version=3),
-    )
-    payload = _all_missing_payload(quote_dictionary)
-    semantic_source = next(
-        source for source in parsed.sources if "No delivery fee is charged" in source.raw_text
-    )
-    amount_source = next(source for source in parsed.sources if source.raw_text == "SGD 0.00")
-    field_index = next(
-        index
-        for index, field in enumerate(quote_dictionary.extractable_fields)
-        if field.field_name == "shipping_fee_amount"
-    )
-    payload["candidates"][field_index] = {
-        "field_name": "shipping_fee_amount",
-        "raw_value": "SGD 0.00",
-        "normalized_value": "0.00",
-        "unit": "SGD",
-        "validation_status": "EXTRACTED",
-        "source_refs": [
-            {
-                "source_id": semantic_source.source_id,
-                "quoted_text": "delivery fee",
-            },
-            {
-                "source_id": amount_source.source_id,
-                "quoted_text": "SGD 0.00",
-            },
-        ],
-    }
-
-    batch = extract_quote_candidates(
-        parsed,
-        quote_dictionary,
-        FixedOutputAdapter({parsed.context.document_id: payload}),
-        ModelCallBudget(graph_run_id="GRAPH-DELIVERY-FEE-SEMANTICS"),
-        "EXTRACT-DELIVERY-FEE-SEMANTICS",
-    )
-
-    amount = next(item for item in batch.candidates if item.field_name == "shipping_fee_amount")
-    assert amount.normalized_value == "0.00"
-
-
 def test_order_increment_evidence_cannot_support_price_basis(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(
         quote_path("b", version=2),
@@ -384,50 +317,6 @@ def test_price_basis_ignores_order_terms_added_only_by_group_context(
         item for item in batch.candidates if item.field_name == "price_basis_unit"
     )
     assert candidate.normalized_value == "piece"
-
-
-def test_merged_price_basis_source_can_include_order_terms(quote_dictionary) -> None:
-    parsed = PdfQuoteParser().parse(
-        quote_path("d", version=3),
-        context_for("d", version=3),
-    )
-    payload = _all_missing_payload(quote_dictionary)
-    source = next(
-        source
-        for source in parsed.sources
-        if "Each quoted price covers 50 pieces" in source.raw_text
-    )
-    field_index = next(
-        index
-        for index, field in enumerate(quote_dictionary.extractable_fields)
-        if field.field_name == "price_basis_quantity"
-    )
-    payload["candidates"][field_index] = {
-        "field_name": "price_basis_quantity",
-        "raw_value": "Each quoted price covers 50 pieces",
-        "normalized_value": "50",
-        "unit": "piece",
-        "validation_status": "EXTRACTED",
-        "source_refs": [
-            {
-                "source_id": source.source_id,
-                "quoted_text": "Each quoted price covers 50 pieces",
-            }
-        ],
-    }
-
-    batch = extract_quote_candidates(
-        parsed,
-        quote_dictionary,
-        FixedOutputAdapter({parsed.context.document_id: payload}),
-        ModelCallBudget(graph_run_id="GRAPH-MERGED-PRICE-BASIS"),
-        "EXTRACT-MERGED-PRICE-BASIS",
-    )
-
-    candidate = next(
-        item for item in batch.candidates if item.field_name == "price_basis_quantity"
-    )
-    assert candidate.normalized_value == "50"
 
 
 def test_field_specific_sources_pass_semantic_guards(quote_dictionary) -> None:

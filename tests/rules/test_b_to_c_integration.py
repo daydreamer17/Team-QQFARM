@@ -23,9 +23,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "data/contracts/quote_data_field.csv"
 REQUIREMENT_PATH = (
     ROOT
-    / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.csv"
+    / "data/generated/fixtures/extraction/requirements/procurement_requirement_v2.csv"
 )
-QUOTES_PATH = ROOT / "data/generated/inputs/development/quote_V1/quotes.csv"
+QUOTES_PATH = ROOT / "data/generated/fixtures/extraction/canonical-quotes/quotes.csv"
 
 
 def _load_requirement() -> ProcurementRequirement:

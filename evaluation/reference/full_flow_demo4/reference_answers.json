@@ -39,5 +39,30 @@
     "HIGHEST_SUPPLIER_PERFORMANCE": ["SUP-024"],
     "HIGHEST_HISTORICAL_ON_TIME_RATE": ["SUP-023"],
     "LOWEST_HISTORICAL_REJECTED_LINE_RATE": ["SUP-024"]
-  }}
+  }},
+  "compliance": {
+    "policy_scope": {"category": "Electronics", "region": "SG", "evaluated_at": "2026-11-02T00:00:00Z"},
+    "initial": {
+      "SUP-029": {"eligibility": "UNVERIFIED", "overall": "REVIEW_REQUIRED", "reason": "EVIDENCE_SCOPE_MISMATCH"},
+      "SUP-022": {"eligibility": "VERIFIED", "overall": "COMPLIANT", "reason": "EVIDENCE_CONFIRMED"},
+      "SUP-023": {"eligibility": "EXCLUDED", "overall": "NON_COMPLIANT", "reason": "EVIDENCE_CONFIRMED"},
+      "SUP-024": {"eligibility": "UNVERIFIED", "overall": "REVIEW_REQUIRED", "reason": "EVIDENCE_EXPIRED"},
+      "verified_first_winner_ids": ["SUP-022"]
+    },
+    "after_sup029_rohs_replacement": {
+      "SUP-029": {"eligibility": "VERIFIED", "overall": "COMPLIANT"},
+      "SUP-022": {"eligibility": "VERIFIED", "overall": "COMPLIANT"},
+      "SUP-023": {"eligibility": "EXCLUDED", "overall": "NON_COMPLIANT"},
+      "SUP-024": {"eligibility": "UNVERIFIED", "overall": "REVIEW_REQUIRED"},
+      "verified_first_winner_ids": ["SUP-029"]
+    },
+    "after_all_replacements": {
+      "SUP-029": "VERIFIED",
+      "SUP-022": "VERIFIED",
+      "SUP-023": "VERIFIED",
+      "SUP-024": "VERIFIED",
+      "verified_first_winner_ids": ["SUP-029"]
+    },
+    "amount_rule": {"stage": "AFTER_SELECTION", "currency": "SGD", "threshold": "7000.00", "operator": "GTE", "triggered_supplier_ids": ["SUP-024"]}
+  }
 }

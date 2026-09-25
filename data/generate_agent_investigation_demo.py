@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "data/generated/inputs/development/agent_investigation_demo"
+OUTPUT = ROOT / "data/generated/demos/agent_investigation_demo"
 REFERENCE = ROOT / "evaluation/reference/agent_investigation_demo"
 
 
@@ -15,47 +15,47 @@ CASES = [
         "case_id": "missing-freight-source-check",
         "kind": "DOCUMENT",
         "description": "运费状态和金额缺失，需要核对原文及当前有效的人工确认记录。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
         ],
-        "variant_quote": "data/generated/inputs/development/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+        "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
         "interaction": "AUTO_ON_BLOCKING_UNKNOWN",
     },
     {
         "case_id": "conflicting-price-evidence",
         "kind": "DOCUMENT",
         "description": "同一报价包含冲突价格，Agent 必须保留冲突并转人工，不能自行挑选金额。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
         ],
-        "variant_quote": "data/generated/inputs/development/full_flow_demo4/variants/conflicting_prices/sterling_quote.pdf",
+        "variant_quote": "data/generated/demos/full_flow_demo4/variants/conflicting_prices/sterling_quote.pdf",
         "interaction": "AUTO_ON_EVIDENCE_CONFLICT",
     },
     {
         "case_id": "confirmed-record-reuse",
         "kind": "WORKFLOW_STATE",
         "description": "先人工确认缺失运费，再对同一文件重新调查，验证当前有效确认记录的复用边界。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [],
-        "variant_quote": "data/generated/inputs/development/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+        "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
         "interaction": "CORRECT_THEN_RERUN_SAME_DOCUMENT",
     },
     {
         "case_id": "selection-gap-and-draft",
         "kind": "USER_REQUEST",
         "description": "用户要求分析未入选原因并形成未发送的供应商澄清草稿。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
         ],
         "interaction": "DRAFT_CLARIFICATION",
     },
@@ -63,12 +63,12 @@ CASES = [
         "case_id": "authorized-requirement-simulation",
         "kind": "USER_REQUEST",
         "description": "用户明确授权预算或交期假设，Agent 只能试算，不能修改正式需求。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
-            "data/generated/inputs/development/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+            "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
         ],
         "interaction": "SIMULATE_REQUIREMENT_CHANGE",
         "authorized_changes": {"budget_amount": "7200.00"},
@@ -92,9 +92,9 @@ CASES = [
         "case_id": "stale-input-stop",
         "kind": "WORKFLOW_STATE",
         "description": "调查期间上传新报价版本，旧输入立即失效，Agent 不得继续使用旧观察。",
-        "requirement": "data/generated/inputs/development/full_flow_demo4/requirement/procurement_requirement.txt",
+        "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [],
-        "variant_quote": "data/generated/inputs/development/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+        "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
         "interaction": "CHANGE_QUOTE_DURING_INVESTIGATION",
     },
 ]
@@ -188,10 +188,10 @@ def main() -> None:
         "negative_control": {
             "description": "完整、无冲突的主报价不应创建自动调查 Case。",
             "quotes": [
-                "data/generated/inputs/development/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
-                "data/generated/inputs/development/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
-                "data/generated/inputs/development/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
-                "data/generated/inputs/development/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+                "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+                "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+                "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+                "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
             ],
         },
     }

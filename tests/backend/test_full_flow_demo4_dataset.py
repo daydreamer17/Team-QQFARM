@@ -22,6 +22,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.models import Base
+from supplier_comparison.backend.compliance import EvidenceInput
 from supplier_comparison.backend.service import BackendService, ConflictError
 from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
 from tests.backend.test_workflow import WorkflowRunner
@@ -31,18 +32,20 @@ from supplier_comparison.extraction.csv_parser import FROZEN_CSV_COLUMNS, FixedC
 from supplier_comparison.extraction.dictionary import QuoteDictionary
 from supplier_comparison.extraction.pdf_parser import PdfQuoteParser
 from supplier_comparison.rag.uploads import PolicyFileImportMetadata, PolicyDraftClauseInput, _draft_clauses
-from supplier_comparison.rules import ComparisonRequest, DecisionPreferences, ProcurementRequirement, compare_suppliers
+from supplier_comparison.rules import (ComparisonRequest, ComplianceEvidence, DecisionPreferences,
+                                       ExecutableRuleParameters, ProcurementRequirement,
+                                       compare_suppliers, evaluate_compliance_rule)
 from supplier_comparison.rules.integration import quote_input_from_extraction
 from supplier_comparison.rules.selection_gap import RequirementChanges
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data/generated/inputs/development/full_flow_demo4"
+DATA = ROOT / "data/generated/demos/full_flow_demo4"
 REF = ROOT / "evaluation/reference/full_flow_demo4"
 DICTIONARY = ROOT / "data/contracts/quote_data_field.csv"
 
 
 def test_compliance_evidence_demo_has_three_controls_two_versions_and_four_suppliers():
-    evidence_root = ROOT / 'data/generated/compliance_evidence'
+    evidence_root = ROOT / 'data/generated/fixtures/compliance/material-regression'
     controls = ('supplier-approval', 'rohs-certificates', 'amount-approvals')
     suppliers = {'SUP-022', 'SUP-023', 'SUP-024', 'SUP-029'}
     for control in controls:
@@ -108,8 +111,12 @@ def test_manifest_exact_inventory_and_no_oracle_leak():
     assert manifest["dataset_id"] == "full_flow_demo4"
     assert len(manifest["primary_quotes"]) == 4
     assert len(manifest["variants"]) == 13
+    assert manifest["schema_version"] == "1.1.0"
+    assert manifest["compliance"]["initial_evidence_count"] == 8
+    assert manifest["compliance"]["replacement_evidence_count"] == 3
     assert {entry["path"] for entry in manifest["files"]} == {
-        p.relative_to(DATA).as_posix() for p in DATA.rglob("*") if p.is_file() and p.name != "manifest.json"}
+        p.relative_to(DATA).as_posix() for p in DATA.rglob("*")
+        if p.is_file() and p.name not in {"manifest.json", ".DS_Store"}}
     for entry in manifest["files"]:
         path = DATA / entry["path"]
         assert DATA in path.resolve().parents
@@ -206,7 +213,74 @@ def test_policy_upload_contract_and_scope_isolation():
         extracted = _draft_clauses((directory / "policy.txt").read_text(), fallback_title=metadata.title)
         assert [(c["clause_id"], c["text"]) for c in extracted] == [(c.clause_id, c.text) for c in reviewed]
         assert set(c.control_code for c in reviewed) <= {"APPROVED_SUPPLIER", "ROHS_COMPLIANCE", "AMOUNT_APPROVAL"}
+        assert all(ExecutableRuleParameters.model_validate(c.rule_parameters).control_code == c.control_code
+                   for c in reviewed)
         assert (metadata.categories, metadata.regions) == ((["Electronics"], ["SG"]) if scope == "electronics_sg" else (["Office Furniture"], ["EU"]))
+
+
+def test_compliance_evidence_exercises_verified_first_and_replacements():
+    guide = json.loads((DATA / "compliance_evidence/entry_guide.json").read_text())
+    assert guide["evaluated_at"] == ANSWERS["evaluated_at"]
+    assert len(guide["initial"]) == 8
+    assert len(guide["corrections"]) == 3
+    quote_ids = {row_at(path)["supplier_id"]: row_at(path)["quote_id"]
+                 for path in (DATA / "quotes/csv").glob("*.csv")}
+
+    def validated(item):
+        path = DATA / "compliance_evidence" / item["file"]
+        assert path.is_file() and "NOT A REAL CERTIFICATE" in path.read_text()
+        payload = {**item["facts"], "quote_id": quote_ids[item["facts"]["supplier_id"]]}
+        EvidenceInput.model_validate(payload)
+        return ComplianceEvidence.model_validate({
+            key: value for key, value in ({**item["facts"], "evidence_id": item["facts"]["material_number"]}).items()
+            if key in ComplianceEvidence.model_fields
+        })
+
+    initial = [validated(item) for item in guide["initial"]]
+    corrections = [validated(item) for item in guide["corrections"]]
+    clauses = {item["control_code"]: item for item in
+               json.loads((DATA / "policy/electronics_sg/reviewed_clauses.json").read_text())["clauses"]}
+
+    def eligibility(supplier_id, evidence):
+        checks = [evaluate_compliance_rule(
+            clause_id=clauses[control]["clause_id"], parameters=clauses[control]["rule_parameters"],
+            supplier_id=supplier_id, manufacturer="QQ Demo Components",
+            manufacturer_part_number="QW-MCU9-DEMO", evaluated_at=EVALUATED_AT,
+            evidence=tuple(record for record in evidence if record.supplier_id == supplier_id),
+            execution_stage="BEFORE_RECOMMENDATION",
+        ) for control in ("APPROVED_SUPPLIER", "ROHS_COMPLIANCE")]
+        return ("EXCLUDED" if any(item.status == "FAIL" for item in checks) else
+                "UNVERIFIED" if any(item.status != "PASS" for item in checks) else "VERIFIED"), checks
+
+    expected = ANSWERS["compliance"]["initial"]
+    for supplier_id in sorted(quote_ids):
+        status, checks = eligibility(supplier_id, initial)
+        assert status == expected[supplier_id]["eligibility"]
+        assert expected[supplier_id]["reason"] in {reason for item in checks for reason in item.reason_codes}
+
+    replacements = {item["supersedes_material_number"]: validated(item) for item in guide["corrections"]}
+    fully_replaced = [replacements.get(record.evidence_id, record) for record in initial]
+    assert {supplier_id: eligibility(supplier_id, fully_replaced)[0] for supplier_id in sorted(quote_ids)} == {
+        supplier_id: status for supplier_id, status in ANSWERS["compliance"]["after_all_replacements"].items()
+        if supplier_id.startswith("SUP-")
+    }
+
+    amount_clause = clauses["AMOUNT_APPROVAL"]
+    triggered = []
+    for supplier_id, expected_row in ANSWERS["baseline"].items():
+        check = evaluate_compliance_rule(
+            clause_id=amount_clause["clause_id"], parameters=amount_clause["rule_parameters"],
+            supplier_id=supplier_id, manufacturer="QQ Demo Components",
+            manufacturer_part_number="QW-MCU9-DEMO", evaluated_at=EVALUATED_AT,
+            amount=Decimal(expected_row["total_cost"]), currency="SGD", execution_stage="AFTER_SELECTION",
+        )
+        if check.triggered:
+            assert check.status == "REVIEW_REQUIRED"
+            assert check.reason_codes == ("AMOUNT_APPROVAL_MISSING",)
+            triggered.append(supplier_id)
+        else:
+            assert check.status == "PASS"
+    assert sorted(triggered) == ANSWERS["compliance"]["amount_rule"]["triggered_supplier_ids"]
 
 
 def test_policy_files_publish_with_fixed_embeddings_and_filter_scope(service, tmp_path):
@@ -468,7 +542,8 @@ def test_generator_is_reproducible_and_keeps_reference_separate(tmp_path):
     output, holdout = tmp_path / "development", tmp_path / "holdout"
     subprocess.run([sys.executable, str(ROOT / "data/generate_full_flow_demo4.py"),
                     "--output-dir", str(output), "--holdout-dir", str(holdout)], check=True, cwd=ROOT)
-    expected = {str(p.relative_to(DATA)): p.read_bytes() for p in DATA.rglob("*") if p.is_file()}
+    expected = {str(p.relative_to(DATA)): p.read_bytes() for p in DATA.rglob("*")
+                if p.is_file() and p.name != ".DS_Store"}
     actual = {str(p.relative_to(output)): p.read_bytes() for p in output.rglob("*") if p.is_file()}
     assert actual == expected
     assert not list(output.rglob("reference_answers.json"))

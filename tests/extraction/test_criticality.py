@@ -39,7 +39,7 @@ def test_c_policy_partitions_the_30_extractable_fields(quote_dictionary) -> None
 
 
 def test_criticality_policy_sources_have_not_drifted() -> None:
-    criticality_source = DATA_ROOT / "EXTRACTION_REVIEW_FIELD_CRITICALITY.md"
+    criticality_source = DATA_ROOT / "contracts" / "EXTRACTION_REVIEW_FIELD_CRITICALITY.md"
     quote_dictionary_source = DATA_ROOT / "contracts" / "quote_data_field.csv"
 
     assert sha256(criticality_source.read_bytes()).hexdigest() == CRITICALITY_SOURCE_SHA256

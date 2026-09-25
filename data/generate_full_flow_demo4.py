@@ -22,8 +22,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from supplier_comparison.extraction.csv_parser import FROZEN_CSV_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "data/generated/inputs/development/full_flow_demo4"
-HOLDOUT = ROOT / "data/generated/inputs/holdout/full_flow_demo4"
+OUT = ROOT / "data/generated/demos/full_flow_demo4"
+HOLDOUT = ROOT / "data/generated/fixtures/extraction/full-flow-demo4-layout-holdout"
 SCENARIO = "MCU-TRADEOFF-004"
 REQUIREMENT = {
     "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO",
@@ -198,20 +198,47 @@ def quote_pdf(path: Path, row: dict[str, str], *, layout: str, variant: str = ""
 
 
 def policy_files(out: Path) -> None:
+    common = {
+        "version": "compliance-rule/1.0",
+        "reviewed_by": "synthetic-demo-reviewer",
+        "reviewed_at": "2026-01-15T00:00:00Z",
+        "date_basis": "EVALUATED_AT",
+        "missing_outcome": "REVIEW_REQUIRED",
+        "expired_outcome": "REVIEW_REQUIRED",
+        "mismatch_outcome": "REVIEW_REQUIRED",
+        "allow_unspecified_validity": False,
+    }
     clauses = [
-        ("FF4-ASL", "Supplier identity evidence", "APPROVED_SUPPLIER", "For SG electronics procurement, approved supplier status requires an exact supplier ID and a current registry record. A quotation or a similar supplier name alone is insufficient.", {}),
-        ("FF4-ROHS", "Part-level compliance evidence", "ROHS_COMPLIANCE", "For SG electronics procurement, RoHS compliance requires valid evidence for the offered manufacturer part number. Missing evidence remains REVIEW_REQUIRED, not compliant and not automatically rejected.", {}),
-        ("FF4-APP", "Amount approval threshold", "AMOUNT_APPROVAL", "For SG electronics procurement, confirmed total cost of SGD 7000.00 or more requires recorded approval. A model recommendation is not approval.", {"currency": "SGD", "threshold": "7000.00", "operator": ">="}),
+        ("FF4-ASL", "Supplier identity evidence", "APPROVED_SUPPLIER", "For SG electronics procurement, approved supplier status requires an exact supplier ID and a current registry record. A quotation or a similar supplier name alone is insufficient.", common | {
+            "control_code": "APPROVED_SUPPLIER", "matching_fields": ["supplier_id"],
+            "execution_stage": "BEFORE_RECOMMENDATION",
+        }),
+        ("FF4-ROHS", "Part-level compliance evidence", "ROHS_COMPLIANCE", "For SG electronics procurement, RoHS compliance requires valid evidence for the offered manufacturer part number. Missing evidence remains REVIEW_REQUIRED, not compliant and not automatically rejected.", common | {
+            "control_code": "ROHS_COMPLIANCE",
+            "matching_fields": ["supplier_id", "manufacturer", "manufacturer_part_number"],
+            "execution_stage": "BEFORE_RECOMMENDATION",
+        }),
+        ("FF4-APP", "Amount approval threshold", "AMOUNT_APPROVAL", "For SG electronics procurement, a selected quotation with confirmed total cost of SGD 7000.00 or more requires recorded approval after selection. A model recommendation is not approval.", common | {
+            "control_code": "AMOUNT_APPROVAL", "matching_fields": [],
+            "execution_stage": "AFTER_SELECTION", "currency": "SGD",
+            "monetary_basis": "TOTAL_COST", "threshold": "7000.00", "operator": "GTE",
+            "action": "Obtain separate amount approval after selection and before ordering; this application does not grant approval.",
+        }),
     ]
     for scope, records, categories, regions in [
         ("electronics_sg", clauses, ["Electronics"], ["SG"]),
-        ("unrelated_office_eu", [("OFFICE-EU", "EU office furniture approval", "AMOUNT_APPROVAL", "For office furniture procurement in the EU only, EUR 100.00 or more requires recorded approval. This policy does not apply to SG electronic components.", {"currency": "EUR", "threshold": "100.00", "operator": ">="})], ["Office Furniture"], ["EU"]),
+        ("unrelated_office_eu", [("OFFICE-EU", "EU office furniture approval", "AMOUNT_APPROVAL", "For office furniture procurement in the EU only, a selected quotation of EUR 100.00 or more requires recorded approval after selection. This policy does not apply to SG electronic components.", common | {
+            "control_code": "AMOUNT_APPROVAL", "matching_fields": [],
+            "execution_stage": "AFTER_SELECTION", "currency": "EUR",
+            "monetary_basis": "TOTAL_COST", "threshold": "100.00", "operator": "GTE",
+            "action": "Obtain separate office-furniture amount approval after selection and before ordering.",
+        })], ["Office Furniture"], ["EU"]),
     ]:
         directory = out / "policy" / scope
         write_text(directory / "policy.txt", "# SYNTHETIC procurement policy\n\n" + "\n\n".join(f"## [{cid}] {title}\n{text}" for cid, title, _, text, _ in records) + "\n")
         write_json(directory / "upload_metadata.json", {
-            "policy_set_id": f"full-flow-demo4-{scope}", "policy_set_version": "2026.11-demo",
-            "policy_id": f"POL-FF4-{scope}", "document_id": f"DOC-FF4-{scope}", "document_version": "1",
+            "policy_set_id": f"full-flow-demo4-{scope}", "policy_set_version": "2026.11-compliance-v2",
+            "policy_id": f"POL-FF4-{scope}", "document_id": f"DOC-FF4-{scope}", "document_version": "2",
             "title": f"Synthetic {scope} policy", "effective_from": "2026-01-01T00:00:00Z",
             "effective_to": None, "categories": categories, "regions": regions,
         })
@@ -221,9 +248,52 @@ def policy_files(out: Path) -> None:
         ]})
 
 
+def compliance_evidence_files(out: Path) -> None:
+    """Create source documents that a human confirms in the compliance UI."""
+    records = [
+        ("initial/admission_SUP-029.txt", {"material_number": "FF4-ASL-SUP029-001", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-029", "supplier_name": "Great Wall Components", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."}),
+        ("initial/rohs_wrong_part_SUP-029.txt", {"material_number": "FF4-ROHS-SUP029-001", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-029", "supplier_name": "Great Wall Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU8-DEMO", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The declaration covers a different part number and must not be used for QW-MCU9-DEMO."}),
+        ("initial/admission_SUP-022.txt", {"material_number": "FF4-ASL-SUP022-001", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-022", "supplier_name": "Redwood Components", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."}),
+        ("initial/rohs_SUP-022.txt", {"material_number": "FF4-ROHS-SUP022-001", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-022", "supplier_name": "Redwood Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic declaration covers the exact offered manufacturer and part number."}),
+        ("initial/admission_SUP-023.txt", {"material_number": "FF4-ASL-SUP023-001", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-023", "supplier_name": "Schwarzwald Circuits", "outcome": "FAIL", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic registry explicitly records this supplier ID as not approved for the scoped purchase."}),
+        ("initial/rohs_SUP-023.txt", {"material_number": "FF4-ROHS-SUP023-001", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-023", "supplier_name": "Schwarzwald Circuits", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic declaration covers the exact offered manufacturer and part number."}),
+        ("initial/admission_SUP-024.txt", {"material_number": "FF4-ASL-SUP024-001", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-024", "supplier_name": "Sterling Components", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."}),
+        ("initial/rohs_expired_SUP-024.txt", {"material_number": "FF4-ROHS-SUP024-001", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-024", "supplier_name": "Sterling Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2025-09-01", "expires_on": "2026-08-31", "statement": "The synthetic declaration covers the exact part but is expired before the demo test window."}),
+        ("corrections/rohs_SUP-029_correct.txt", {"material_number": "FF4-ROHS-SUP029-002", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-029", "supplier_name": "Great Wall Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "supersedes": "FF4-ROHS-SUP029-001", "statement": "This replacement synthetic declaration covers the exact offered manufacturer and part number."}),
+        ("corrections/admission_SUP-023_reinstated.txt", {"material_number": "FF4-ASL-SUP023-002", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-023", "supplier_name": "Schwarzwald Circuits", "outcome": "PASS", "effective_from": "2026-09-01", "expires_on": "2027-12-31", "supersedes": "FF4-ASL-SUP023-001", "statement": "This replacement synthetic registry record reinstates the exact supplier ID before evaluation."}),
+        ("corrections/rohs_SUP-024_current.txt", {"material_number": "FF4-ROHS-SUP024-002", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-024", "supplier_name": "Sterling Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2026-09-01", "expires_on": "2027-12-31", "supersedes": "FF4-ROHS-SUP024-001", "statement": "This replacement synthetic declaration is current and covers the exact offered part."}),
+    ]
+    labels = {"material_number": "Material number", "control_code": "Control", "supplier_id": "Supplier ID", "supplier_name": "Supplier name", "manufacturer": "Manufacturer", "manufacturer_part_number": "Manufacturer part number", "outcome": "Registry / declaration outcome", "effective_from": "Effective from", "expires_on": "Expires on", "supersedes": "Supersedes", "statement": "Statement"}
+    guide = {"schema_version": "1.0.0", "evaluated_at": "2026-11-02T00:00:00Z", "warning": "Synthetic demo facts for manual confirmation; not real certificates or automated verification.", "initial": [], "corrections": []}
+    for relative, values in records:
+        lines = ["SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE"]
+        lines.extend(f"{labels[key]}: {value}" for key, value in values.items())
+        write_text(out / "compliance_evidence" / relative, "\n".join(lines) + "\n")
+        facts = {key: values[key] for key in ("material_number", "control_code", "supplier_id", "manufacturer", "manufacturer_part_number", "outcome", "effective_from", "expires_on") if key in values}
+        facts.update({"coverage_confirmed": True, "permanent": False, "source_refs": [f"{relative}#lines=1-{len(lines)}"], "note": values["statement"]})
+        item = {"file": relative, "facts": facts}
+        if "supersedes" in values:
+            item["supersedes_material_number"] = values["supersedes"]
+            guide["corrections"].append(item)
+        else:
+            guide["initial"].append(item)
+    write_json(out / "compliance_evidence/entry_guide.json", guide)
+    write_text(out / "compliance_evidence/README.md", """# 制度检查材料（全部为合成演示资料）
+
+`initial/` 用于第一轮核验；每家各有一份供应商准入记录和一份 RoHS 声明。请逐份查看原文，在制度检查页选择对应供应商和控制项，按 `entry_guide.json` 录入并上传同一文件。
+
+第一轮刻意包含四种状态：完整有效、料号错配、明确不通过、已过期。不要把文件名或本 README 当成证明，实际核对 TXT 原文后再勾选“已核对覆盖范围”。
+
+`corrections/` 用于第二轮。必须通过页面的“替换材料”操作替换对应旧记录，不能把新旧两份同时当成当前有效材料，否则应被识别为冲突或保留历史版本。
+
+这些文件只用于演示证据核验和版本追踪，不是真实证书，不证明任何真实供应商或产品合规，也不构成采购审批。
+""")
+
+
 def inventory(out: Path) -> list[dict]:
     return [{"path": p.relative_to(out).as_posix(), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
-             "size_bytes": p.stat().st_size} for p in sorted(out.rglob("*"), key=lambda p: p.relative_to(out).as_posix()) if p.is_file() and p.name != "manifest.json"]
+             "size_bytes": p.stat().st_size} for p in sorted(out.rglob("*"), key=lambda p: p.relative_to(out).as_posix())
+            if p.is_file() and p.name not in {"manifest.json", ".DS_Store"}]
 
 
 def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:
@@ -260,10 +330,44 @@ def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:
         variants.append({"case_id": case, "replaces_supplier_id": row["supplier_id"],
                          "upload": f"variants/{case}/{key}_quote.pdf", "isolated_only": True})
     policy_files(out)
-    write_text(out / "README.md", """# full_flow_demo4\n\n全新 MCU 商业取舍开发测试包，所有报价均为合成数据。不是 demo3 的复制品。\n\n## 开始\n\n1. 创建新任务，上传 `requirement/procurement_requirement.txt`（PDF/MD 等价），核对 `confirmed_requirement.json`。\n2. 先不绑定 Policy；历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。\n3. 上传 `quotes/pdf/` 四份 PDF，或 `quotes/csv/` 四份 CSV；两套不要混传。供应商 ID 使用 manifest 所列值。\n4. 核对全部字段并正式提交四份报价，再手动开始比较。PDF 路径含真实模型提取；固定 CSV 不需要模型。\n5. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。\n6. 第二轮绑定 `policy/electronics_sg/` 已发布制度，检查缺失证明的人工核验流程。`unrelated_office_eu` 是独立不适用制度，不要混入 SG 制度的相同 scope。\n\n完整人工步骤、回答、预期推荐与测试记录在仓库 `evaluation/reference/full_flow_demo4/` 和 `docs/guide/guide_FULL_FLOW_DEMO4_TESTING.md`。它们是离线验收资料，禁止上传给运行时 Agent。\n\n## 数据边界\n\n固定时间：计划下单 2026-11-02，报价有效至 2026-11-30。以后重测若过期，另建有独立预期的版本，不自动使用今天改变结果。\n保留原 MCU 标识、单商品采购和六指标主/次排序，不测试新器件选型或替代兼容性。\n自然语言仅提出偏好；金额、硬约束和结果由既有确定性引擎计算，应用前必须确认。\n本目录不含参考推荐、人工补充答案或模型评测输出。\n\n## 再生成\n\n```bash\nPYTHONPATH=src .venv/bin/python data/generate_full_flow_demo4.py\n```\n\n脚本只重建本数据包及其独立留出版式，不触碰 demo1/2/3、数据库或其他代码。生成器不导入参考答案或计算引擎。\n""")
-    write_json(out / "manifest.json", {"dataset_id": "full_flow_demo4", "schema_version": "1.0.0",
+    compliance_evidence_files(out)
+    write_text(out / "README.md", """# full_flow_demo4
+
+全新 MCU 商业取舍开发测试包，所有报价和制度材料均为合成数据。不是 demo3 的复制品。
+
+## 开始
+
+1. 上传并发布 `policy/electronics_sg/`；按 `upload_metadata.json` 和 `reviewed_clauses.json` 完成人工核对。
+2. 创建新任务时绑定刚发布的 Electronics/SG 制度，上传 `requirement/procurement_requirement.txt`（PDF/MD 等价），核对 `confirmed_requirement.json`。若只回归旧的无制度基线，才创建不绑定制度的独立任务。
+3. 上传 `quotes/pdf/` 四份 PDF，或 `quotes/csv/` 四份 CSV；两套不要混传。供应商 ID 使用 manifest 所列值。
+4. 核对全部字段并正式提交四份报价。PDF 路径含真实模型提取；固定 CSV 不需要模型。
+5. 进入制度检查，先上传 `compliance_evidence/initial/` 的八份材料并确认结果；再使用 `corrections/` 的三份材料逐项执行“替换材料”。确认制度检查后再进入决策比较。
+6. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。
+7. 历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。`policy/unrelated_office_eu/` 是范围隔离反例，不要绑定到 SG 电子采购。
+
+制度材料的录入值见 `compliance_evidence/entry_guide.json`；它只是人工录入辅助，不替代阅读原文。完整步骤和预期结果在仓库 `evaluation/reference/full_flow_demo4/` 与 `docs/guide/guide_FULL_FLOW_DEMO4_TESTING.md`，这些离线验收资料禁止上传给运行时 Agent。
+
+## 数据边界
+
+固定评估时间：2026-11-02，报价有效至 2026-11-30。以后重测若过期，另建有独立预期的版本，不自动使用今天改变结果。
+保留原 MCU 标识、单商品采购和六指标主/次排序，不测试新器件选型或替代兼容性。
+自然语言只解释制度与偏好；金额、硬约束、证据匹配和状态由确定性代码计算，材料事实由人工确认。
+本目录不含参考推荐、人工补充答案或模型评测输出。
+
+## 再生成
+
+```bash
+PYTHONPATH=src .venv/bin/python data/generate_full_flow_demo4.py
+```
+
+脚本只重建本数据包及其独立留出版式，不触碰 demo1/2/3、数据库或其他代码。生成器不导入参考答案或计算引擎。
+""")
+    write_json(out / "manifest.json", {"dataset_id": "full_flow_demo4", "schema_version": "1.1.0",
         "scenario_id": SCENARIO, "is_synthetic": True, "runtime_safe": True, "primary_quote_limit": 4,
         "primary_quotes": primary, "variants": variants,
+        "compliance": {"policy_scope": "policy/electronics_sg", "workflow_contract_version": "compliance/2.0",
+                       "evidence_entry_guide": "compliance_evidence/entry_guide.json",
+                       "initial_evidence_count": 8, "replacement_evidence_count": 3},
         "history_binding": {"dataset_id": "synthetic-mcu9-supplier-performance", "dataset_version": "2026-08-06-v1"},
         "files": inventory(out)})
     # Holdout uses a separate layout family; do not include in development tuning.

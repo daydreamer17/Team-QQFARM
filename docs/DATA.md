@@ -118,14 +118,14 @@ Python 使用 Decimal；PostgreSQL NUMERIC 保留约定的单价精度，API 用
 
 PDF 必交付采用 1 种开发版式及 1 种独立留出版式，包含表格／措辞差异；为正式 RAG 调整工时，额外开发版式不列为必做。版式与供应商排名独立变化；用于调试后的盲测模板不能继续充当最终留出模板。pdfplumber 解析英文可提取文本 PDF，每份最多 5 页／5 MB、单任务最多 5 份，均为可配置限制；不增加 OCR。解析器生成稳定证据 ID，LLM 再理解字段；文件生成器与解析器独立。
 
-建议目录如下，当前属于计划，不表示文件已经存在：
+当前交付目录如下：
 
 ```text
 data/source/                 原始 CSV、许可证、来源与哈希清单
-data/generated/manifests/    场景、种子、生成器版本及素材映射
-data/generated/inputs/       可上传 PDF／CSV、采购需求
-data/policies/              演示制度 Markdown、集合清单和版本哈希
-data/suppliers/             供应商主数据、批准记录、RoHS 和注册表清单
+data/generated/demos/        当前可上传并走通的完整演示包
+data/generated/fixtures/     解析与制度核验专项测试夹具
+data/generated/supplier_history/  确定性生成的供应商历史发布
+data/policies/               演示制度 Markdown、集合清单和版本哈希
 evaluation/reference/        独立参考答案与模拟用户回答
 evaluation/rag/              独立 RAG 问题、参考条款和留出集（不挂载给 Agent）
 evaluation/compliance/       供应商身份、注册事实和合规三态参考矩阵
@@ -216,10 +216,8 @@ Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进
 
 供应商历史表现的运行时发布位于
 `data/generated/supplier_history/mcu9/{dataset_version}/`。当前发布
-`2026-08-06-v1` 由 `data/purchase_orders.csv` 中 1,185 条 MCU-9 合成采购记录确定性生成，
+`2026-08-06-v1` 由 `data/source/purchase_orders.csv` 中 1,185 条 MCU-9 合成采购记录确定性生成，
 包含内容哈希、manifest 哈希、as-of、统计期间、scope、样本门槛、评级方法版本和合成数据标识。
 任务通过 `task_history_bindings` 固定具体发布；旧结果只能读取其冻结快照，不能读取最新发布补齐。
 
-`data/generated/inputs/development/preference_demo/` 是独立的六指标演示包，不替代
-`full_flow_demo` 的硬约束回归场景。其四家供应商、报价、器件和历史均为合成数据，且统一使用
-`EXCLUDED` 税费比较口径。生成器为 `data/generate_preference_demo.py`，日期只能通过显式参数整体平移。
+当前用户可走通的完整流程演示包为 `data/generated/demos/full_flow_demo4/`。其四家供应商、报价、器件、制度材料和历史均为合成数据；专项解析样本已按用途收敛到 `data/generated/fixtures/`，不再把旧版号目录当作可交付数据集。

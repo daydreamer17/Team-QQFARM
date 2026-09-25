@@ -21,7 +21,7 @@ from supplier_comparison.extraction.review import review_extraction_batch
 from supplier_comparison.extraction.service import extract_quote_candidates
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = ROOT / "data/generated/inputs/development/full_flow_demo4"
+DATA = ROOT / "data/generated/demos/full_flow_demo4"
 
 
 def main() -> int:

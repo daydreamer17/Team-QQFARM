@@ -238,7 +238,7 @@ def generate_supplier_history(
         dataset_id=DATASET_ID,
         dataset_version=dataset_version,
         content_sha256=content_sha256,
-        source_path="data/purchase_orders.csv",
+        source_path="data/source/purchase_orders.csv",
         source_sha256=source_sha256,
         source_record_count=source_count,
         filtered_record_count=scoped_count,

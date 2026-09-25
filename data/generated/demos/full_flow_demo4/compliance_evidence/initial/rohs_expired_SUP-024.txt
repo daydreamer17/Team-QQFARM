@@ -1,0 +1,11 @@
+SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
+Material number: FF4-ROHS-SUP024-001
+Control: ROHS_COMPLIANCE
+Supplier ID: SUP-024
+Supplier name: Sterling Components
+Manufacturer: QQ Demo Components
+Manufacturer part number: QW-MCU9-DEMO
+Registry / declaration outcome: PASS
+Effective from: 2025-09-01
+Expires on: 2026-08-31
+Statement: The synthetic declaration covers the exact part but is expired before the demo test window.

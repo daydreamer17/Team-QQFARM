@@ -15,18 +15,27 @@ from supplier_comparison.extraction.dictionary import QuoteDictionary
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO_ROOT / "data"
-DEVELOPMENT_ROOT = DATA_ROOT / "generated" / "inputs" / "development"
+FIXTURE_ROOT = DATA_ROOT / "generated" / "fixtures" / "extraction"
+DEVELOPMENT_ROOT = FIXTURE_ROOT
 
 
 def development_dir(version: int = 1) -> Path:
+    if version == 1:
+        return FIXTURE_ROOT / "canonical-quotes"
+    if version == 2:
+        return FIXTURE_ROOT / "requirements"
     return development_dataset_dir(DEVELOPMENT_ROOT, f"V{version}")
 
 
 def quote_path(alias: str, version: int = 1, extension: str = "pdf") -> Path:
+    if version in {1, 2}:
+        return development_dir(version) / f"supplier_{alias.lower()}_quote_v{version}.{extension}"
     return supplier_quote_path(DEVELOPMENT_ROOT, f"V{version}", alias, extension)
 
 
 def quotes_csv_path(version: int = 1) -> Path:
+    if version == 1:
+        return FIXTURE_ROOT / "canonical-quotes" / "quotes.csv"
     return canonical_quotes_csv_path(DEVELOPMENT_ROOT, f"V{version}")
 
 

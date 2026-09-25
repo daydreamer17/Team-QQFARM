@@ -1,0 +1,254 @@
+{
+  "schema_version": "agent-investigation-demo/1.0.0",
+  "dataset_id": "agent-investigation-demo-v1",
+  "synthetic_only": true,
+  "case_count": 8,
+  "cases": [
+    {
+      "case_id": "missing-freight-source-check",
+      "kind": "DOCUMENT",
+      "description": "运费状态和金额缺失，需要核对原文及当前有效的人工确认记录。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [
+        "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf"
+      ],
+      "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+      "interaction": "AUTO_ON_BLOCKING_UNKNOWN",
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+          "sha256": "e030af53e587438eaf83e2f9fd7724846e84b25043ca547416669c9938f16b14",
+          "size_bytes": 2858
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+          "sha256": "04886301dd96c33abe922fd74da25553c65735d4e57eb5e0447e7f7e291ecfdc",
+          "size_bytes": 2807
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+          "sha256": "7ef5d55954a7a08b800540b21b0113754fdef8509f9a5370b94beb3b1bc3cd83",
+          "size_bytes": 3671
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+          "sha256": "86b91ce20b5e8ef03a74688aa66d7dbcedf13c95e04d02a8c1c65135a7183ba1",
+          "size_bytes": 2818
+        }
+      ]
+    },
+    {
+      "case_id": "conflicting-price-evidence",
+      "kind": "DOCUMENT",
+      "description": "同一报价包含冲突价格，Agent 必须保留冲突并转人工，不能自行挑选金额。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [
+        "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf"
+      ],
+      "variant_quote": "data/generated/demos/full_flow_demo4/variants/conflicting_prices/sterling_quote.pdf",
+      "interaction": "AUTO_ON_EVIDENCE_CONFLICT",
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/variants/conflicting_prices/sterling_quote.pdf",
+          "sha256": "0674b8bfff5bbb5e95367f21531b45ad0339156d89b214fea0f01c481bcb2544",
+          "size_bytes": 2969
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+          "sha256": "d657a2e4f4652707dd42e2319a5e2741d48a76342ea1da04a526876acfa09710",
+          "size_bytes": 2824
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+          "sha256": "04886301dd96c33abe922fd74da25553c65735d4e57eb5e0447e7f7e291ecfdc",
+          "size_bytes": 2807
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+          "sha256": "7ef5d55954a7a08b800540b21b0113754fdef8509f9a5370b94beb3b1bc3cd83",
+          "size_bytes": 3671
+        }
+      ]
+    },
+    {
+      "case_id": "confirmed-record-reuse",
+      "kind": "WORKFLOW_STATE",
+      "description": "先人工确认缺失运费，再对同一文件重新调查，验证当前有效确认记录的复用边界。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [],
+      "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+      "interaction": "CORRECT_THEN_RERUN_SAME_DOCUMENT",
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+          "sha256": "e030af53e587438eaf83e2f9fd7724846e84b25043ca547416669c9938f16b14",
+          "size_bytes": 2858
+        }
+      ]
+    },
+    {
+      "case_id": "selection-gap-and-draft",
+      "kind": "USER_REQUEST",
+      "description": "用户要求分析未入选原因并形成未发送的供应商澄清草稿。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [
+        "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf"
+      ],
+      "interaction": "DRAFT_CLARIFICATION",
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+          "sha256": "d657a2e4f4652707dd42e2319a5e2741d48a76342ea1da04a526876acfa09710",
+          "size_bytes": 2824
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+          "sha256": "04886301dd96c33abe922fd74da25553c65735d4e57eb5e0447e7f7e291ecfdc",
+          "size_bytes": 2807
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+          "sha256": "7ef5d55954a7a08b800540b21b0113754fdef8509f9a5370b94beb3b1bc3cd83",
+          "size_bytes": 3671
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+          "sha256": "86b91ce20b5e8ef03a74688aa66d7dbcedf13c95e04d02a8c1c65135a7183ba1",
+          "size_bytes": 2818
+        }
+      ]
+    },
+    {
+      "case_id": "authorized-requirement-simulation",
+      "kind": "USER_REQUEST",
+      "description": "用户明确授权预算或交期假设，Agent 只能试算，不能修改正式需求。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [
+        "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+        "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf"
+      ],
+      "interaction": "SIMULATE_REQUIREMENT_CHANGE",
+      "authorized_changes": {
+        "budget_amount": "7200.00"
+      },
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+          "sha256": "d657a2e4f4652707dd42e2319a5e2741d48a76342ea1da04a526876acfa09710",
+          "size_bytes": 2824
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+          "sha256": "04886301dd96c33abe922fd74da25553c65735d4e57eb5e0447e7f7e291ecfdc",
+          "size_bytes": 2807
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+          "sha256": "7ef5d55954a7a08b800540b21b0113754fdef8509f9a5370b94beb3b1bc3cd83",
+          "size_bytes": 3671
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf",
+          "sha256": "86b91ce20b5e8ef03a74688aa66d7dbcedf13c95e04d02a8c1c65135a7183ba1",
+          "size_bytes": 2818
+        }
+      ]
+    },
+    {
+      "case_id": "policy-transient-recovery",
+      "kind": "CONTROLLED_FAULT",
+      "description": "制度检索发生一次明确的临时传输错误，允许同版本有限重试。",
+      "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+      "interaction": "POLICY_TRANSPORT_TRANSIENT_ONCE",
+      "files": [
+        {
+          "path": "data/policies/electronics-components/v2/manifest.json",
+          "sha256": "4ce26f70f665c1392d227eb60fb156f1ec0051e4a385092c320710d78ed9b749",
+          "size_bytes": 2855
+        }
+      ]
+    },
+    {
+      "case_id": "policy-terminal-problem",
+      "kind": "CONTROLLED_FAULT",
+      "description": "分别注入制度缺失和制度冲突；两种情况都必须转管理员，禁止盲目重试。",
+      "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+      "interaction": "POLICY_NO_EVIDENCE_OR_CONFLICT",
+      "variants": [
+        "NO_EVIDENCE",
+        "CONFLICT"
+      ],
+      "files": [
+        {
+          "path": "data/policies/electronics-components/v2/manifest.json",
+          "sha256": "4ce26f70f665c1392d227eb60fb156f1ec0051e4a385092c320710d78ed9b749",
+          "size_bytes": 2855
+        }
+      ]
+    },
+    {
+      "case_id": "stale-input-stop",
+      "kind": "WORKFLOW_STATE",
+      "description": "调查期间上传新报价版本，旧输入立即失效，Agent 不得继续使用旧观察。",
+      "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+      "base_quotes": [],
+      "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+      "interaction": "CHANGE_QUOTE_DURING_INVESTIGATION",
+      "files": [
+        {
+          "path": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
+          "sha256": "0ec63dcc640e62e1516736c410312277418614831fa3ea21c3b708260c83a6e7",
+          "size_bytes": 533
+        },
+        {
+          "path": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
+          "sha256": "e030af53e587438eaf83e2f9fd7724846e84b25043ca547416669c9938f16b14",
+          "size_bytes": 2858
+        }
+      ]
+    }
+  ],
+  "negative_control": {
+    "description": "完整、无冲突的主报价不应创建自动调查 Case。",
+    "quotes": [
+      "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
+      "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
+      "data/generated/demos/full_flow_demo4/quotes/pdf/schwarzwald_quote.pdf",
+      "data/generated/demos/full_flow_demo4/quotes/pdf/sterling_quote.pdf"
+    ]
+  }
+}

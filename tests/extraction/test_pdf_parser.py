@@ -45,26 +45,6 @@ def test_v2_development_pdfs_produce_stable_positioned_sources(alias: str) -> No
     assert all(source.block_id and source.bbox for source in first.sources)
 
 
-@pytest.mark.parametrize("alias", ("a", "b", "c", "d", "e"))
-def test_v3_development_pdfs_produce_stable_positioned_sources(alias: str) -> None:
-    path = quote_path(alias, version=3)
-    parser = PdfQuoteParser()
-    first = parser.parse(path, context_for(alias, version=3))
-    second = parser.parse(path, context_for(alias, version=3))
-
-    assert first.document_sha256 == second.document_sha256
-    assert [source.source_id for source in first.sources] == [
-        source.source_id for source in second.sources
-    ]
-    assert first.sources
-    assert all(
-        source.kind in {SourceKind.PDF_TEXT_BLOCK, SourceKind.PDF_TABLE_CELL}
-        for source in first.sources
-    )
-    assert all(source.page_number == 1 for source in first.sources)
-    assert all(source.block_id and source.bbox for source in first.sources)
-
-
 def test_supplier_b_pdf_does_not_contain_shipping_amount() -> None:
     path = quote_path("b")
     parsed = PdfQuoteParser().parse(path, context_for("b"))

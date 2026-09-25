@@ -1,0 +1,9 @@
+SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
+Material number: FF4-ASL-SUP029-001
+Control: APPROVED_SUPPLIER
+Supplier ID: SUP-029
+Supplier name: Great Wall Components
+Registry / declaration outcome: PASS
+Effective from: 2026-01-01
+Expires on: 2027-12-31
+Statement: The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing.

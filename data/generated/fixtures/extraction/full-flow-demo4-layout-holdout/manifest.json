@@ -1,0 +1,23 @@
+{
+  "dataset_id": "full_flow_demo4-layout-holdout",
+  "split": "holdout",
+  "is_synthetic": true,
+  "model_evaluation_status": "NOT_RUN",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "93bf30bea66c22e37a43299f83289948a4ecbc6704bca2aa3e59d90e68016506",
+      "size_bytes": 309
+    },
+    {
+      "path": "great_wall_schedule.pdf",
+      "sha256": "d76dfc5f7904bf4fccba0220b691d813d3c49be9edcbad8d9e037e7957716302",
+      "size_bytes": 2791
+    },
+    {
+      "path": "sterling_schedule.pdf",
+      "sha256": "1e12194906386605e9bdfff3b70e7832b4017883408a247f5c9d7b979d8ccef3",
+      "size_bytes": 2789
+    }
+  ]
+}

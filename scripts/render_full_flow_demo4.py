@@ -13,8 +13,11 @@ OUT = ROOT / "tmp/pdfs/full_flow_demo4"
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     pages = []
-    for split in ("development", "holdout"):
-        base = ROOT / "data/generated/inputs" / split / "full_flow_demo4"
+    roots = {
+        "development": ROOT / "data/generated/demos/full_flow_demo4",
+        "holdout": ROOT / "data/generated/fixtures/extraction/full-flow-demo4-layout-holdout",
+    }
+    for split, base in roots.items():
         for path in sorted(base.rglob("*.pdf")):
             pdf = pypdfium2.PdfDocument(path)
             with pdfplumber.open(path) as text_pdf:

@@ -1,0 +1,11 @@
+SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
+Material number: FF4-ROHS-SUP029-001
+Control: ROHS_COMPLIANCE
+Supplier ID: SUP-029
+Supplier name: Great Wall Components
+Manufacturer: QQ Demo Components
+Manufacturer part number: QW-MCU8-DEMO
+Registry / declaration outcome: PASS
+Effective from: 2026-01-01
+Expires on: 2027-12-31
+Statement: The declaration covers a different part number and must not be used for QW-MCU9-DEMO.

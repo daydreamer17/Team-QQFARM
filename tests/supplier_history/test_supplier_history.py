@@ -25,9 +25,9 @@ from supplier_comparison.supplier_history.generator import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "data" / "purchase_orders.csv"
+SOURCE = ROOT / "data" / "source" / "purchase_orders.csv"
 QUOTE_DICTIONARY = ROOT / "data" / "contracts" / "quote_data_field.csv"
-QUOTES = ROOT / "data" / "generated" / "inputs" / "development" / "quote_V1" / "quotes.csv"
+QUOTES = ROOT / "data" / "generated" / "fixtures" / "extraction" / "canonical-quotes" / "quotes.csv"
 VERSION = "test-v1"
 GENERATED_AT = datetime(2026, 8, 7, tzinfo=timezone.utc)
 AS_OF = date(2026, 8, 6)

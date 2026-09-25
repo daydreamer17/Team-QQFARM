@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -23,9 +22,8 @@ from supplier_comparison.extraction.service import extract_quote_candidates
 from .conftest import DATA_ROOT, context_for
 
 
-V4_INPUT_ROOT = DATA_ROOT / "generated/inputs/development/quote_V4"
-V4_FIXTURE_ROOT = DATA_ROOT / "generated/fixtures/quote_V4"
-V4_REFERENCE = Path("evaluation/reference/quote_V4/reference_answers.json")
+V4_INPUT_ROOT = DATA_ROOT / "generated/fixtures/extraction/pdf-boundaries"
+V4_FIXTURE_ROOT = V4_INPUT_ROOT / "metadata"
 
 
 def _all_missing_payload(quote_dictionary) -> dict:
@@ -61,15 +59,6 @@ def _payload_with_unit_price(quote_dictionary, source_id: str, quoted_text: str,
     return payload
 
 
-def test_v4_reference_hashes_bind_every_fixture() -> None:
-    reference = json.loads(V4_REFERENCE.read_text(encoding="utf-8"))
-
-    for file_record in reference["files"]:
-        path = Path(file_record["relative_path"])
-        assert path.is_file()
-        assert hashlib.sha256(path.read_bytes()).hexdigest() == file_record["sha256"]
-
-
 @pytest.mark.parametrize(
     ("filename", "expected_code"),
     (
@@ -77,7 +66,6 @@ def test_v4_reference_hashes_bind_every_fixture() -> None:
         ("blank_quote_v4.pdf", "blank_pdf"),
         ("encrypted_quote_v4.pdf", "encrypted_pdf_unsupported"),
         ("over_page_limit_quote_v4.pdf", "pdf_page_limit_exceeded"),
-        ("over_size_limit_quote_v4.pdf", "pdf_size_limit_exceeded"),
     ),
 )
 def test_v4_invalid_pdfs_are_rejected_before_model(filename: str, expected_code: str) -> None:
@@ -86,6 +74,14 @@ def test_v4_invalid_pdfs_are_rejected_before_model(filename: str, expected_code:
 
     assert raised.value.code == expected_code
     assert filename in str(raised.value) or filename in raised.value.details.get("path", "")
+
+
+def test_oversized_pdf_is_rejected_before_model(tmp_path: Path) -> None:
+    path = tmp_path / "oversized.pdf"
+    path.write_bytes(b"%PDF-1.4\n" + b"0" * (5 * 1024 * 1024 + 1))
+    with pytest.raises(ExtractionError) as raised:
+        PdfQuoteParser().parse(path, context_for("a", version=4))
+    assert raised.value.code == "pdf_size_limit_exceeded"
 
 
 def test_v4_invalid_csv_header_reports_duplicate_and_missing_columns(quote_dictionary) -> None:

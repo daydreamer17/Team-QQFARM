@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST = ROOT / "data/generated/inputs/development/agent_investigation_demo/manifest.json"
+MANIFEST = ROOT / "data/generated/demos/agent_investigation_demo/manifest.json"
 EXPECTATIONS = ROOT / "evaluation/reference/agent_investigation_demo/cases.json"
 
 

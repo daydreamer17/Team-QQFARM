@@ -1,0 +1,211 @@
+{
+  "schema_version": "1.0.0",
+  "evaluated_at": "2026-11-02T00:00:00Z",
+  "warning": "Synthetic demo facts for manual confirmation; not real certificates or automated verification.",
+  "initial": [
+    {
+      "file": "initial/admission_SUP-029.txt",
+      "facts": {
+        "material_number": "FF4-ASL-SUP029-001",
+        "control_code": "APPROVED_SUPPLIER",
+        "supplier_id": "SUP-029",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/admission_SUP-029.txt#lines=1-9"
+        ],
+        "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
+      }
+    },
+    {
+      "file": "initial/rohs_wrong_part_SUP-029.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP029-001",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-029",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU8-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/rohs_wrong_part_SUP-029.txt#lines=1-11"
+        ],
+        "note": "The declaration covers a different part number and must not be used for QW-MCU9-DEMO."
+      }
+    },
+    {
+      "file": "initial/admission_SUP-022.txt",
+      "facts": {
+        "material_number": "FF4-ASL-SUP022-001",
+        "control_code": "APPROVED_SUPPLIER",
+        "supplier_id": "SUP-022",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/admission_SUP-022.txt#lines=1-9"
+        ],
+        "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
+      }
+    },
+    {
+      "file": "initial/rohs_SUP-022.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP022-001",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-022",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/rohs_SUP-022.txt#lines=1-11"
+        ],
+        "note": "The synthetic declaration covers the exact offered manufacturer and part number."
+      }
+    },
+    {
+      "file": "initial/admission_SUP-023.txt",
+      "facts": {
+        "material_number": "FF4-ASL-SUP023-001",
+        "control_code": "APPROVED_SUPPLIER",
+        "supplier_id": "SUP-023",
+        "outcome": "FAIL",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/admission_SUP-023.txt#lines=1-9"
+        ],
+        "note": "The synthetic registry explicitly records this supplier ID as not approved for the scoped purchase."
+      }
+    },
+    {
+      "file": "initial/rohs_SUP-023.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP023-001",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-023",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/rohs_SUP-023.txt#lines=1-11"
+        ],
+        "note": "The synthetic declaration covers the exact offered manufacturer and part number."
+      }
+    },
+    {
+      "file": "initial/admission_SUP-024.txt",
+      "facts": {
+        "material_number": "FF4-ASL-SUP024-001",
+        "control_code": "APPROVED_SUPPLIER",
+        "supplier_id": "SUP-024",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/admission_SUP-024.txt#lines=1-9"
+        ],
+        "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
+      }
+    },
+    {
+      "file": "initial/rohs_expired_SUP-024.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP024-001",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-024",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2025-09-01",
+        "expires_on": "2026-08-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "initial/rohs_expired_SUP-024.txt#lines=1-11"
+        ],
+        "note": "The synthetic declaration covers the exact part but is expired before the demo test window."
+      }
+    }
+  ],
+  "corrections": [
+    {
+      "file": "corrections/rohs_SUP-029_correct.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP029-002",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-029",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2026-01-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "corrections/rohs_SUP-029_correct.txt#lines=1-12"
+        ],
+        "note": "This replacement synthetic declaration covers the exact offered manufacturer and part number."
+      },
+      "supersedes_material_number": "FF4-ROHS-SUP029-001"
+    },
+    {
+      "file": "corrections/admission_SUP-023_reinstated.txt",
+      "facts": {
+        "material_number": "FF4-ASL-SUP023-002",
+        "control_code": "APPROVED_SUPPLIER",
+        "supplier_id": "SUP-023",
+        "outcome": "PASS",
+        "effective_from": "2026-09-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "corrections/admission_SUP-023_reinstated.txt#lines=1-10"
+        ],
+        "note": "This replacement synthetic registry record reinstates the exact supplier ID before evaluation."
+      },
+      "supersedes_material_number": "FF4-ASL-SUP023-001"
+    },
+    {
+      "file": "corrections/rohs_SUP-024_current.txt",
+      "facts": {
+        "material_number": "FF4-ROHS-SUP024-002",
+        "control_code": "ROHS_COMPLIANCE",
+        "supplier_id": "SUP-024",
+        "manufacturer": "QQ Demo Components",
+        "manufacturer_part_number": "QW-MCU9-DEMO",
+        "outcome": "PASS",
+        "effective_from": "2026-09-01",
+        "expires_on": "2027-12-31",
+        "coverage_confirmed": true,
+        "permanent": false,
+        "source_refs": [
+          "corrections/rohs_SUP-024_current.txt#lines=1-12"
+        ],
+        "note": "This replacement synthetic declaration is current and covers the exact offered part."
+      },
+      "supersedes_material_number": "FF4-ROHS-SUP024-001"
+    }
+  ]
+}

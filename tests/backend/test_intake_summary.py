@@ -42,7 +42,7 @@ def _model_payload(body: dict) -> dict:
 
 
 def test_requirement_parser_supports_pdf_txt_and_markdown(tmp_path: Path) -> None:
-    pdf = REPO_ROOT / "data/generated/inputs/development/quote_V2/procurement_requirement_v2.pdf"
+    pdf = REPO_ROOT / "data/generated/fixtures/extraction/requirements/procurement_requirement_v2.pdf"
     parsed_pdf = parse_requirement_document(pdf, "application/pdf")
     assert parsed_pdf["sources"][0]["source_id"] == "requirement:page:1"
     assert "PROCUREMENT REQUIREMENT" in parsed_pdf["sources"][0]["raw_text"]
@@ -71,7 +71,7 @@ def test_requirement_parser_rejects_empty_and_invalid_utf8(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="requirement_text_encoding_invalid"):
         parse_requirement_document(invalid, "text/markdown")
 
-    scanned = REPO_ROOT / "data/generated/inputs/holdout/quote_V7_2/v72_hold_02_clear_scan.pdf"
+    scanned = REPO_ROOT / "data/generated/fixtures/extraction/ocr/clear_scan.pdf"
     with pytest.raises(ValueError, match="requirement_text_unavailable"):
         parse_requirement_document(scanned, "application/pdf")
 
