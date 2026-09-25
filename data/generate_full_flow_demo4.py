@@ -345,7 +345,7 @@ def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:
 6. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。
 7. 历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。`policy/unrelated_office_eu/` 是范围隔离反例，不要绑定到 SG 电子采购。
 
-制度材料的录入值见 `compliance_evidence/entry_guide.json`；它只是人工录入辅助，不替代阅读原文。完整步骤和预期结果在仓库 `evaluation/reference/full_flow_demo4/` 与 `docs/guide/guide_FULL_FLOW_DEMO4_TESTING.md`，这些离线验收资料禁止上传给运行时 Agent。
+制度材料的录入值见 `compliance_evidence/entry_guide.json`；它只是人工录入辅助，不替代阅读原文。完整步骤见仓库 `docs/TESTING.md`，预期结果位于 `evaluation/reference/full_flow_demo4/`；这些离线验收资料禁止上传给运行时 Agent。
 
 ## 数据边界
 

@@ -1,223 +1,105 @@
-# 数据设计与演示集
+# 数据、证据与演示集
 
-> v0.5 · 2026-09-14 · 制度 RAG＋供应商合规数据契约。相关文档：[选型方案](方案.md)、[架构](ARCHITECTURE.md)、[项目计划](../Supplier_Comparison_Project_Plan.md)。
+本文描述当前交付版本的数据组织、运行时边界和演示数据。目录入口另见 [`data/README.md`](../data/README.md)。所有演示供应商、物料、报价、制度材料和采购历史均为合成数据。
 
-本文定义待制作的数据集、字段、报价文档和评测答案。原始 CSV 已在线核对；演示规格、生成器、PDF 和评测文件是待实现设计，不表示文件已经生成或系统已经通过测试。
-
-## 1. 数据来源与范围
-
-使用 [Procurement Spend Analysis Dashboard](https://github.com/dytcoke23/procurement-spend-analysis-dashboard) 的 [purchase_orders.csv](https://github.com/dytcoke23/procurement-spend-analysis-dashboard/blob/main/data/purchase_orders.csv) 作为业务素材。原项目由固定随机种子合成历史采购订单，不提供本场景的原始供应商报价 PDF。保留其 [MIT 许可证](https://github.com/dytcoke23/procurement-spend-analysis-dashboard/blob/main/LICENSE) 与归属信息。
-
-2026-09-08 在线读取 CSV 后统计如下。上游 main 分支可能变化，落地时必须保存实际下载文件及来源清单，以哈希绑定版本。
-
-| 项目 | 实际统计 |
-| --- | --- |
-| 全部采购记录／供应商 | 47,128 条／106 家 |
-| Electronics 记录／供应商 | 6,123 条／15 家 |
-| Microcontroller MCU-9 | 1,185 条／15 家供应商 |
-| Power Supply Unit 450W | 1,319 条 |
-| Connector Kit CK-8 | 1,194 条 |
-| Sensor Module SM-3 | 1,221 条 |
-| PCB Assembly A-11 | 1,204 条 |
-
-本次 CSV SHA-256：`fba22a467e5dd800a0af960930d2ca5e2ecbd9d2bc747e37304867d8d031ae21`。
-
-**首版只以 Electronics／Microcontroller MCU-9 为主演示商品。** 保留完整原始数据，提取 Electronics 子集作为背景，再选 MCU-9 的 3–5 家供应商记录作为场景素材；不将全部历史记录逐条转换为报价。其他商品作为后续扩展候选。
-
-原始字段共 16 个：
+## 1. 目录职责
 
 ```text
-po_id, order_date, promised_delivery_date, actual_delivery_date,
-supplier_id, supplier_name, supplier_country, category, item,
-business_unit, unit_price, quantity, line_total, payment_terms,
-on_contract, quality_rejected
+data/
+├── contracts/                  字段字典、Schema 和接口约束
+├── policies/                   可发布的采购制度与集合清单
+├── examples/policy_rag/        Policy RAG 最小示例
+├── source/                     上游原始数据、许可证和来源说明
+└── generated/
+    ├── demos/                  当前可人工走通的演示包
+    ├── fixtures/extraction/    解析器边界与格式测试夹具
+    ├── fixtures/compliance/    制度核验专项夹具
+    └── supplier_history/       确定性生成的供应商历史发布
+
+evaluation/
+└── reference/                  参考答案和离线验收数据
 ```
 
-| 原始字段 | 用途与边界 |
+`data/generated/demos/` 可以作为用户上传输入；`evaluation/reference/` 只能供测试程序和验收人员读取，不得上传或挂载给运行时 Agent。
+
+## 2. 报价字段契约
+
+报价审核字段以 `data/contracts/quote_data_field.csv` 和后端 `GET /api/v1/quote-field-schema` 为准，前端不维护重复字段表。当前字段覆盖：
+
+| 分组 | 字段 |
 | --- | --- |
-| supplier_id／supplier_name／supplier_country | 合成供应商素材；不构成真实企业验证，也不自动决定新场景跨境运费或税费 |
-| category／item | 筛选 MCU-9；名称相同不证明制造商、料号和封装一致 |
-| unit_price／quantity／line_total | 历史价格和规模参考；不能当成当前报价、MOQ 或含运费总成本 |
-| payment_terms／on_contract | 保留历史含义，当前付款与合同条件必须重新明确 |
-| promised_delivery_date／actual_delivery_date | 可分析历史表现，不能直接填为本次到货承诺 |
-| po_id | 映射为 source_po_id，不能充当新报价编号 |
-| quality_rejected | 订单行拒收标志，不等于拒收件数或数量拒收率 |
+| 身份 | `supplier_name`、`supplier_country` |
+| 规格 | `category`、`item`、`manufacturer`、`manufacturer_part_number`、`package`、`revision`、`condition` |
+| 价格 | `currency`、`unit_price`、`price_basis_quantity`、`price_basis_unit` |
+| 包装 | `packaging_type`、`units_per_pack`、`order_multiple_units` |
+| MOQ | `moq_quantity`、`moq_unit` |
+| 费用 | `shipping_fee_status`、`shipping_fee_amount`、`other_fees_status`、`other_fees_amount`、`tax_mode` |
+| 交期 | `lead_time_days`、`day_basis`、`delivery_semantics`、`start_event` |
+| 商务 | `payment_terms`、`quote_date`、`valid_until` |
 
-原数据没有币种、详细器件规格、包装步长、MOQ、运费、税费及报价有效期。新增 SGD 是团队设定，不是确认原币种或完成汇率换算。原项目风险评分不纳入首版推荐；以后展示历史表现时，只使用决策时点前已知的记录。
+字段候选至少包含原始值、标准化值、单位、校验状态、来源引用以及适配器/提示词版本。业务 ID 和报价版本由后端生成或校验，不能信任模型自报。
 
-## 2. MCU 规格与采购需求
+### 状态与来源
 
-MCU-9 是合成目录标签。为使三份文档有共同参考，本文定义以下**虚构演示规格**，不对应已核验的真实器件或数据手册；后续调整须同步场景和参考答案。
+| 维度 | 值 | 含义 |
+| --- | --- | --- |
+| `validation_status` | `EXTRACTED` | 已抽取，尚未达到确定性核验条件 |
+|  | `VERIFIED` | 已通过结构、范围、单位和证据核验 |
+|  | `MISSING` | 原文未提供或无法可靠识别 |
+|  | `CONFLICT` | 同一字段存在相互冲突的候选 |
+| `origin` | `DOCUMENT` | 来自上传原件 |
+|  | `USER_INPUT` | 用户补充的新事实 |
+|  | `USER_CORRECTION` | 用户纠正模型或解析结果 |
+|  | `DERIVED` | 由明确规则和已确认输入计算 |
 
-| 字段 | 主演示设定 |
-| --- | --- |
-| category／item | Electronics／Microcontroller MCU-9 |
-| manufacturer | QQ Demo Components（虚构） |
-| manufacturer_part_number | QW-MCU9-DEMO（虚构料号） |
-| package／revision | QFN-32／R1（演示规格） |
-| condition／allow_substitutes | NEW／false |
-| base_unit | piece，界面显示“颗” |
+费用状态为 `KNOWN_AMOUNT | FREE | INCLUDED | NOT_APPLICABLE | UNKNOWN`。`UNKNOWN` 的金额必须为空，不能用 0 代替。金额使用十进制字符串；包装数量、订购倍数和 MOQ 是三个不同概念。
 
-需求指定同制造商、同料号、同封装及必要版本、全新产品，不判断替代型号的电气、引脚或固件兼容性。规格缺失先待确认，证据明确不匹配时判不可行；已失败报价不必追问无助于排除结论的其他字段。
+## 3. 文件与证据
 
-采购需求与供应商报价分别保存：
+- PDF 证据包含文件/报价版本、哈希、页码、稳定文本块 ID、原文片段和可用坐标。
+- CSV 证据包含文件/报价版本、哈希、行号和列名。
+- 模型只能引用本次解析生成且属于正确文件版本的来源 ID。
+- 人工纠正保留原提取值；派生值记录输入字段和规则版本。
+- 文件替换生成新版本，旧文件和引用继续用于历史快照。
 
-| 需求字段 | 含义 |
-| --- | --- |
-| required_product_spec | 上述规格与必须匹配字段 |
-| required_quantity／quantity_unit | 主演示为 1,000 颗 |
-| budget_amount／currency／budget_basis | 主演示 S$8,000，含运费、不计税的明确合成口径 |
-| delivery_deadline／delivery_location | 2026-09-19；新加坡虚构收货点 SG-DEMO-01 |
-| planned_order_date／scenario_clock | 起算日 2026-09-14；受控评测时钟为当日 09:00，Asia/Singapore |
-| ranking_preference／secondary_preference | 总成本优先，未指定第二排序项时允许并列 |
-| task_id／requirement_version／task_revision | 后端生成；业务输入修改推进版本 |
+## 4. 制度与合规材料
 
-相对交期按共同起算日、自然日、到货语义换算，起算日为第 0 日。只给工作日或发货时间时，先确认到货日期及依据。受控时钟仅用于标记明确的演示／评测环境；实际部署默认使用真实时间，不能为维持旧报价有效而偷偷移动日期。
+制度数据分为三层：
 
-## 3. 报价字段与来源契约
+1. 原始制度文件及范围元数据；
+2. 人工审核后的条款、控制码和可执行参数；
+3. 发布后的 Embedding 索引及版本清单。
 
-| 字段组 | 必要字段／规则 |
-| --- | --- |
-| 身份与版本 | scenario_id、quote_id、quote_version、supplier_id、document_id；素材有对应原订单时保存 source_po_id |
-| 产品规格 | manufacturer、manufacturer_part_number、package、revision、condition；与需求逐项核验 |
-| 价格 | unit_price、currency、price_basis_quantity、price_basis_unit；标准化价格基数以颗表示，保留按颗／按盘原始表述 |
-| 包装与订购 | packaging_type、units_per_pack、order_multiple_units；每盘数量与是否必须整盘购买分开 |
-| MOQ | moq_quantity、moq_unit；转为颗后计算，不能从历史 quantity 推断 |
-| 运费 | shipping_fee_status、shipping_fee_amount；UNKNOWN 金额为空，不自动记零 |
-| 其他费用与税费 | other_fees、fees_complete、tax_mode；费用明确列出或声明无其他费用，预算采用同口径 |
-| 交期 | delivery_date，或 lead_time_days、day_basis、delivery_semantics、start_event、start_date 的完整组合 |
-| 商务与时间 | payment_terms、quote_date、valid_until；新版独立核验，不继承旧人工补充 |
+供应商证明材料是任务级、供应商级的版本化证据。当前闭环支持供应商准入、RoHS 合规和金额审批等控制项；材料事实由解析器辅助填写，必须由用户核对确认。合规 assessment 同时冻结制度引用、材料引用、评估时间和确定性状态。
 
-费用状态为 KNOWN_AMOUNT、FREE、INCLUDED、NOT_APPLICABLE、UNKNOWN。已包含费用不重复累加，未知费用不形成确定总额。`Q = ceil(max(D, M) / S) × S`，货款为 `Q / B × P`；需求 D、MOQ M、步长 S、计价基数 B 均为颗，P 为覆盖 B 颗的固定价格。
+## 5. 当前完整演示：full_flow_demo4
 
-Python 使用 Decimal；PostgreSQL NUMERIC 保留约定的单价精度，API 用十进制字符串传递金额。默认货款行按 ROUND_HALF_UP 舍入至分，再加已确认费用；超出支持精度或与报价金额／舍入规则不符时创建问题，不静默截断。
+入口：`data/generated/demos/full_flow_demo4/`。
 
-| 追溯层 | 保存内容 |
-| --- | --- |
-| 合成数据来源 | 源 URL、哈希、source_po_id、generator_version、seed、base_date；字段标记 COPIED_FROM_SOURCE／SYNTHETIC／DERIVED 等生成来源 |
-| 字段状态 | validation_status：EXTRACTED／VERIFIED／MISSING／CONFLICT |
-| 运行时来源 | origin：DOCUMENT／USER_INPUT／USER_CORRECTION／DERIVED；与生成来源分开，PDF 中的合成条款仍可有 DOCUMENT 原文依据 |
-| 解析证据 | 文件版本、哈希、解析器版本、页码、文本块 ID、位置或 CSV 行列；不伪造缺失字段引用 |
-| 用户变更 | 原值、新值、用户、时间、问题与任务版本，保留历史 |
-| 运行记录 | graph_run_id／thread_id、job_id、task_revision、snapshot_id、环境／provider／model_id／提示词版本 |
+该数据集包括：
 
-身份、版本与来源 ID 由后端生成或校验。检查点保存执行状态，业务表保存权威事实，补问恢复和新报价失效规则见架构文档。
+- 一份采购需求及确认参考；
+- Electronics/SG 主制度和一个不匹配范围的反例制度；
+- 四家供应商的 PDF 与等价 CSV 报价；
+- 首轮供应商准入/RoHS 材料及三份替换材料；
+- 缺运费、冲突价格、错误料号、MOQ、并列、提示注入等隔离变体；
+- 与 `2026-08-06-v1` 合成供应商历史发布的绑定信息。
 
-## 4. 合成、渲染与评测隔离
+主场景固定评估日期为 2026-11-02。PDF 和 CSV 是两条等价输入路径，同一任务不要混传。每个 `variants/` 用例必须创建新任务，只替换指定供应商的一份报价。
 
-```text
-原始 CSV（只读保存与哈希绑定）
-→ 筛选 MCU-9 素材并固定目标规格
-→ 固定随机种子＋场景规则生成结构化报价
-→ 一致性检查与独立人工参考核验
-→ 按场景遮蔽字段并渲染文本 PDF／模板 CSV
-→ 系统只读取上传文件与已确认的用户回答
-```
+完整人工步骤见 [TESTING.md](TESTING.md)，具体上传顺序见数据包内的 `README.md`。离线预期结果位于 `evaluation/reference/full_flow_demo4/`，不得提供给运行时 Agent。
 
-价格、MOQ、包装倍数、费用和日期按场景联动生成，采购量与金额由规则推导，不逐字段独立随机。固定生成器版本、源文件哈希、基准日期及各场景随机流；保存最终产物，不能只记录一个全局种子。
+## 6. 供应商历史
 
-PDF 必交付采用 1 种开发版式及 1 种独立留出版式，包含表格／措辞差异；为正式 RAG 调整工时，额外开发版式不列为必做。版式与供应商排名独立变化；用于调试后的盲测模板不能继续充当最终留出模板。pdfplumber 解析英文可提取文本 PDF，每份最多 5 页／5 MB、单任务最多 5 份，均为可配置限制；不增加 OCR。解析器生成稳定证据 ID，LLM 再理解字段；文件生成器与解析器独立。
+运行时历史发布位于 `data/generated/supplier_history/mcu9/{dataset_version}/`，由 `data/source/purchase_orders.csv` 确定性生成。发布包含内容哈希、manifest 哈希、统计期间、样本门槛、评级方法版本和合成数据标识。
 
-当前交付目录如下：
+任务通过 `task_history_bindings` 固定具体版本。旧结果必须读取冻结快照，不能用最新历史数据补齐。
 
-```text
-data/source/                 原始 CSV、许可证、来源与哈希清单
-data/generated/demos/        当前可上传并走通的完整演示包
-data/generated/fixtures/     解析与制度核验专项测试夹具
-data/generated/supplier_history/  确定性生成的供应商历史发布
-data/policies/               演示制度 Markdown、集合清单和版本哈希
-evaluation/reference/        独立参考答案与模拟用户回答
-evaluation/rag/              独立 RAG 问题、参考条款和留出集（不挂载给 Agent）
-evaluation/compliance/       供应商身份、注册事实和合规三态参考矩阵
-evaluation/results/          按模型环境区分的实测结果
-```
+## 7. 数据维护规则
 
-部署仅导入被选中的运行输入；参考答案、完整未遮蔽报价和生成来源映射不得挂载到 Agent 可读取目录或暴露为业务工具。历史查询仅提供受限 SQL 查询，不用于反推被遮蔽条款。模拟回答由测试驱动器经正常 API 提交，提交前不可被 Agent 读取。
-
-Docker Compose 管理 Lightsail 上的应用和存储挂载；文件和报告进入持久化文件卷，业务数据、制度条款、供应商注册记录、检索轨迹、pgvector 条款向量和检查点进入 PostgreSQL 专用卷，均需实例外备份。条款向量通过 SiliconFlow `BAAI/bge-m3` 生成并保存为固定维度的 `vector(1024)`；批准状态和 RoHS 保存在普通关系表。两类导入都使用明确路径白名单，不能递归收录项目文档、生成器映射或 evaluation 目录。
-
-## 5. 共同主演示与参考答案
-
-场景 ID：`MCU-DEMO-001`。采用第 2 节固定规格、1,000 颗需求、S$8,000 预算及共同收货点。以下全部是新增合成条款，金额经独立手算核对，**不是从历史 CSV 直接得到的报价**。A／B／C 是演示别名，生成时选择不同源供应商并保存映射。
-
-各报价日期为 2026-09-13，有效至 2026-09-20 新加坡当日结束；付款条件为演示 Net 30，到货从 2026-09-14 下单日起算，明确不计税且无其他费用。
-
-| 供应商 | 固定报价 | MOQ／订购倍数 | 运费 | 到货周期 | 实际采购量 | 总成本与结论 |
-| --- | --- | --- | --- | --- | --- | --- |
-| A | S$640／盘，每盘 100 颗 | MOQ 20 盘／整盘购买 | 免费 | 7 天 | 2,000 颗 | 20 × 640＝S$12,800；超预算且到货超期 |
-| B | S$6.80／颗 | MOQ 1,000 颗／允许按颗购买 | S$200 | 3 天 | 1,000 颗 | 1,000 × 6.80＋200＝S$7,000；可行且最低 |
-| C | S$660／盘，每盘 100 颗 | MOQ 10 盘／整盘购买 | S$500 | 3 天 | 1,000 颗 | 10 × 660＋500＝S$7,100；可行 |
-
-主演示冻结 `policy_set_version=POLICY-DEMO-1` 和 `supplier_registry_version=SUPPLIER-DEMO-1`。B、C 均映射到唯一 supplier master，注册表状态为批准，RoHS 在 2026-09-14 有效；A 的合规记录不影响其已经确定的价格／交期不可行结论。所有记录均为虚构演示数据。另在合规评测矩阵中设置未批准、证书过期、身份多匹配和缺记录案例。
-
-按以下事件演示；上述完整答案不得直接交给 Agent：
-
-1. B 初始报价省略运费。A 不可行，B 待确认，C 可行；只展示草稿，不能直接宣布 C 最优。
-2. Agent 请求确认 B 运费，引用相关上下文而不伪造运费证据。模拟用户回答 S$200 并确认后，保存人工输入、推进版本并恢复关联的 LangGraph 中断。
-3. 新快照完整校验和计算，B 以 S$7,000 成为初步价格第一名；此时尚未发布最终推荐。
-4. RAG 检索适用的金额门槛、批准供应商和 RoHS 条款；系统按冻结注册表精确查询 B 的批准状态及 RoHS。确定性门禁输出 COMPLIANT 后发布 B，审核人审批并导出报告。
-5. 同一受控场景日上传 B v2，报价日期为 2026-09-14、有效期不变，明确运费 S$200，到货改为 6 天。旧运行／推荐／合规评估／审批失效；新报价独立解析，不继承旧人工回答。
-6. 新运行按交期将 C 排在第一，重新检索制度并查询 C 的当前注册事实；C 为 COMPLIANT 后推荐 S$7,100，比旧推荐增加 S$100 并要求重新审批。B v2 到货为 2026-09-20，超期。
-7. 报告分别展示报价证据、确定性计算、制度引用和供应商注册记录；S$100 不从制度或资质文本推断。
-
-另备规格缺失、不匹配料号、单位歧义、已不可行报价缺运费、全不可行、仍待确认、用户排除、并列和自然过期场景。自然过期测试显式推进受控时钟，实际应用不能用演示日期替换真实审批时间。
-
-## 6. 评测组织与交付状态
-
-约 20 个业务场景，建议 12 个开发／8 个留出，按模板划分，不能只换数值。独立测试算术、硬约束和版本事务，不将代码断言计为业务场景。使用同一比较函数生成答案再验证自身不能作为唯一证据，主演示和关键边界需手算或独立实现核对。
-
-参考答案包括期望字段、语义支持证据、阻塞问题、人工回答、采购量、金额、可行性、最优／并列集合及事件后状态；分别记录补问前、回答后、新报价后的结果。覆盖重启、重复回答、过期恢复、迟到结果、旧页面审批、自然过期和文件中的越权指令。
-
-本地开发 API 与主办方 API 使用相同评测输入，分开报告人工修正前字段准确率、证据支持、漏检与误报、修正负担、含人工时间的耗时和调用用量／成本。本地通过不代替 AWS 实测；合成表现不等于真实企业验证。获授权匿名化真实报价可补充验证，首版不以其到位为前提。
-
-待制作交付物：原始数据与许可清单、种子生成器、规格与字段 schema、文本 PDF／CSV、独立参考答案、评测脚本与实际结果。生成前确认具体源供应商映射及字段精度；调整主演示规格或金额时，同步项目计划和架构示例。
-
-## 7. 采购制度 RAG 与供应商合规数据（正式交付）
-
-### 7.1 知识库范围与制作
-
-团队编写 3–5 份简短英文 Markdown 制度，覆盖报价完整性、总成本比较、批准供应商、Electronics RoHS 要求、审批与报价变更；每份按完整条款／章节切分，不能切掉否定条件或例外。首版预计 15–30 个条款，以语义完整性为准，不为数量凑文本。每份显著标记“Fictional procurement policy for demonstration”；不代表 NUS、AWS 或真实企业规定。
-
-制度应与现有确定性规则一致，A 编写、C 交叉复核。当前 `2026.09.1` manifest 绑定的候选控制码为 `QUOTE_COMPLETENESS`、`TOTAL_COST`、`APPROVED_SUPPLIER`、`ROHS_COMPLIANCE`、`AMOUNT_APPROVAL` 和 `QUOTE_CHANGE_REVIEW`；A／C 签字状态见 [`guide/POLICY_SEMANTIC_REVIEW.md`](guide/POLICY_SEMANTIC_REVIEW.md)。品类、地区和有效期保存在制度范围中，金额阈值等规则参数绑定具体条款。结构化制度清单先确定必需控制码，RAG 再检索支持原文；漏召回不能减少检查项或默认合规。制度不能包含某个供应商的正确报价、隐藏测试问题、预期排名或主场景答案。
-
-另行制作一个版本化供应商注册表，只包含主演示 A／B／C 所需的规范化身份、别名、批准状态和 RoHS 记录。批准事实和有效期由 PostgreSQL 精确查询，不进入向量检索。ISO 和框架合同不进入 Week2 数据集。
-
-| 记录 | 必需内容 |
-| --- | --- |
-| 制度集合 | policy_set_version、适用范围、成员文档版本、集合哈希；发布后不可变 |
-| 制度文档 | policy_id、document_version、title、language、scope、effective_from／effective_to、source_path、content_hash、is_synthetic |
-| 条款 | clause_id、章节标题、完整正文、文档版本和正文哈希；引用键为文档 ID＋版本＋条款 ID |
-| 条款向量／索引版本 | 条款 ID／版本／内容哈希、embedding provider／模型版本、维度、预处理版本、pgvector `vector(1024)`、索引版本、导入状态／错误；完整校验后才可用，旧索引不覆盖 |
-| 检索轨迹 | retrieval_id、任务修订／快照、集合版本、查询、过滤、embedding／rerank 服务商与模型版本、维度／预处理／索引版本、召回与重排 Top-k ID／排名／分数、调用尝试与用量、引用与支持判断、状态／错误、耗时 |
-| 供应商主数据 | supplier_master_id、规范名称、别名、来源和身份匹配状态；上传请求中的 supplier_id 只是声明值 |
-| 供应商注册表版本 | supplier_registry_version、成员记录版本、集合哈希、发布时间和发布状态；发布后不可覆盖 |
-| 批准供应商记录 | supplier_master_id、批准状态、适用类别／地区、有效区间、来源文件／行和内容哈希 |
-| RoHS 记录 | supplier_master_id、证书／记录 ID、适用范围、有效区间、来源文件／行和内容哈希 |
-| 合规评估／人工事件 | task_revision、供应商、两个集合版本、control_code 检查、三态结论、原因、证据及具名人工确认 |
-
-有效区间按 Asia/Singapore 日期使用左闭右开规则，effective_to 可空；制度及供应商记录在任务评估日需有效，不满足时记录冲突／无依据，不能混用其他版本。主演示数据的有效期需覆盖 2026-09-14，且不据此改变真实运行时钟。任务冻结 `policy_set_version` 和 `supplier_registry_version`；新版本不追溯改写旧结果。
-
-第一版使用英文问题和英文制度，中文界面按钮映射固定英文问题。SiliconFlow `BAAI/bge-m3` 生成 1024 维查询向量，版本和适用范围过滤后由 pgvector 执行精确余弦 Top-10，并与 BM25 Top-10 通过 RRF `k=60` 融合，`BAAI/bge-reranker-v2-m3` 重排取 Top-3；不足时取实际数量。条款向量记录内容哈希、服务商、模型版本、维度与预处理版本，文档／查询使用同一向量空间；同配置幂等复用，变更时完整重建，不混用向量。首版不建立 HNSW／IVFFlat，后续仅按实测规模和延迟决定。重排索引只映射本次候选条款。不设置未经评测的相似度阈值；分数不能替代引用语义核验。报价事实、制度依据、人工输入三者分开展示。运行所需制度只读导入，API 不提供任意路径索引入口。
-
-### 7.2 独立评测与通过标准
-
-正式准备 12 个制度检索问题：8 个开发、4 个留出，独立于约 20 个采购业务场景和供应商合规矩阵，不相加冒充采购任务样本。建议开发集含 4 个有答案、2 个无答案、1 个旧版本过滤、1 个冲突问题；留出集各含有答案、无答案、旧版过滤、冲突问题各 1 个。按问题意图／涉及条款划分；制度文档可以进入运行知识库，留出问题、相关条款标签和期望答案不进入索引或提示词。
-
-- 对有答案且无冲突的问题，人工标注必要条款集合；分别报告 BM25、pgvector、融合召回 Recall@10 与 rerank 后 Recall@3，均为对应 Top-k 命中的必要条款数／全部必要条款数。逐题报告，正式门槛为重排后 Recall@3 宏平均至少 80%，Recall@10 用于诊断召回损失。开发集、留出集及两种模型环境分别统计、分别判定，不能合并开发成绩抵消留出失败；旧版过滤题若有有效目标条款，也计入该指标。必要条款超过 3 条的问题不放入当前单次检索范围。
-- 对输出引用，ID／版本／原文必须全部匹配本次检索结果；人工逐条核对制度主张是否被引用支持，目标 100%，无依据主张同样计为失败，不能靠不输出引用获得通过。
-- 无答案时明确说明无法从制度确认；冲突时明确标记并不编造合规结论。这两类问题在开发／留出及两种模型环境中均要求全部通过。错误版本、任务外条款、越权指令与检索故障用确定性边界测试另验，预定测试必须全部通过。引用匹配与主张支持的通过标准也按上述分组分别判定，禁止只报总体平均。
-- 分别记录条款导入 embedding、查询 embedding、rerank、解释的耗时／用量／失败；同一留出结果注明完整模型组合。补充维度／模型不匹配、向量无效、索引部分完成、缓存跨版本、rerank 响应错位、超时／限流／预算耗尽与恢复复用测试。故障必须报告 ERROR，不以跳过重排算作成功。
-- 供应商身份映射、批准状态、RoHS 有效期和合规三态另做确定性矩阵，覆盖未匹配／多匹配、批准／未批准／缺记录、有效／过期／冲突 RoHS、高排名 REVIEW_REQUIRED、高排名 NON_COMPLIANT、全不合规和旧 registry version。预定边界必须全部通过，不能用检索 Recall 代替结构化事实正确性。
-- 主演示的金额门槛、批准供应商和 RoHS 要求必须实际检索并显示正确制度引用；B／C 的注册事实必须由冻结版本精确查询。硬编码解释或向量搜索供应商状态不能代替验收。
-- 第二周完成 8 个开发问题和边界测试，最终周运行 4 个留出问题；两阶段模型分别报告引用支持、失败、延迟与用量。小样本结果不表示真实采购制度泛化效果；留出集用于调试后必须另备未使用问题并披露。
-
-以上为交付目标，当前文档修改不表示制度文件、索引、代码或评测结果已经制作完成。
-## V2 供应商历史发布与偏好演示数据
-
-供应商历史表现的运行时发布位于
-`data/generated/supplier_history/mcu9/{dataset_version}/`。当前发布
-`2026-08-06-v1` 由 `data/source/purchase_orders.csv` 中 1,185 条 MCU-9 合成采购记录确定性生成，
-包含内容哈希、manifest 哈希、as-of、统计期间、scope、样本门槛、评级方法版本和合成数据标识。
-任务通过 `task_history_bindings` 固定具体发布；旧结果只能读取其冻结快照，不能读取最新发布补齐。
-
-当前用户可走通的完整流程演示包为 `data/generated/demos/full_flow_demo4/`。其四家供应商、报价、器件、制度材料和历史均为合成数据；专项解析样本已按用途收敛到 `data/generated/fixtures/`，不再把旧版号目录当作可交付数据集。
+- 新的用户演示包放入 `generated/demos/`；专项边界样本放入 `generated/fixtures/`。
+- 不再以 `quote_V1`、`quote_V2` 等版本号复制整套数据。
+- 生成数据必须有可复现生成器、固定种子或内容哈希，以及明确的合成数据标识。
+- 开发集、校准集和留出集隔离；根据留出结果调试过的样本不再算最终留出样本。
+- 参考答案、模拟回答和未遮蔽真值不得进入运行时目录。
+- 修改生成文件后必须同步 manifest 的文件大小和哈希，或使用对应生成器重建。

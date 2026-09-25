@@ -125,8 +125,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "547ba96bafc335e8be0f1a9fe40c9dc6907a5e96df42d9b76d4bb5f7919783ab",
-      "size_bytes": 2399
+      "sha256": "6607df9ad7f1996aff2303ebb7db2a199a94e698226c757ab8cc1173a926ee38",
+      "size_bytes": 2373
     },
     {
       "path": "compliance_evidence/README.md",

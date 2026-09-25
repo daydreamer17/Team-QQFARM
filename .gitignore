@@ -59,6 +59,8 @@ test-results/
 *.swp
 *.swo
 *~
+/tmp/
+/output/
 
 # Real-model evaluation outputs are local evidence and may contain provider diagnostics.
 /evaluation/results/local/
