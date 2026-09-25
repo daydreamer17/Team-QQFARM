@@ -969,6 +969,27 @@ class BackendService(ComplianceMixin):
                             review_artifact = session.get(
                                 WorkflowArtifact, execution.review_artifact_id
                             )
+                    if review_artifact is None:
+                        # A quote deactivation/reactivation invalidates the current
+                        # graph, but it does not change either the current document
+                        # or the requirement.  Reuse the newest completed review for
+                        # this exact document only when it was produced at or after
+                        # the current requirement revision.  Replaced quotes and
+                        # subsequently edited requirements therefore still require
+                        # a fresh review.
+                        review_artifact = session.scalar(
+                            select(WorkflowArtifact)
+                            .where(
+                                WorkflowArtifact.task_id == task_id,
+                                WorkflowArtifact.document_id == document.document_id,
+                                WorkflowArtifact.artifact_type == "REVIEW_ENVELOPE",
+                                WorkflowArtifact.task_revision >= requirement_revision,
+                            )
+                            .order_by(
+                                WorkflowArtifact.task_revision.desc(),
+                                WorkflowArtifact.created_at.desc(),
+                            )
+                        )
                     if review_artifact is not None:
                         document_ready = (
                             review_artifact.payload.get("review_status")

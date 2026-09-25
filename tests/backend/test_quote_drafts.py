@@ -7,7 +7,14 @@ import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 
-from supplier_comparison.backend.models import Base, Document, QuoteDraft, WorkflowArtifact
+from supplier_comparison.backend.models import (
+    Base,
+    Document,
+    DocumentExecution,
+    GraphRun,
+    QuoteDraft,
+    WorkflowArtifact,
+)
 from supplier_comparison.backend.service import (
     BackendError,
     BackendService,
@@ -521,6 +528,106 @@ def test_replacement_creates_new_version_and_deactivation_preserves_history(
             idempotency_key="reactivate-already-active",
         )
     assert already_active.value.code == "quote_already_active"
+
+
+def test_reactivation_reuses_review_for_same_document_and_requirement(
+    service: BackendService,
+    tmp_path: Path,
+) -> None:
+    task, draft, current = _processed_canonical_draft(
+        service, tmp_path, key="reactivation-review"
+    )
+    reviewed = _review_all_fields(
+        service,
+        task,
+        draft,
+        current,
+        key="review-before-reactivation",
+    )
+    submitted = service.submit_quote_draft(
+        task["task_id"],
+        draft["quote_draft_id"],
+        expected_task_revision=1,
+        expected_draft_revision=reviewed["draft_revision"],
+        idempotency_key="submit-before-reactivation",
+    )
+
+    changed_requirement = ProcurementRequirement.model_validate(
+        requirement().model_dump(mode="json")
+        | {"delivery_deadline": "2026-09-20"}
+    )
+    updated = service.update_requirement(
+        task["task_id"],
+        changed_requirement,
+        expected_task_revision=2,
+        idempotency_key="update-before-reactivation",
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/1.0.0",
+    )
+    review_payload = {"review_status": "READY_FOR_DOWNSTREAM"}
+    with service.session_factory.begin() as session:
+        graph = session.get(GraphRun, updated["graph_run_id"])
+        execution = session.scalar(
+            select(DocumentExecution).where(
+                DocumentExecution.graph_run_id == updated["graph_run_id"],
+                DocumentExecution.document_id == submitted["document_id"],
+            )
+        )
+        assert graph is not None and execution is not None
+        review_artifact_id = "artifact-reactivation-review"
+        session.add(
+            WorkflowArtifact(
+                artifact_id=review_artifact_id,
+                task_id=task["task_id"],
+                task_revision=updated["task_revision"],
+                artifact_type="REVIEW_ENVELOPE",
+                quote_id=submitted["quote_id"],
+                document_id=submitted["document_id"],
+                graph_run_id=graph.graph_run_id,
+                payload=review_payload,
+                content_sha256=content_hash(review_payload),
+            )
+        )
+        execution.status = "REVIEWED"
+        execution.review_artifact_id = review_artifact_id
+        graph.status = "COMPLETED"
+
+    assert service.get_task(task["task_id"])["progress"]["quote_review_completed"] is True
+
+    deactivated = service.deactivate_quote(
+        task["task_id"],
+        submitted["quote_id"],
+        expected_task_revision=3,
+        idempotency_key="deactivate-after-review",
+    )
+    service.reactivate_quote(
+        task["task_id"],
+        submitted["quote_id"],
+        expected_task_revision=deactivated["task_revision"],
+        idempotency_key="reactivate-after-review",
+    )
+
+    restored = service.get_task(task["task_id"])
+    assert restored["current_graph_run_id"] is None
+    assert restored["progress"]["quote_review_completed"] is True
+
+    newer_requirement = ProcurementRequirement.model_validate(
+        changed_requirement.model_dump(mode="json")
+        | {"delivery_deadline": "2026-09-21"}
+    )
+    service.update_requirement(
+        task["task_id"],
+        newer_requirement,
+        expected_task_revision=restored["task_revision"],
+        idempotency_key="update-after-reactivation",
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/1.0.0",
+    )
+    assert service.get_task(task["task_id"])["progress"]["quote_review_completed"] is False
 
 
 def test_unknown_required_fee_can_be_submitted_but_not_calculated(
