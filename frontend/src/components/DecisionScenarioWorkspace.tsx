@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ComplianceAssessmentDetails } from './ComplianceAssessmentDetails'
+import { OverlayPortal } from './OverlayPortal'
 import {
   api,
   ApiClientError,
@@ -947,7 +948,8 @@ export function DecisionScenarioWorkspace({
           : undefined
         const dialogLabel = policyCitation ? '制度引用详情' : '引用详情'
         return (
-          <div className="evidence-drawer-layer" role="presentation">
+          <OverlayPortal>
+            <div className="evidence-drawer-layer" role="presentation">
             <button
               className="evidence-drawer-backdrop"
               type="button"
@@ -1020,7 +1022,8 @@ export function DecisionScenarioWorkspace({
                 </section>
               )}
             </aside>
-          </div>
+            </div>
+          </OverlayPortal>
         )
       })()}
     </section>

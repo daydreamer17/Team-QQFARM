@@ -388,10 +388,14 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getAllByRole('button', { name: /^查看引用/ })).toHaveLength(3)
 
     await userEvent.click(screen.getByRole('button', { name: '查看引用 [2] 供应商报价' }))
-    expect(screen.getByRole('dialog', { name: 'Supplier One 字段证据' })).toBeInTheDocument()
+    const quoteEvidenceDialog = screen.getByRole('dialog', { name: 'Supplier One 字段证据' })
+    expect(quoteEvidenceDialog).toBeInTheDocument()
+    expect(quoteEvidenceDialog.parentElement?.parentElement).toBe(document.body)
     await userEvent.click(screen.getByRole('button', { name: '关闭' }))
     await userEvent.click(screen.getByRole('button', { name: '查看引用 [3] 制度证据' }))
-    expect(screen.getByRole('dialog', { name: '制度引用详情' })).toHaveTextContent(
+    const policyCitationDialog = screen.getByRole('dialog', { name: '制度引用详情' })
+    expect(policyCitationDialog.parentElement?.parentElement).toBe(document.body)
+    expect(policyCitationDialog).toHaveTextContent(
       'A current supplier registry record is required before approval.',
     )
   })

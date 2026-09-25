@@ -15,6 +15,7 @@ import { DecisionScenarioWorkspace } from '../components/DecisionScenarioWorkspa
 import { MatrixPaymentTerm, MatrixSupplierPerformance } from '../components/SupplierMatrixDetails'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
+import { OverlayPortal } from '../components/OverlayPortal'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
 import { supplierSelectionExplanation, withPolicyAssessment } from '../lib/resultComparison'
 import {
@@ -146,9 +147,10 @@ function EvidenceDrawer({
   onClose: () => void
 }) {
   return (
-    <div className="evidence-drawer-layer" role="presentation">
-      <button className="evidence-drawer-backdrop" type="button" aria-label="关闭证据抽屉" onClick={onClose} />
-      <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} 字段证据`}>
+    <OverlayPortal>
+      <div className="evidence-drawer-layer" role="presentation">
+        <button className="evidence-drawer-backdrop" type="button" aria-label="关闭证据抽屉" onClick={onClose} />
+        <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} 字段证据`}>
         <header>
           <div>
             <p className="eyebrow">报价原文</p>
@@ -206,8 +208,9 @@ function EvidenceDrawer({
             ))}
           </section>
         )}
-      </aside>
-    </div>
+        </aside>
+      </div>
+    </OverlayPortal>
   )
 }
 

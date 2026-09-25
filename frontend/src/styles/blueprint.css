@@ -253,7 +253,7 @@
 .file-preview-layer {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1000;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(560px, 46vw);
 }
@@ -273,7 +273,9 @@
   grid-row: 1;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
-  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   background: #fff;
   box-shadow: -20px 0 50px rgba(23, 32, 51, 0.2);
 }
@@ -285,6 +287,11 @@
   gap: 18px;
   padding: 22px;
   border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.file-preview-dialog > header > div {
+  min-width: 0;
 }
 
 .file-preview-dialog h2 {
@@ -4209,7 +4216,7 @@ body {
 .evidence-drawer-layer {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1000;
   display: flex;
   justify-content: flex-end;
 }
@@ -4225,9 +4232,14 @@ body {
 
 .evidence-drawer {
   position: relative;
+  z-index: 1;
   width: min(560px, 94vw);
-  height: 100vh;
+  min-width: 0;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   box-shadow: -22px 0 60px rgba(15, 23, 42, 0.2);
 }
@@ -4246,8 +4258,13 @@ body {
   backdrop-filter: blur(12px);
 }
 
+.evidence-drawer > header > div {
+  min-width: 0;
+}
+
 .evidence-drawer > header h2 {
   margin: 0 0 5px;
+  overflow-wrap: anywhere;
 }
 
 .evidence-drawer > header span {
@@ -4305,7 +4322,40 @@ body {
 
 .drawer-reasons,
 .drawer-fields {
+  min-width: 0;
   margin: 0 22px 20px;
+}
+
+.drawer-fields,
+.drawer-fields li,
+.drawer-fields p,
+.drawer-fields small,
+.drawer-fields span,
+.drawer-fields strong {
+  overflow-wrap: anywhere;
+}
+
+.drawer-fields ol,
+.drawer-fields ul {
+  max-width: 100%;
+  padding-left: 22px;
+}
+
+.drawer-fields li {
+  min-width: 0;
+}
+
+.drawer-fields li > strong,
+.drawer-fields li > span,
+.drawer-fields li > small {
+  display: block;
+}
+
+.drawer-fields pre {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .drawer-reasons {

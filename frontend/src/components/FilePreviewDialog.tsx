@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { OverlayPortal } from './OverlayPortal'
 
 export interface PreviewFileSource {
   name: string
@@ -66,9 +67,10 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
   const isPdf = source.mediaType === 'application/pdf' || source.name.toLowerCase().endsWith('.pdf')
 
   return (
-    <div className="file-preview-layer" role="presentation">
-      <button className="file-preview-backdrop" type="button" aria-label="关闭文件预览" onClick={onClose} />
-      <section className="file-preview-dialog" role="dialog" aria-modal="true" aria-label={`${source.name} 文件预览`}>
+    <OverlayPortal>
+      <div className="file-preview-layer" role="presentation">
+        <button className="file-preview-backdrop" type="button" aria-label="关闭文件预览" onClick={onClose} />
+        <section className="file-preview-dialog" role="dialog" aria-modal="true" aria-label={`${source.name} 文件预览`}>
         <header>
           <div>
             <p className="eyebrow">FILE PREVIEW</p>
@@ -99,7 +101,8 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
           )}
         </div>
         {source.downloadUrl && <footer className="inline-actions"><a className="button button-submit" href={source.downloadUrl}>下载原件</a></footer>}
-      </section>
-    </div>
+        </section>
+      </div>
+    </OverlayPortal>
   )
 }
