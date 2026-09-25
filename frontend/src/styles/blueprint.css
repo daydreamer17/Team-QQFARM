@@ -715,10 +715,11 @@ body {
 
 .user-avatar {
   display: grid;
-  width: 32px;
+  min-width: 32px;
   height: 32px;
+  padding: 0 10px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: 999px;
   color: var(--blue-dark);
   background: var(--blue-soft);
   font-size: 0.72rem;
@@ -990,6 +991,39 @@ body {
   font-size: 0.66rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.task-center-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 13px 20px;
+  border-top: 1px solid var(--line);
+  background: #fafbfc;
+}
+
+.task-center-pagination .table-pagination {
+  flex: 1;
+}
+
+.task-page-size {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.task-page-size select {
+  min-height: 32px;
+  padding: 4px 28px 4px 9px;
+  border: 1px solid #d4dae4;
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
 }
 
 .task-name-link,
@@ -4909,6 +4943,21 @@ body {
   font-size: 0.68rem;
 }
 
+.policy-source-inline {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.policy-source-inline > p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.policy-source-inline > pre {
+  margin-top: 12px;
+}
+
 .policy-selected-file span,
 .policy-selected-file small {
   display: block;
@@ -6369,6 +6418,15 @@ body {
   .policy-picker-state {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .task-center-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .task-page-size {
+    justify-content: flex-end;
   }
 
   .policy-form-grid,

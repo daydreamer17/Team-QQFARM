@@ -3,6 +3,7 @@ import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
 import type { TaskListItem } from '../api/types'
+import { TablePagination } from '../components/TablePagination'
 
 const EMPTY_TASKS: TaskListItem[] = []
 
@@ -61,6 +62,7 @@ export function OverviewPage() {
   const [serverQuery, setServerQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [sortBy, setSortBy] = useState<TaskSort>('updated_desc')
+  const [pageSize, setPageSize] = useState<10 | 15>(10)
   const [offset, setOffset] = useState(0)
   const searchTimer = useRef<number | null>(null)
   const health = useQuery({
@@ -69,8 +71,8 @@ export function OverviewPage() {
     refetchInterval: 30_000,
   })
   const tasks = useQuery({
-    queryKey: ['tasks', 'center', serverQuery, statusFilter, sortBy, offset],
-    queryFn: () => api.listTasks({ limit: 20, offset, query: serverQuery, status: statusFilter === 'ALL' ? undefined : statusFilter, sort: sortBy }),
+    queryKey: ['tasks', 'center', serverQuery, statusFilter, sortBy, pageSize, offset],
+    queryFn: () => api.listTasks({ limit: pageSize, offset, query: serverQuery, status: statusFilter === 'ALL' ? undefined : statusFilter, sort: sortBy }),
     refetchInterval: 5_000,
   })
   const items = tasks.data?.items ?? EMPTY_TASKS
@@ -80,6 +82,9 @@ export function OverviewPage() {
   const completedCount = counts.COMPLETED ?? 0
   const isReady = health.data?.status === 'ready'
   const visibleItems = items
+  const total = tasks.data?.total ?? 0
+  const page = Math.floor(offset / pageSize)
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
 
   function updateSearch(value: string) {
     setSearch(value)
@@ -157,7 +162,7 @@ export function OverviewPage() {
             <Link className="button button-secondary" to="/tasks/new">创建任务</Link>
           </div>
         )}
-        {(tasks.data?.total ?? 0) === 0 && (serverQuery || statusFilter !== 'ALL') && (
+        {total === 0 && (serverQuery || statusFilter !== 'ALL') && (
           <div className="task-center-empty task-center-empty-filtered">
             <strong>没有匹配的采购任务</strong>
             <p>可以更换搜索词或状态筛选条件。</p>
@@ -193,7 +198,29 @@ export function OverviewPage() {
             </table>
           </div>
         )}
-        {(tasks.data?.total ?? 0) > 20 && <div className="policy-pagination"><span>第 {offset + 1}–{Math.min(offset + items.length, tasks.data!.total)} 条，共 {tasks.data!.total} 条</span><div><button className="button button-secondary" type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 20))}>上一页</button><button className="button button-secondary" type="button" disabled={offset + 20 >= tasks.data!.total} onClick={() => setOffset(offset + 20)}>下一页</button></div></div>}
+        {total > 0 && <div className="task-center-pagination">
+          <label className="task-page-size">
+            <span>每页</span>
+            <select
+              aria-label="每页任务数"
+              value={pageSize}
+              onChange={(event) => {
+                setPageSize(Number(event.target.value) as 10 | 15)
+                setOffset(0)
+              }}
+            >
+              <option value={10}>10 条</option>
+              <option value={15}>15 条</option>
+            </select>
+          </label>
+          <TablePagination
+            page={page}
+            pageSize={pageSize}
+            pageCount={pageCount}
+            total={total}
+            onPageChange={(nextPage) => setOffset(nextPage * pageSize)}
+          />
+        </div>}
       </section>
     </div>
   )

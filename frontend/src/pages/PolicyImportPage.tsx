@@ -122,7 +122,8 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
   const [revisionConflict, setRevisionConflict] = useState(false)
   const [lastReview, setLastReview] = useState<ReviewSubmission | null>(null)
   const [lastPublish, setLastPublish] = useState<PublishSubmission | null>(null)
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(true)
+  const [openRuleSettings, setOpenRuleSettings] = useState<Record<string, boolean>>({})
 
   const policy = useQuery({
     queryKey: ['policy-imports', policyImportId],
@@ -381,6 +382,11 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
               </Link>
             ))}
           </div>
+          <details className="policy-source-details policy-source-inline">
+            <summary>查看当前文件解析结果</summary>
+            {data.extraction_metadata.page_count && <p>共 {data.extraction_metadata.page_count} 页</p>}
+            <pre>{data.extracted_text}</pre>
+          </details>
         </section>
       )}
 
@@ -391,19 +397,13 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
         </section>
       )}
 
-      <details className="card policy-source-details">
-        <summary>查看文件解析结果</summary>
-        {data.extraction_metadata.page_count && <p>共 {data.extraction_metadata.page_count} 页</p>}
-        <pre>{data.extracted_text}</pre>
-      </details>
-
       {!readonly && (
         <section className="card policy-published-summary">
           <div><h2>{unresolvedCount === 0 ? '当前文件已自动整理' : `还有 ${unresolvedCount} 条需要确认`}</h2></div>
           <p>
             已识别 {recognizedCount} / {clauses.length} 条条款用途。
             {unresolvedCount === 0
-              ? ' 用于自动检查前，请进入高级审核，配置并人工确认执行规则。'
+              ? ' 用于自动检查前，请在下方高级审核中配置并人工确认执行规则。'
               : ' 请只处理下方未识别条款，其他内容无需重复确认。'}
           </p>
         </section>
@@ -430,17 +430,15 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
           </div>
         )}
         <div className="section-heading">
-          <div><h2>{showAdvanced ? '全部条款与高级设置' : '需要确认的条款'}</h2></div>
-          {!readonly && (
-            <div className="policy-clause-actions">
-              <button className="button button-secondary" type="button" onClick={() => setShowAdvanced((current) => !current)}>
-                {showAdvanced ? '退出高级审核' : `进入高级审核（${clauses.length} 条）`}
-              </button>
-              {showAdvanced && <button className="button button-secondary" type="button" onClick={addClause}>＋ 添加条款</button>}
-            </div>
-          )}
+          <div><h2>{showAdvanced ? '高级审核' : '需要确认的条款'}</h2></div>
+          <div className="policy-clause-actions">
+            <button className="button button-secondary" type="button" onClick={() => setShowAdvanced((current) => !current)}>
+              {showAdvanced ? '收起高级审核' : `展开高级审核（${clauses.length} 条）`}
+            </button>
+            {!readonly && showAdvanced && <button className="button button-secondary" type="button" onClick={addClause}>＋ 添加条款</button>}
+          </div>
         </div>
-        <p className="section-helper">分类结果不等于可执行规则。进入高级审核可逐项配置材料匹配、有效期处理和金额条件；旧参数不会自动执行。</p>
+        <p className="section-helper">分类结果不等于可执行规则。高级审核可逐项配置材料匹配、有效期处理和金额条件；旧参数不会自动执行。</p>
 
         <div className="policy-clause-list">
           {clauses.map((clause, index) => (!showAdvanced && !unresolvedIndexes.has(index) ? null : (
@@ -464,7 +462,16 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
                   {(sourceClauses[index].classification?.conflicts_with?.length ?? 0) > 0 && <span>冲突对象：{sourceClauses[index].classification?.conflicts_with.join('、')}</span>}
                   <span>普通用户无需填写技术代码；请由制度管理员进入高级审核处理。</span>
                 </div>}
-                {showAdvanced && <details className="policy-clause-rule-settings policy-field-wide" open={!clause.control_code}>
+                {showAdvanced && <details
+                  className="policy-clause-rule-settings policy-field-wide"
+                  open={openRuleSettings[clause.editor_key] ?? true}
+                  onToggle={(event) => {
+                    const open = event.currentTarget.open
+                    setOpenRuleSettings((current) => current[clause.editor_key] === open
+                      ? current
+                      : { ...current, [clause.editor_key]: open })
+                  }}
+                >
                   <summary>检查规则设置{!clause.control_code ? '（发布前必填）' : ''}</summary>
                   <div className="policy-clause-grid">
                     <label className="field"><span>条款编号</span><input required readOnly={readonly} value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>

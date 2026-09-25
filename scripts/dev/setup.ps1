@@ -4,7 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
 $envFile = Join-Path $repoRoot '.env'
 
@@ -20,7 +20,7 @@ Write-Host 'Installing Python dependencies...'
 & $python -m pip install -e '.[dev]'
 
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
-    throw 'npm was not found. Install Node.js and run .\setup.ps1 again.'
+    throw 'npm was not found. Install Node.js and run .\scripts\dev\setup.ps1 again.'
 }
 
 Write-Host 'Installing frontend dependencies...'
@@ -36,4 +36,4 @@ if (-not (Test-Path -LiteralPath $envFile)) {
     Write-Host 'Created .env from .env.example. Add any required model credentials before live Agent tests.'
 }
 
-Write-Host 'Setup complete. Ensure PostgreSQL is running, then execute .\start.ps1.'
+Write-Host 'Setup complete. Ensure PostgreSQL is running, then execute .\scripts\dev\start.ps1.'

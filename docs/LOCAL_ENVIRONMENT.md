@@ -1,6 +1,6 @@
 # 本地运行环境
 
-本页说明如何在 Windows PowerShell 中启动 Supplier Comparison 的 PostgreSQL、FastAPI 和后台 worker。数据库与固定输出测试不需要模型 API Key。
+本页说明如何在 macOS 或 Windows 中启动 Supplier Comparison 的 PostgreSQL、FastAPI、后台 Worker 和前端。数据库与固定输出测试不需要模型 API Key。
 
 完整 MCU 两次中断演示见 [成员 D 交接](guide/guide_D.md)。
 
@@ -8,7 +8,7 @@
 
 - Python 3.11 或兼容版本。
 - 已安装并启动 Docker Desktop。
-- PowerShell 当前目录为仓库根目录。
+- 终端当前目录为仓库根目录。
 
 创建虚拟环境并安装项目：
 
@@ -21,24 +21,48 @@ Copy-Item .env.example .env
 
 `.env` 是本地文件。不要提交 API Key；模型配置尚未完成时仍可运行数据库、API 和全部固定输出测试。
 
-### Windows 一键启动
+### 一键启动脚本
 
-首次安装依赖：
+脚本统一位于 `scripts/dev/`。macOS 首次安装依赖：
 
-```powershell
-.\setup.ps1
+```bash
+./scripts/dev/setup.sh
 ```
 
-PostgreSQL 已运行后，日常开发只需一条命令。脚本会自动执行数据库迁移和 checkpoint 初始化，再在后台启动 API、Worker 与前端：
+macOS 日常启动会自动启动 PostgreSQL、执行迁移和 checkpoint 初始化，再在后台启动 API、Worker 与前端：
+
+```bash
+./scripts/dev/start.sh
+```
+
+停止应用服务但保留 PostgreSQL：
+
+```bash
+./scripts/dev/stop.sh
+```
+
+如需同时停止 PostgreSQL（保留数据卷）：
+
+```bash
+./scripts/dev/stop.sh --postgres
+```
+
+Windows PowerShell 首次安装依赖：
 
 ```powershell
-.\start.ps1
+.\scripts\dev\setup.ps1
+```
+
+日常开发只需一条命令。脚本会自动启动 PostgreSQL、执行数据库迁移和 checkpoint 初始化，再在后台启动 API、Worker 与前端：
+
+```powershell
+.\scripts\dev\start.ps1
 ```
 
 默认地址为前端 `http://127.0.0.1:5173`、API `http://127.0.0.1:8000`。日志位于 `logs/dev/`。全部停止：
 
 ```powershell
-.\stop.ps1
+.\scripts\dev\stop.ps1
 ```
 
 ## 2. 启动 PostgreSQL

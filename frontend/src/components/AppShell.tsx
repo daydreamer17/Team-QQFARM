@@ -125,7 +125,7 @@ export function AppShell() {
             <strong>供应商比选工作区</strong>
           </div>
           <div className="topbar-actions">
-            <span className="user-avatar" aria-label="当前用户 LC">LC</span>
+            <span className="user-avatar" aria-label="当前用户 USER">USER</span>
           </div>
         </header>
         <main className="page-content"><Outlet /></main>

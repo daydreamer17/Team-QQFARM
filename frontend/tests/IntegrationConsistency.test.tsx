@@ -1031,7 +1031,6 @@ test('policy editor locks fields during save and permits editing after completio
   let finish!: (value: PolicyImportResponse) => void
   vi.spyOn(api, 'reviewPolicyClauses').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
   const client = renderPolicy()
-  await userEvent.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
   const field = await screen.findByRole('textbox', { name: /条款正文/ })
   const user = userEvent.setup()
   await user.clear(field); await user.type(field, 'Submitted')
@@ -1051,9 +1050,11 @@ test('editing a policy clause id keeps its rule settings expanded', async () => 
   const client = renderPolicy()
   const user = userEvent.setup()
 
-  await user.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
-  const summary = screen.getByText('检查规则设置')
+  const summary = await screen.findByText('检查规则设置')
   const settings = summary.closest('details')!
+  expect(settings).toHaveAttribute('open')
+  await user.click(summary)
+  expect(settings).not.toHaveAttribute('open')
   await user.click(summary)
   expect(settings).toHaveAttribute('open')
 
@@ -1084,7 +1085,6 @@ test('switching policy files replaces an unsaved clause draft instead of showing
   const client = renderPolicy('policy-admission')
   const user = userEvent.setup()
 
-  await user.click(await screen.findByRole('button', { name: '进入高级审核（1 条）' }))
   const title = await screen.findByLabelText('标题')
   await user.clear(title)
   await user.type(title, 'Unsaved admission edit')
@@ -1095,7 +1095,7 @@ test('switching policy files replaces an unsaved clause draft instead of showing
   expect(screen.queryByDisplayValue('Unsaved admission edit')).not.toBeInTheDocument()
   client.clear()
 })
-test('unrecognized policy clauses keep technical controls out of the normal workflow', async () => {
+test('advanced policy review opens by default and can be collapsed', async () => {
   vi.restoreAllMocks()
   const data = {
     ...policyFixture(),
@@ -1104,13 +1104,13 @@ test('unrecognized policy clauses keep technical controls out of the normal work
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  expect(await screen.findByText(/系统无法判断该条款属于哪类采购检查/)).toBeInTheDocument()
-  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
-  expect(screen.queryByRole('button', { name: '保存确认结果' })).not.toBeInTheDocument()
-
-  await userEvent.click(screen.getByRole('button', { name: '进入高级审核（1 条）' }))
-  expect(screen.getByLabelText('检查类型')).toBeInTheDocument()
+  expect(await screen.findByLabelText('检查类型')).toBeInTheDocument()
   expect(screen.getByRole('option', { name: '供应商准入' })).toHaveValue('APPROVED_SUPPLIER')
+  await userEvent.click(screen.getByRole('button', { name: '收起高级审核' }))
+  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
+  expect(screen.getByText(/系统无法判断该条款属于哪类采购检查/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: '展开高级审核（1 条）' }))
+  expect(screen.getByLabelText('检查类型')).toBeInTheDocument()
   client.clear()
 })
 test('unsupported policy clauses explain the capability gap without asking ordinary users for codes', async () => {
@@ -1133,7 +1133,9 @@ test('unsupported policy clauses explain the capability gap without asking ordin
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  expect(await screen.findByText('当前不支持自动执行')).toBeInTheDocument()
+  await screen.findByRole('button', { name: '收起高级审核' })
+  await userEvent.click(screen.getByRole('button', { name: '收起高级审核' }))
+  expect(screen.getByText('当前不支持自动执行')).toBeInTheDocument()
   expect(screen.getByText(/当前系统没有对应的检查器或数据来源/)).toBeInTheDocument()
   expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
   client.clear()

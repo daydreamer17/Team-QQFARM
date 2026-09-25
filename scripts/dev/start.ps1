@@ -7,13 +7,14 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $python = Join-Path $repoRoot '.venv\Scripts\python.exe'
 $frontendRoot = Join-Path $repoRoot 'frontend'
 $envFile = Join-Path $repoRoot '.env'
 $stateDirectory = Join-Path $repoRoot '.local-data'
 $stateFile = Join-Path $stateDirectory 'dev-processes.json'
 $logDirectory = Join-Path $repoRoot 'logs\dev'
+$stopScript = Join-Path $PSScriptRoot 'stop.ps1'
 
 function Test-PortInUse([int]$Port) {
     return $null -ne (Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
@@ -46,15 +47,20 @@ function Start-LoggedProcess(
 }
 
 if (-not (Test-Path -LiteralPath $python)) {
-    throw 'Python environment is missing. Run .\setup.ps1 first.'
+    throw 'Python environment is missing. Run .\scripts\dev\setup.ps1 first.'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $frontendRoot 'node_modules'))) {
-    throw 'Frontend dependencies are missing. Run .\setup.ps1 first.'
+    throw 'Frontend dependencies are missing. Run .\scripts\dev\setup.ps1 first.'
 }
 if (-not (Test-Path -LiteralPath $envFile)) {
-    throw '.env is missing. Run .\setup.ps1 first, then review the generated configuration.'
+    throw '.env is missing. Run .\scripts\dev\setup.ps1 first, then review the generated configuration.'
 }
 $npm = (Get-Command npm.cmd -ErrorAction Stop).Source
+$docker = (Get-Command docker.exe -ErrorAction Stop).Source
+& $docker info *> $null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Docker Desktop is not running. Start it, then run this script again.'
+}
 
 if (Test-Path -LiteralPath $stateFile) {
     $saved = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
@@ -68,7 +74,7 @@ if (Test-Path -LiteralPath $stateFile) {
         exit 0
     }
     if ($live.Count -gt 0) {
-        & (Join-Path $repoRoot 'stop.ps1') -Quiet
+        & $stopScript -Quiet
     } else {
         Remove-Item -LiteralPath $stateFile -Force
     }
@@ -90,6 +96,9 @@ New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 
 Set-Location -LiteralPath $repoRoot
+Write-Host 'Starting PostgreSQL...'
+& $docker compose up -d --wait postgres
+if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL failed to start. Check Docker Desktop.' }
 Write-Host 'Applying database migrations...'
 & $python -m dotenv -f $envFile run -- $python -m alembic upgrade head
 if ($LASTEXITCODE -ne 0) { throw 'Database migration failed. Check PostgreSQL and .env.' }
@@ -143,9 +152,9 @@ try {
     Write-Host "  API       http://127.0.0.1:$ApiPort"
     Write-Host "  Swagger   http://127.0.0.1:$ApiPort/docs"
     Write-Host '  Worker    heartbeat detected'
-    Write-Host 'Stop all services with .\stop.ps1'
+    Write-Host 'Stop all services with .\scripts\dev\stop.ps1'
 } catch {
     Write-Error $_
-    & (Join-Path $repoRoot 'stop.ps1') -Quiet
+    & $stopScript -Quiet
     exit 1
 }

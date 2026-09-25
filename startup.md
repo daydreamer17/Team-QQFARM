@@ -30,6 +30,31 @@ docker compose up -d --wait postgres
 
 ## 每次启动
 
+### macOS 一键启动（推荐）
+
+先打开 Docker Desktop，然后在仓库根目录执行：
+
+```bash
+cd /Users/lc/Desktop/hackson/Team-QQFARM
+./scripts/dev/start.sh
+```
+
+该脚本会自动启动 PostgreSQL、执行数据库迁移和 checkpoint 初始化，并在后台启动 API、Worker 和前端。日志位于 `logs/dev/`。
+
+停止 API、Worker 和前端：
+
+```bash
+./scripts/dev/stop.sh
+```
+
+同时停止 PostgreSQL（保留数据）：
+
+```bash
+./scripts/dev/stop.sh --postgres
+```
+
+以下为需要分别观察各服务输出时的手工启动方式。
+
 先打开 Docker Desktop，然后启动数据库：
 
 ```bash

@@ -4,7 +4,7 @@ param([switch]$Quiet)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$repoRoot = $PSScriptRoot
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $stateFile = Join-Path $repoRoot '.local-data\dev-processes.json'
 
 function Get-ProcessTree([int[]]$RootIds) {
