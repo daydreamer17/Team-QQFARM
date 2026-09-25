@@ -153,6 +153,23 @@ describe('DecisionScenarioWorkspace', () => {
     })
   })
 
+  test('keeps the compact chat focused on the conversation instead of repeated metadata', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><MemoryRouter>
+      <DecisionScenarioWorkspace task={task} result={result} compact />
+    </MemoryRouter></QueryClientProvider>)
+
+    await screen.findByText('可以生成一个提前交付的情景。')
+    expect(screen.getByText('你好！我是 QuoteWise，可以帮你解释推荐结果、核查报价与制度证据，也可以试算预算或交期变化。')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '当前版本 · 决策讨论' })).toBeInTheDocument()
+    expect(screen.queryByText('SCENARIO-1')).not.toBeInTheDocument()
+    expect(screen.queryByText('AI 决策助手')).not.toBeInTheDocument()
+    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
+    expect(screen.getByText('查看 1 个来源')).toBeInTheDocument()
+    expect(screen.queryByText('RESULT:result-1')).not.toBeInTheDocument()
+    expect(screen.getByText('示例问题').parentElement).not.toHaveTextContent('3 个')
+  })
+
   test('opens Scenario management after confirming an intent and still allows collapse', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'confirmDecisionIntent').mockResolvedValue({
@@ -283,7 +300,7 @@ describe('DecisionScenarioWorkspace', () => {
     render(<QueryClientProvider client={queryClient}><MemoryRouter>
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
-    expect(await screen.findByRole('link', { name: '前往集中审核' }))
+    expect(await screen.findByRole('link', { name: '前往待处理事项' }))
       .toHaveAttribute('href', '/tasks/task-1/review#excluded-review')
   })
 

@@ -2,12 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
-import type { ResultReason, SupplierComparisonResult } from '../api/types'
+import type { PolicyComplianceSupplierAssessment, ResultReason, SupplierComparisonResult } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { ComplianceAssessmentDetails } from '../components/ComplianceAssessmentDetails'
 import { rankingCriterionLabel } from '../lib/rankingCriteria'
-import { supplierSelectionExplanation } from '../lib/resultComparison'
-import { cleanSummaryText, quoteStatusLabel, reasonText, summaryStatusLabel } from '../lib/presentation'
+import { policyAwareSupplierSelectionExplanation } from '../lib/resultComparison'
+import { cleanSummaryText, controlLabel, quoteStatusLabel, reasonText, summaryStatusLabel } from '../lib/presentation'
 
 function errorMessage(error: unknown) {
   return error instanceof ApiClientError ? error.message : '采购总结读取失败。'
@@ -60,7 +60,39 @@ function costDeltaText(
   return `${delta > 0 ? '+' : '−'}${moneyText(currency, String(Math.abs(delta)))}`
 }
 
-function communicationGoal(supplier: SupplierComparisonResult, isRecommended: boolean) {
+function policyIssues(assessment: PolicyComplianceSupplierAssessment | undefined) {
+  if (!assessment) return []
+  return [...new Set(assessment.checks
+    .filter((check) => ['FAIL', 'REVIEW_REQUIRED', 'NOT_EVALUATED'].includes(check.status))
+    .map((check) => controlLabel(check.control_code)))]
+}
+
+function policyEligibility(assessment: PolicyComplianceSupplierAssessment | undefined) {
+  if (!assessment) return { label: '未记录', tone: 'neutral' }
+  if (assessment.eligibility === 'EXCLUDED' || assessment.status === 'NON_COMPLIANT') {
+    return { label: '制度排除', tone: 'danger' }
+  }
+  if (assessment.eligibility === 'UNVERIFIED'
+      || assessment.status === 'REVIEW_REQUIRED'
+      || assessment.status === 'NOT_EVALUATED') {
+    return { label: '待补充或复核', tone: 'warning' }
+  }
+  return { label: '已核验候选', tone: 'good' }
+}
+
+function communicationGoal(
+  supplier: SupplierComparisonResult,
+  isRecommended: boolean,
+  assessment: PolicyComplianceSupplierAssessment | undefined,
+) {
+  if (assessment?.eligibility === 'EXCLUDED' || assessment?.status === 'NON_COMPLIANT') {
+    return '补正制度证明后重新评估'
+  }
+  if (assessment?.eligibility === 'UNVERIFIED'
+      || assessment?.status === 'REVIEW_REQUIRED'
+      || assessment?.status === 'NOT_EVALUATED') {
+    return '补齐制度材料并完成复核'
+  }
   if (isRecommended) return '锁定当前报价与交付承诺'
   if (supplier.status === 'PENDING') return '补齐待确认信息，恢复可比较性'
   if (supplier.status === 'INFEASIBLE') return '确认能否修正不符合项'
@@ -72,7 +104,18 @@ function fallbackCommunicationDraft(
   isRecommended: boolean,
   recommendation: SupplierComparisonResult | undefined,
   currency: string | undefined,
+  assessment: PolicyComplianceSupplierAssessment | undefined,
 ) {
+  const issues = policyIssues(assessment)
+  const issueText = issues.length > 0 ? issues.join('、') : '制度要求'
+  if (assessment?.eligibility === 'EXCLUDED' || assessment?.status === 'NON_COMPLIANT') {
+    return `当前因${issueText}检查不通过，不能进入推荐。请补交或更正对应证明，完成复核后再重新分析。`
+  }
+  if (assessment?.eligibility === 'UNVERIFIED'
+      || assessment?.status === 'REVIEW_REQUIRED'
+      || assessment?.status === 'NOT_EVALUATED') {
+    return `当前${issueText}尚未完成核验。请补齐有效材料或确认记录，完成复核后再比较价格与交期。`
+  }
   if (isRecommended) {
     return `请确认 ${moneyText(currency, supplier.total_cost)} 的总成本、${supplier.estimated_arrival_date ?? '当前交期'}及付款条件在报价有效期内保持不变，并书面回复供货承诺。`
   }
@@ -242,6 +285,9 @@ export function SummaryPage() {
     current?.facts.recommended_quote_ids ?? result.data?.result.recommended_quote_ids ?? [],
   )
   const recommended = suppliers.find((item) => recommendedIds.has(item.quote_id))
+  const policyAssessments = new Map(
+    (result.data?.policy_compliance.assessments ?? []).map((assessment) => [assessment.quote_id, assessment]),
+  )
   const reportDecisionProfile = current?.facts.decision_profile
     ?? result.data?.input_snapshot?.decision_profile
     ?? (result.data?.is_current ? data.decision_profile : undefined)
@@ -252,12 +298,13 @@ export function SummaryPage() {
   )
   const selectionSummaries = new Map(suppliers.map((supplier) => [
     supplier.quote_id,
-    supplierSelectionExplanation(
+    policyAwareSupplierSelectionExplanation(
       supplier,
       recommended,
       currentRanking,
       reportRequirement?.currency,
       recommendedIds.has(supplier.quote_id),
+      policyAssessments.get(supplier.quote_id),
     ),
   ]))
   const chartRows = suppliers.filter((item) => item.total_cost !== null)
@@ -308,9 +355,9 @@ export function SummaryPage() {
         active="summary"
       />
 
-      <section className="summary-report-toolbar">
-        <div>
-          <strong>采购总结</strong>
+      <section className="summary-report-toolbar card workspace-page-lead">
+        <div className="workspace-page-lead-copy">
+          <h2>采购总结</h2>
           {current && <span>{data.task_name} · 第 {current.task_revision} 版 · {generatedAt}</span>}
         </div>
         <div className="summary-report-actions">
@@ -421,7 +468,7 @@ export function SummaryPage() {
 
             <ReportSection number="03" title="报价与取舍" id="summary-cost">
               <p className="summary-section-intro">
-                以下表格使用冻结结果直接呈现成本、交付和可行性；自然语言只解释取舍，不重新计算或改变推荐结论。
+                先核对制度资格，再比较成本、交付和可行性；自然语言只解释冻结结论，不重新计算或改变推荐结果。
               </p>
               <div className="summary-comparison-scroll">
                 <table className="summary-comparison-table" style={{ minWidth: Math.max(700, 142 + suppliers.length * 175) }}>
@@ -432,6 +479,10 @@ export function SummaryPage() {
                     </th>
                   ))}</tr></thead>
                   <tbody>
+                    <tr><th>制度资格</th>{suppliers.map((supplier) => {
+                      const eligibility = policyEligibility(policyAssessments.get(supplier.quote_id))
+                      return <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}><span className={`summary-tradeoff summary-tradeoff-${eligibility.tone}`}>{eligibility.label}</span></td>
+                    })}</tr>
                     <tr><th>确认总成本</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended is-best' : ''} key={supplier.quote_id}>{moneyText(reportRequirement.currency, supplier.total_cost)}</td>)}</tr>
                     <tr><th>相对首选差额</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{costDeltaText(supplier, recommended, reportRequirement.currency)}</td>)}</tr>
                     <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, reportRequirement.quantity_unit)}</td>)}</tr>
@@ -491,13 +542,19 @@ export function SummaryPage() {
               <div className="summary-communication-report">
                 {suppliers.map((supplier) => {
                   const isRecommended = recommendedIds.has(supplier.quote_id)
-                  const draft = communicationDrafts.get(supplier.quote_id)
-                    ?? fallbackCommunicationDraft(supplier, isRecommended, recommended, reportRequirement.currency)
+                  const assessment = policyAssessments.get(supplier.quote_id)
+                  const needsPolicyAction = assessment?.eligibility === 'EXCLUDED'
+                    || assessment?.eligibility === 'UNVERIFIED'
+                    || assessment?.status === 'NON_COMPLIANT'
+                    || assessment?.status === 'REVIEW_REQUIRED'
+                    || assessment?.status === 'NOT_EVALUATED'
+                  const draft = (!needsPolicyAction ? communicationDrafts.get(supplier.quote_id) : undefined)
+                    ?? fallbackCommunicationDraft(supplier, isRecommended, recommended, reportRequirement.currency, assessment)
                   return (
                     <article className={isRecommended ? 'is-recommended' : ''} key={supplier.quote_id}>
                       <h3>{supplier.supplier_name}</h3>
                       <p className="summary-selection-line"><strong>{isRecommended ? '推荐原因' : '本次取舍'}：</strong>{selectionSummaries.get(supplier.quote_id)?.detail}</p>
-                      <small>沟通目标：{communicationGoal(supplier, isRecommended)}</small>
+                      <small>沟通目标：{communicationGoal(supplier, isRecommended, assessment)}</small>
                       <p><strong>建议沟通：</strong>{draft}</p>
                     </article>
                   )

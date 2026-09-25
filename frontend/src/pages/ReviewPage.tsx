@@ -109,11 +109,11 @@ function errorMessage(error: unknown) {
       return '当前报价还没有可用的解析结果，请先完成报价解析。'
     }
     if (error.status === 500) {
-      return `后端在保存集中审核时发生异常，本次不会视为已提交。${error.requestId ? `请求编号：${error.requestId}。` : ''}请刷新后核对当前版本；若仍失败，请将请求编号与 API 日志一并提供。`
+      return `后端在保存待处理事项时发生异常，本次不会视为已提交。${error.requestId ? `请求编号：${error.requestId}。` : ''}请刷新后核对当前版本；若仍失败，请将请求编号与 API 日志一并提供。`
     }
     return error.message
   }
-  return '集中审核数据读取失败。'
+  return '待处理事项读取失败。'
 }
 
 function isStaleCorrectionError(error: unknown) {
@@ -376,7 +376,7 @@ export function ReviewPage() {
   })
 
   if (task.isPending || review.isPending || schema.isPending) {
-    return <section className="card loading-panel">正在读取集中审核数据…</section>
+    return <section className="card loading-panel">正在读取待处理事项…</section>
   }
   if (task.isError || review.isError || schema.isError) {
     return <section className="card error-panel" role="alert">{errorMessage(task.error ?? review.error ?? schema.error)}</section>
@@ -459,17 +459,17 @@ export function ReviewPage() {
         active="review"
       />
 
-      <section className="review-workspace-lead review-overview-lead" aria-labelledby="review-overview-title">
-        <div className="review-overview-title-row">
-          <h2 id="review-overview-title">集中审核</h2>
-          <dl className="review-overview-stats" aria-label="审核统计">
-            <div><dt>有效报价</dt><dd>{report.quotes.length}</dd></div>
-            <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>待处理字段</dt><dd>{pendingCount}</dd></div>
-            {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>PENDING 限制</dt><dd>{pendingLimitations.length}</dd></div>}
-            <div><dt>仅保留记录</dt><dd>{recordOnly.length}</dd></div>
-          </dl>
+      <section className="card workspace-page-lead" aria-labelledby="review-overview-title">
+        <div className="workspace-page-lead-copy">
+          <h2 id="review-overview-title">待处理事项</h2>
+          <p>核对影响当前决策的字段；仅已确认的项目进入新版本重算。</p>
         </div>
-        <p>核对影响当前决策的字段；机器识别疑问可人工确认。仅已确认的项目进入新版本重算。</p>
+        <dl className="review-overview-stats" aria-label="审核统计">
+          <div><dt>有效报价</dt><dd>{report.quotes.length}</dd></div>
+          <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>待处理字段</dt><dd>{pendingCount}</dd></div>
+          {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>PENDING 限制</dt><dd>{pendingLimitations.length}</dd></div>}
+          <div><dt>仅保留记录</dt><dd>{recordOnly.length}</dd></div>
+        </dl>
       </section>
 
       {waitingForReview && <div className="run-notice">部分报价仍在审核，完成后才可统一提交；页面会自动更新。</div>}

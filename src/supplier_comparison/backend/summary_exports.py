@@ -69,8 +69,15 @@ def _report_model(
         (row for row in quote_rows if row.get("quote_id") in recommended_ids),
         None,
     )
+    compliance = facts.get("policy_compliance") or {}
+    assessments = {
+        str(item.get("quote_id")): item
+        for item in compliance.get("assessments", [])
+        if isinstance(item, dict) and item.get("quote_id")
+    } if isinstance(compliance, dict) else {}
     currency = str(requirement.get("currency") or "")
     for row in quote_rows:
+        assessment = assessments.get(str(row.get("quote_id")))
         row["recommended"] = row.get("quote_id") in recommended_ids
         row["status_label"] = _status_label(row.get("status"))
         row["payment_text"] = _payment_text(row)
@@ -79,9 +86,11 @@ def _report_model(
             row.get("actual_quantity"), requirement.get("quantity_unit")
         )
         row["cost_delta"] = _cost_delta(row, recommended, currency)
-        row["selection_text"] = _selection_text(row, recommended, currency)
+        row["policy_assessment"] = assessment
+        row["policy_status_text"] = _policy_status_text(assessment)
+        row["selection_text"] = _selection_text(row, recommended, currency, assessment)
         row["communication_goal"], row["communication_text"] = _communication(
-            row, recommended, currency
+            row, recommended, currency, assessment
         )
     scenario = str(
         requirement.get("manufacturer_part_number")
@@ -160,6 +169,7 @@ def _render_markdown(report: dict[str, Any]) -> str:
         "| --- | " + " | ".join("---" for _ in report["quotes"]) + " |",
     ])
     matrix_rows = [
+        ("制度资格", lambda row: row["policy_status_text"]),
         ("确认总成本", lambda row: row["cost_text"] + ("（推荐）" if row["recommended"] else "")),
         ("相对首选差额", lambda row: row["cost_delta"]),
         ("实际采购量", lambda row: row["quantity_text"]),
@@ -246,6 +256,7 @@ def _render_docx(report: dict[str, Any]) -> bytes:
     body.append(_w_heading("3. 报价、成本与关键取舍"))
     matrix = [["指标", *[_text(row.get("supplier_name")) for row in report["quotes"]]]]
     for label, key in [
+        ("制度资格", "policy_status_text"),
         ("确认总成本", "cost_text"),
         ("相对首选差额", "cost_delta"),
         ("实际采购量", "quantity_text"),
@@ -325,6 +336,22 @@ def _requirement_paragraph(requirement: dict[str, Any]) -> str:
 
 
 def _selection_text(
+    row: dict[str, Any], recommended: dict[str, Any] | None, currency: str,
+    assessment: dict[str, Any] | None,
+) -> str:
+    commercial = _commercial_selection_text(row, recommended, currency)
+    status, issues = _policy_assessment_summary(assessment)
+    issue_text = "、".join(issues) or "制度要求"
+    if status == "EXCLUDED":
+        return f"制度检查不通过：{issue_text}；已从推荐候选中排除。商业比较：{commercial}"
+    if status == "UNVERIFIED":
+        return f"{issue_text}尚未完成核验；有已核验合格候选时不优先推荐。商业比较：{commercial}"
+    if status == "VERIFIED":
+        return f"制度检查已通过；{commercial}"
+    return commercial
+
+
+def _commercial_selection_text(
     row: dict[str, Any], recommended: dict[str, Any] | None, currency: str
 ) -> str:
     if row.get("recommended"):
@@ -339,9 +366,22 @@ def _selection_text(
 
 
 def _communication(
-    row: dict[str, Any], recommended: dict[str, Any] | None, currency: str
+    row: dict[str, Any], recommended: dict[str, Any] | None, currency: str,
+    assessment: dict[str, Any] | None,
 ) -> tuple[str, str]:
     supplier = _text(row.get("supplier_name"))
+    status, issues = _policy_assessment_summary(assessment)
+    issue_text = "、".join(issues) or "制度要求"
+    if status == "EXCLUDED":
+        return (
+            "补正制度证明后重新评估",
+            f"当前因{issue_text}检查不通过，不能进入推荐。请由 {supplier} 补交或更正对应证明，完成复核后再重新分析。",
+        )
+    if status == "UNVERIFIED":
+        return (
+            "补齐制度材料并完成复核",
+            f"当前{issue_text}尚未完成核验。请由 {supplier} 补齐有效材料或确认记录，完成复核后再比较价格与交期。",
+        )
     if row.get("recommended"):
         return (
             "锁定价格、交期和报价有效期",
@@ -359,6 +399,47 @@ def _communication(
         "缩小与首选方案的商务差距",
         f"当前方案与首选方案的成本差额为 {delta}。请确认是否可优化价格、运费或付款条件，并提交更新后的完整报价与有效期。",
     )
+
+
+_CONTROL_LABELS = {
+    "APPROVED_SUPPLIER": "供应商资质",
+    "ROHS_COMPLIANCE": "RoHS 合规",
+    "AMOUNT_APPROVAL": "金额审批",
+}
+
+
+def _policy_assessment_summary(
+    assessment: dict[str, Any] | None,
+) -> tuple[str, list[str]]:
+    if not isinstance(assessment, dict):
+        return "UNKNOWN", []
+    status = str(assessment.get("status") or "")
+    eligibility = str(assessment.get("eligibility") or "")
+    issues: list[str] = []
+    for check in assessment.get("checks") or []:
+        if not isinstance(check, dict) or check.get("status") not in {
+            "FAIL", "REVIEW_REQUIRED", "NOT_EVALUATED",
+        }:
+            continue
+        label = _CONTROL_LABELS.get(str(check.get("control_code")), "其他制度要求")
+        if label not in issues:
+            issues.append(label)
+    if eligibility == "EXCLUDED" or status == "NON_COMPLIANT":
+        return "EXCLUDED", issues
+    if eligibility == "UNVERIFIED" or status in {"REVIEW_REQUIRED", "NOT_EVALUATED"}:
+        return "UNVERIFIED", issues
+    if eligibility == "VERIFIED" or status == "COMPLIANT":
+        return "VERIFIED", issues
+    return "UNKNOWN", issues
+
+
+def _policy_status_text(assessment: dict[str, Any] | None) -> str:
+    status, _issues = _policy_assessment_summary(assessment)
+    return {
+        "EXCLUDED": "制度排除",
+        "UNVERIFIED": "待补充或复核",
+        "VERIFIED": "已核验候选",
+    }.get(status, "未记录")
 
 
 def _payment_text(row: dict[str, Any]) -> str:

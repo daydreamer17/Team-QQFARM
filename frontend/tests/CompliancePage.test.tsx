@@ -283,13 +283,13 @@ test('a specific check link chooses the supplier page and expands the requested 
   expect(screen.getByText('2 / 2')).toBeInTheDocument()
 })
 
-test('processed with missing evidence and disabled policy are never labelled as all passed', async () => {
+test('confirmed compliance with missing evidence is completed without being labelled as all passed', async () => {
   vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, stage: { ...workspace.stage,
     status: 'PROCESSED', confirmed: true, can_compare: true, pending_count: 1 } } as never)
   mount()
   expect(await screen.findByLabelText('制度检查：已处理·有待补充')).toBeInTheDocument()
   expect(screen.getByText('1 个检查项')).toBeInTheDocument()
-  expect(screen.getByLabelText('制度检查：已处理·有待补充')).toHaveClass('task-timeline-processed')
+  expect(screen.getByLabelText('制度检查：已处理·有待补充')).toHaveClass('task-timeline-complete')
 })
 
 test('processing compliance shows an animated progress indicator', async () => {
@@ -305,7 +305,7 @@ test('confirmed disabled policy remains explicitly not enabled', async () => {
   vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, stage: { ...workspace.stage,
     status: 'DISABLED', confirmed: true, can_compare: true, pending_count: 0 } } as never)
   mount()
-  expect(await screen.findByLabelText('制度检查：未启用')).toHaveClass('task-timeline-processed')
+  expect(await screen.findByLabelText('制度检查：未启用')).toHaveClass('task-timeline-complete')
 })
 
 test('current assessment links identify the exact supplier and check', async () => {

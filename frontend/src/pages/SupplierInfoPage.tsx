@@ -119,8 +119,8 @@ export function SupplierInfoPage() {
         revisionContext={info.view_state === 'HISTORICAL_RESULT' ? 'historical' : 'current'}
       />
 
-      <section className="supplier-context card">
-        <div className="supplier-context-heading">
+      <section className="supplier-context card workspace-page-lead">
+        <div className="supplier-context-heading workspace-page-lead-copy">
           <h2>供应商信息</h2>
           <p>{String(context.category ?? 'Electronics')} / {String(context.item ?? task.requirement.manufacturer_part_number)}</p>
           <p className="supplier-scope-copy">{scopeSummary}</p>

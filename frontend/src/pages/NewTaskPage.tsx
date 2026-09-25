@@ -484,7 +484,7 @@ export function NewTaskPage() {
 
   return (
     <div className="page-stack new-task-page">
-      <section className="page-heading">
+      <section className="page-heading app-page-heading">
         <div>
           <h1>新建任务</h1>
           <p>上传采购需求文件，或直接填写采购信息。</p>

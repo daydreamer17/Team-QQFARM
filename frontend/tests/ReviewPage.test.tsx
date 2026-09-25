@@ -175,8 +175,11 @@ describe('ReviewPage', () => {
     vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
     vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
     renderPage()
-    const heading = await screen.findByRole('heading', { name: '集中审核' })
-    const row = heading.parentElement!
+    const heading = await screen.findByRole('heading', { name: '待处理事项' })
+    const row = heading.closest('section')!
+    expect(row).toHaveClass('workspace-page-lead')
+    expect(screen.getByRole('link', { name: '采购需求' })).toHaveAttribute('href', '/tasks/task-1')
+    expect(screen.queryByRole('link', { name: '概览' })).not.toBeInTheDocument()
     const stats = within(row).getByLabelText('审核统计')
     expect(within(stats).getByText('有效报价')).toBeInTheDocument()
     expect(within(stats).getByText('待处理字段')).toBeInTheDocument()

@@ -74,13 +74,14 @@ export function TaskPage() {
         active="overview"
       />
 
-      <section>
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">REQUIREMENT SNAPSHOT</p>
-            <h2>采购需求</h2>
-          </div>
+      <section className="card workspace-page-lead">
+        <div className="workspace-page-lead-copy">
+          <h2>采购需求</h2>
+          <p>查看当前版本确认的采购范围与决策条件。</p>
         </div>
+      </section>
+
+      <section>
         <dl className="detail-grid">
           <div><dt>制造商</dt><dd>{requirement.manufacturer}</dd></div>
           <div><dt>制造商料号</dt><dd>{requirement.manufacturer_part_number}</dd></div>

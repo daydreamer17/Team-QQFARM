@@ -140,8 +140,8 @@ export function AuditPage() {
         active="audit"
       />
 
-      <section className="card audit-summary-bar">
-        <div className="audit-summary-copy">
+      <section className="card audit-summary-bar workspace-page-lead">
+        <div className="audit-summary-copy workspace-page-lead-copy">
           <h2>版本记录</h2>
           <p>提交报价、修改需求或完成人工处理时生成版本；草稿和运行分析不增加版本。</p>
         </div>

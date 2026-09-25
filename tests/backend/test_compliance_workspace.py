@@ -373,6 +373,8 @@ def test_frozen_summary_exports_and_simulation_use_same_assessment(policy_worksp
         text = exported.decode() if format == 'md' else ZipFile(BytesIO(exported)).read('word/document.xml').decode()
         assert result['policy_compliance']['assessment_id'] in text
         assert '不鉴定材料真伪' in text
+        assert '制度资格' in text
+        assert '制度检查已通过' in text
 
 
 def test_simulation_preserves_frozen_publication_blockers(policy_workspace):

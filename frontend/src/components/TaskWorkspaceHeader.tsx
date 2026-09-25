@@ -58,9 +58,12 @@ export function TaskWorkspaceHeader({
         <ol className={`task-timeline task-timeline-stage-${completedStage}`} aria-label="任务完成进度">
           {stages.map((label, index) => {
             const stage = index + 1
-            const incompletePolicy = index === 2 && progress.compliance?.confirmed
-              && (progress.compliance.status === 'DISABLED' || Boolean(progress.compliance.pending_count))
-            const state = incompletePolicy ? 'processed' : completed[index] ? 'complete' : 'upcoming'
+            // The timeline describes whether a workflow stage was completed, not
+            // whether every supplier passed that stage. Keep the detailed
+            // compliance outcome in its accessible label and on the compliance
+            // page, while a confirmed stage uses the same completed styling as
+            // the surrounding workflow stages.
+            const state = completed[index] ? 'complete' : 'upcoming'
             const description = index === 2 ? complianceStageLabel(progress.compliance) : state === 'complete' ? '已完成' : '未完成'
             return (
               <li className={`task-timeline-${state}`} key={label} aria-label={`${label}：${description}`}>
@@ -72,7 +75,7 @@ export function TaskWorkspaceHeader({
         </ol>
       </div>
       <nav className="workspace-tabs" aria-label="任务工作台页面">
-        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>概览</Link>
+        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>采购需求</Link>
         <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>报价与证据</Link>
         <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>待处理事项</Link>
         <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>供应商信息</Link>

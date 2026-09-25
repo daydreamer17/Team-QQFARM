@@ -383,8 +383,8 @@ describe('frontend and backend version consistency', () => {
     expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument()
     await waitFor(() => expect(fields).toHaveBeenCalledWith('task-1', 'quote-1', 'result-old'))
     expect(conversations).toHaveBeenCalledWith('task-1')
-    expect(screen.getByRole('option', { name: /Rev 6 · 当前版本对话/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /Rev 5 · 历史版本对话/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /当前版本 · 当前版本对话/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /第 5 版 · 历史版本对话 · 历史/ })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /^查看引用/ })).toHaveLength(3)
 
     await userEvent.click(screen.getByRole('button', { name: '查看引用 [2] 供应商报价' }))
@@ -598,7 +598,20 @@ describe('frontend and backend version consistency', () => {
 
   test('historical summary renders its frozen requirement instead of the current task', async () => {
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask({ current_result_id: null }))
-    vi.spyOn(api, 'getResult').mockResolvedValue(makeHistoricalResult())
+    const historical = makeHistoricalResult()
+    historical.policy_compliance.assessments = [{
+      quote_id: 'quote-1',
+      quote_version: 1,
+      supplier_name: 'Supplier One',
+      status: 'REVIEW_REQUIRED',
+      eligibility: 'UNVERIFIED',
+      checks: [{
+        control_code: 'APPROVED_SUPPLIER',
+        status: 'REVIEW_REQUIRED',
+        citation_ids: ['CIT-old'],
+      }],
+    }]
+    vi.spyOn(api, 'getResult').mockResolvedValue(historical)
     vi.spyOn(api, 'listSummaries').mockResolvedValue({
       task_id: 'task-1',
       task_revision: 6,
@@ -641,6 +654,9 @@ describe('frontend and backend version consistency', () => {
     expect(await screen.findByRole('heading', { name: 'FROZEN-PART 采购总结' })).toBeInTheDocument()
     expect(screen.getByText(/预算上限为 SGD 8000.00/)).toBeInTheDocument()
     expect(screen.getByText(/第 5 版历史采购总结/)).toBeInTheDocument()
+    expect((await screen.findAllByText('待补充或复核')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/供应商资质尚未完成核验；有已核验合格候选时不优先推荐/)).length).toBeGreaterThan(0)
+    expect(await screen.findByText(/完成复核后再比较价格与交期/)).toBeInTheDocument()
   })
 
   test('requirement update invalidates all task caches before navigation', async () => {

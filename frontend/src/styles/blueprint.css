@@ -2705,6 +2705,10 @@ body {
   font-size: 0.6rem;
 }
 
+.decision-chat-message .chat-message-status {
+  justify-content: flex-end;
+}
+
 .decision-chat-message p {
   margin: 0;
   white-space: pre-wrap;
@@ -2728,9 +2732,11 @@ body {
   border-top: 1px solid var(--line);
 }
 
-.chat-citations > strong {
+.chat-citations > summary {
   color: var(--muted);
   font-size: 0.6rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .chat-citations ol {
@@ -2739,6 +2745,10 @@ body {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.chat-citations[open] ol {
+  margin-top: 2px;
 }
 
 .chat-citation-link {
@@ -2767,12 +2777,6 @@ body {
   font-weight: 800;
 }
 
-.chat-citation-link > div {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
-}
-
 .chat-reference-drawer blockquote {
   margin: 12px 0;
   padding: 12px;
@@ -2785,12 +2789,13 @@ body {
   font-size: 0.57rem;
 }
 
-.chat-citations code {
-  color: #647188;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.55rem;
-  line-height: 1.35;
+.chat-message-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
 }
 
 .decision-chat-message.chat-streaming {
@@ -3922,18 +3927,6 @@ body {
   white-space: nowrap;
 }
 
-.decision-compact-chat-context {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin: 12px 12px 0;
-  padding: 9px 10px;
-  border-radius: 8px;
-  color: var(--muted);
-  background: #f5f7fb;
-  font-size: 0.61rem;
-}
-
 .decision-assistant-compact .run-notice,
 .decision-assistant-compact > .form-error {
   margin: 10px 12px 0;
@@ -4054,12 +4047,6 @@ body {
 
 .decision-chat-prompt-menu[open] > summary::after {
   content: '－';
-}
-
-.decision-chat-prompt-menu > summary small {
-  color: var(--muted);
-  font-size: 0.58rem;
-  font-weight: 600;
 }
 
 .decision-chat-prompts {
@@ -7881,6 +7868,79 @@ body {
   gap: 12px;
 }
 
+/* Reader typography: match the main decision workspace without changing layout. */
+.summary-report-toolbar span { font-size: 0.76rem; }
+.summary-report-empty p { font-size: 0.82rem; }
+.summary-report-outline > strong { font-size: 0.7rem; }
+.summary-report-outline a { font-size: 0.78rem; }
+.summary-report-outline a span { font-size: 0.7rem; }
+.summary-report-cover p { font-size: 0.7rem; }
+.summary-report-cover > div:first-child > span { font-size: 0.82rem; }
+.summary-report-stamp strong { font-size: 0.75rem; }
+.summary-report-stamp small { font-size: 0.68rem; }
+.summary-report-section-body > p,
+.summary-narrative-list p,
+.summary-policy-note p,
+.summary-next-step p { font-size: 0.84rem; }
+.summary-recommendation-callout strong { font-size: 0.9rem; }
+.summary-recommendation-callout p { font-size: 0.76rem; }
+.summary-recommendation-callout > small { font-size: 0.66rem; }
+.summary-requirement-layout dt,
+.summary-requirement-layout dd { font-size: 0.75rem; }
+.summary-narrative-list h3 { font-size: 0.82rem; }
+.summary-comparison-table { font-size: 0.75rem; }
+.summary-comparison-table thead th { font-size: 0.76rem; }
+.summary-comparison-table thead th > span { font-size: 0.62rem; }
+.summary-comparison-table td > small { font-size: 0.67rem; }
+.summary-status,
+.summary-tradeoff { font-size: 0.66rem; }
+.summary-cost-chart figcaption,
+.summary-tradeoff-chart figcaption { font-size: 0.78rem; }
+.summary-cost-row > span,
+.summary-cost-row strong { font-size: 0.7rem; }
+.summary-cost-chart > small { font-size: 0.66rem; }
+.summary-axis-x,
+.summary-axis-y { font-size: 0.6rem; }
+.summary-tradeoff-point > small { font-size: 0.58rem; }
+.summary-tradeoff-plot > p { font-size: 0.68rem; }
+.summary-ai-brief header strong { font-size: 0.8rem; }
+.summary-ai-brief header small { font-size: 0.64rem; }
+.summary-ai-brief h3 { font-size: 0.75rem; }
+.summary-ai-brief p { font-size: 0.73rem; }
+.summary-communication-report article h3 { font-size: 0.82rem; }
+.summary-communication-report article > small { font-size: 0.67rem; }
+.summary-communication-report article > p,
+.summary-communication-ai p,
+.summary-risk-note p,
+.summary-risk-table td { font-size: 0.73rem; }
+.summary-communication-ai > strong,
+.summary-risk-note > strong { font-size: 0.75rem; }
+.summary-risk-table th { font-size: 0.71rem; }
+.summary-risk-table td > strong { font-size: 0.69rem; }
+.summary-action-list div > span { font-size: 0.66rem; }
+.summary-action-list p { font-size: 0.74rem; }
+.summary-action-list p strong { font-size: 0.77rem; }
+.summary-risk-strip span,
+.summary-policy-status > span { font-size: 0.71rem; }
+.summary-risk-strip strong { font-size: 0.68rem; }
+.summary-policy-note strong { font-size: 0.78rem; }
+.summary-reason-list { font-size: 0.8rem; }
+.summary-next-step strong { font-size: 0.8rem; }
+.summary-disclaimer { font-size: 0.74rem !important; }
+.summary-report-footer { font-size: 0.66rem; }
+.summary-report-rail dt { font-size: 0.68rem; }
+.summary-report-rail dd { font-size: 0.77rem; }
+.summary-report-rail > p { font-size: 0.72rem; }
+.summary-report-rail > small { font-size: 0.66rem; }
+
+.audit-summary-copy p { font-size: 0.78rem; }
+.audit-summary-status dt { font-size: 0.7rem; }
+.audit-summary-status dd { font-size: 0.84rem; }
+.audit-table { font-size: 0.8rem; }
+.audit-table th { font-size: 0.72rem; }
+.audit-table small { font-size: 0.7rem; }
+.audit-access-details > summary { font-size: 0.82rem; }
+
 @media (max-width: 1280px) {
   .summary-report-layout {
     grid-template-columns: 150px minmax(0, 1fr);
@@ -8334,3 +8394,79 @@ body {
 @media (max-width: 700px) { .compliance-frozen-summary { align-items: flex-start; flex-wrap: wrap; } .compliance-frozen-summary-counts { flex-wrap: wrap; } .compliance-frozen-supplier > summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .compliance-frozen-supplier-name { grid-column: 1 / -1; } .compliance-frozen-supplier > summary::after { grid-column: 2; grid-row: 3; justify-self: end; } .compliance-frozen-issue-count { grid-column: 1; grid-row: 3; } }
 @media (prefers-reduced-motion: reduce) { .compliance-spinner { animation-duration: 1.8s; } }
 @media print { .compliance-frozen-details { break-inside: avoid; } .compliance-frozen-details > * { display: block !important; } }
+
+/* Shared page title language: one hierarchy for every workspace tab and top-level page. */
+.workspace-page-lead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 84px;
+  padding: 16px 20px;
+  box-sizing: border-box;
+}
+
+.workspace-page-lead > .workspace-page-lead-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+  margin: 0 auto 0 0;
+}
+
+.workspace-page-lead h2,
+.workspace-page-lead .workspace-page-lead-copy h2,
+.summary-report-toolbar.workspace-page-lead h2,
+.audit-summary-bar.workspace-page-lead h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.workspace-page-lead .workspace-page-lead-copy > p,
+.workspace-page-lead .workspace-page-lead-copy > span {
+  max-width: 760px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.page-heading.app-page-heading {
+  align-items: center;
+  padding: 4px 2px 0;
+}
+
+.app-page-heading h1,
+.task-center-heading.app-page-heading h1,
+.resource-heading.app-page-heading h1 {
+  margin: 0 0 7px;
+  font-size: 1.8rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.app-page-heading p,
+.task-center-heading.app-page-heading p:last-child,
+.resource-heading.app-page-heading p:last-child {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 760px) {
+  .workspace-page-lead,
+  .page-heading.app-page-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .workspace-page-lead .review-overview-stats,
+  .workspace-page-lead .supplier-kpis,
+  .workspace-page-lead .audit-summary-status {
+    width: 100%;
+  }
+}

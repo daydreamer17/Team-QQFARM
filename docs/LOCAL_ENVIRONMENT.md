@@ -21,6 +21,26 @@ Copy-Item .env.example .env
 
 `.env` 是本地文件。不要提交 API Key；模型配置尚未完成时仍可运行数据库、API 和全部固定输出测试。
 
+### Windows 一键启动
+
+首次安装依赖：
+
+```powershell
+.\setup.ps1
+```
+
+PostgreSQL 已运行后，日常开发只需一条命令。脚本会自动执行数据库迁移和 checkpoint 初始化，再在后台启动 API、Worker 与前端：
+
+```powershell
+.\start.ps1
+```
+
+默认地址为前端 `http://127.0.0.1:5173`、API `http://127.0.0.1:8000`。日志位于 `logs/dev/`。全部停止：
+
+```powershell
+.\stop.ps1
+```
+
 ## 2. 启动 PostgreSQL
 
 Compose 使用固定镜像 `pgvector/pgvector:0.8.6-pg16-bookworm`，在 PostgreSQL 16 中提供 `vector` 扩展。已有 `database_data` 卷会继续挂载；切换镜像不需要删除卷。

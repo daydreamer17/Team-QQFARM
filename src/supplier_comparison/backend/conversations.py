@@ -18,7 +18,7 @@ from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.rules import RequirementChanges
 
 
-CONVERSATION_PROMPT_VERSION = "decision-conversation/1.7.0"
+CONVERSATION_PROMPT_VERSION = "decision-conversation/1.8.0"
 
 
 _MONEY_PATTERNS = (
@@ -380,11 +380,16 @@ def generate_conversation_turn(
         system += (
             " This question has already been routed to a read-only investigation. Use its INVESTIGATION reference "
             "and the frozen references to answer the user's specific evidence question. Cite the investigation "
-                "record in at least one factual sentence. Distinguish verified findings, inference, and missing evidence. "
-                "A NOT_FOUND observation is lack of evidence, not proof of the opposite. If the investigation stopped "
-                "without resolving, say so. Never claim supplier compliance from a retrieved policy clause alone. "
-                "Do not state counts of tools, records, sources, citations, or inspected fields; summarize their substance. "
-                "Return changes=null and clarification=null; do not propose or apply changes."
+            "record in at least one factual sentence. Structure the answer as: conclusion, verified advantages, verified "
+            "risks, unresolved items, and why investigation stopped. Use compile_decision_brief.verified_advantages, "
+            "verified_risks, unresolved_items, and stop_reason when present. Never equate requires_follow_up=false with "
+            "'no risk': it only means there is no missing, conflicting, expired, or unverifiable evidence requiring another "
+            "step. Every confirmed adverse fact in verified_risks that matters to the question must remain visible even "
+            "when tool use stops. Distinguish verified findings, inference, and missing evidence. A NOT_FOUND observation "
+            "is lack of evidence, not proof of the opposite. If the investigation stopped without resolving, say so. "
+            "Never claim supplier compliance from a retrieved policy clause alone. Do not state counts of tools, records, "
+            "sources, citations, or inspected fields; summarize their substance. Return changes=null and clarification=null; "
+            "do not propose or apply changes."
             )
     if context.get("response_mode") == "EXPLAIN_ONLY":
         system += (
@@ -447,6 +452,7 @@ def generate_conversation_turn(
                                 "use changes or clarification instead. clarification is EXACT_DELIVERY_DAY, COST_LIMIT, "
                                     "CHANGE_DETAILS, or null. Append supporting IDs before punctuation in each factual sentence."
                                     " For investigation answers, remove counts of tools, records, sources, citations, and inspected fields."
+                                    " Preserve verified adverse facts; requires_follow_up=false means no unresolved evidence gap, not no risk."
                                 ),
                         },
                         ensure_ascii=False,
@@ -579,22 +585,39 @@ def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str
 
     subject = "、".join(suppliers) if suppliers else "相关供应商"
     scope = "、".join(focuses) if focuses else "相关"
-    if record.get("status") == "RESOLVED":
-        verified = f"已核实：本轮只读调查已完成，并核对了{subject}的{scope}报价依据（{reference_id}）。"
-    else:
-        verified = f"已核实：本轮只读调查保留了已取得的{scope}核查记录，但尚未完成全部目标（{reference_id}）。"
-
     brief = next((
         row["result"].get("data") or {} for row in reversed(observations)
         if isinstance(row, dict) and isinstance(row.get("result"), dict)
         and row["result"].get("tool_name") == "compile_decision_brief"
     ), {})
-    if brief.get("requires_follow_up"):
-        missing = f"尚缺信息：仍需补充核查记录列出的证明或审批材料后再分析（{reference_id}）。"
+    advantages = [
+        str(item.get("summary")) for item in brief.get("verified_advantages") or []
+        if isinstance(item, dict) and item.get("summary")
+    ]
+    risks = [
+        str(item.get("summary")) for item in brief.get("verified_risks") or []
+        if isinstance(item, dict) and item.get("summary")
+    ]
+    if record.get("status") == "RESOLVED":
+        conclusion = f"结论：本轮只读调查已完成，并核对了{subject}的{scope}依据（{reference_id}）。"
     else:
-        missing = f"尚缺信息：本轮记录之外的费用、交期或商务条款不能据此视为已确认（{reference_id}）。"
+        conclusion = f"结论：本轮只读调查保留了已取得的{scope}核查记录，但尚未完成全部目标（{reference_id}）。"
+    advantage_text = (
+        f"已核实优势：{' '.join(advantages)}（{reference_id}）。"
+        if advantages else f"已核实优势：本轮记录未单列额外优势（{reference_id}）。"
+    )
+    risk_text = (
+        f"已核实风险：{' '.join(risks)}（{reference_id}）。"
+        if risks else f"已核实风险：本轮记录未单列已确认的不利事实；这不等于不存在其他风险（{reference_id}）。"
+    )
+    if brief.get("requires_follow_up"):
+        unresolved_text = f"尚待追查事项：仍需补充核查记录列出的证明或审批材料后再分析（{reference_id}）。"
+    else:
+        unresolved_text = f"尚待追查事项：未发现需要再次调用现有工具解决的证据缺失或冲突（{reference_id}）。"
+    stop_reason = str(brief.get("stop_reason") or "本轮可用证据核查已经结束。")
+    stop_text = f"停止原因：{stop_reason}（{reference_id}）。"
     turn = {
-        "assistant_text": verified + missing,
+        "assistant_text": conclusion + advantage_text + risk_text + unresolved_text + stop_text,
         "reference_ids": [reference_id],
         "changes": None,
         "clarification": None,
@@ -783,7 +806,51 @@ def _validate_grounded_output(
         raise ValueError("reference_ids must exactly match inline references")
     if factual_sentences and not output.reference_ids:
         raise ValueError("missing reference")
+    _validate_investigation_risk_summary(output, context)
     _validate_delivery_deadline_semantics(output, context)
+
+
+def _validate_investigation_risk_summary(
+    output: ConversationTurnOutput, context: dict[str, Any]
+) -> None:
+    """Do not let a completed evidence search erase confirmed adverse facts."""
+    if context.get("response_mode") != "INVESTIGATION_ONLY":
+        return
+    reference_id = context.get("investigation_reference_id")
+    record = (context.get("frozen_references") or {}).get(reference_id)
+    if not isinstance(record, dict):
+        return
+    observations = record.get("observations") or []
+    brief = next((
+        row.get("result", {}).get("data") or {}
+        for row in reversed(observations)
+        if isinstance(row, dict)
+        and isinstance(row.get("result"), dict)
+        and row["result"].get("tool_name") == "compile_decision_brief"
+    ), {})
+    risks = [item for item in brief.get("verified_risks") or [] if isinstance(item, dict)]
+    text = output.assistant_text
+    if "尚待追查" not in text and not re.search(r"尚缺|未决|待补|证据缺失|证据冲突", text):
+        raise ValueError("investigation answer omitted unresolved-item status")
+    if "停止" not in text and not re.search(r"无需继续|不再继续|核查完成", text):
+        raise ValueError("investigation answer omitted its stopping reason")
+    if not risks:
+        return
+    if re.search(r"未发现[^。；]{0,12}风险|没有[^。；]{0,8}风险|无风险", text):
+        raise ValueError("investigation answer confused no unresolved evidence with no risk")
+    if "风险" not in text:
+        raise ValueError("investigation answer omitted verified risks")
+    for risk in risks:
+        supplier_name = str(risk.get("supplier_name") or "").strip()
+        summary = str(risk.get("summary") or "")
+        if supplier_name and supplier_name.casefold() not in text.casefold():
+            raise ValueError("investigation answer omitted a supplier with verified risk")
+        for grade in re.findall(r"综合评级\s*([CDN])", summary, re.IGNORECASE):
+            if not re.search(rf"(?:综合)?评级\s*(?:为)?\s*{re.escape(grade)}\b", text, re.IGNORECASE):
+                raise ValueError("investigation answer omitted a verified adverse grade")
+        for percentage in re.findall(r"\d+(?:\.\d+)?%", summary):
+            if percentage not in text:
+                raise ValueError("investigation answer omitted a verified adverse rate")
 
 def validate_conversation_turn(
     turn: dict[str, Any], context: dict[str, Any]

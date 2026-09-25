@@ -61,7 +61,9 @@ function observationSummary(observation: InvestigationObservation) {
   if (observation.result.tool_name === 'inspect_policy_evidence') return '已核对本次结果冻结的制度检索与合规状态。'
   if (observation.result.tool_name === 'compile_decision_brief') {
     const pending = Array.isArray(data.unresolved_items) ? data.unresolved_items.length : 0
-    return pending > 0 ? `已汇总结论，并列出 ${pending} 项待补证明或审批记录。` : '已整理本轮核查事实与结论。'
+    const risks = Array.isArray(data.verified_risks) ? data.verified_risks.length : 0
+    if (pending > 0) return `已汇总结论，保留 ${risks} 项已核实风险，并列出 ${pending} 项待追查事项。`
+    return risks > 0 ? `已汇总结论，保留 ${risks} 项已核实风险；当前没有待追查事项。` : '已整理本轮核查事实与结论。'
   }
   if (observation.result.tool_name === 'draft_clarification' && typeof data.text === 'string') {
     return data.text

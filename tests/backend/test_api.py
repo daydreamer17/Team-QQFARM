@@ -14,7 +14,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from supplier_comparison.backend.api import create_app
-from supplier_comparison.backend.investigation import AgentChoice, AgentLimits, InvestigationRunner
+from supplier_comparison.backend.investigation import (
+    AgentChoice, AgentLimits, InvestigationRunner, ToolObservation, ToolResult,
+)
 from supplier_comparison.backend.decision_investigation import DecisionInvestigationTools
 from supplier_comparison.backend.models import (
     Base,
@@ -1394,7 +1396,8 @@ def test_decision_agent_checks_observations_and_preserves_official_result(batch_
     record = response.json()
     assert record["kind"] == "DECISION" and record["status"] == "RESOLVED"
     assert [o["result"]["tool_name"] for o in record["observations"]] == [
-        "read_decision_overview", "compare_alternatives", "inspect_quote_evidence", "compile_decision_brief",
+        "read_decision_overview", "compare_alternatives",
+        "inspect_quote_evidence", "inspect_quote_evidence", "compile_decision_brief",
     ]
     assert record["model_calls"] == 2
     assert "inspect_quote_evidence" in planner.seen[0][1]
@@ -1502,6 +1505,103 @@ def test_decision_agent_treats_refocused_quote_read_as_duplicate(batch_review):
     )
 
 
+def test_decision_brief_keeps_confirmed_history_risk_separate_from_unresolved_items(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-known-risk",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    quote_id = next(iter(tools.rows))
+    supplier_name = tools.rows[quote_id]["supplier_name"]
+    observation = ToolObservation(
+        sequence=1,
+        reason="核查供应商历史",
+        arguments={"quote_id": quote_id},
+        result=ToolResult(
+            tool_name="inspect_supplier_history",
+            task_id=task["task_id"],
+            task_revision=current["task_revision"],
+            quote_id=None,
+            input_sha256=tools.input_sha256,
+            status="OK",
+            data={
+                "quote_id": quote_id,
+                "supplier_name": supplier_name,
+                "supplier": {"history_snapshot": {
+                    "history_availability_status": "AVAILABLE",
+                    "overall_grade": "C",
+                    "on_time": {"rate": "1"},
+                    "rejected_lines": {"rate": "0.0909"},
+                }},
+            },
+        ),
+        latency_ms=0,
+    )
+    advantages, risks = tools._verified_findings(
+        [observation], {"criterion": "FASTEST_CONFIRMED_DELIVERY"},
+    )
+    assert any("历史准时率 100.00%" in item["summary"] for item in advantages)
+    assert any("综合评级 C" in item["summary"] and "历史拒收率 9.09%" in item["summary"] for item in risks)
+
+
+@pytest.mark.parametrize(("criterion", "expected_tools", "expected_focus", "fallback_tool"), [
+    ("LOWEST_CONFIRMED_TOTAL_COST", {"inspect_quote_evidence"}, "COST", "inspect_quote_evidence"),
+    ("FASTEST_CONFIRMED_DELIVERY", {"inspect_quote_evidence", "inspect_supplier_history"}, "DELIVERY", "inspect_quote_evidence"),
+    ("HIGHEST_SUPPLIER_PERFORMANCE", {"inspect_supplier_history"}, None, "inspect_supplier_history"),
+])
+def test_decision_agent_selects_tools_from_primary_ranking(
+    batch_review, criterion, expected_tools, expected_focus, fallback_tool,
+):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key=f"dynamic-investigation-{criterion.lower()}",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    tools.result["input_snapshot"]["decision_profile"]["preferences"]["primary_criterion"] = criterion
+    case = tools.prepare_case(tools.requested_case(request_id=f"dynamic-{criterion}"))
+
+    schemas = tools.available_schemas(case)
+    offered = {name for name in schemas if name.startswith("inspect_")}
+    assert offered == expected_tools
+    plan = case.known_facts["ranking_investigation_plan"]
+    assert plan["criterion"] == criterion
+    assert plan["quote_focus"] == expected_focus
+    if expected_focus:
+        assert schemas["inspect_quote_evidence"]["preferred_focus"] == expected_focus
+    fallback = tools.fallback_on_premature_stop(case)
+    assert fallback is not None
+    assert fallback[0] == fallback_tool
+    if expected_focus:
+        assert fallback[1]["focus"] == expected_focus
+
+    completed = InvestigationRunner(ScriptedPlanner([
+        AgentChoice(action="STOP", reason="按服务端计划继续核查") for _ in range(6)
+    ])).run((case,), tools, tools.save)[0]
+    trace = [observation for observation in completed.observations
+             if observation.result.tool_name.startswith("inspect_")]
+    assert completed.status == "RESOLVED"
+    assert {observation.result.tool_name for observation in trace} == expected_tools
+    if expected_focus:
+        quote_calls = [observation for observation in trace
+                       if observation.result.tool_name == "inspect_quote_evidence"]
+        assert quote_calls
+        assert all(observation.arguments["focus"] == expected_focus for observation in quote_calls)
+
+
 def test_decision_agent_recovers_from_premature_stop_for_narrow_evidence_question(batch_review):
     _http, service, task, runner, _review, body = batch_review
     updated = service.correct_fields(
@@ -1526,7 +1626,7 @@ def test_decision_agent_recovers_from_premature_stop_for_narrow_evidence_questio
     names = [observation.result.tool_name for observation in completed.observations]
     assert completed.status == "RESOLVED"
     assert completed.stop_reason == "REQUEST_COMPLETED"
-    assert completed.model_calls == 2
+    assert completed.model_calls == 1
     assert names == [
         "read_decision_overview", "compare_alternatives",
         "inspect_quote_evidence", "compile_decision_brief",

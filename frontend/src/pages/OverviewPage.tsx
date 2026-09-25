@@ -89,7 +89,7 @@ export function OverviewPage() {
 
   return (
     <div className="page-stack task-center-page">
-      <section className="task-center-heading">
+      <section className="page-heading app-page-heading task-center-heading">
         <div>
           <h1>任务中心</h1>
           <p>查看和管理采购任务。</p>

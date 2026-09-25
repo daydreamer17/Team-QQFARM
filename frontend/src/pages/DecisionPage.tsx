@@ -88,8 +88,8 @@ export function DecisionPage() {
         active="decision"
       />
 
-      <section className="decision-section-lead">
-        <div>
+      <section className="card workspace-page-lead decision-section-lead">
+        <div className="workspace-page-lead-copy">
           <h2>决策比较</h2>
           {expectedRevision !== null && !data.current_result_id && (
             <p>正在生成第 {expectedRevision} 版决策结果，完成后将自动打开。</p>

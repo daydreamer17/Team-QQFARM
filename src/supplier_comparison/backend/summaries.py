@@ -15,7 +15,7 @@ from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.extraction.adapters import trusted_urlopen
 
 
-SUMMARY_PROMPT_VERSION = "procurement-summary/1.1.0"
+SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.0"
 
 
 class SummarySectionOutput(BaseModel):
@@ -73,6 +73,8 @@ def generate_summary_narrative(
         "Do not mention shipping, tax, unit price, MOQ, or payment terms because those details are intentionally not supplied. "
         "Give each quote its own section and cite that quote's QUOTE reference; never swap facts between quotes. "
         "Use the frozen COMPLIANCE assessment for supported checks only. Human-confirmed evidence is not certificate authentication. "
+        "In tradeoff and supplier-communication sections, state policy eligibility before price or delivery differences. "
+        "An EXCLUDED supplier cannot be recommended. An UNVERIFIED supplier is pending rather than failed and is deprioritized when a VERIFIED candidate exists. "
         "VERIFIED_FIRST is a product ranking strategy, not a policy clause. Policy matches never imply procurement approval. "
         "Return JSON only with keys title, overview, sections, disclaimer. sections is a non-empty list of "
         "{heading,text,reference_ids}; every reference ID must be supplied. If formal recommendation is not allowed, say so clearly."

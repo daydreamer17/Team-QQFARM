@@ -250,6 +250,7 @@ export function QuoteUploadPage() {
   if (task.data?.status === 'ABANDONED') {
     return <div className="page-stack quote-review-page">
       <TaskWorkspaceHeader taskId={task.data.task_id} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle="任务已废弃；报价与原件保持只读" status={task.data.status} revision={task.data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={task.data.progress} active="quotes" />
+      <section className="card workspace-page-lead"><div className="workspace-page-lead-copy"><h2>报价与审核</h2><p>查看已提交的报价文件与审核记录。</p></div></section>
       <section className="card run-notice"><strong>该任务已软废弃</strong><p>不能上传、修正或提交报价；历史文件仍可预览和下载。</p></section>
       <section>{quoteHistory.isPending ? <div className="card empty-upload-list">正在加载报价历史…</div> : submittedQuoteTable(true)}</section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
@@ -260,7 +261,7 @@ export function QuoteUploadPage() {
   return (
     <div className="page-stack quote-review-page">
       {task.data ? <TaskWorkspaceHeader taskId={task.data.task_id} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} 份正式报价`} status={task.data.status} revision={task.data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={task.data.progress} reviewBlocked={Boolean(activeDraft || legacyFieldReview || legacyIssueReview || batchReview)} active="quotes" /> : <section className="card loading-panel">正在读取任务工作台…</section>}
-      <section className="quote-review-lead"><div><h2>报价与审核</h2><p>上传报价文件，系统将自动提取内容。</p></div></section>
+      <section className="card workspace-page-lead quote-review-lead"><div className="workspace-page-lead-copy"><h2>报价与审核</h2><p>上传报价文件，系统将自动提取内容。</p></div></section>
       {!activeDraft && (
         <form className="card upload-form" onSubmit={handleSubmit}>
           <label className="field">
@@ -307,7 +308,7 @@ export function QuoteUploadPage() {
         })}
       />}
       {legacyFieldReview && task.data && <ReviewPanel task={task.data} onRefresh={() => void refreshAll()} />}
-      {batchReview && <section className="card run-notice"><strong>本轮需要集中审核多个字段。</strong><p>请在集中审核页按后端返回的字段版本统一提交。</p><Link className="button button-submit" to={`/tasks/${taskId}/review`}>进入集中审核</Link></section>}
+      {batchReview && <section className="card run-notice"><strong>本轮有多个字段需要处理。</strong><p>请在待处理事项页按后端返回的字段版本统一提交。</p><Link className="button button-submit" to={`/tasks/${taskId}/review`}>进入待处理事项</Link></section>}
       {legacyIssueReview && task.data && <IssuePanel task={task.data} onRefresh={() => void refreshAll()} />}
       <section>
         <div className="section-heading"><div><h2>已提交报价（{quoteHistory.data?.items.length ?? 0}）</h2></div></div>

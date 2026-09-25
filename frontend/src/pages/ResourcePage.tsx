@@ -453,7 +453,7 @@ export function ResourcePage() {
 
   return (
     <div className="page-stack resource-page">
-      <section className="page-heading resource-heading">
+      <section className="page-heading resource-heading app-page-heading">
         <div>
           <h1>规则资源库</h1>
           <p>查看已发布制度，处理待审核文件，并按需发布新版本。</p>

@@ -11,6 +11,7 @@ import {
 import type {
   ComparisonResultResponse,
   DecisionChanges,
+  DecisionConversation,
   DecisionMessage,
   InvestigationCase,
   RankingCriterion,
@@ -40,10 +41,22 @@ const investigationToolLabels: Record<string, string> = {
 
 function conversationStatusLabel(status?: string) {
   if (!status) return '尚未开始'
-  if (status === 'ACTIVE') return '使用当前结果'
-  if (status === 'STALE') return '历史对话'
+  if (status === 'ACTIVE') return '当前版本'
+  if (status === 'STALE') return '历史版本'
   if (status === 'CLOSED') return '已结束'
   return status
+}
+
+function conversationTitle(title: string) {
+  return /^决策讨论\s+\d{4}[/-]/.test(title.trim()) ? '决策讨论' : title
+}
+
+function conversationOptionLabel(item: DecisionConversation, currentResultId: string) {
+  const version = item.status === 'ACTIVE' && item.base_result_id === currentResultId
+    ? '当前版本'
+    : `第 ${item.base_task_revision} 版`
+  const history = item.status === 'STALE' ? ' · 历史' : item.status === 'CLOSED' ? ' · 已结束' : ''
+  return `${version} · ${conversationTitle(item.title)}${history}`
 }
 
 function investigationObservationText(observation: InvestigationCase['observations'][number]) {
@@ -67,7 +80,9 @@ function investigationObservationText(observation: InvestigationCase['observatio
   if (observation.result.tool_name === 'inspect_policy_evidence') return '已核对本次结果冻结的制度检索与合规状态。'
   if (observation.result.tool_name === 'compile_decision_brief') {
     const pending = Array.isArray(data.unresolved_items) ? data.unresolved_items.length : 0
-    return pending > 0 ? `已汇总结论，并列出 ${pending} 项待补证明或审批记录。` : '已整理本轮核查事实与结论。'
+    const risks = Array.isArray(data.verified_risks) ? data.verified_risks.length : 0
+    if (pending > 0) return `已汇总结论，保留 ${risks} 项已核实风险，并列出 ${pending} 项待追查事项。`
+    return risks > 0 ? `已汇总结论，保留 ${risks} 项已核实风险；当前没有待追查事项。` : '已整理本轮核查事实与结论。'
   }
   return '已整理本轮核查事实、局限和后续事项。'
 }
@@ -173,6 +188,7 @@ function MessageBubble({
   onRetry?: () => void
   retrying: boolean
 }) {
+  const [copied, setCopied] = useState(false)
   const citation = citationPresentation(message.content ?? '', message.reference_ids)
   const statusLabel = message.role === 'USER'
     ? null
@@ -182,29 +198,18 @@ function MessageBubble({
       ? '生成失败'
       : message.status === 'PENDING'
         ? '生成中'
-        : '已完成'
+        : null
   return (
     <article className={`decision-chat-message chat-role-${message.role.toLowerCase()}`}>
-      <header>
-        <strong>{message.role === 'USER' ? '你' : 'AI 决策助手'}</strong>
-        {statusLabel && <span>{statusLabel}</span>}
-      </header>
+      {statusLabel && <header className="chat-message-status"><span>{statusLabel}</span></header>}
       {message.content && <p><CitedText text={citation.displayContent} /></p>}
       {message.status === 'STALE' && <p className="run-notice">依据已更新，此回复保留为历史记录；请根据当前结果重新提问。</p>}
       {message.status === 'FAILED' && (
         <p className="chat-message-error">生成失败：{message.error_message ?? message.error_code ?? '未知错误'}</p>
       )}
-      {message.status === 'FAILED' && message.error_code === 'selection_review_required' && (
-        <Link className="button button-secondary" to={`/tasks/${taskId}/review#excluded-review`}>前往集中审核</Link>
-      )}
-      {message.status === 'FAILED' && message.error_code !== 'selection_review_required' && onRetry && (
-        <button className="button button-secondary" type="button" disabled={readOnly || retrying} onClick={onRetry}>
-          {retrying ? '重新生成中…' : '重新生成'}
-        </button>
-      )}
       {citation.citations.length > 0 && (
-        <footer className="chat-citations">
-          <strong>引用</strong>
+        <details className="chat-citations">
+          <summary>查看 {citation.citations.length} 个来源</summary>
           <ol>
             {citation.citations.map((item) => (
               <li key={item.id}>
@@ -215,12 +220,12 @@ function MessageBubble({
                   onClick={() => onOpenCitation(item.id)}
                 >
                   <span>[{item.number}]</span>
-                  <div><small>{citationTitle(item.id)}</small><code>{item.id}</code></div>
+                  <small>{citationTitle(item.id)}</small>
                 </button>
               </li>
             ))}
           </ol>
-        </footer>
+        </details>
       )}
       {investigation && (
         <details className="decision-investigation-trace">
@@ -235,6 +240,25 @@ function MessageBubble({
             </li>
           ))}</ol>
         </details>
+      )}
+      {message.role === 'ASSISTANT' && (message.content || message.status === 'FAILED') && (
+        <footer className="chat-message-actions">
+          {message.content && (
+            <button className="text-button" type="button" onClick={() => {
+              if (!navigator.clipboard) return
+              void navigator.clipboard.writeText(message.content as string)
+                .then(() => setCopied(true))
+                .catch(() => undefined)
+            }}>{copied ? '已复制' : '复制回答'}</button>
+          )}
+          {message.status === 'FAILED' && message.error_code === 'selection_review_required' ? (
+            <Link className="button button-secondary" to={`/tasks/${taskId}/review#excluded-review`}>前往待处理事项</Link>
+          ) : message.status === 'FAILED' && onRetry ? (
+            <button className="button button-secondary" type="button" disabled={readOnly || retrying} onClick={onRetry}>
+              {retrying ? '重新生成中…' : '重新生成'}
+            </button>
+          ) : null}
+        </footer>
       )}
       {message.proposed_changes && (
         <section className="chat-proposal">
@@ -678,9 +702,11 @@ export function DecisionScenarioWorkspace({
           <span className="decision-chat-spark" aria-hidden="true">✦</span>
           <div className="decision-compact-chat-copy">
             <h2>Ask QuoteWise</h2>
-            <p>基于当前冻结的报价、制度核验和决策结果，解释推荐依据、比较供应商差异，并模拟偏好变化对排序的影响。</p>
+            <p>你好！我是 QuoteWise，可以帮你解释推荐结果、核查报价与制度证据，也可以试算预算或交期变化。</p>
           </div>
-          <span className="decision-chat-state">{conversationStatusLabel(activeConversation?.status)}</span>
+          {activeConversation?.status && activeConversation.status !== 'ACTIVE' && (
+            <span className="decision-chat-state">{conversationStatusLabel(activeConversation.status)}</span>
+          )}
         </header>
       ) : (
         <header className="decision-assistant-heading">
@@ -726,14 +752,6 @@ export function DecisionScenarioWorkspace({
         </div>
       )}
 
-      {compact && (
-        <div className="decision-compact-chat-context">
-          <span>{task.task_name}</span>
-          <span>{result.result.supplier_results.length} 家供应商</span>
-          <span>Revision {result.task_revision}</span>
-        </div>
-      )}
-
       <div className="decision-assistant-grid">
         <article className="decision-chat-panel">
           <header className="decision-chat-toolbar">
@@ -755,7 +773,7 @@ export function DecisionScenarioWorkspace({
                 >
                   {allConversations.map((item) => (
                     <option key={item.conversation_id} value={item.conversation_id}>
-                      Rev {item.base_task_revision} · {item.title} · {conversationStatusLabel(item.status)}
+                      {conversationOptionLabel(item, task.current_result_id ?? result.result_id)}
                     </option>
                   ))}
                 </select>
@@ -810,7 +828,7 @@ export function DecisionScenarioWorkspace({
             ))}
             {(streamingText || activeTurn) && (
               <article className="decision-chat-message chat-role-assistant chat-streaming">
-                <header><strong>AI 决策助手</strong><span>生成并校验中</span></header>
+                <header className="chat-message-status"><span>生成并校验中</span></header>
                 <p>{streamingText || processingStage}</p>
                 {toolProgress.length > 0 && <ol className="decision-chat-tool-progress">
                   {toolProgress.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}
@@ -820,14 +838,14 @@ export function DecisionScenarioWorkspace({
             {streamError && <div className="chat-message-error">{streamError}</div>}
             {activeConversation && activeConversation.base_result_id !== result.result_id && (
               <div className="run-notice">
-                这是 Revision {activeConversation.base_task_revision} 的历史对话，仅作背景；新回复会基于当前冻结结果重新核验。
+                这是第 {activeConversation.base_task_revision} 版的历史对话，仅作背景；新回复会基于当前结果重新核验。
               </div>
             )}
           </div>
 
           {compact && activeConversation && (
-            <details className="decision-chat-prompt-menu">
-              <summary><span>示例问题</span><small>3 个</small></summary>
+            <details className="decision-chat-prompt-menu" open={activeMessageCount === 0 ? true : undefined}>
+              <summary><span>示例问题</span></summary>
               <div className="decision-chat-prompts" aria-label="快捷问题">
                 <button type="button" onClick={() => setMessage('为什么推荐当前供应商？')}>为什么这样推荐？</button>
                 <button type="button" onClick={() => setMessage('如果优先交期，推荐会变化吗？')}>如果优先交期？</button>
@@ -840,7 +858,7 @@ export function DecisionScenarioWorkspace({
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
-              placeholder="用自然语言询问或描述你希望模拟的条件…"
+              placeholder="询问推荐原因、核查风险或试算条件变化…"
               maxLength={4000}
               rows={compact ? 2 : 3}
               disabled={conversationReadOnly || !activeConversation || activeTurn}

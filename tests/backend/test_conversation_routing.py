@@ -237,7 +237,13 @@ def test_investigation_route_uses_grounded_fallback_when_model_narration_is_inva
                 "result": {
                     "tool_name": "compile_decision_brief",
                     "status": "OK",
-                    "data": {"requires_follow_up": False, "unresolved_items": []},
+                    "data": {
+                        "requires_follow_up": False,
+                        "unresolved_items": [],
+                        "verified_advantages": [{"summary": "Alpha 的交期已经核实。"}],
+                        "verified_risks": [{"summary": "Alpha 的历史拒收率非零。"}],
+                        "stop_reason": "必要核查已经完成，未发现证据缺失或冲突。",
+                    },
                 },
             }],
         }}
@@ -258,9 +264,100 @@ def test_investigation_route_uses_grounded_fallback_when_model_narration_is_inva
 
     assert calls == 6
     assert turn["reference_ids"] == ["INVESTIGATION:case-fallback"]
-    assert "已核实" in turn["assistant_text"]
+    assert "已核实优势" in turn["assistant_text"]
+    assert "已核实风险" in turn["assistant_text"]
+    assert "历史拒收率非零" in turn["assistant_text"]
     assert "Alpha" in turn["assistant_text"]
-    assert "尚缺信息" in turn["assistant_text"]
+    assert "尚待追查事项" in turn["assistant_text"]
+    assert "停止原因" in turn["assistant_text"]
+
+
+def _investigation_risk_context():
+    reference = "INVESTIGATION:case-risk-summary"
+    ctx = context()
+    ctx.update({
+        "response_mode": "INVESTIGATION_ONLY",
+        "investigation_reference_id": reference,
+        "allowed_reference_ids": [reference],
+        "frozen_references": {reference: {
+            "status": "RESOLVED",
+            "observations": [{
+                "result": {
+                    "tool_name": "compile_decision_brief",
+                    "status": "OK",
+                    "data": {
+                        "requires_follow_up": False,
+                        "unresolved_items": [],
+                        "verified_advantages": [{
+                            "supplier_name": "Schwarzwald Circuits",
+                            "summary": "Schwarzwald Circuits：预计到货最早。",
+                        }],
+                        "verified_risks": [{
+                            "supplier_name": "Schwarzwald Circuits",
+                            "summary": "Schwarzwald Circuits：综合评级 C、历史拒收率 9.09%。",
+                        }],
+                        "stop_reason": (
+                            "当前排序依据要求的核查已完成，未发现证据缺失或冲突；"
+                            "已核实风险仍保留在结论中。"
+                        ),
+                    },
+                },
+            }],
+        }},
+    })
+    return ctx, reference
+
+
+def test_investigation_answer_cannot_equate_no_evidence_gap_with_no_risk():
+    ctx, reference = _investigation_risk_context()
+    turn = {
+        "assistant_text": (
+            f"已核实风险：未发现风险（{reference}）。"
+            f"尚待追查事项：未发现证据缺失或冲突（{reference}）。"
+            f"停止原因：必要核查已完成（{reference}）。"
+        ),
+        "reference_ids": [reference],
+        "changes": None,
+        "clarification": None,
+    }
+
+    with pytest.raises(ValueError, match="confused no unresolved evidence with no risk"):
+        conversations.validate_conversation_turn(turn, ctx)
+
+
+def test_investigation_answer_cannot_hide_a_verified_adverse_rate():
+    ctx, reference = _investigation_risk_context()
+    turn = {
+        "assistant_text": (
+            f"已核实风险：Schwarzwald Circuits 综合评级 C（{reference}）。"
+            f"尚待追查事项：未发现证据缺失或冲突（{reference}）。"
+            f"停止原因：必要核查已完成（{reference}）。"
+        ),
+        "reference_ids": [reference],
+        "changes": None,
+        "clarification": None,
+    }
+
+    with pytest.raises(ValueError, match="omitted a verified adverse rate"):
+        conversations.validate_conversation_turn(turn, ctx)
+
+
+def test_investigation_answer_keeps_risk_separate_from_unresolved_items():
+    ctx, reference = _investigation_risk_context()
+    turn = {
+        "assistant_text": (
+            f"已核实风险：Schwarzwald Circuits 综合评级 C，历史拒收率 9.09%（{reference}）。"
+            f"尚待追查事项：未发现证据缺失或冲突（{reference}）。"
+            f"停止原因：必要核查已完成，已确认风险继续保留（{reference}）。"
+        ),
+        "reference_ids": [reference],
+        "changes": None,
+        "clarification": None,
+    }
+
+    output = conversations.validate_conversation_turn(turn, ctx)
+
+    assert output.reference_ids == [reference]
 
 
 def test_investigation_route_without_enabled_agent_is_explicit(monkeypatch):

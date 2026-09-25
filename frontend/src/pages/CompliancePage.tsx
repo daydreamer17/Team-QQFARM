@@ -353,8 +353,8 @@ export function CompliancePage() {
     : '本任务未启用制度检查'
   return <div className="page-stack compliance-page">
     <TaskWorkspaceHeader taskId={taskId} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} 份报价`} status={task.data.status} revision={data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={{ ...task.data.progress, compliance: data.stage }} active="compliance" />
-    <section className="card compliance-context">
-      <div className="compliance-context-heading"><h2>制度检查</h2><p>{policySummary}</p></div>
+    <section className="card compliance-context workspace-page-lead">
+      <div className="compliance-context-heading workspace-page-lead-copy"><h2>制度检查</h2><p>{policySummary}</p></div>
       {data.assessment && <div className="compliance-kpis" aria-label="制度检查概览">
         <div><strong>{counts?.COMPLIANT ?? 0}</strong><span>已核验候选</span></div>
         <div><strong>{counts?.REVIEW_REQUIRED ?? 0}</strong><span>待补充或复核</span></div>

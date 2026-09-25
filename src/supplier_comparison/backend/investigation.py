@@ -153,6 +153,8 @@ class LiveInvestigationPlanner:
             "server-scoped tool, observe its result, then adjust the next call to the actual finding. "
             "The server has already called read_decision_overview and compare_alternatives as baseline observations; "
             "do not repeat them. After observing the comparison, "
+            "follow the server-provided ranking_investigation_plan: fastest delivery uses DELIVERY quote evidence plus supplier history, "
+            "lowest cost uses COST quote evidence, and supplier-performance ranking uses supplier history. "
             "select useful follow-up tools: inspect_quote_evidence for disputed or missing quote facts, "
             "inspect_supplier_history when historical performance affects ranking, and inspect_policy_evidence "
             "when a bound policy or compliance caveat matters. Do not mechanically call every tool. "
