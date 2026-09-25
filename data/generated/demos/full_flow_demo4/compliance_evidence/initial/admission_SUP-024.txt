@@ -1,9 +1,8 @@
 SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE
-Material number: FF4-ASL-SUP024-001
-Control: APPROVED_SUPPLIER
+Record ID: FF4-ASL-SUP024-001
 Supplier ID: SUP-024
-Supplier name: Sterling Components
-Registry / declaration outcome: PASS
+Supplier: Sterling Components
+Status: APPROVED
 Effective from: 2026-01-01
 Expires on: 2027-12-31
 Statement: The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing.

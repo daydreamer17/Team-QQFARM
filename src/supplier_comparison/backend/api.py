@@ -596,6 +596,18 @@ def create_app(
     def confirm_compliance(task_id: str, body: ComplianceConfirmationRequest, idempotency_key: IdempotencyKey):
         return service.confirm_compliance(task_id, **body.model_dump(), idempotency_key=idempotency_key)
 
+    @app.post('/api/v1/tasks/{task_id}/compliance/start', status_code=202)
+    def start_compliance(
+        task_id: str,
+        body: StartRunRequest,
+        idempotency_key: IdempotencyKey,
+    ):
+        return service.start_compliance(
+            task_id,
+            expected_task_revision=body.expected_task_revision,
+            idempotency_key=idempotency_key,
+        )
+
     @app.post("/api/v1/tasks", status_code=201)
     def create_task(
         body: CreateTaskRequest,

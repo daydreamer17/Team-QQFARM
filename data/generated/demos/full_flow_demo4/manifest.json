@@ -1,6 +1,6 @@
 {
   "dataset_id": "full_flow_demo4",
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "scenario_id": "MCU-TRADEOFF-004",
   "is_synthetic": true,
   "runtime_safe": true,
@@ -116,7 +116,9 @@
     "workflow_contract_version": "compliance/2.0",
     "evidence_entry_guide": "compliance_evidence/entry_guide.json",
     "initial_evidence_count": 8,
-    "replacement_evidence_count": 3
+    "replacement_evidence_count": 3,
+    "paired_evidence_count": 24,
+    "paired_evidence_per_supplier": 6
   },
   "history_binding": {
     "dataset_id": "synthetic-mcu9-supplier-performance",
@@ -125,73 +127,193 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "6607df9ad7f1996aff2303ebb7db2a199a94e698226c757ab8cc1173a926ee38",
-      "size_bytes": 2373
+      "sha256": "8ef1611e46d35294dc7f53e14976277bb7e6cde0be72ec88bf5331cda2cb6973",
+      "size_bytes": 2511
     },
     {
       "path": "compliance_evidence/README.md",
-      "sha256": "21b2bbe89f830546467712b37d58e1ff312304fbf1b668e4c512047481cafd38",
-      "size_bytes": 859
+      "sha256": "9655076aab8f1ab8a9d6d2912332f366a47f93899b09fea8cae54fd4dfeb24d2",
+      "size_bytes": 1414
     },
     {
       "path": "compliance_evidence/corrections/admission_SUP-023_reinstated.txt",
-      "sha256": "591552d216117ec25ec96a76f7153181d20731f50ab5925cd9f5cd30515b9c94",
-      "size_bytes": 401
+      "sha256": "fe1cd87130aeac8f684fe533aa86f73b1aeeed0224d555ff781df39b2e13e9a3",
+      "size_bytes": 343
     },
     {
       "path": "compliance_evidence/corrections/rohs_SUP-024_current.txt",
-      "sha256": "4bcbf9aa7bd9e6b60014f4775a3600e37cc86774528b6c53ddd9ba4f6b773412",
-      "size_bytes": 462
+      "sha256": "304a9eb0b3aa5919075345c0ab73051a10ab92dfcaf36d7ef7ab8ad19ba730ae",
+      "size_bytes": 393
     },
     {
       "path": "compliance_evidence/corrections/rohs_SUP-029_correct.txt",
-      "sha256": "0ad2afd463a7a275ae41b42b3af3b1a50587bd25287f3d31a61db8e67f1bfa7c",
-      "size_bytes": 473
+      "sha256": "fe6054ccee0f9f0a0ec124e4165aaf0adefd8ab5b546a82d037c766328db0fdd",
+      "size_bytes": 402
     },
     {
       "path": "compliance_evidence/entry_guide.json",
-      "sha256": "4f158d77e389b9225987d653b8c5819d6e2905cce104e74dccb0ba5ee52e95e5",
-      "size_bytes": 7387
+      "sha256": "d954959a3a2de2fdb2811811471099df08267c4861280c0e8fe384cb920642dd",
+      "size_bytes": 12759
     },
     {
       "path": "compliance_evidence/initial/admission_SUP-022.txt",
-      "sha256": "8df6d5c90d122e5782cc5883e309916fa1b74718f0d2fd1a8eff8249b3f37e89",
-      "size_bytes": 366
+      "sha256": "50f8f68c8f1497413cf727d8cdbf8221ea9ce7b3edc03ba3533fd0faa628fd20",
+      "size_bytes": 308
     },
     {
       "path": "compliance_evidence/initial/admission_SUP-023.txt",
-      "sha256": "e4bd9db8f230e643f9b1216fe99fee8973d8e5ef58b6664bdc3765353dc92b5f",
-      "size_bytes": 375
+      "sha256": "eb56ce8ba7baa90da3e01450495ae16ebe6171f01b9edccf0d8065ba51b2bd5a",
+      "size_bytes": 316
     },
     {
       "path": "compliance_evidence/initial/admission_SUP-024.txt",
-      "sha256": "048582a1496a1ee144def84628838e2dc144735c6744e1afe2b68f7d31347605",
-      "size_bytes": 367
+      "sha256": "7de5d1a32b7294a633c4b6c447b47ea56cadc80cbca7123a3c846c0213263385",
+      "size_bytes": 309
     },
     {
       "path": "compliance_evidence/initial/admission_SUP-029.txt",
-      "sha256": "23e796c7bc41e38f6d7c7d3e14130430bccca3ae941cf6088eff1db6bc83c27c",
-      "size_bytes": 369
+      "sha256": "cc7021777da2d13056202105f24f997850e5b8f23b51662b55789b787f4b1b56",
+      "size_bytes": 311
     },
     {
       "path": "compliance_evidence/initial/rohs_SUP-022.txt",
-      "sha256": "a667a635c6d5806bcf5db158b7fbcf4897ffcd24c25236ddc8fda7910bbbcaca",
-      "size_bytes": 425
+      "sha256": "2df78fa4e67d4f06dc16f94886d4bf8488ea0bc9743b07fe9993a17452bceafb",
+      "size_bytes": 357
     },
     {
       "path": "compliance_evidence/initial/rohs_SUP-023.txt",
-      "sha256": "3e258f907fe3f83033047c0b925449a0433cdd46306a98f65c3daa39a9801b5a",
-      "size_bytes": 427
+      "sha256": "2268188dfd57e502ad58c90a764e93e7f0537b6cd5aec9b11ef70784750aff9a",
+      "size_bytes": 357
     },
     {
       "path": "compliance_evidence/initial/rohs_expired_SUP-024.txt",
-      "sha256": "b3ab0074439c00863775f4cbe5b0450159bc82ec35180c0a3e2581ea0109af73",
-      "size_bytes": 437
+      "sha256": "7de6a22452dec821bde64524decdfe434303e5ee2f9251247c73167d1df6d5d3",
+      "size_bytes": 368
     },
     {
       "path": "compliance_evidence/initial/rohs_wrong_part_SUP-029.txt",
-      "sha256": "57f4d3403bd4fc2682cfe5f53ad9fbb42e73c472f240645f81069c4176f6e5ad",
-      "size_bytes": 433
+      "sha256": "3e68a1b2f07a0b634bfe848b298da8060de57c25665346a9f9ca91ea53c3b48a",
+      "size_bytes": 362
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/amount-compliant.md",
+      "sha256": "679702c0ff03ecc631669207956b1221634ca9d72eb5dfe8a666a95cd09932cf",
+      "size_bytes": 306
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/amount-non-compliant-insufficient.md",
+      "sha256": "2d5983435320c2e3662cff40a8cb4b8da0c5c6235d016173a92a0284ff7ba8ca",
+      "size_bytes": 342
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/rohs-compliant.md",
+      "sha256": "015ff66b90cdc810d3fd6e32e38772e67a52a16d2d8ca70d1177bc23bef86f50",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/rohs-non-compliant-failed.md",
+      "sha256": "a134a030093c837d85b47b739bb00f07c6b4d3639f7bcfa3b40b370d26d3dc48",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/supplier-compliant.md",
+      "sha256": "6441a7716ab995744b052dbe989caef5c77ec85d93b0ef851efa25995ef87444",
+      "size_bytes": 355
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-022-redwood-components/supplier-non-compliant-expired.md",
+      "sha256": "0fa123e76ca8cf0b71c3b6a721cac9a90c5c9435f1f3713fc2ab185aef9bef36",
+      "size_bytes": 369
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/amount-compliant.md",
+      "sha256": "2c90f32373f260be57a9f03d78a4e7a5e877849f91ebdb3b1af760424c030ea6",
+      "size_bytes": 306
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/amount-non-compliant-wrong-currency.md",
+      "sha256": "b8ce3d1aca5b035cfcf23411f235dc4c53bdbd8dde78493e2159eecb712b4f0c",
+      "size_bytes": 371
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/rohs-compliant.md",
+      "sha256": "4334e2b5edd94591bd85f52fcaebd7e1b06798a78c9073a3a4638add4543b11f",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/rohs-non-compliant-wrong-part.md",
+      "sha256": "bd43cb3ae6ac694d8748f364a3557e09df1697d796d145ccff3d8e1708e939ec",
+      "size_bytes": 398
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/supplier-compliant.md",
+      "sha256": "e1cc9da53e18831ceb647d1994c5c6326d2cf27cbc272798324fceacb2059823",
+      "size_bytes": 357
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-023-schwarzwald-circuits/supplier-non-compliant-revoked.md",
+      "sha256": "57ec6de396009805d10ea4d1def59d4b6dd3d505c304d0a330a989e827d7bede",
+      "size_bytes": 357
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/amount-compliant.md",
+      "sha256": "42c325773a1c1da2e2868c26015511f9aa5db5a677e082e2ea9abb9097cea5bf",
+      "size_bytes": 306
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/amount-non-compliant-expired.md",
+      "sha256": "c4a10eb05438c768d36dd11daeac8945180c5775b081b06e904bf5b63c994a8a",
+      "size_bytes": 313
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/rohs-compliant.md",
+      "sha256": "44139faaa12dc9f42062523d5dc8d5cf8958ad4c9e14b05c3b1781e18f5932b2",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/rohs-non-compliant-expired.md",
+      "sha256": "c76d497cc8a952ce34d8b27d61562702f1461113d7e601b83dcd31126257f75d",
+      "size_bytes": 380
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/supplier-compliant.md",
+      "sha256": "dbe509814b85074528c26c8f2d0733b8513d585ac719fa02622127ac0ba7695c",
+      "size_bytes": 356
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-024-sterling-components/supplier-non-compliant-suspended.md",
+      "sha256": "19e4b116b9b288f98cffa34f69254a587ec2f118ae3f1391a3a326028e6c875f",
+      "size_bytes": 384
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/amount-compliant.md",
+      "sha256": "baebae3ebb5c95fe41217949d09180b1359d6e9f9ccded74af3ec34ca3d391a1",
+      "size_bytes": 306
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/amount-non-compliant-rejected.md",
+      "sha256": "8732991b0647ef6dd9159ed31dbbc256a3c3111235681c91814f556d0e01bdfb",
+      "size_bytes": 341
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/rohs-compliant.md",
+      "sha256": "f9a3242d26415f214f94e06da5f075f233cb2ccfc3108b5ffe8827ab95f3199a",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/rohs-non-compliant-failed.md",
+      "sha256": "87a0a2b8199b9ff6e1908b9bb89bed6322b36e8d2c1be6726b92c23ddd9abeaf",
+      "size_bytes": 368
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/supplier-compliant.md",
+      "sha256": "444aba9415ebbd8e88537989b4210ce6811d04d5ead8a7eefd866ca660e5b281",
+      "size_bytes": 358
+    },
+    {
+      "path": "compliance_evidence/paired_scenarios/SUP-029-great-wall-components/supplier-non-compliant-wrong-id.md",
+      "sha256": "268d5819bc852585b1ed716b652154f9155e4f6213c816d80b4d2cd8a2210620",
+      "size_bytes": 401
     },
     {
       "path": "policy/electronics_sg/policy.txt",

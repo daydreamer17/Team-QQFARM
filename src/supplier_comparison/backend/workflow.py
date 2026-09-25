@@ -297,6 +297,7 @@ class WorkflowState(TypedDict, total=False):
     compliance_plan_id: str
     compliance_assessment_id: str
     compliance_confirmed: bool
+    compliance_requested: bool
     task_id: str
     graph_run_id: str
     task_revision: int
@@ -365,6 +366,7 @@ class WorkflowRunner:
         builder.add_node("freeze_final_and_compare", self._freeze_final_and_compare)
         builder.add_node("retrieve_policies", self._retrieve_policies)
         builder.add_node("prepare_compliance", self._prepare_compliance)
+        builder.add_node("await_compliance_start", self._await_compliance_start)
         builder.add_node("assess_compliance", self._assess_compliance)
         builder.add_node("await_compliance_confirmation", self._await_compliance_confirmation)
         builder.add_node('investigate_policies', self._investigate_policies)
@@ -391,7 +393,15 @@ class WorkflowRunner:
         builder.add_edge("freeze_draft_and_compare", "await_shipping_amount")
         builder.add_edge("await_shipping_amount", "apply_shipping_amount")
         builder.add_edge("apply_shipping_amount", "freeze_final_and_compare")
-        builder.add_edge("freeze_final_and_compare", "prepare_compliance")
+        builder.add_conditional_edges(
+            "freeze_final_and_compare",
+            self._route_compliance_start,
+            {
+                "requested": "prepare_compliance",
+                "prepare_evidence": "await_compliance_start",
+            },
+        )
+        builder.add_edge("await_compliance_start", "prepare_compliance")
         builder.add_edge("prepare_compliance", "retrieve_policies")
         builder.add_edge('retrieve_policies', 'investigate_policies')
         builder.add_conditional_edges(
@@ -414,12 +424,13 @@ class WorkflowRunner:
         job = self.service.claim_job(job_id)
         config = {"configurable": {"thread_id": job["graph_run_id"]}}
         try:
-            if job["job_type"] == "START":
+            if job["job_type"] in {"START", "COMPLIANCE_START"}:
                 result = self.graph.invoke(
                     {
                         "task_id": job["task_id"],
                         "graph_run_id": job["graph_run_id"],
                         "task_revision": job["task_revision"],
+                        "compliance_requested": job["job_type"] == "COMPLIANCE_START",
                     },
                     config=config,
                 )
@@ -467,6 +478,19 @@ class WorkflowRunner:
             "task_revision": context["effective_revision"],
             "evaluated_at": state.get("evaluated_at") or self.evaluated_at.isoformat(),
         }
+
+    @staticmethod
+    def _route_compliance_start(state: WorkflowState) -> str:
+        return "requested" if state.get("compliance_requested") else "prepare_evidence"
+
+    @staticmethod
+    def _await_compliance_start(state: WorkflowState) -> WorkflowState:
+        interrupt({
+            "type": "COMPLIANCE_PREPARATION",
+            "task_id": state["task_id"],
+            "task_revision": state["task_revision"],
+        })
+        return {}
 
     def _extract_documents(self, state: WorkflowState) -> WorkflowState:
         workflow_context = self.service.workflow_context(state["graph_run_id"])

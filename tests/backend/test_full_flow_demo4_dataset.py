@@ -23,6 +23,7 @@ from sqlalchemy.orm import sessionmaker
 
 from supplier_comparison.backend.models import Base
 from supplier_comparison.backend.compliance import EvidenceInput
+from supplier_comparison.backend.compliance_evidence_parser import parse_compliance_evidence
 from supplier_comparison.backend.service import BackendService, ConflictError
 from supplier_comparison.backend.workflow import DefaultQuoteProcessor, DraftReviewRunner
 from tests.backend.test_workflow import WorkflowRunner
@@ -111,9 +112,11 @@ def test_manifest_exact_inventory_and_no_oracle_leak():
     assert manifest["dataset_id"] == "full_flow_demo4"
     assert len(manifest["primary_quotes"]) == 4
     assert len(manifest["variants"]) == 13
-    assert manifest["schema_version"] == "1.1.0"
+    assert manifest["schema_version"] == "1.2.0"
     assert manifest["compliance"]["initial_evidence_count"] == 8
     assert manifest["compliance"]["replacement_evidence_count"] == 3
+    assert manifest["compliance"]["paired_evidence_count"] == 24
+    assert manifest["compliance"]["paired_evidence_per_supplier"] == 6
     assert {entry["path"] for entry in manifest["files"]} == {
         p.relative_to(DATA).as_posix() for p in DATA.rglob("*")
         if p.is_file() and p.name not in {"manifest.json", ".DS_Store"}}
@@ -228,7 +231,7 @@ def test_compliance_evidence_exercises_verified_first_and_replacements():
 
     def validated(item):
         path = DATA / "compliance_evidence" / item["file"]
-        assert path.is_file() and "NOT A REAL CERTIFICATE" in path.read_text()
+        assert path.is_file() and "NOT A REAL CERTIFICATE" in path.read_text(encoding="utf-8")
         payload = {**item["facts"], "quote_id": quote_ids[item["facts"]["supplier_id"]]}
         EvidenceInput.model_validate(payload)
         return ComplianceEvidence.model_validate({
@@ -281,6 +284,64 @@ def test_compliance_evidence_exercises_verified_first_and_replacements():
         else:
             assert check.status == "PASS"
     assert sorted(triggered) == ANSWERS["compliance"]["amount_rule"]["triggered_supplier_ids"]
+
+
+def test_all_demo4_evidence_files_are_auto_parseable_and_pairs_are_complete():
+    guide = json.loads((DATA / "compliance_evidence/entry_guide.json").read_text())
+    legacy = [*guide["initial"], *guide["corrections"]]
+    for item in legacy:
+        path = DATA / "compliance_evidence" / item["file"]
+        parsed = parse_compliance_evidence(
+            path.read_bytes(), filename=path.name, media_type="text/plain",
+            control_code=item["facts"]["control_code"],
+        )
+        assert parsed["status"] == "FOUND", (path, parsed)
+        assert parsed["missing_fields"] == [], (path, parsed)
+
+    paired = guide["paired_scenarios"]
+    assert len(paired) == 24
+    expected_controls = {"APPROVED_SUPPLIER", "ROHS_COMPLIANCE", "AMOUNT_APPROVAL"}
+    supplier_ids = {"SUP-022", "SUP-023", "SUP-024", "SUP-029"}
+    for supplier_id in supplier_ids:
+        items = [item for item in paired if item["target_supplier_id"] == supplier_id]
+        assert len(items) == 6
+        assert {item["control_code"] for item in items} == expected_controls
+        for control_code in expected_controls:
+            variants = {item["expected_variant"] for item in items if item["control_code"] == control_code}
+            assert variants == {"COMPLIANT", "NON_COMPLIANT"}
+
+    clauses = {item["control_code"]: item for item in
+               json.loads((DATA / "policy/electronics_sg/reviewed_clauses.json").read_text())["clauses"]}
+    for item in paired:
+        path = DATA / "compliance_evidence" / item["file"]
+        parsed = parse_compliance_evidence(
+            path.read_bytes(), filename=path.name, media_type="text/markdown",
+            control_code=item["control_code"],
+        )
+        assert parsed["status"] == "FOUND", (path, parsed)
+        assert parsed["missing_fields"] == [], (path, parsed)
+        assert parsed["detected_control_code"] == item["control_code"]
+        evidence_payload = {
+            **parsed["facts"], "evidence_id": parsed["facts"]["material_number"],
+            "control_code": item["control_code"], "coverage_confirmed": True,
+            "permanent": False,
+        }
+        evidence = ComplianceEvidence.model_validate({
+            key: value for key, value in evidence_payload.items()
+            if key in ComplianceEvidence.model_fields
+        })
+        clause = clauses[item["control_code"]]
+        check = evaluate_compliance_rule(
+            clause_id=clause["clause_id"], parameters=clause["rule_parameters"],
+            supplier_id=item["target_supplier_id"], manufacturer="QQ Demo Components",
+            manufacturer_part_number="QW-MCU9-DEMO", evaluated_at=EVALUATED_AT,
+            evidence=(evidence,), amount=Decimal("7100.00"), currency="SGD",
+            execution_stage=clause["rule_parameters"]["execution_stage"],
+        )
+        if item["expected_variant"] == "COMPLIANT":
+            assert check.status == "PASS", (path, check)
+        else:
+            assert check.status != "PASS", (path, check)
 
 
 def test_policy_files_publish_with_fixed_embeddings_and_filter_scope(service, tmp_path):
@@ -352,6 +413,17 @@ def upload_and_review(service, task, path, *, processor=None, actions_transform=
     return draft, reviewed
 
 
+def run_job_through_compliance(service, runner, task_id, job_id):
+    """Complete the explicit evidence-preparation boundary used by demo workflows."""
+    runner.run_job(job_id)
+    workspace = service.compliance_workspace(task_id)
+    assert workspace["stage"]["status"] == "NOT_STARTED"
+    compliance = service.start_compliance(task_id, expected_task_revision=workspace["task_revision"],
+        idempotency_key=f"start-compliance:{job_id}")
+    runner.run_job(compliance["job_id"])
+    return service.get_task(task_id)
+
+
 def completed_task(service):
     task = service.create_task(ProcurementRequirement.model_validate_json((DATA / "requirement/confirmed_requirement.json").read_text()),
                                idempotency_key="create-demo4", scenario_id="MCU-TRADEOFF-004")
@@ -365,8 +437,7 @@ def completed_task(service):
         provider="fixed", model_id="fixed-output", environment="FIXED_TEST", prompt_version="quote-extraction/2.2.0")
     runner = WorkflowRunner(service, processor=DefaultQuoteProcessor(service.quote_dictionary), checkpointer=InMemorySaver(),
                             dictionary_path=DICTIONARY, evaluated_at=EVALUATED_AT)
-    runner.run_job(started["job_id"])
-    task = service.get_task(task["task_id"])
+    task = run_job_through_compliance(service, runner, task["task_id"], started["job_id"])
     assert task["current_result_id"], task
     return task, runner
 
@@ -398,8 +469,7 @@ def test_real_csv_review_workflow_scenarios_apply_stale_and_history(service):
     assert service.get_task(task_id)["current_result_id"] is None
     with pytest.raises(ConflictError):
         service.apply_decision_scenario(task_id, scenarios[1]["decision_scenario_id"], expected_task_revision=revision + 1, idempotency_key="stale-apply")
-    runner.run_job(applied["job_id"])
-    current = service.get_task(task_id)
+    current = run_job_through_compliance(service, runner, task_id, applied["job_id"])
     result = service.get_result(task_id, current["current_result_id"])["result"]
     assert [suppliers[q] for q in result["recommended_quote_ids"]] == ["SUP-023"]
     assert service.get_result(task_id, baseline_id)["result"] == baseline
@@ -410,8 +480,7 @@ def test_confirmed_payment_remains_comparable_in_persisted_scenario(service):
     rerun = service.start_run(task["task_id"], expected_task_revision=task["task_revision"],
         idempotency_key="payment-rerun", provider="fixed", model_id="fixed-output",
         environment="FIXED_TEST", prompt_version="quote-extraction/2.2.0")
-    runner.run_job(rerun["job_id"])
-    task = service.get_task(task["task_id"])
+    task = run_job_through_compliance(service, runner, task["task_id"], rerun["job_id"])
     scenario = service.create_decision_scenario(task["task_id"], expected_task_revision=task["task_revision"],
         changes=RequirementChanges(primary_criterion="LONGEST_CONFIRMED_PAYMENT_TERM"), idempotency_key="payment")
     quotes = service.list_quotes(task["task_id"])["items"]
@@ -529,8 +598,7 @@ def test_conversation_proposal_apply_preserves_old_messages_and_new_facts(servic
         idempotency_key="confirmed-scenario")
     applied = service.apply_decision_scenario(tid, scenario["decision_scenario_id"], expected_task_revision=revision,
         idempotency_key="chat-apply", provider="fixed", model_id="fixed-output", environment="FIXED_TEST")
-    runner.run_job(applied["job_id"])
-    new_task = service.get_task(tid)
+    new_task = run_job_through_compliance(service, runner, tid, applied["job_id"])
     assert new_task["current_result_id"] != context["result_id"]
     historical = service.get_decision_conversation(tid, conversation["conversation_id"])
     assert any("200" in m["content"] for m in historical["messages"] if m["role"] == "USER")

@@ -146,6 +146,41 @@ class CatalogueRetriever:
             candidates=[], latency_ms={'total':0}, attempts={'embedding':1,'rerank':1}, error_code='fixed_failure' if self.fail else None)
 
 
+def test_regular_run_waits_for_explicit_compliance_start(tmp_path):
+    engine = create_engine('sqlite+pysqlite:///:memory:')
+    Base.metadata.create_all(engine)
+    service = BackendService(sessionmaker(engine, expire_on_commit=False), tmp_path / 'files', actor_id='owner')
+    seed_policy(service)
+    task = service.create_task(_requirement(), idempotency_key='create', policy_set_version='v1',
+        policy_index_version='idx', policy_category='Electronics', policy_region='SG')
+    uploaded = service.upload_quote(task['task_id'], expected_task_revision=1, supplier_id='SUP-024',
+        original_filename='quote.csv', media_type='text/csv', content=b'placeholder-c',
+        idempotency_key='upload', is_synthetic=True)
+    retriever = CatalogueRetriever(service)
+    runner = WorkflowRunner(service, processor=CanonicalCsvProcessor(tmp_path), policy_retriever=retriever,
+        checkpointer=InMemorySaver(), dictionary_path=DICTIONARY_PATH,
+        evaluated_at=datetime(2026,9,17,tzinfo=timezone.utc))
+
+    regular = service.start_run(task['task_id'], expected_task_revision=uploaded['task_revision'],
+        idempotency_key='regular')
+    paused = runner.run_job(regular['job_id'])
+    workspace = service.compliance_workspace(task['task_id'])
+    assert paused['status'] == 'WAITING_INPUT'
+    assert paused['issue'] is None
+    assert workspace['stage']['status'] == 'NOT_STARTED'
+    assert workspace['assessment'] is None
+    assert retriever.calls == 0
+
+    requested = service.start_compliance(task['task_id'], expected_task_revision=workspace['task_revision'],
+        idempotency_key='compliance')
+    assert requested['job_type'] == 'COMPLIANCE_START'
+    runner.run_job(requested['job_id'])
+    checked = service.compliance_workspace(task['task_id'])
+    assert checked['stage']['status'] == 'AWAITING_CONFIRMATION'
+    assert checked['assessment'] is not None
+    assert retriever.calls == 3
+
+
 @pytest.fixture
 def policy_workspace(tmp_path):
     engine = create_engine('sqlite+pysqlite:///:memory:')
@@ -156,7 +191,8 @@ def policy_workspace(tmp_path):
         policy_index_version='idx', policy_category='Electronics', policy_region='SG')
     uploaded = service.upload_quote(task['task_id'], expected_task_revision=1, supplier_id='SUP-024',
         original_filename='quote.csv', media_type='text/csv', content=b'placeholder-c', idempotency_key='upload', is_synthetic=True)
-    job = service.start_run(task['task_id'], expected_task_revision=uploaded['task_revision'], idempotency_key='start')
+    job = service.start_run(task['task_id'], expected_task_revision=uploaded['task_revision'],
+                            idempotency_key='start', compliance_requested=True)
     retriever = CatalogueRetriever(service)
     runner = WorkflowRunner(service, processor=CanonicalCsvProcessor(tmp_path), policy_retriever=retriever,
         checkpointer=InMemorySaver(), dictionary_path=DICTIONARY_PATH, evaluated_at=datetime(2026,9,17,tzinfo=timezone.utc))
@@ -241,7 +277,8 @@ def test_evidence_can_be_staged_before_compliance_check(policy_workspace):
     assert staged['evidence'][0]['facts']['material_number'] == 'DEMO-001'
     assert service.get_task(task_id)['progress']['quote_review_completed'] is True
 
-    job = service.start_run(task_id, expected_task_revision=saved['task_revision'], idempotency_key='check-staged')
+    job = service.start_compliance(task_id, expected_task_revision=saved['task_revision'],
+                                   idempotency_key='check-staged')
     runner.run_job(job['job_id'])
     checked = service.compliance_workspace(task_id)
     admission = next(check for check in checked['assessment']['assessments'][0]['checks']
@@ -537,7 +574,8 @@ def workspace(tmp_path):
     uploaded = service.upload_quote(task['task_id'], expected_task_revision=1, supplier_id='SUP-024',
         original_filename='quote.csv', media_type='text/csv', content=b'placeholder-c',
         idempotency_key='upload', is_synthetic=True)
-    job = service.start_run(task['task_id'], expected_task_revision=uploaded['task_revision'], idempotency_key='start')
+    job = service.start_run(task['task_id'], expected_task_revision=uploaded['task_revision'],
+                            idempotency_key='start', compliance_requested=True)
     runner = WorkflowRunner(service, processor=CanonicalCsvProcessor(tmp_path), checkpointer=InMemorySaver(),
         dictionary_path=DICTIONARY_PATH, evaluated_at=datetime(2026, 9, 17, tzinfo=timezone.utc))
     runner.run_job(job['job_id'])
@@ -614,5 +652,9 @@ def test_legacy_reanalysis_enters_new_stage_without_rewriting_history(workspace)
     job = service.start_run(task_id, expected_task_revision=service.get_task(task_id)['task_revision'], idempotency_key='legacy-reanalyse')
     runner.run_job(job['job_id'])
     assert service.get_task(task_id)['current_result_id'] is None
+    assert service.compliance_workspace(task_id)['stage']['status'] == 'NOT_STARTED'
+    requested = service.start_compliance(task_id, expected_task_revision=service.get_task(task_id)['task_revision'],
+                                         idempotency_key='legacy-compliance')
+    runner.run_job(requested['job_id'])
     assert service.compliance_workspace(task_id)['stage']['status'] == 'AWAITING_CONFIRMATION'
     assert service.get_result(task_id, original['result_id'])['result'] == original['result']

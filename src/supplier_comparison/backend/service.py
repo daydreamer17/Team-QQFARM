@@ -7395,7 +7395,7 @@ class BackendService(ComplianceMixin):
                     job_id=job_id,
                     task_id=task_id,
                     graph_run_id=graph_run_id,
-                    job_type="START",
+                    job_type="COMPLIANCE_START",
                     status="PENDING",
                     task_revision=next_revision,
                     history_binding_id=(
@@ -7408,7 +7408,7 @@ class BackendService(ComplianceMixin):
                 "task_revision": next_revision,
                 "graph_run_id": graph_run_id,
                 "job_id": job_id,
-                "job_type": "START",
+                "job_type": "COMPLIANCE_START",
                 "job_status": "PENDING",
                 "correction_count": len(corrections),
             }
@@ -7908,6 +7908,7 @@ class BackendService(ComplianceMixin):
         *,
         expected_task_revision: int,
         idempotency_key: str,
+        compliance_requested: bool = False,
         provider: str | None = None,
         model_id: str | None = None,
         environment: str | None = None,
@@ -7920,6 +7921,7 @@ class BackendService(ComplianceMixin):
             "model_id": model_id,
             "environment": environment,
             "prompt_version": prompt_version,
+            "compliance_requested": compliance_requested,
         }
         request_sha = content_hash(request)
         operation = f"start_run:{task_id}"
@@ -8017,7 +8019,7 @@ class BackendService(ComplianceMixin):
                     job_id=job_id,
                     task_id=task_id,
                     graph_run_id=graph_run_id,
-                    job_type="START",
+                    job_type="COMPLIANCE_START" if compliance_requested else "START",
                     status="PENDING",
                     task_revision=task.current_revision,
                     history_binding_id=history_binding.history_binding_id,
@@ -8030,7 +8032,7 @@ class BackendService(ComplianceMixin):
                 "task_revision": task.current_revision,
                 "graph_run_id": graph_run_id,
                 "job_id": job_id,
-                "job_type": "START",
+                "job_type": "COMPLIANCE_START" if compliance_requested else "START",
                 "job_status": "PENDING",
             }
             self._save_idempotent(

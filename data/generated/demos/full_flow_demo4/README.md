@@ -8,7 +8,7 @@
 2. 创建新任务时绑定刚发布的 Electronics/SG 制度，上传 `requirement/procurement_requirement.txt`（PDF/MD 等价），核对 `confirmed_requirement.json`。若只回归旧的无制度基线，才创建不绑定制度的独立任务。
 3. 上传 `quotes/pdf/` 四份 PDF，或 `quotes/csv/` 四份 CSV；两套不要混传。供应商 ID 使用 manifest 所列值。
 4. 核对全部字段并正式提交四份报价。PDF 路径含真实模型提取；固定 CSV 不需要模型。
-5. 进入制度检查，先上传 `compliance_evidence/initial/` 的八份材料并确认结果；再使用 `corrections/` 的三份材料逐项执行“替换材料”。确认制度检查后再进入决策比较。
+5. 进入制度检查，可按原流程先上传 `compliance_evidence/initial/` 的八份材料，再使用 `corrections/` 的三份材料执行“替换材料”；需要测试任一供应商、任一证明类型的正反案例时，使用 `compliance_evidence/paired_scenarios/` 下对应的 24 份材料。确认制度检查后再进入决策比较。
 6. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。
 7. 历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。`policy/unrelated_office_eu/` 是范围隔离反例，不要绑定到 SG 电子采购。
 

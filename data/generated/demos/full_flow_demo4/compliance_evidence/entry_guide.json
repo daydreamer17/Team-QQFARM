@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "evaluated_at": "2026-11-02T00:00:00Z",
   "warning": "Synthetic demo facts for manual confirmation; not real certificates or automated verification.",
   "initial": [
@@ -15,7 +15,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/admission_SUP-029.txt#lines=1-9"
+          "initial/admission_SUP-029.txt#lines=1-8"
         ],
         "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
       }
@@ -34,7 +34,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/rohs_wrong_part_SUP-029.txt#lines=1-11"
+          "initial/rohs_wrong_part_SUP-029.txt#lines=1-9"
         ],
         "note": "The declaration covers a different part number and must not be used for QW-MCU9-DEMO."
       }
@@ -51,7 +51,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/admission_SUP-022.txt#lines=1-9"
+          "initial/admission_SUP-022.txt#lines=1-8"
         ],
         "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
       }
@@ -70,7 +70,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/rohs_SUP-022.txt#lines=1-11"
+          "initial/rohs_SUP-022.txt#lines=1-9"
         ],
         "note": "The synthetic declaration covers the exact offered manufacturer and part number."
       }
@@ -87,7 +87,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/admission_SUP-023.txt#lines=1-9"
+          "initial/admission_SUP-023.txt#lines=1-8"
         ],
         "note": "The synthetic registry explicitly records this supplier ID as not approved for the scoped purchase."
       }
@@ -106,7 +106,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/rohs_SUP-023.txt#lines=1-11"
+          "initial/rohs_SUP-023.txt#lines=1-9"
         ],
         "note": "The synthetic declaration covers the exact offered manufacturer and part number."
       }
@@ -123,7 +123,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/admission_SUP-024.txt#lines=1-9"
+          "initial/admission_SUP-024.txt#lines=1-8"
         ],
         "note": "The synthetic registry lists this exact supplier ID as approved for SG electronics sourcing."
       }
@@ -142,7 +142,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "initial/rohs_expired_SUP-024.txt#lines=1-11"
+          "initial/rohs_expired_SUP-024.txt#lines=1-9"
         ],
         "note": "The synthetic declaration covers the exact part but is expired before the demo test window."
       }
@@ -163,7 +163,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "corrections/rohs_SUP-029_correct.txt#lines=1-12"
+          "corrections/rohs_SUP-029_correct.txt#lines=1-10"
         ],
         "note": "This replacement synthetic declaration covers the exact offered manufacturer and part number."
       },
@@ -181,7 +181,7 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "corrections/admission_SUP-023_reinstated.txt#lines=1-10"
+          "corrections/admission_SUP-023_reinstated.txt#lines=1-9"
         ],
         "note": "This replacement synthetic registry record reinstates the exact supplier ID before evaluation."
       },
@@ -201,11 +201,157 @@
         "coverage_confirmed": true,
         "permanent": false,
         "source_refs": [
-          "corrections/rohs_SUP-024_current.txt#lines=1-12"
+          "corrections/rohs_SUP-024_current.txt#lines=1-10"
         ],
         "note": "This replacement synthetic declaration is current and covers the exact offered part."
       },
       "supersedes_material_number": "FF4-ROHS-SUP024-001"
+    }
+  ],
+  "paired_scenarios": [
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/amount-compliant.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/amount-non-compliant-insufficient.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/rohs-compliant.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/rohs-non-compliant-failed.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/supplier-compliant.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-022-redwood-components/supplier-non-compliant-expired.md",
+      "target_supplier_id": "SUP-022",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/amount-compliant.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/amount-non-compliant-wrong-currency.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/rohs-compliant.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/rohs-non-compliant-wrong-part.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/supplier-compliant.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-023-schwarzwald-circuits/supplier-non-compliant-revoked.md",
+      "target_supplier_id": "SUP-023",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/amount-compliant.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/amount-non-compliant-expired.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/rohs-compliant.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/rohs-non-compliant-expired.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/supplier-compliant.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-024-sterling-components/supplier-non-compliant-suspended.md",
+      "target_supplier_id": "SUP-024",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/amount-compliant.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/amount-non-compliant-rejected.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "AMOUNT_APPROVAL",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/rohs-compliant.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/rohs-non-compliant-failed.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "ROHS_COMPLIANCE",
+      "expected_variant": "NON_COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/supplier-compliant.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "COMPLIANT"
+    },
+    {
+      "file": "paired_scenarios/SUP-029-great-wall-components/supplier-non-compliant-wrong-id.md",
+      "target_supplier_id": "SUP-029",
+      "control_code": "APPROVED_SUPPLIER",
+      "expected_variant": "NON_COMPLIANT"
     }
   ]
 }

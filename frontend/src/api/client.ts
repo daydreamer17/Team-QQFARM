@@ -237,6 +237,12 @@ export function decisionConversationEventsUrl(
 
 export const api = {
   getCompliance: (taskId: string) => request<ComplianceWorkspace>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance`),
+  startCompliance: (taskId: string, expectedTaskRevision: number, idempotencyKey: string) =>
+    request<StartRunResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/compliance/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_task_revision: expectedTaskRevision }),
+    }),
   parseComplianceEvidence: (taskId: string, controlCode: ComplianceEvidenceFacts['control_code'], file: File) => {
     const body = new FormData()
     body.append('control_code', controlCode)

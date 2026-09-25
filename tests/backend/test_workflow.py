@@ -149,6 +149,7 @@ def test_two_interrupt_workflow_resumes_without_reextracting_documents(
         model_id="fixed-output",
         environment="FIXED_TEST",
         prompt_version="quote-extraction/1.0.0",
+        compliance_requested=True,
     )
     processor = CanonicalCsvProcessor(tmp_path)
     checkpointer = InMemorySaver()
@@ -474,7 +475,8 @@ def _run_impact_quotes(tmp_path, *, overrides=None, policy_retriever=None, polic
             content=supplier.encode(), idempotency_key=f"upload-{supplier}", is_synthetic=True,
         )
         revision = uploaded["task_revision"]
-    started = service.start_run(task["task_id"], expected_task_revision=revision, idempotency_key="run")
+    started = service.start_run(task["task_id"], expected_task_revision=revision,
+                                idempotency_key="run", compliance_requested=True)
     if policy_binding:
         # These historical fixed-retriever fixtures predate the published catalogue.
         # Keep testing resume compatibility for an already-running legacy graph.

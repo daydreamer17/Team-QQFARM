@@ -138,7 +138,7 @@ test('a not-started workspace starts analysis instead of polling forever', async
   const user = userEvent.setup()
   vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, assessment: null,
     stage: { status: 'NOT_STARTED', confirmed: false, can_confirm: false, can_compare: false } } as never)
-  const start = vi.spyOn(api, 'startRun').mockResolvedValue({ task_revision: 3, job_id: 'job-1' } as never)
+  const start = vi.spyOn(api, 'startCompliance').mockResolvedValue({ task_revision: 3, job_id: 'job-1' } as never)
   mount()
   await user.click(await screen.findByRole('button', { name: 'Start' }))
   await waitFor(() => expect(start).toHaveBeenCalledWith('task-1', 3, expect.any(String)))
@@ -151,7 +151,7 @@ test('existing evidence can be saved before the first compliance check', async (
   const save = vi.spyOn(api, 'saveComplianceEvidence').mockResolvedValue({
     task_id: 'task-1', task_revision: 4, evidence_id: 'evidence-1', analysis_started: false,
   })
-  const start = vi.spyOn(api, 'startRun')
+  const start = vi.spyOn(api, 'startCompliance')
   mount()
 
   expect(await screen.findByRole('heading', { name: 'Prepare evidence before checking' })).toBeInTheDocument()
@@ -204,11 +204,13 @@ test('historical assessment keeps frozen material downloads without sending read
 })
 
 test('bound policy summary and separate control columns preserve incomplete multi-clause checks', async () => {
+  const user = userEvent.setup()
   const data = structuredClone(workspace)
   Object.assign(data.policy_binding, { policy_set_version: '2026.09', category: 'Electronics', region: 'SG' })
   Object.assign(data.plan, { clauses: [{ clause_id: 'rohs-1', title: 'Supplier Assurance Policy', text: 'Policy text' }] })
   data.assessment.assessments[0].checks.push({ ...data.assessment.assessments[0].checks[0], clause_id: 'rohs-2', status: 'PASS' },
-    { ...data.assessment.assessments[0].checks[0], clause_id: 'admission-1', control_code: 'APPROVED_SUPPLIER', status: 'PASS' })
+    { ...data.assessment.assessments[0].checks[0], clause_id: 'admission-1', control_code: 'APPROVED_SUPPLIER', status: 'PASS' },
+    { ...data.assessment.assessments[0].checks[0], clause_id: 'amount-1', control_code: 'AMOUNT_APPROVAL', triggered: true })
   Object.assign(data.assessment, { amount_requirements: [{ quote_id: 'quote-1', supplier_name: 'Supplier One', amount: '7000.00', currency: 'SGD', threshold: '6500.00', execution_stage: 'AFTER_SELECTION', triggered: true, approval_confirmed: false, action: 'Manager review' }] })
   vi.mocked(api.getCompliance).mockResolvedValue(data as never)
   mount()
@@ -216,16 +218,23 @@ test('bound policy summary and separate control columns preserve incomplete mult
   expect(screen.queryByText('SUPPLIER CHECKS')).not.toBeInTheDocument()
   expect(screen.queryByText('AMOUNT RULES')).not.toBeInTheDocument()
   expect(screen.queryByText('FINAL CHECK')).not.toBeInTheDocument()
-  expect(screen.getByRole('columnheader', { name: 'Eligibility' })).toBeInTheDocument()
+  expect(screen.getByRole('columnheader', { name: 'Supplier eligibility' })).toBeInTheDocument()
   expect(screen.getByRole('columnheader', { name: 'RoHS' })).toBeInTheDocument()
+  expect(screen.getByRole('columnheader', { name: 'Amount approval' })).toBeInTheDocument()
+  expect(screen.queryByRole('columnheader', { name: 'Compliance conclusion' })).not.toBeInTheDocument()
+  expect(screen.getByRole('columnheader', { name: 'Recommendation eligibility' })).toBeInTheDocument()
   const row = within(screen.getByRole('table', { name: 'Supplier checks' })).getByRole('row', { name: /Supplier One/ })
-  expect(within(row).getByRole('cell', { name: 'Pending' })).toBeInTheDocument()
+  expect(within(row).getByRole('cell', { name: 'Unverified' })).toBeInTheDocument()
+  expect(within(row).getAllByRole('cell', { name: 'Review' })).toHaveLength(2)
   expect(within(row).getByRole('cell', { name: 'Passed' })).toBeInTheDocument()
   const amountRow = within(screen.getByRole('table', { name: 'Amount conditions and next actions' })).getByRole('row', { name: /Supplier One/ })
   expect(within(amountRow).getByText('After supplier selection')).toBeInTheDocument()
   expect(within(amountRow).getByText('Triggered')).toBeInTheDocument()
   expect(within(amountRow).getByText('Manager review')).toBeInTheDocument()
   expect(within(amountRow).getByRole('button', { name: 'Add' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Expand Supplier One Checks and Evidence' }))
+  const amountCard = screen.getByRole('heading', { name: 'Amount approval' }).closest('article')!
+  expect(within(amountCard).getByRole('button', { name: 'Upload' })).toBeInTheDocument()
 })
 
 test('amount approval editor captures exact approval facts and keeps approval separate from supplier qualification', async () => {

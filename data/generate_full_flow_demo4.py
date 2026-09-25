@@ -263,11 +263,45 @@ def compliance_evidence_files(out: Path) -> None:
         ("corrections/admission_SUP-023_reinstated.txt", {"material_number": "FF4-ASL-SUP023-002", "control_code": "APPROVED_SUPPLIER", "supplier_id": "SUP-023", "supplier_name": "Schwarzwald Circuits", "outcome": "PASS", "effective_from": "2026-09-01", "expires_on": "2027-12-31", "supersedes": "FF4-ASL-SUP023-001", "statement": "This replacement synthetic registry record reinstates the exact supplier ID before evaluation."}),
         ("corrections/rohs_SUP-024_current.txt", {"material_number": "FF4-ROHS-SUP024-002", "control_code": "ROHS_COMPLIANCE", "supplier_id": "SUP-024", "supplier_name": "Sterling Components", "manufacturer": "QQ Demo Components", "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS", "effective_from": "2026-09-01", "expires_on": "2027-12-31", "supersedes": "FF4-ROHS-SUP024-001", "statement": "This replacement synthetic declaration is current and covers the exact offered part."}),
     ]
-    labels = {"material_number": "Material number", "control_code": "Control", "supplier_id": "Supplier ID", "supplier_name": "Supplier name", "manufacturer": "Manufacturer", "manufacturer_part_number": "Manufacturer part number", "outcome": "Registry / declaration outcome", "effective_from": "Effective from", "expires_on": "Expires on", "supersedes": "Supersedes", "statement": "Statement"}
-    guide = {"schema_version": "1.0.0", "evaluated_at": "2026-11-02T00:00:00Z", "warning": "Synthetic demo facts for manual confirmation; not real certificates or automated verification.", "initial": [], "corrections": []}
+    def render(values: dict[str, object], *, heading: str | None = None) -> list[str]:
+        """Render labels accepted by the deterministic evidence parser."""
+        control_code = str(values["control_code"])
+        outcome = str(values["outcome"])
+        lines = [heading or "SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE"]
+        if control_code == "APPROVED_SUPPLIER":
+            lines.extend([
+                f"Record ID: {values['material_number']}",
+                f"Supplier ID: {values['supplier_id']}",
+                f"Supplier: {values['supplier_name']}",
+                f"Status: {values.get('outcome_value', 'APPROVED' if outcome == 'PASS' else 'REVOKED')}",
+            ])
+        elif control_code == "ROHS_COMPLIANCE":
+            lines.extend([
+                f"Certificate ID: {values['material_number']}",
+                f"Supplier ID: {values['supplier_id']}",
+                f"Manufacturer: {values['manufacturer']}",
+                f"Manufacturer part number: {values['manufacturer_part_number']}",
+                f"Outcome: {values.get('outcome_value', 'CONFORMITY DECLARED' if outcome == 'PASS' else 'FAILED')}",
+            ])
+        else:
+            lines.extend([
+                f"Approval ID: {values['material_number']}",
+                f"Supplier ID: {values['supplier_id']}",
+                f"Decision: {values.get('outcome_value', 'APPROVED' if outcome == 'PASS' else 'REJECTED')}",
+                f"Approved amount: {values['currency']} {values['approval_amount']}",
+            ])
+        for key, label in (
+            ("scope", "Scope"), ("basis", "Basis"), ("effective_from", "Effective from"),
+            ("expires_on", "Expires on"), ("supersedes", "Supersedes"),
+            ("finding", "Finding"), ("statement", "Statement"), ("source", "Source"),
+        ):
+            if values.get(key) is not None:
+                lines.append(f"{label}: {values[key]}")
+        return lines
+
+    guide = {"schema_version": "1.1.0", "evaluated_at": "2026-11-02T00:00:00Z", "warning": "Synthetic demo facts for manual confirmation; not real certificates or automated verification.", "initial": [], "corrections": [], "paired_scenarios": []}
     for relative, values in records:
-        lines = ["SYNTHETIC COMPLIANCE EVIDENCE — NOT A REAL CERTIFICATE"]
-        lines.extend(f"{labels[key]}: {value}" for key, value in values.items())
+        lines = render(values)
         write_text(out / "compliance_evidence" / relative, "\n".join(lines) + "\n")
         facts = {key: values[key] for key in ("material_number", "control_code", "supplier_id", "manufacturer", "manufacturer_part_number", "outcome", "effective_from", "expires_on") if key in values}
         facts.update({"coverage_confirmed": True, "permanent": False, "source_refs": [f"{relative}#lines=1-{len(lines)}"], "note": values["statement"]})
@@ -277,6 +311,114 @@ def compliance_evidence_files(out: Path) -> None:
             guide["corrections"].append(item)
         else:
             guide["initial"].append(item)
+
+    paired_root = out / "compliance_evidence" / "paired_scenarios"
+    pair_items: list[dict[str, object]] = []
+
+    def add_pair(
+        relative: str,
+        *,
+        target_supplier_id: str,
+        expected_variant: str,
+        values: dict[str, object],
+        heading: str,
+    ) -> None:
+        lines = render(values, heading=heading)
+        write_text(paired_root / relative, "\n".join(lines) + "\n")
+        pair_items.append({
+            "file": f"paired_scenarios/{relative}",
+            "target_supplier_id": target_supplier_id,
+            "control_code": values["control_code"],
+            "expected_variant": expected_variant,
+        })
+
+    supplier_anomalies = {
+        "SUP-022": {"suffix": "expired", "outcome": "PASS", "effective_from": "2025-01-01", "expires_on": "2026-09-23", "statement": "Approval is expired at the evaluation date."},
+        "SUP-023": {"suffix": "revoked", "outcome": "FAIL", "outcome_value": "REVOKED", "effective_from": "2026-09-20", "expires_on": "2027-12-31", "statement": "Not approved after revocation."},
+        "SUP-024": {"suffix": "suspended", "outcome": "FAIL", "outcome_value": "SUSPENDED", "effective_from": "2026-09-10", "expires_on": "2027-12-31", "statement": "Not approved while corrective review remains open."},
+        "SUP-029": {"suffix": "wrong-id", "outcome": "PASS", "supplier_id": "SUP-290", "effective_from": "2026-01-01", "expires_on": "2027-12-31", "statement": "Record belongs to SUP-290 and does not cover quoted supplier SUP-029."},
+    }
+    rohs_anomalies = {
+        "SUP-022": {"suffix": "failed", "outcome": "FAIL", "outcome_value": "FAILED", "effective_from": "2026-06-01", "expires_on": "2027-05-31", "finding": "Tested sample exceeds a fictional restricted-substance limit."},
+        "SUP-023": {"suffix": "wrong-part", "outcome": "PASS", "manufacturer_part_number": "QW-MCU8-OTHER", "effective_from": "2026-06-01", "expires_on": "2027-05-31", "finding": "Certificate is valid but does not cover quoted part QW-MCU9-DEMO."},
+        "SUP-024": {"suffix": "expired", "outcome": "PASS", "effective_from": "2025-06-01", "expires_on": "2026-09-23", "finding": "Certificate scope matches but the certificate is expired."},
+        "SUP-029": {"suffix": "failed", "outcome": "FAIL", "outcome_value": "FAILED", "effective_from": "2026-06-01", "expires_on": "2027-05-31", "finding": "Tested sample exceeds a fictional restricted-substance limit."},
+    }
+    amount_anomalies = {
+        "SUP-022": {"suffix": "insufficient", "outcome": "PASS", "currency": "SGD", "approval_amount": "6000.00", "effective_from": "2026-09-01", "expires_on": "2026-12-31", "basis": "Partial budget only; below the quoted total cost."},
+        "SUP-023": {"suffix": "wrong-currency", "outcome": "PASS", "currency": "USD", "approval_amount": "8000.00", "effective_from": "2026-09-01", "expires_on": "2026-12-31", "basis": "Approval is denominated in USD while the procurement requirement is SGD."},
+        "SUP-024": {"suffix": "expired", "outcome": "PASS", "currency": "SGD", "approval_amount": "8000.00", "effective_from": "2026-01-01", "expires_on": "2026-09-23", "basis": "Total landed cost for QW-MCU9-DEMO."},
+        "SUP-029": {"suffix": "rejected", "outcome": "FAIL", "outcome_value": "REJECTED", "currency": "SGD", "approval_amount": "7500.00", "effective_from": "2026-09-01", "expires_on": "2026-12-31", "basis": "Approval request was rejected by the fictional budget owner."},
+    }
+    for _, supplier in SUPPLIERS.items():
+        supplier_id, supplier_name = supplier[0], supplier[1]
+        supplier_number = supplier_id.removeprefix("SUP-")
+        directory = f"{supplier_id}-{supplier_name.lower().replace(' ', '-')}"
+
+        compliant_supplier = {
+            "material_number": f"ADM-{supplier_id}-PASS", "control_code": "APPROVED_SUPPLIER",
+            "supplier_id": supplier_id, "supplier_name": supplier_name, "outcome": "PASS",
+            "scope": "Electronics components procurement in Singapore", "effective_from": "2026-01-01",
+            "expires_on": "2027-12-31", "statement": "Approved for the stated scope.",
+            "source": f"synthetic supplier review board record SRB-{supplier_number}-PASS.",
+        }
+        add_pair(f"{directory}/supplier-compliant.md", target_supplier_id=supplier_id,
+                 expected_variant="COMPLIANT", values=compliant_supplier,
+                 heading="# Fictional supplier admission record — compliant")
+        anomaly = supplier_anomalies[supplier_id]
+        noncompliant_supplier = compliant_supplier | anomaly | {
+            "material_number": f"ADM-{supplier_id}-{str(anomaly['suffix']).upper()}",
+            "supplier_id": anomaly.get("supplier_id", supplier_id),
+            "source": f"synthetic supplier exception record SRB-{supplier_number}-{str(anomaly['suffix']).upper()}.",
+        }
+        add_pair(f"{directory}/supplier-non-compliant-{anomaly['suffix']}.md",
+                 target_supplier_id=supplier_id, expected_variant="NON_COMPLIANT",
+                 values=noncompliant_supplier,
+                 heading=f"# Fictional supplier admission record — {anomaly['suffix']}")
+
+        compliant_rohs = {
+            "material_number": f"ROHS-{supplier_id}-PASS", "control_code": "ROHS_COMPLIANCE",
+            "supplier_id": supplier_id, "manufacturer": "QQ Demo Components",
+            "manufacturer_part_number": "QW-MCU9-DEMO", "outcome": "PASS",
+            "effective_from": "2026-06-01", "expires_on": "2027-05-31",
+            "finding": "Certificate covers the quoted manufacturer and part number.",
+            "source": f"synthetic laboratory report LAB-{supplier_number}-PASS.",
+        }
+        add_pair(f"{directory}/rohs-compliant.md", target_supplier_id=supplier_id,
+                 expected_variant="COMPLIANT", values=compliant_rohs,
+                 heading="# Fictional RoHS certificate — compliant")
+        anomaly = rohs_anomalies[supplier_id]
+        noncompliant_rohs = compliant_rohs | anomaly | {
+            "material_number": f"ROHS-{supplier_id}-{str(anomaly['suffix']).upper()}",
+            "source": f"synthetic laboratory exception report LAB-{supplier_number}-{str(anomaly['suffix']).upper()}.",
+        }
+        add_pair(f"{directory}/rohs-non-compliant-{anomaly['suffix']}.md",
+                 target_supplier_id=supplier_id, expected_variant="NON_COMPLIANT",
+                 values=noncompliant_rohs,
+                 heading=f"# Fictional RoHS certificate — {anomaly['suffix']}")
+
+        compliant_amount = {
+            "material_number": f"APR-{supplier_id}-PASS", "control_code": "AMOUNT_APPROVAL",
+            "supplier_id": supplier_id, "outcome": "PASS", "currency": "SGD",
+            "approval_amount": "7500.00" if supplier_id == "SUP-029" else "8000.00",
+            "basis": "Total landed cost for QW-MCU9-DEMO.", "effective_from": "2026-09-01",
+            "expires_on": "2026-12-31",
+            "source": f"synthetic procurement approval ledger PAL-{supplier_number}-PASS.",
+        }
+        add_pair(f"{directory}/amount-compliant.md", target_supplier_id=supplier_id,
+                 expected_variant="COMPLIANT", values=compliant_amount,
+                 heading="# Fictional procurement amount approval — compliant")
+        anomaly = amount_anomalies[supplier_id]
+        noncompliant_amount = compliant_amount | anomaly | {
+            "material_number": f"APR-{supplier_id}-{str(anomaly['suffix']).upper()}",
+            "source": f"synthetic procurement approval exception PAL-{supplier_number}-{str(anomaly['suffix']).upper()}.",
+        }
+        add_pair(f"{directory}/amount-non-compliant-{anomaly['suffix']}.md",
+                 target_supplier_id=supplier_id, expected_variant="NON_COMPLIANT",
+                 values=noncompliant_amount,
+                 heading=f"# Fictional procurement amount approval — {anomaly['suffix']}")
+
+    guide["paired_scenarios"] = sorted(pair_items, key=lambda item: str(item["file"]))
     write_json(out / "compliance_evidence/entry_guide.json", guide)
     write_text(out / "compliance_evidence/README.md", """# 制度检查材料（全部为合成演示资料）
 
@@ -285,6 +427,10 @@ def compliance_evidence_files(out: Path) -> None:
 第一轮刻意包含四种状态：完整有效、料号错配、明确不通过、已过期。不要把文件名或本 README 当成证明，实际核对 TXT 原文后再勾选“已核对覆盖范围”。
 
 `corrections/` 用于第二轮。必须通过页面的“替换材料”操作替换对应旧记录，不能把新旧两份同时当成当前有效材料，否则应被识别为冲突或保留历史版本。
+
+`paired_scenarios/` 提供完整的 24 份材料矩阵：4 家供应商 × 供应商准入、RoHS、金额审批 × 合规/不合规。每个供应商目录中包含 6 份可自动解析的 Markdown 文件。测试单个异常时，只上传对应文件；测试替换闭环时，先上传 `non-compliant` 文件，再用同类 `compliant` 文件执行“替换材料”。
+
+金额审批规则只在中选报价总成本达到 SGD 7,000 时触发；未触发供应商的 amount 文件用于解析和边界测试，不代表业务上必须预先上传。
 
 这些文件只用于演示证据核验和版本追踪，不是真实证书，不证明任何真实供应商或产品合规，也不构成采购审批。
 """)
@@ -341,7 +487,7 @@ def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:
 2. 创建新任务时绑定刚发布的 Electronics/SG 制度，上传 `requirement/procurement_requirement.txt`（PDF/MD 等价），核对 `confirmed_requirement.json`。若只回归旧的无制度基线，才创建不绑定制度的独立任务。
 3. 上传 `quotes/pdf/` 四份 PDF，或 `quotes/csv/` 四份 CSV；两套不要混传。供应商 ID 使用 manifest 所列值。
 4. 核对全部字段并正式提交四份报价。PDF 路径含真实模型提取；固定 CSV 不需要模型。
-5. 进入制度检查，先上传 `compliance_evidence/initial/` 的八份材料并确认结果；再使用 `corrections/` 的三份材料逐项执行“替换材料”。确认制度检查后再进入决策比较。
+5. 进入制度检查，可按原流程先上传 `compliance_evidence/initial/` 的八份材料，再使用 `corrections/` 的三份材料执行“替换材料”；需要测试任一供应商、任一证明类型的正反案例时，使用 `compliance_evidence/paired_scenarios/` 下对应的 24 份材料。确认制度检查后再进入决策比较。
 6. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。
 7. 历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。`policy/unrelated_office_eu/` 是范围隔离反例，不要绑定到 SG 电子采购。
 
@@ -362,12 +508,13 @@ PYTHONPATH=src .venv/bin/python data/generate_full_flow_demo4.py
 
 脚本只重建本数据包及其独立留出版式，不触碰 demo1/2/3、数据库或其他代码。生成器不导入参考答案或计算引擎。
 """)
-    write_json(out / "manifest.json", {"dataset_id": "full_flow_demo4", "schema_version": "1.1.0",
+    write_json(out / "manifest.json", {"dataset_id": "full_flow_demo4", "schema_version": "1.2.0",
         "scenario_id": SCENARIO, "is_synthetic": True, "runtime_safe": True, "primary_quote_limit": 4,
         "primary_quotes": primary, "variants": variants,
         "compliance": {"policy_scope": "policy/electronics_sg", "workflow_contract_version": "compliance/2.0",
                        "evidence_entry_guide": "compliance_evidence/entry_guide.json",
-                       "initial_evidence_count": 8, "replacement_evidence_count": 3},
+                       "initial_evidence_count": 8, "replacement_evidence_count": 3,
+                       "paired_evidence_count": 24, "paired_evidence_per_supplier": 6},
         "history_binding": {"dataset_id": "synthetic-mcu9-supplier-performance", "dataset_version": "2026-08-06-v1"},
         "files": inventory(out)})
     # Holdout uses a separate layout family; do not include in development tuning.

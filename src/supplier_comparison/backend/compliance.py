@@ -341,12 +341,12 @@ class ComplianceMixin:
                     document_id=old.document_id, max_calls=old.max_calls, calls_used=old.calls_used,
                     batch_artifact_id=old.batch_artifact_id, review_artifact_id=old.review_artifact_id,
                     status=old.status))
-        session.add(Job(job_id=job_id, task_id=task.task_id, graph_run_id=graph_id, job_type='START',
+        session.add(Job(job_id=job_id, task_id=task.task_id, graph_run_id=graph_id, job_type='COMPLIANCE_START',
             status='PENDING', task_revision=task.current_revision, history_binding_id=graph.history_binding_id))
         task.current_graph_run_id, task.status = graph_id, 'QUEUED'
         task.workflow_contract_version = WORKFLOW_VERSION
         return {'task_id': task.task_id, 'task_revision': task.current_revision, 'graph_run_id': graph_id,
-                'job_id': job_id, 'job_type': 'START', 'job_status': 'PENDING'}
+                'job_id': job_id, 'job_type': 'COMPLIANCE_START', 'job_status': 'PENDING'}
 
     def _compliance_preparation_graph(self, session, task, previous):
         """Keep reviewed quote executions current while evidence is staged without a run."""
@@ -369,6 +369,33 @@ class ComplianceMixin:
         task.current_graph_run_id = graph_id
         task.workflow_contract_version = WORKFLOW_VERSION
         return graph
+
+    def start_compliance(self, task_id, *, expected_task_revision, idempotency_key):
+        """Start the explicit compliance stage while carrying reviewed quote facts."""
+        from .service import ConflictError, content_hash
+        request = {'task_id': task_id, 'revision': expected_task_revision}
+        request_sha = content_hash(request)
+        operation = f'compliance_start:{task_id}'
+        with self.session_factory.begin() as session:
+            task = self._compliance_task(session, task_id, lock=True)
+            replay = self._existing_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha,
+            )
+            if replay is not None:
+                return replay
+            self._compliance_mutable(task)
+            self._require_revision(task, expected_task_revision)
+            current = session.get(GraphRun, task.current_graph_run_id) if task.current_graph_run_id else None
+            if current is not None and current.status in {'PENDING', 'RUNNING'}:
+                raise ConflictError('graph_run_active', 'The task already has an active graph run.')
+            previous = self._supersede_current_graph(session, task)
+            response = self._compliance_new_run(session, task, previous)
+            self._save_idempotent(
+                session, operation=operation, key=idempotency_key,
+                request_sha256=request_sha, response_status=202, response=response,
+            )
+            return response
 
     def revalidate_compliance_confirmation(self, task_id, *, old_assessment_id, new_assessment_id, graph_run_id, task_revision):
         from .service import ConflictError, content_hash, new_id

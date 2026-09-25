@@ -2256,18 +2256,32 @@ def test_scenario_and_rerun_reuse_corrected_inputs_and_share_exclusion_review(ba
         raise AssertionError('Preference-only runs must reuse corrected batches')
 
     monkeypatch.setattr(runner.processor, 'process', must_not_extract)
-    runner.run_job(applied['job_id'])
+    prepared = runner.run_job(applied['job_id'])
+    assert prepared['status'] == 'WAITING_INPUT'
     with service.session_factory() as session:
         carried = {row.document_id: row.batch_artifact_id for row in session.scalars(
             select(DocumentExecution).where(DocumentExecution.graph_run_id == applied['graph_run_id'])
         )}
     assert carried == previous_batches
+    compliance = service.start_compliance(
+        task_id,
+        expected_task_revision=service.get_task(task_id)['task_revision'],
+        idempotency_key='reuse-apply-compliance',
+    )
+    runner.run_job(compliance['job_id'])
     first_result_id = service.get_task(task_id)['current_result_id']
     first = service.get_result(task_id, first_result_id)['result']
     assert first['recommended_quote_ids']
     assert service.selection_gaps(task_id, expected_task_revision=service.get_task(task_id)["task_revision"])['gaps']
     rerun = service.start_run(task_id, expected_task_revision=service.get_task(task_id)["task_revision"], idempotency_key='reuse-rerun')
-    runner.run_job(rerun['job_id'])
+    rerun_prepared = runner.run_job(rerun['job_id'])
+    assert rerun_prepared['status'] == 'WAITING_INPUT'
+    rerun_compliance = service.start_compliance(
+        task_id,
+        expected_task_revision=service.get_task(task_id)['task_revision'],
+        idempotency_key='reuse-rerun-compliance',
+    )
+    runner.run_job(rerun_compliance['job_id'])
     second = service.get_result(task_id, service.get_task(task_id)['current_result_id'])['result']
     assert {k: v for k, v in second.items() if k != "compliance_assessment"} == {k: v for k, v in first.items() if k != "compliance_assessment"}
     assert service.get_result(task_id, first_result_id)["result"] == first
