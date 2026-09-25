@@ -24,7 +24,7 @@ export function RankingCriterionSelect({
   const groups = [...new Set(rankingCriterionOptions.map((item) => item.group))]
   return (
     <select id={id} required={required} aria-invalid={invalid} value={value} onChange={(event) => onChange(event.target.value)}>
-      {(allowEmpty || !value) && <option value="">{allowEmpty ? '无' : '请选择排序指标'}</option>}
+      {(allowEmpty || !value) && <option value="">{allowEmpty ? 'None' : 'Select a ranking criterion'}</option>}
       {groups.map((group) => (
         <optgroup key={group} label={group}>
           {rankingCriterionOptions.filter((item) => item.group === group).map((item) => (
@@ -32,9 +32,9 @@ export function RankingCriterionSelect({
               key={item.value}
               value={item.value}
               disabled={item.value === exclude || (item.history && !historyApplicable)}
-              title={item.history && !historyApplicable ? '当前任务没有适用的历史数据绑定' : undefined}
+              title={item.history && !historyApplicable ? 'No applicable historical dataset is bound to this task' : undefined}
             >
-              {item.label}{item.history && !historyApplicable ? '（当前范围不可用）' : ''}
+              {item.label}{item.history && !historyApplicable ? ' (unavailable for the current scope)' : ''}
             </option>
           ))}
         </optgroup>

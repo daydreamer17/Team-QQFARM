@@ -72,7 +72,7 @@ def bind_assessment_comparison(result, assessment):
         result = result.model_copy(update={'final_recommendation_allowed': False, 'recommended_quote_ids': (),
             'disposition': ComparisonDisposition.PENDING_INPUT,
             'comparison_reasons': (RuleIssue(code='APPROVAL_REQUIRED_BEFORE_PUBLICATION',
-                message='制度要求正式发布前完成核验或取得批准；当前仅提供草稿与待办。'),)})
+                message='Policy requires verification or approval before publication; only a draft and action items are currently available.'),)})
     return result.model_copy(update={'compliance_assessment': assessment})
 
 
@@ -111,7 +111,7 @@ class ComplianceMixin:
         with self.session_factory() as session:
             task = self._compliance_task(session, task_id)
             if task.workflow_contract_version == WORKFLOW_VERSION and not stage_payload(session, task)['confirmed']:
-                raise ConflictError('compliance_confirmation_required', '请先处理并确认制度检查，再进入决策比较。')
+                raise ConflictError('compliance_confirmation_required', 'Process and confirm the compliance review before entering decision comparison.')
 
     def _compliance_task(self, session, task_id, *, lock=False):
         from .service import NotFoundError
@@ -165,7 +165,7 @@ class ComplianceMixin:
                     PolicyIndex.status == 'PUBLISHED', PolicySet.status.in_(('PUBLISHED', 'INACTIVE')),
                     PolicySet.policy_set_version == context['policy_set_version'])).one_or_none()
                 if pair is None:
-                    errors.append({'code': 'POLICY_CATALOGUE_UNAVAILABLE', 'message': '固定版本制度目录不可用，请修复制度绑定。'})
+                    errors.append({'code': 'POLICY_CATALOGUE_UNAVAILABLE', 'message': 'The frozen policy catalogue is unavailable. Repair the policy binding.'})
                 else:
                     rows = session.execute(select(PolicyClause, PolicyDocument).join(PolicyDocument,
                         PolicyClause.policy_document_record_id == PolicyDocument.policy_document_record_id).where(
@@ -182,7 +182,7 @@ class ComplianceMixin:
                             'text': clause.text, 'content_sha256': clause.content_sha256,
                             'rule_parameters': clause.rule_parameters, 'policy_set_version': context['policy_set_version']})
                     if not clauses:
-                        errors.append({'code': 'NO_APPLICABLE_POLICY', 'message': '当前品类、地区和日期没有适用条款，不能视作核验通过。'})
+                        errors.append({'code': 'NO_APPLICABLE_POLICY', 'message': 'No clauses apply to the current category, region, and date. This cannot be treated as verified.'})
         return {'schema_version': WORKFLOW_VERSION, 'task_revision': context['task_revision'],
                 'policy_set_version': context['policy_set_version'], 'policy_index_version': context['policy_index_version'],
                 'category': context['policy_category'], 'region': context['policy_region'],
@@ -207,12 +207,12 @@ class ComplianceMixin:
         for retrieval in retrievals:
             if retrieval.get('status') != 'OK':
                 errors.append({'code': 'POLICY_RETRIEVAL_' + retrieval.get('status', 'ERROR'),
-                    'retrieval_id': retrieval.get('retrieval_id'), 'message': '制度检索未成功，请先修复或重试，不能用材料确认绕过。'})
+                    'retrieval_id': retrieval.get('retrieval_id'), 'message': 'Policy retrieval did not succeed. Repair or retry it first; evidence confirmation cannot bypass this requirement.'})
         for clause in plan['clauses']:
             citation = citations.get(clause['clause_id'])
             if not citation or any(citation.get(k) != clause[k] for k in ('text', 'content_sha256', 'document_id', 'document_version', 'policy_set_version', 'policy_id', 'control_code', 'section')):
                 errors.append({'code': 'POLICY_COVERAGE_MISSING', 'clause_id': clause['clause_id'],
-                               'message': '该适用条款尚无经过核对的检索引用，请修复检索后重试。'})
+                               'message': 'This applicable clause has no reviewed retrieval citation. Repair retrieval and try again.'})
         executable_rules = {}
         invalid_rule_ids = []
         for clause in plan['clauses']:
@@ -228,8 +228,8 @@ class ComplianceMixin:
                 'code': 'POLICY_EXECUTABLE_RULES_INVALID',
                 'clause_ids': sorted(invalid_rule_ids),
                 'message': (
-                    f'当前制度版本有 {len(invalid_rule_ids)} 条条款缺少经审核的可执行规则参数；'
-                    '请制度管理员发布新版，供应商补充材料不能解决此问题。'
+                    f'The current policy revision has {len(invalid_rule_ids)} clauses without reviewed executable-rule parameters. '
+                    'Ask the policy administrator to publish a new revision; supplier evidence cannot resolve this issue.'
                 ),
             })
         with self.session_factory() as session:
@@ -407,22 +407,22 @@ class ComplianceMixin:
             suffix = Path(filename or '').suffix.lower()
             media_type = {'.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown'}.get(suffix)
             if not media_type:
-                raise BackendError('unsupported_evidence_type', '材料仅支持 PDF、TXT、MD。')
+                raise BackendError('unsupported_evidence_type', 'Evidence supports only PDF, TXT, or MD files.')
             file_bytes = file.read(MAX_EVIDENCE_BYTES + 1)
             if not file_bytes or len(file_bytes) > MAX_EVIDENCE_BYTES:
-                raise BackendError('evidence_size_invalid', '材料不能为空且不得超过 10 MiB。')
+                raise BackendError('evidence_size_invalid', 'Evidence cannot be empty or exceed 10 MiB.')
             if suffix == '.pdf' and not file_bytes.startswith(b'%PDF-'):
-                raise BackendError('evidence_content_invalid', '文件内容不是 PDF。')
+                raise BackendError('evidence_content_invalid', 'The file content is not a PDF.')
             if suffix in ('.txt', '.md'):
                 try:
                     text = file_bytes.decode('utf-8-sig')
                     if '\x00' in text:
                         raise ValueError()
                 except (UnicodeError, ValueError):
-                    raise BackendError('evidence_content_invalid', '文本材料须使用 UTF-8 编码。')
+                    raise BackendError('evidence_content_invalid', 'Text evidence must use UTF-8 encoding.')
             sha = hashlib.sha256(file_bytes).hexdigest()
         if not facts.source_refs and file_bytes is None:
-            raise BackendError('evidence_source_required', '请附上原件，或填写可追溯的来源记录。')
+            raise BackendError('evidence_source_required', 'Attach the source file or enter a traceable source record.')
         request = {'revision': expected_task_revision, 'facts': payload, 'previous': previous_evidence_id,
                    'filename': filename, 'file_sha256': sha, 'run_after_save': run_after_save}
         request_sha = content_hash(request)
@@ -498,16 +498,16 @@ class ComplianceMixin:
             self._require_revision(task, expected_task_revision)
             assessment = latest_artifact(session, task, 'COMPLIANCE_ASSESSMENT')
             if not assessment or assessment.artifact_id != expected_assessment_id:
-                raise ConflictError('compliance_assessment_stale', '核验结果已更新，请刷新后重新确认。')
+                raise ConflictError('compliance_assessment_stale', 'The verification result has changed. Refresh and confirm it again.')
             if assessment.payload['policy_errors']:
-                raise ConflictError('compliance_policy_blocked', '请先修复制度检索或条款覆盖问题。')
+                raise ConflictError('compliance_policy_blocked', 'Resolve policy retrieval or clause-coverage issues first.')
             if set(acknowledged_missing_item_ids) != set(assessment.payload['missing_item_ids']):
-                raise ConflictError('compliance_missing_acknowledgement', '请明确确认本次暂不补充的材料项。')
+                raise ConflictError('compliance_missing_acknowledgement', 'Explicitly acknowledge the evidence items being deferred.')
             if not assessment.payload['policy_enabled'] and not acknowledge_no_policy:
-                raise ConflictError('compliance_no_policy_acknowledgement', '请确认本次未启用制度核验。')
+                raise ConflictError('compliance_no_policy_acknowledgement', 'Confirm that policy verification is not enabled for this task.')
             prior_confirmation = latest_artifact(session, task, 'COMPLIANCE_CONFIRMATION')
             if prior_confirmation and prior_confirmation.payload.get('assessment_id') == assessment.artifact_id:
-                raise ConflictError('compliance_already_confirmed', '本版本已确认。')
+                raise ConflictError('compliance_already_confirmed', 'This revision has already been confirmed.')
             previous = self._supersede_current_graph(session, task)
             task.current_revision += 1
             copied_id = new_id('artifact')

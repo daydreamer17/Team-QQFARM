@@ -3,7 +3,7 @@ import type { QuoteField, TaskQuote } from '../api/types'
 
 const feeStatusFields = new Set(['shipping_fee_status', 'other_fees_status'])
 const labels: Record<string, string> = {
-  shipping_fee_status: '运费状态', other_fees_status: '其他费用状态', payment_terms: '付款条件',
+  shipping_fee_status: 'Shipping Fee Status', other_fees_status: 'Other Fees Status', payment_terms: 'Payment terms',
 }
 
 export function canConfirmReviewField(field: QuoteField | undefined) {
@@ -21,12 +21,12 @@ export function fieldCorrectionErrorMessage(error: unknown, quotes: TaskQuote[])
   const summary = errors.map((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return null
     const row = item as Record<string, unknown>
-    const fieldName = typeof row.field_name === 'string' ? row.field_name : '未知字段'
-    const filename = typeof row.quote_id === 'string' ? filenames.get(row.quote_id) ?? row.quote_id : '报价'
+    const fieldName = typeof row.field_name === 'string' ? row.field_name : 'Unknown Fields'
+    const filename = typeof row.quote_id === 'string' ? filenames.get(row.quote_id) ?? row.quote_id : 'Quotation'
     const label = labels[fieldName] ?? fieldName
     return row.code === 'field_version_conflict'
-      ? `${filename} 的“${label}”已更新，请重新核对`
-      : `${filename} 的“${label}”修正值无效，请填写已确认的实际值`
-  }).filter((item): item is string => item !== null).join('；')
-  return `提交失败：${summary || '修正内容未通过校验'}。`
+      ? `${label} in ${filename} has changed. Review it again.`
+      : `The corrected value for ${label} in ${filename} is invalid. Enter the confirmed value.`
+  }).filter((item): item is string => item !== null).join('; ')
+  return `Submission failed: ${summary || 'the corrections did not pass validation'}.`
 }

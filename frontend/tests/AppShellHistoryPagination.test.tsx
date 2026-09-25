@@ -22,22 +22,22 @@ const tasks: TaskListItem[] = Array.from({ length: 9 }, (_, index) => ({
   updated_at: '2026-09-21T00:00:00Z',
 }))
 
-describe('AppShell 历史任务分页', () => {
+describe('AppShell Task History分页', () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  test('废弃任务不会显示为报价已登记', async () => {
+  test('Abandon Task不会显示为Quotation registered', async () => {
     vi.spyOn(api, 'listTasks').mockResolvedValue({
       items: [{ ...tasks[0], status: 'ABANDONED', task_revision: 2 }],
       total: 1, limit: 8, offset: 0, status_counts: { ABANDONED: 1 },
     })
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter><AppShell /></MemoryRouter></QueryClientProvider>)
-    expect(await screen.findByText('已废弃')).toBeInTheDocument()
-    expect(screen.queryByText('报价已登记')).not.toBeInTheDocument()
+    expect(await screen.findByText('Abandoned')).toBeInTheDocument()
+    expect(screen.queryByText('Quotation registered')).not.toBeInTheDocument()
     client.clear()
   })
 
-  test('每页请求八条并使用 offset 翻页', async () => {
+  test('Per page请求八条并使用 offset 翻页', async () => {
     const listTasks = vi.spyOn(api, 'listTasks').mockImplementation(async (values = 8) => {
       const limit = typeof values === 'number' ? values : values.limit ?? 8
       const offset = typeof values === 'number' ? 0 : values.offset ?? 0
@@ -58,12 +58,12 @@ describe('AppShell 历史任务分页', () => {
       </QueryClientProvider>,
     )
 
-    const history = await screen.findByRole('region', { name: '历史任务' })
+    const history = await screen.findByRole('region', { name: 'Task History' })
     expect(await within(history).findByText('SCENARIO-1')).toBeInTheDocument()
     expect(within(history).queryByText('SCENARIO-9')).not.toBeInTheDocument()
     expect(within(history).getByText('1 / 2')).toBeInTheDocument()
 
-    await user.click(within(history).getByRole('button', { name: '下一页历史任务' }))
+    await user.click(within(history).getByRole('button', { name: 'Next task-history page' }))
 
     await waitFor(() => expect(within(history).getByText('SCENARIO-9')).toBeInTheDocument())
     expect(within(history).getByText('09')).toBeInTheDocument()

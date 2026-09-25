@@ -117,9 +117,9 @@ def _canonical_requirement_units(
 def _normalize_task_name(value: str) -> tuple[str, str]:
     display = " ".join(unicodedata.normalize("NFKC", value).split())
     if not display:
-        raise BackendError("task_name_invalid", "任务名称不能为空。")
+        raise BackendError("task_name_invalid", "Task name cannot be empty.")
     if len(display) > 128:
-        raise BackendError("task_name_invalid", "任务名称不能超过 128 个字符。")
+        raise BackendError("task_name_invalid", "Task name cannot exceed 128 characters.")
     return display, display.casefold()
 
 
@@ -153,39 +153,39 @@ def _preferences_require_history(preferences: DecisionPreferences) -> bool:
 
 
 QUOTE_REVIEW_ERROR_MESSAGES = {
-    "CANDIDATE_AUTHORITY_MISMATCH": "字段身份与当前报价不一致，请重新解析原文件。",
-    "CANDIDATE_FIELD_SET_INVALID": "候选字段集合不完整或重复，请重新解析原文件。",
-    "CORRECTION_AUDIT_MISSING": "人工修改缺少对应审计记录，请重新确认该字段。",
-    "CORRECTION_EVENT_INVALID": "人工修改记录与当前字段版本不一致，请刷新后重试。",
-    "CRITICAL_FIELD_MISSING": "必填字段在报价中缺失，请核对后填写真实值。",
-    "CRITICAL_FIELD_CONFLICT": "报价中该字段有多个冲突值，请核对后填写最终值。",
-    "CURRENT_UNIT_PRICE_MISMATCH": "当前单价与原件中标记为 CURRENT 的价格不一致。",
-    "DICTIONARY_VERSION_MISMATCH": "字段字典版本不一致，请重新解析报价。",
-    "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE": "原文只说明费用未提供，不能据此填写费用状态或金额。",
-    "FEE_STATUS_UNKNOWN": "费用仍为待确认状态，取得真实费用结论后才能提交。",
-    "FEE_STATUS_AMOUNT_CONFLICT": "费用状态与金额不一致。",
-    "HUMAN_ORIGIN_REQUIRES_VERIFIED": "人工填写或修改后的字段必须通过结构校验。",
-    "HUMAN_REVIEW_EVENT_INVALID": "人工确认记录与当前字段或文件版本不一致。",
-    "MONEY_VALUE_INVALID": "金额必须是大于或等于 0 的十进制字符串。",
-    "MONEY_UNIT_MISMATCH": "金额币种必须与报价币种一致。",
-    "NORMALIZED_ENUM_INVALID": "字段值不在允许的标准选项中。",
-    "NORMALIZED_PRICE_NOT_IN_EVIDENCE": "提取价格无法由当前报价证据支持，请核对原件。",
-    "NORMALIZED_TYPE_INVALID": "字段值的类型或范围不正确。",
-    "NORMALIZED_VALUE_REQUIRED": "该字段需要一个可用的标准值。",
-    "ISO_DATE_REQUIRED": "日期必须是有效的 YYYY-MM-DD。",
-    "PRICE_GROUP_INCOMPLETE": "单价、计价数量和计价单位必须同时填写。",
-    "PACKAGING_CONVERSION_INCOMPLETE": "MOQ 不按颗时，必须同时填写包装方式和每包数量。",
-    "MOQ_PACKAGING_UNIT_MISMATCH": "MOQ 单位与包装单位不一致。",
-    "LEAD_TIME_GROUP_INCOMPLETE": "交期天数、日历口径、交付语义和起算事件必须同时填写。",
-    "QUOTE_DATE_AFTER_VALID_UNTIL": "报价日期不能晚于有效截止日。",
-    "SOURCE_IDENTITY_MISMATCH": "证据不属于当前报价文件或版本，请重新解析。",
-    "SOURCE_QUOTE_MISMATCH": "引用片段不在绑定的原文中，请重新解析后核对。",
-    "SOURCE_REF_UNKNOWN": "字段引用了当前文件中不存在的证据。",
-    "SOURCE_SEMANTIC_MISMATCH": "证据原文不能支持该字段含义，请人工核对。",
-    "START_EVENT_DOCUMENT_CONFLICT": "原件存在多个交期起算事件，请确认最终适用条件。",
-    "START_EVENT_UNSUPPORTED": "当前自动计算只支持明确从下单日开始的相对交期。",
-    "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID": "供应商名称混入了系统编号，请分开填写。",
-    "REQUIRED_FIELD_UNAVAILABLE": "必填字段缺少可用值，UNKNOWN、MISSING 或 CONFLICT 不能正式提交。",
+    "CANDIDATE_AUTHORITY_MISMATCH": "Field identity does not match the current quotation. Parse the source file again.",
+    "CANDIDATE_FIELD_SET_INVALID": "The candidate field set is incomplete or duplicated. Parse the source file again.",
+    "CORRECTION_AUDIT_MISSING": "The manual correction has no corresponding audit record. Confirm the field again.",
+    "CORRECTION_EVENT_INVALID": "The correction record does not match the current field revision. Refresh and try again.",
+    "CRITICAL_FIELD_MISSING": "A required field is missing from the quotation. Review it and enter the actual value.",
+    "CRITICAL_FIELD_CONFLICT": "The quotation contains conflicting values for this field. Review them and enter the final value.",
+    "CURRENT_UNIT_PRICE_MISMATCH": "The current unit price does not match the price marked CURRENT in the source document.",
+    "DICTIONARY_VERSION_MISMATCH": "The field-dictionary revision does not match. Parse the quotation again.",
+    "DOCUMENT_ABSENCE_MISREAD_AS_FEE_VALUE": "The source only states that the fee is not provided; this does not establish a fee status or amount.",
+    "FEE_STATUS_UNKNOWN": "The fee remains pending confirmation. Obtain the actual fee outcome before submission.",
+    "FEE_STATUS_AMOUNT_CONFLICT": "Fee status and amount are inconsistent.",
+    "HUMAN_ORIGIN_REQUIRES_VERIFIED": "A manually entered or corrected field must pass structural validation.",
+    "HUMAN_REVIEW_EVENT_INVALID": "The manual confirmation record does not match the current field or file revision.",
+    "MONEY_VALUE_INVALID": "An amount must be a decimal string greater than or equal to zero.",
+    "MONEY_UNIT_MISMATCH": "The amount currency must match the quotation currency.",
+    "NORMALIZED_ENUM_INVALID": "The field value is not one of the allowed standard options.",
+    "NORMALIZED_PRICE_NOT_IN_EVIDENCE": "The extracted price is not supported by current quotation evidence. Review the source document.",
+    "NORMALIZED_TYPE_INVALID": "The field value has an invalid type or range.",
+    "NORMALIZED_VALUE_REQUIRED": "This field requires a usable normalised value.",
+    "ISO_DATE_REQUIRED": "The date must be a valid YYYY-MM-DD value.",
+    "PRICE_GROUP_INCOMPLETE": "Unit price, price-basis quantity, and price-basis unit must all be entered.",
+    "PACKAGING_CONVERSION_INCOMPLETE": "When MOQ is not measured in pieces, packaging type and units per pack are both required.",
+    "MOQ_PACKAGING_UNIT_MISMATCH": "The MOQ unit does not match the packaging unit.",
+    "LEAD_TIME_GROUP_INCOMPLETE": "Lead-time days, day basis, delivery semantics, and start event must all be entered.",
+    "QUOTE_DATE_AFTER_VALID_UNTIL": "The quotation date cannot be later than the validity end date.",
+    "SOURCE_IDENTITY_MISMATCH": "Evidence does not belong to the current quotation file or revision. Parse it again.",
+    "SOURCE_QUOTE_MISMATCH": "The cited excerpt is not present in the bound source document. Parse and review it again.",
+    "SOURCE_REF_UNKNOWN": "The field cites evidence that does not exist in the current file.",
+    "SOURCE_SEMANTIC_MISMATCH": "The evidence text does not support the meaning of this field. Review it manually.",
+    "START_EVENT_DOCUMENT_CONFLICT": "The source contains multiple lead-time start events. Confirm the final applicable condition.",
+    "START_EVENT_UNSUPPORTED": "Automated calculation currently supports only relative lead time explicitly starting from the order date.",
+    "SUPPLIER_NAME_CONTAINS_SUPPLIER_ID": "The supplier name contains a system ID. Enter the name and ID separately.",
+    "REQUIRED_FIELD_UNAVAILABLE": "A required field has no usable value. UNKNOWN, MISSING, or CONFLICT cannot be formally submitted.",
 }
 
 # Comparison rules may discover either an incorrect/unknown quote fact or a
@@ -665,7 +665,7 @@ class BackendService(ComplianceMixin):
                 )) is not None:
                     raise ConflictError(
                         "task_name_conflict",
-                        "任务名称已存在，请修改后重试。",
+                        "A task with this name already exists. Change the name and try again.",
                         task_name=candidate_name,
                     )
             task = Task(
@@ -690,7 +690,7 @@ class BackendService(ComplianceMixin):
             except IntegrityError as exc:
                 raise ConflictError(
                     "task_name_conflict",
-                    "任务名称已存在，请修改后重试。",
+                    "A task with this name already exists. Change the name and try again.",
                     task_name=candidate_name,
                 ) from exc
             session.add(
@@ -1672,7 +1672,7 @@ class BackendService(ComplianceMixin):
                         "before": before,
                         "after": after,
                         "reason_code": "CARRIED_FORWARD_FROM_CURRENT_QUOTE",
-                        "reason": "从当前已确认报价版本继承。",
+                        "reason": "Inherited from the current confirmed quotation revision.",
                         "basis_source_ids": tuple(
                             source_id_map[source_id]
                             for source_id in source_correction.basis_source_ids
@@ -2398,7 +2398,7 @@ class BackendService(ComplianceMixin):
                             {name for name in target_set if targets.count(name) > 1}
                         ),
                         "group_id": None,
-                        "message": "同一字段不能重复提交审核动作。",
+                        "message": "A review action cannot be submitted more than once for the same field.",
                     }
                 )
             missing_fields = sorted(expected_fields - target_set)
@@ -2409,7 +2409,7 @@ class BackendService(ComplianceMixin):
                         "code": "FULL_FIELD_REVIEW_REQUIRED",
                         "field_names": missing_fields,
                         "group_id": None,
-                        "message": "正式提交前必须核对全部 30 个报价字段。",
+                        "message": "All 30 quotation fields must be reviewed before formal submission.",
                     }
                 )
             if unexpected_fields:
@@ -2418,7 +2418,7 @@ class BackendService(ComplianceMixin):
                         "code": "SYSTEM_FIELD_NOT_EDITABLE",
                         "field_names": unexpected_fields,
                         "group_id": None,
-                        "message": "请求包含不可编辑的系统字段。",
+                        "message": "The request contains a non-editable system field.",
                     }
                 )
             if coverage_errors:
@@ -2442,7 +2442,7 @@ class BackendService(ComplianceMixin):
                             "code": "FIELD_VERSION_CONFLICT",
                             "field_names": [field_name],
                             "group_id": self._quote_field_group_id(field_name),
-                            "message": "字段已被更新，请刷新后重新核对。",
+                            "message": "The field has changed. Refresh and review it again.",
                             "expected_field_id": item.get("expected_field_id"),
                             "actual_field_id": candidate.field_id if candidate else None,
                             "expected_field_version": item.get("expected_field_version"),
@@ -2492,7 +2492,7 @@ class BackendService(ComplianceMixin):
                             unit=item.get("unit"),
                             reason_code="PRE_SUBMISSION_HUMAN_REVIEW",
                             reason=(
-                                str(item.get("reason") or "用户在正式提交前核对并修改字段。")
+                                str(item.get("reason") or "The user reviewed and corrected the field before formal submission.")
                             ),
                             reviewer_id=self.actor_id,
                             reviewed_at=reviewed_at,
@@ -2507,7 +2507,7 @@ class BackendService(ComplianceMixin):
                             normalized_value=None,
                             unit=None,
                             reason_code="PRE_SUBMISSION_MARKED_MISSING",
-                            reason=str(item.get("reason") or "用户确认模型误提取了该字段。"),
+                            reason=str(item.get("reason") or "The user confirmed that the model extracted this field incorrectly."),
                             reviewer_id=self.actor_id,
                             reviewed_at=reviewed_at,
                             draft_revision=expected_draft_revision,
@@ -2521,7 +2521,7 @@ class BackendService(ComplianceMixin):
                             "code": "FIELD_REVIEW_ACTION_INVALID",
                             "field_names": [field_name],
                             "group_id": self._quote_field_group_id(field_name),
-                            "message": "当前字段操作与提取状态不匹配。",
+                            "message": "The field action does not match the current extraction status.",
                         }
                     )
             if action_errors:
@@ -2556,7 +2556,7 @@ class BackendService(ComplianceMixin):
                             "code": "FIELD_REVIEW_ACTION_INVALID",
                             "field_names": [field_name],
                             "group_id": self._quote_field_group_id(field_name),
-                            "message": "确认动作与当前字段状态不匹配。",
+                            "message": "The confirmation action does not match the current field status.",
                         }
                     )
             if action_errors:
@@ -2750,7 +2750,7 @@ class BackendService(ComplianceMixin):
             ):
                 raise BackendError(
                     "draft_correction_scope_invalid",
-                    "旧版修正接口只允许对不重复的报价业务字段执行 SET_VALUE。",
+                    "The legacy correction endpoint allows SET_VALUE only for unique quotation business fields.",
                     editable_fields=sorted(editable_fields),
                 )
             batch_artifact = session.get(WorkflowArtifact, draft.batch_artifact_id)
@@ -2789,7 +2789,7 @@ class BackendService(ComplianceMixin):
                 ):
                     raise BackendError(
                         "field_correction_value_invalid",
-                        "请选择该字段允许的标准值，不要输入 N/A、NO 等自由文本。",
+                        "Select an allowed standard value for this field; do not enter free text such as N/A or NO.",
                         field_name=field_name,
                         allowed_values=list(allowed_values),
                     )
@@ -2958,7 +2958,7 @@ class BackendService(ComplianceMixin):
                 ):
                     raise ConflictError(
                         "quote_draft_not_ready",
-                        "请先完成全部字段人工确认并通过后端复核。",
+                        "Complete manual confirmation for every field and pass server review first.",
                     )
 
                 current_dictionary_sha = hashlib.sha256(
@@ -2967,7 +2967,7 @@ class BackendService(ComplianceMixin):
                 if draft.dictionary_sha256 != current_dictionary_sha:
                     raise ConflictError(
                         "quote_draft_review_stale",
-                        "字段字典已更新，请重新处理并确认报价。",
+                        "The field dictionary has changed. Process and confirm the quotation again.",
                         expected=draft.dictionary_sha256,
                         actual=current_dictionary_sha,
                     )
@@ -2990,7 +2990,7 @@ class BackendService(ComplianceMixin):
                 ):
                     raise ConflictError(
                         "quote_draft_review_stale",
-                        "审核规则已更新，请重新确认全部字段。",
+                        "Review rules have changed. Confirm every field again.",
                         expected_review_policy=REVIEW_POLICY_VERSION,
                         actual_review_policy=prior_review.review_policy_version,
                     )
@@ -3028,7 +3028,7 @@ class BackendService(ComplianceMixin):
                 if not _quote_draft_submission_ready(authoritative_review):
                     raise ConflictError(
                         "quote_draft_revalidation_required",
-                        "报价在正式提交前复核未通过，请重新确认有变化的字段。",
+                        "The quotation did not pass pre-submission review. Reconfirm the changed fields.",
                         errors=self._quote_review_errors(authoritative_review),
                         unconfirmed_fields=list(
                             authoritative_review.unconfirmed_fields
@@ -3070,13 +3070,13 @@ class BackendService(ComplianceMixin):
                 if unbound_fields:
                     raise ConflictError(
                         "quote_draft_review_stale",
-                        "部分字段没有绑定当前草稿版本，请重新确认全部字段。",
+                        "Some fields are not bound to the current draft revision. Confirm every field again.",
                         errors=[
                             {
                                 "code": "DRAFT_REVISION_CONFIRMATION_MISSING",
                                 "field_names": unbound_fields,
                                 "group_id": None,
-                                "message": "字段确认记录不属于当前草稿版本。",
+                                "message": "The field-confirmation record does not belong to the current draft revision.",
                             }
                         ],
                     )
@@ -4642,7 +4642,7 @@ class BackendService(ComplianceMixin):
                     else:
                         unresolved.append(quote_view | {
                             "supplier_id": supplier_id,
-                            "display_name": display_name or "身份待核验候选",
+                            "display_name": display_name or "Candidate with identity pending verification",
                             "identity_match_status": identity_status,
                             "history_availability_status": (history or {}).get(
                                 "history_availability_status", "NOT_RECORDED"
@@ -4737,7 +4737,7 @@ class BackendService(ComplianceMixin):
                 else:
                     unresolved.append(quote_view | {
                         "supplier_id": supplier_id,
-                        "display_name": evaluation.get("supplier_name") or supplier_id or "身份待核验候选",
+                        "display_name": evaluation.get("supplier_name") or supplier_id or "Candidate with identity pending verification",
                         "identity_match_status": identity_status,
                         "history_availability_status": (history or {}).get(
                             "history_availability_status", "NOT_RECORDED"
@@ -4820,15 +4820,15 @@ class BackendService(ComplianceMixin):
         control_definitions = {
             "APPROVED_SUPPLIER": (
                 "SUPPLIER_REGISTRY_EVIDENCE_MISSING",
-                "缺少当前供应商注册表记录，无法确认供应商准入状态。",
+                "The current supplier registry record is missing, so supplier eligibility cannot be confirmed.",
             ),
             "ROHS_COMPLIANCE": (
                 "ROHS_EVIDENCE_MISSING",
-                "缺少与供应商及料号匹配的有效 RoHS 证明。",
+                "A valid RoHS record matching the supplier and part number is missing.",
             ),
             "AMOUNT_APPROVAL": (
                 "AMOUNT_APPROVAL_NOT_EVALUATED",
-                "金额审批条款已找到，但尚未执行阈值判断或核对审批记录。",
+                "The amount-approval clause was found, but threshold evaluation or approval-record verification has not been completed.",
             ),
         }
         retrieval_by_control: dict[str, dict[str, Any]] = {}
@@ -4857,15 +4857,15 @@ class BackendService(ComplianceMixin):
                 if not quote_feasible:
                     status = "NOT_EVALUATED"
                     reason_code = "QUOTE_NOT_FEASIBLE"
-                    message = "该报价未通过采购要求，不进入供应商制度核验。"
+                    message = "This quotation does not meet procurement requirements and is not included in supplier policy verification."
                 elif retrieval is None:
                     status = "REVIEW_REQUIRED"
                     reason_code = "POLICY_EVIDENCE_NOT_RETRIEVED"
-                    message = "当前结果没有该控制项的制度检索记录。"
+                    message = "The current result has no policy retrieval record for this control."
                 elif retrieval.get("status") != "OK":
                     status = "REVIEW_REQUIRED"
                     reason_code = "POLICY_EVIDENCE_INCOMPLETE"
-                    message = "该控制项的制度依据缺失或存在冲突。"
+                    message = "Policy evidence for this control is missing or conflicting."
                 else:
                     status = "REVIEW_REQUIRED"
                     reason_code = missing_fact_code
@@ -5279,7 +5279,7 @@ class BackendService(ComplianceMixin):
         except DownstreamNotReadyError as exc:
             raise ConflictError(
                 'selection_review_required',
-                '参与本次比较的报价仍有待审核字段，请到集中审核确认后重新分析。',
+                'Quotations in this comparison still contain fields requiring review. Confirm them in consolidated review and analyse again.',
             ) from exc
         latest = self.get_task(task_id)
         if latest['task_revision'] != expected_task_revision or latest['current_graph_run_id'] != task['current_graph_run_id']:
@@ -5292,7 +5292,7 @@ class BackendService(ComplianceMixin):
         from supplier_comparison.rules import analyze_selection_gap, draft_clarification
         before = self.get_task(task_id)
         if expected_result_id is not None and before['current_result_id'] != expected_result_id:
-            raise ConflictError('selection_input_stale', '当前结果已更新，请刷新决策页面后重试。')
+            raise ConflictError('selection_input_stale', 'The current result has changed. Refresh the decision page and try again.')
         result = analyze_selection_gap(self.selection_analysis_input(task_id, expected_task_revision=expected_task_revision))
         latest = self.get_task(task_id)
         if (latest['task_revision'] != expected_task_revision
@@ -5412,7 +5412,7 @@ class BackendService(ComplianceMixin):
             )
             raise ConflictError(
                 "scenario_baseline_stale",
-                "冻结结果与当前确定性计算不一致，请先按当前代码重新分析。",
+                "The frozen result does not match the current deterministic calculation. Reanalyse using the current code first.",
                 frozen_rule_version=frozen_baseline.get("rule_version"),
                 current_rule_version=baseline.get("rule_version"),
                 changed_sections=changed_sections,
@@ -6193,7 +6193,7 @@ class BackendService(ComplianceMixin):
                 base_task_revision=task.current_revision,
                 base_result_id=task.current_result_id,
                 status="ACTIVE",
-                title=title or "决策分析对话",
+                title=title or "Decision analysis conversation",
             )
             session.add(conversation)
             session.flush()
@@ -6715,7 +6715,7 @@ class BackendService(ComplianceMixin):
                 changes = None
                 text = "\n\n".join(part for part in (
                     validated_turn.assistant_text.strip(),
-                    "这项偏好与当前设置一致，无需生成新的模拟情景。您可以继续调整其他条件。",
+                    "This preference matches the current settings, so a new simulation scenario is unnecessary. You can continue adjusting other conditions.",
                 ) if part)
             reference_ids = list(validated_turn.reference_ids)
             if changes is not None and not no_effect:
@@ -8502,28 +8502,28 @@ class BackendService(ComplianceMixin):
                     "code": "FULL_FIELD_REVIEW_REQUIRED",
                     "field_names": list(envelope.unconfirmed_fields),
                     "group_id": None,
-                    "message": "正式提交前必须核对全部 30 个报价字段。",
+                    "message": "All 30 quotation fields must be reviewed before formal submission.",
                 }
             )
         for error in errors:
             code = error["code"]
             if code in IDENTITY_CODES:
                 category, actions = "SOURCE_OR_VERSION_ERROR", ["RELOAD_OR_REPARSE"]
-                next_action = "请刷新草稿版本；若仍提示文件或引用身份不一致，请重新解析原件。"
+                next_action = "Refresh the draft revision. If file or citation identity still does not match, parse the source document again."
             elif code in HUMAN_RESOLVABLE_CODES:
                 category, actions = "NEEDS_CONFIRMATION", ["VIEW_SOURCE", "CONFIRM_VALUE", "EDIT_VALUE", "MARK_UNKNOWN"]
-                next_action = "请查看原文，核对后可直接采用当前值，也可修改或标记未知，再保存审核。"
+                next_action = "Review the source document. You may accept the current value, correct it, or mark it unknown, then save the review."
             elif code in {"FEE_STATUS_UNKNOWN", "CRITICAL_FIELD_MISSING", "REQUIRED_FIELD_UNAVAILABLE", "NORMALIZED_VALUE_REQUIRED"}:
                 category, actions = "MISSING_INFORMATION", ["EDIT_VALUE", "SAVE_REVIEW"]
-                next_action = "可先保存。请依据原文或供应商确认补充；未知信息不会按零计算，相关比较暂不能完成。"
+                next_action = "You may save now. Complete the field using source evidence or supplier confirmation. Unknown information is not treated as zero, so the related comparison cannot yet be completed."
             elif code == "FULL_FIELD_REVIEW_REQUIRED":
                 category, actions = "NEEDS_CONFIRMATION", ["SAVE_REVIEW"]
-                next_action = "核对表单后点击保存并确认审核；有疑问的值请修改或标记未知。"
+                next_action = "Review the form, then save and confirm the review. Correct uncertain values or mark them unknown."
             else:
                 category, actions = "INVALID_INPUT", ["EDIT_VALUE", "SAVE_REVIEW"]
-                next_action = QUOTE_REVIEW_ERROR_MESSAGES.get(code, "请按字段格式和关联条件修正当前值。") + " 可以先保存，修正后再正式提交。"
+                next_action = QUOTE_REVIEW_ERROR_MESSAGES.get(code, "Correct the current value according to the field format and related conditions.") + " You may save now and submit formally after correction."
             if code == "FEE_STATUS_AMOUNT_CONFLICT":
-                next_action = "另有明确金额时请填写非负金额；已包含时请清空金额，避免重复计费；免费/不适用时请留空或填写 0；未知时请清空金额。可先保存。"
+                next_action = "If a separate amount is known, enter a non-negative amount. If included, clear the amount to avoid double-counting. For free or not applicable, leave blank or enter 0. For unknown, clear the amount. You may save now."
             error.update(category=category, next_action=next_action, actions=actions)
         return errors
 
@@ -8668,9 +8668,9 @@ class BackendService(ComplianceMixin):
             else:
                 definition = self.quote_dictionary.fields.get(field_name)
                 criticality = {
-                    "关键": EffectiveCriticality.ALWAYS.value,
-                    "条件关键": EffectiveCriticality.CONDITIONAL_NOT_APPLICABLE.value,
-                    "可选": EffectiveCriticality.NON_CRITICAL.value,
+                    "Critical": EffectiveCriticality.ALWAYS.value,
+                    "Conditionally critical": EffectiveCriticality.CONDITIONAL_NOT_APPLICABLE.value,
+                    "Optional": EffectiveCriticality.NON_CRITICAL.value,
                 }.get(
                     definition.required_level if definition is not None else "",
                     EffectiveCriticality.NON_CRITICAL.value,
@@ -9131,7 +9131,7 @@ class BackendService(ComplianceMixin):
             document, quote = duplicate
             raise ConflictError(
                 "duplicate_quote_uploaded",
-                "该报价单已上传。",
+                "This quotation has already been uploaded.",
                 document_id=document.document_id,
                 quote_id=quote.quote_id,
                 supplier_id=quote.supplier_id,
@@ -9150,7 +9150,7 @@ class BackendService(ComplianceMixin):
         if draft is not None:
             raise ConflictError(
                 "duplicate_quote_uploaded",
-                "该报价单已上传。",
+                "This quotation has already been uploaded.",
                 quote_draft_id=draft.quote_draft_id,
             )
 

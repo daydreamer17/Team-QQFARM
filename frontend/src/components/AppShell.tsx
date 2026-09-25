@@ -13,19 +13,19 @@ function navClass({ isActive }: { isActive: boolean }) {
 function taskStage(task: TaskListItem) {
   switch (task.status) {
     case 'QUEUED':
-      return '等待执行'
+      return 'Queued'
     case 'RUNNING':
-      return '分析中'
+      return 'Analysing'
     case 'NEEDS_INPUT':
-      return '等待确认'
+      return 'Action required'
     case 'COMPLETED':
-      return '已完成'
+      return 'Completed'
     case 'FAILED':
-      return '执行失败'
+      return 'Failed'
     case 'ABANDONED':
-      return '已废弃'
+      return 'Abandoned'
     default:
-      return task.task_revision > 1 ? '报价已登记' : '需求已创建'
+      return task.task_revision > 1 ? 'Quotation registered' : 'Requirements created'
   }
 }
 
@@ -42,40 +42,40 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
-      <nav className="sidebar" aria-label="主导航">
-        <NavLink className="brand" to="/" aria-label="QuoteWise 首页">
+      <nav className="sidebar" aria-label="Main navigation">
+        <NavLink className="brand" to="/" aria-label="QuoteWise home">
           <span className="brand-mark" aria-hidden="true">Q</span>
           <span>
             <strong>QuoteWise</strong>
             <small>Supplier Intelligence</small>
           </span>
         </NavLink>
-        <p className="nav-label">采购工作区</p>
+        <p className="nav-label">Procurement Workspace</p>
         <NavLink to="/" end className={navClass}>
           <span className="nav-icon" aria-hidden="true">▦</span>
-          <span>任务中心</span>
+          <span>Task Centre</span>
         </NavLink>
         <NavLink to="/tasks/new" className={navClass}>
           <span className="nav-icon" aria-hidden="true">＋</span>
-          <span>新建任务</span>
+          <span>New task</span>
         </NavLink>
         <NavLink to="/resources" className={navClass}>
           <span className="nav-icon" aria-hidden="true">▤</span>
-          <span>规则资源库</span>
+          <span>Policy Library</span>
         </NavLink>
-          <section className="sidebar-history" aria-label="历史任务">
+          <section className="sidebar-history" aria-label="Task History">
             <div className="sidebar-history-heading">
-              <span>历史任务</span>
+              <span>Task History</span>
               <small>{historyTotal}</small>
             </div>
             {taskHistory.isPending && (
-              <p className="sidebar-history-message">正在读取…</p>
+              <p className="sidebar-history-message">Loading…</p>
             )}
             {taskHistory.isError && (
-              <p className="sidebar-history-message">暂时无法读取</p>
+              <p className="sidebar-history-message">Temporarily unavailable</p>
             )}
             {taskHistory.data?.items.length === 0 && (
-              <p className="sidebar-history-message">还没有任务</p>
+              <p className="sidebar-history-message">No tasks yet</p>
             )}
             <div className="history-task-list">
               {taskHistory.data?.items.map((task, index) => (
@@ -107,25 +107,25 @@ export function AppShell() {
               ))}
             </div>
             {historyTotal > HISTORY_PAGE_SIZE && (
-              <nav className="sidebar-history-pagination" aria-label="历史任务分页">
-                <button type="button" aria-label="上一页历史任务" disabled={historyPage === 0 || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}>‹</button>
+              <nav className="sidebar-history-pagination" aria-label="Task history pagination">
+                <button type="button" aria-label="Previous task-history page" disabled={historyPage === 0 || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.max(0, page - 1))}>‹</button>
                 <span>{historyPage + 1} / {historyPageCount}</span>
-                <button type="button" aria-label="下一页历史任务" disabled={historyPage + 1 >= historyPageCount || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.min(historyPageCount - 1, page + 1))}>›</button>
+                <button type="button" aria-label="Next task-history page" disabled={historyPage + 1 >= historyPageCount || taskHistory.isFetching} onClick={() => setHistoryPage((page) => Math.min(historyPageCount - 1, page + 1))}>›</button>
               </nav>
             )}
           </section>
           <div className="sidebar-note">
-            <strong>当前工作区</strong>
-            <span>需求、报价审核与决策结果均以当前 revision 为准。</span>
+            <strong>Current Workspace</strong>
+            <span>Requirements, quotation reviews and decision results are based on the current task revision.</span>
           </div>
       </nav>
       <div className="app-main">
         <header className="topbar">
           <div className="topbar-title">
-            <strong>供应商比选工作区</strong>
+            <strong>Supplier Selection Workspace</strong>
           </div>
           <div className="topbar-actions">
-            <span className="user-avatar" aria-label="当前用户 USER">USER</span>
+            <span className="user-avatar" aria-label="Current user">USER</span>
           </div>
         </header>
         <main className="page-content"><Outlet /></main>

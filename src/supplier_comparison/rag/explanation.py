@@ -92,7 +92,7 @@ class LiveExplanationClient:
             "English. Do not return decisions, facts, or recommendations."
             " Prefer one concise Chinese claim per citation. Copy its full English text verbatim into "
             "evidence_quotes to avoid punctuation errors; never translate or paraphrase evidence_quotes. "
-            'Shape: {"claims":[{"text":"中文制度说明","citation_ids":["EXACT_CURRENT_ID"],'
+            'Shape: {"claims":[{"text":"English policy explanation","citation_ids":["EXACT_CURRENT_ID"],'
             '"evidence_quotes":{"EXACT_CURRENT_ID":"EXACT_ENGLISH_SOURCE_TEXT"}}]}. '
         )
         if feedback:

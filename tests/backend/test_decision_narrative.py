@@ -38,33 +38,33 @@ def test_tolerance_preview_uses_engine_pool_and_actual_winner():
     trial, text = trial_for(primary_criterion='LOWEST_CONFIRMED_TOTAL_COST',
                            secondary_criterion='FASTEST_CONFIRMED_DELIVERY', cost_tolerance_amount='10')
     assert trial.comparison.recommended_quote_ids == ('SUP-030',)
-    assert '建议选择 **Sterling Semitech（SUP-030）**' in text
-    assert '最低总成本为 Schwarzwald Circuits（SUP-023）的 SGD 9,653.75' in text
-    assert '候选上限为 SGD 9,663.75' in text
-    assert 'Sterling Components（SUP-024）：SGD 9,660.00，预计 2026-10-17 到货' in text
-    assert 'Sterling Semitech（SUP-030）：SGD 9,660.00，预计 2026-10-15 到货' in text
-    assert text.endswith('是否按上述条件生成 Scenario？')
+    assert 'this scenario recommends **Sterling Semitech (SUP-030)**' in text
+    assert 'The lowest total cost in the current comparison scope is SGD 9,653.75 from Schwarzwald Circuits (SUP-023)' in text
+    assert 'candidate ceiling is SGD 9,663.75' in text
+    assert 'Sterling Components (SUP-024): SGD 9,660.00, estimated arrival 2026-10-17' in text
+    assert 'Sterling Semitech (SUP-030): SGD 9,660.00, estimated arrival 2026-10-15' in text
+    assert text.endswith('Generate a scenario using these conditions?')
 
 
 def test_tolerance_without_secondary_keeps_tie():
     trial, text = trial_for(primary_criterion='LOWEST_CONFIRMED_TOTAL_COST', cost_tolerance_amount='10')
     assert len(trial.comparison.recommended_quote_ids) == 3
-    assert '并列' in text and '建议选择' not in text
+    assert 'are tied' in text and 'this scenario recommends' not in text
 
 
 def test_clearing_tolerance_is_visible_before_application():
     trial, text = trial_for(primary_criterion='LONGEST_CONFIRMED_PAYMENT_TERM',
                            secondary_criterion='LOWEST_CONFIRMED_TOTAL_COST', cost_tolerance_amount=None)
     assert trial.changes['cost_tolerance_amount'] is None
-    assert '本次方案将清除原成本容差设置' in text
-    assert '尚未应用，需您确认' in text
+    assert 'clears the existing cost-tolerance setting' in text
+    assert 'has not been applied and requires your confirmation' in text
 
 
 def test_history_missing_and_empty_scope_never_invent_winner():
     trial, text = trial_for(primary_criterion='HIGHEST_HISTORICAL_ON_TIME_RATE',
                            excluded_supplier_ids=('SUP-030',))
     assert not trial.comparison.recommended_quote_ids
-    assert '还不能确定推荐供应商' in text
+    assert 'a recommended supplier cannot yet be determined' in text
     trial, text = trial_for(excluded_supplier_ids=('SUP-023', 'SUP-024', 'SUP-030'))
     assert not trial.comparison.recommended_quote_ids
-    assert '当前范围为空' in text
+    assert 'current scope is empty' in text

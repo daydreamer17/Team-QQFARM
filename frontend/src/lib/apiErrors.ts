@@ -21,7 +21,7 @@ export function backendFieldErrors(
         ? String(item.message)
         : 'msg' in item
           ? String(item.msg)
-          : '该字段未通过后端校验。'
+          : 'This field did not pass backend validation.'
       if (allowed.has(field)) output[field] = message
     }
   }

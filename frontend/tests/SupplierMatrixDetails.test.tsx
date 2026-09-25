@@ -22,7 +22,7 @@ describe('frozen supplier matrix details', () => {
       raw_text: 'Net 60 from invoice', normalized_text: 'Net 60', net_days: 60,
       payment_start_event: 'INVOICE_DATE', parse_status: 'COMPARABLE', reason_codes: [],
     } }} />)
-    expect(screen.getByText('发票日后 60 天')).toBeInTheDocument()
+    expect(screen.getByText('Net 60 days from invoice date')).toBeInTheDocument()
     expect(screen.queryByText('Net 60')).not.toBeInTheDocument()
     expect(screen.queryByText('Net 60 from invoice')).not.toBeInTheDocument()
   })
@@ -31,16 +31,16 @@ describe('frozen supplier matrix details', () => {
       raw_text: 'Net 30', normalized_text: 'Net 30', net_days: 30,
       payment_start_event: null, parse_status: 'INCOMPARABLE', reason_codes: ['PAYMENT_TERMS_NOT_VERIFIED'],
     } }} />)
-    expect(screen.getByText('账期尚未核验，不参与排序')).toBeInTheDocument()
+    expect(screen.getByText('Payment terms have not been evaluated and are excluded from ranking.')).toBeInTheDocument()
   })
   test('shows grade and rates with sample counts, preserving a real zero', () => {
     render(<MatrixSupplierPerformance supplier={{ ...base, history_snapshot: history }} />)
     expect(screen.getByText('A')).toBeInTheDocument()
     expect(screen.getByText('95.0%')).toBeInTheDocument()
     expect(screen.getByText('0.0%')).toBeInTheDocument()
-    const disclosure = screen.getByText('历史样本').closest('details')!
+    const disclosure = screen.getByText('Historical Records').closest('details')!
     expect(disclosure).not.toHaveAttribute('open')
-    expect(screen.getByText('准时：95 / 100')).toBeInTheDocument()
+    expect(screen.getByText('On time: 95 / 100')).toBeInTheDocument()
   })
   test.each(['INSUFFICIENT_SAMPLE', 'OUT_OF_SCOPE', 'NO_DATA', 'NOT_RECORDED'])('does not present %s as usable history', (status) => {
     render(<MatrixSupplierPerformance supplier={{ ...base, history_snapshot: { ...history, history_availability_status: status } }} />)
@@ -48,29 +48,29 @@ describe('frozen supplier matrix details', () => {
   })
   test('does not use unmatched supplier history', () => {
     render(<MatrixSupplierPerformance supplier={{ ...base, history_snapshot: { ...history, identity_match_status: 'REVIEW_REQUIRED' } }} />)
-    expect(screen.getByText('供应商身份待核验，历史表现不可比')).toBeInTheDocument()
+    expect(screen.getByText('Supplier identity requires verification, so historical performance is not comparable.')).toBeInTheDocument()
     expect(screen.queryByText('A')).not.toBeInTheDocument()
   })
   test('handles legacy results without fabricated zero values', () => {
     render(<><MatrixPaymentTerm supplier={base} /><MatrixSupplierPerformance supplier={base} /></>)
-    expect(screen.getByText('未记录')).toBeInTheDocument()
-    expect(screen.getByText('当时未记录历史表现')).toBeInTheDocument()
+    expect(screen.getByText('Not recorded')).toBeInTheDocument()
+    expect(screen.getByText('Historical performance was not recorded at the time.')).toBeInTheDocument()
   })
   test('does not turn missing rates into 0%', () => {
     render(<MatrixSupplierPerformance supplier={{ ...base, history_snapshot: { ...history, on_time: null, rejected_lines: null } }} />)
     expect(screen.getAllByText('—')).toHaveLength(2)
   })
   test.each([
-    ['PAYMENT_TERMS_COMPLEX', '分期／预付款条款，暂不支持账期排序'],
-    ['PAYMENT_START_EVENT_MISSING', '缺少账期起算条件，请确认'],
-    ['PAYMENT_START_EVENT_CONFLICT', '账期起算条件冲突，请核对'],
+    ['PAYMENT_TERMS_COMPLEX', 'Instalment or advance-payment clauses are not supported for payment-term ranking.'],
+    ['PAYMENT_START_EVENT_MISSING', 'The payment-term start event is missing. Please confirm it.'],
+    ['PAYMENT_START_EVENT_CONFLICT', 'The payment-term start event conflicts with another value. Please review it.'],
   ])('explains backend reason %s without mislabelling it as unverified', (code, message) => {
     render(<MatrixPaymentTerm supplier={{ ...base, payment_term: {
       raw_text: 'terms', normalized_text: null, net_days: null,
       payment_start_event: null, parse_status: 'INCOMPARABLE', reason_codes: [code],
     } }} />)
     expect(screen.getByText(message)).toBeInTheDocument()
-    expect(screen.queryByText('账期尚未核验，不参与排序')).not.toBeInTheDocument()
+    expect(screen.queryByText('Payment terms have not been evaluated and are excluded from ranking.')).not.toBeInTheDocument()
   })
 })
 
@@ -95,8 +95,8 @@ describe('supplier selection explanations', () => {
       'SGD',
       true,
     )).toEqual({
-      label: '推荐依据',
-      detail: '历史准时率最高（100.0%）',
+      label: 'Basis for Recommendation',
+      detail: 'Highest historical on-time rate (100.0%)',
       tone: 'good',
     })
   })
@@ -120,9 +120,9 @@ describe('supplier selection explanations', () => {
       false,
     )
 
-    expect(explanation.label).toBe('未选原因')
-    expect(explanation.detail).toContain('历史准时率比推荐供应商低 14.0 个百分点')
-    expect(explanation.detail).toContain('总成本比推荐供应商低 SGD 200.00')
+    expect(explanation.label).toBe('Reason not selected')
+    expect(explanation.detail).toContain('Historical on-time rate is 14.0 percentage points lower than the recommended supplier')
+    expect(explanation.detail).toContain('Total cost is SGD 200.00 lower than the recommended supplier')
   })
 
   test('explains the cost difference when lowest confirmed cost is the ranking rule', () => {
@@ -134,7 +134,7 @@ describe('supplier selection explanations', () => {
       false,
     )
 
-    expect(explanation.detail).toBe('总成本比推荐供应商高 SGD 200.00')
+    expect(explanation.detail).toBe('Total cost is SGD 200.00 higher than the recommended supplier')
   })
 
   test('puts a policy exclusion before commercial trade-offs', () => {
@@ -154,10 +154,10 @@ describe('supplier selection explanations', () => {
       },
     )
 
-    expect(explanation.label).toBe('制度排除')
+    expect(explanation.label).toBe('Excluded by Policy')
     expect(explanation.tone).toBe('danger')
     expect(explanation.detail).toBe(
-      '制度检查不通过：RoHS 合规、供应商资质；已从推荐候选中排除。商业比较：预计到货比推荐供应商晚 5 天；总成本比推荐供应商低 SGD 400.00',
+      'Compliance review failed: RoHS compliance, Supplier eligibility. Excluded from recommendation candidates. Commercial comparison: Expected delivery is 5 days later than the recommended supplier; Total cost is SGD 400.00 lower than the recommended supplier',
     )
   })
 
@@ -175,9 +175,9 @@ describe('supplier selection explanations', () => {
       },
     )
 
-    expect(explanation.label).toBe('制度待复核')
-    expect(explanation.detail).toContain('供应商资质尚未完成核验')
-    expect(explanation.detail).toContain('有已核验合格候选时不优先推荐')
-    expect(explanation.detail).not.toContain('制度检查不通过')
+    expect(explanation.label).toBe('Policy review required')
+    expect(explanation.detail).toContain('Supplier eligibility have not been fully verified')
+    expect(explanation.detail).toContain('It is not prioritised while verified eligible candidates are available')
+    expect(explanation.detail).not.toContain('Compliance ReviewFailed')
   })
 })

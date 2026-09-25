@@ -10,7 +10,7 @@ import { policyAwareSupplierSelectionExplanation } from '../lib/resultComparison
 import { cleanSummaryText, controlLabel, quoteStatusLabel, reasonText, summaryStatusLabel } from '../lib/presentation'
 
 function errorMessage(error: unknown) {
-  return error instanceof ApiClientError ? error.message : '采购总结读取失败。'
+  return error instanceof ApiClientError ? error.message : 'Failed to load the procurement decision brief.'
 }
 
 function displayDate(value: string) {
@@ -36,7 +36,7 @@ function moneyText(currency: string | undefined, value: string | null | undefine
 
 function quantityText(value: number | null, unit: string | undefined) {
   if (value === null) return '—'
-  const unitLabels: Record<string, string> = { piece: '件', pieces: '件', unit: '件', units: '件' }
+  const unitLabels: Record<string, string> = { piece: 'Piece', pieces: 'Piece', unit: 'Piece', units: 'Piece' }
   return `${new Intl.NumberFormat('zh-CN').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
 }
 
@@ -44,7 +44,7 @@ function paymentText(supplier: SupplierComparisonResult) {
   return supplier.payment_term?.normalized_text
     ?? supplier.payment_term?.raw_text
     ?? (supplier.payment_term?.net_days !== null && supplier.payment_term?.net_days !== undefined
-      ? `${supplier.payment_term.net_days} 天`
+      ? `${supplier.payment_term.net_days} days`
       : '—')
 }
 
@@ -56,7 +56,7 @@ function costDeltaText(
   if (!recommended || supplier.total_cost === null || recommended.total_cost === null) return '—'
   const delta = Number(supplier.total_cost) - Number(recommended.total_cost)
   if (!Number.isFinite(delta)) return '—'
-  if (delta === 0) return '基准'
+  if (delta === 0) return 'Baseline'
   return `${delta > 0 ? '+' : '−'}${moneyText(currency, String(Math.abs(delta)))}`
 }
 
@@ -68,16 +68,16 @@ function policyIssues(assessment: PolicyComplianceSupplierAssessment | undefined
 }
 
 function policyEligibility(assessment: PolicyComplianceSupplierAssessment | undefined) {
-  if (!assessment) return { label: '未记录', tone: 'neutral' }
+  if (!assessment) return { label: 'Not recorded', tone: 'neutral' }
   if (assessment.eligibility === 'EXCLUDED' || assessment.status === 'NON_COMPLIANT') {
-    return { label: '制度排除', tone: 'danger' }
+    return { label: 'Excluded by Policy', tone: 'danger' }
   }
   if (assessment.eligibility === 'UNVERIFIED'
       || assessment.status === 'REVIEW_REQUIRED'
       || assessment.status === 'NOT_EVALUATED') {
-    return { label: '待补充或复核', tone: 'warning' }
+    return { label: 'Evidence or Review Required', tone: 'warning' }
   }
-  return { label: '已核验候选', tone: 'good' }
+  return { label: 'Verified Candidate', tone: 'good' }
 }
 
 function communicationGoal(
@@ -86,17 +86,17 @@ function communicationGoal(
   assessment: PolicyComplianceSupplierAssessment | undefined,
 ) {
   if (assessment?.eligibility === 'EXCLUDED' || assessment?.status === 'NON_COMPLIANT') {
-    return '补正制度证明后重新评估'
+    return 'Correct the policy evidence and reassess'
   }
   if (assessment?.eligibility === 'UNVERIFIED'
       || assessment?.status === 'REVIEW_REQUIRED'
       || assessment?.status === 'NOT_EVALUATED') {
-    return '补齐制度材料并完成复核'
+    return 'Complete the policy evidence and review'
   }
-  if (isRecommended) return '锁定当前报价与交付承诺'
-  if (supplier.status === 'PENDING') return '补齐待确认信息，恢复可比较性'
-  if (supplier.status === 'INFEASIBLE') return '确认能否修正不符合项'
-  return '争取缩小与首选方案的差距'
+  if (isRecommended) return 'Secure the current quotation and delivery commitment'
+  if (supplier.status === 'PENDING') return 'Complete pending information and restore comparability'
+  if (supplier.status === 'INFEASIBLE') return 'Confirm whether non-compliant items can be corrected'
+  return 'Narrow the gap with the preferred option'
 }
 
 function fallbackCommunicationDraft(
@@ -107,24 +107,24 @@ function fallbackCommunicationDraft(
   assessment: PolicyComplianceSupplierAssessment | undefined,
 ) {
   const issues = policyIssues(assessment)
-  const issueText = issues.length > 0 ? issues.join('、') : '制度要求'
+  const issueText = issues.length > 0 ? issues.join(', ') : 'policy requirements'
   if (assessment?.eligibility === 'EXCLUDED' || assessment?.status === 'NON_COMPLIANT') {
-    return `当前因${issueText}检查不通过，不能进入推荐。请补交或更正对应证明，完成复核后再重新分析。`
+    return `This supplier failed the ${issueText} check and cannot be recommended. Submit or correct the relevant evidence, complete the review, and then rerun the analysis.`
   }
   if (assessment?.eligibility === 'UNVERIFIED'
       || assessment?.status === 'REVIEW_REQUIRED'
       || assessment?.status === 'NOT_EVALUATED') {
-    return `当前${issueText}尚未完成核验。请补齐有效材料或确认记录，完成复核后再比较价格与交期。`
+    return `${issueText} verification is incomplete. Add valid evidence or confirmation records and complete the review before comparing price and delivery.`
   }
   if (isRecommended) {
-    return `请确认 ${moneyText(currency, supplier.total_cost)} 的总成本、${supplier.estimated_arrival_date ?? '当前交期'}及付款条件在报价有效期内保持不变，并书面回复供货承诺。`
+    return `Please confirm in writing that the total cost of ${moneyText(currency, supplier.total_cost)}, the ${supplier.estimated_arrival_date ?? 'current delivery date'}, and the payment terms remain valid through the quotation validity period, together with the supply commitment.`
   }
   const firstIssue = supplier.failed_reasons[0] ?? supplier.pending_reasons[0]
   if (firstIssue) {
-    return `请书面澄清“${reasonText(firstIssue)}”，并提供可满足采购要求的修订报价、交付日期及有效期。`
+    return `Please clarify “${reasonText(firstIssue)}” in writing and provide a revised quotation, delivery date, and validity period that meet the procurement requirements.`
   }
   const delta = costDeltaText(supplier, recommendation, currency)
-  return `当前方案与首选方案的成本差额为 ${delta}。请确认是否可优化价格、交付或付款条件，并提交更新后的完整报价。`
+  return `The cost difference from the preferred option is ${delta}. Please confirm whether price, delivery, or payment terms can be improved and submit a complete updated quotation.`
 }
 
 function ReportSection({
@@ -159,12 +159,12 @@ function ComparisonReasons({ reasons }: { reasons: ResultReason[] }) {
 }
 
 const reportOutline = [
-  ['01', '执行摘要', 'summary-executive'],
-  ['02', '采购需求', 'summary-requirement'],
-  ['03', '报价与取舍', 'summary-cost'],
-  ['04', '选择与沟通', 'summary-communication'],
-  ['05', '风险与制度', 'summary-risk'],
-  ['06', '行动与留档', 'summary-next'],
+  ['01', 'Executive Summary', 'summary-executive'],
+  ['02', 'Procurement Requirements', 'summary-requirement'],
+  ['03', 'Quotations and Trade-offs', 'summary-cost'],
+  ['04', 'Selection and communication', 'summary-communication'],
+  ['05', 'Risk and policy', 'summary-risk'],
+  ['06', 'Actions and Records', 'summary-next'],
 ] as const
 
 export function SummaryPage() {
@@ -239,7 +239,7 @@ export function SummaryPage() {
   })
 
   if (task.isPending || summaries.isPending) {
-    return <section className="card loading-panel">正在读取采购总结…</section>
+    return <section className="card loading-panel">Loading procurement brief…</section>
   }
   if (task.isError || summaries.isError) {
     return <section className="card error-panel" role="alert">{errorMessage(task.error ?? summaries.error)}</section>
@@ -269,11 +269,11 @@ export function SummaryPage() {
   const narrativeText = (value: string) => cleanSummaryText(value, supplierNames)
   const narrative = current?.narrative
   const policySections = narrative?.sections.filter((section) =>
-    /制度|政策|合规|审批|RoHS/i.test(section.heading + section.text)) ?? []
+    /\u5236\u5ea6|\u653f\u7b56|\u5408\u89c4|\u5ba1\u6279|RoHS/i.test(section.heading + section.text)) ?? []
   const communicationSections = narrative?.sections.filter((section) =>
-    /沟通|询价|谈判|澄清|下一步|行动/i.test(section.heading + section.text)) ?? []
+    /\u6c9f\u901a|\u8be2\u4ef7|\u8c08\u5224|\u6f84\u6e05|\u4e0b\u4e00\u6b65|\u884c\u52a8/i.test(section.heading + section.text)) ?? []
   const riskSections = narrative?.sections.filter((section) =>
-    /风险|交付|未知|待确认|缺失/i.test(section.heading + section.text)) ?? []
+    /\u98ce\u9669|\u4ea4\u4ed8|\u672a\u77e5|\u5f85\u786e\u8ba4|\u7f3a\u5931/i.test(section.heading + section.text)) ?? []
   const commercialSections = narrative?.sections.filter((section) =>
     !policySections.includes(section)
     && !communicationSections.includes(section)
@@ -334,7 +334,7 @@ export function SummaryPage() {
   const exportPdf = () => {
     if (!isExportable || !current) return
     const previousTitle = document.title
-    document.title = `${data.task_name}_采购总结_第${current.task_revision}版`
+    document.title = `${data.task_name}_Procurement_Decision_Brief_Revision_${current.task_revision}`
     window.addEventListener('afterprint', () => { document.title = previousTitle }, { once: true })
     window.print()
   }
@@ -345,7 +345,7 @@ export function SummaryPage() {
         taskId={data.task_id}
         scenarioId={data.scenario_id}
         title={data.task_name}
-        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} 份正式报价`}
+        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} submitted quotations`}
         status={data.status}
         revision={data.task_revision}
         resultId={data.current_result_id}
@@ -357,8 +357,8 @@ export function SummaryPage() {
 
       <section className="summary-report-toolbar card workspace-page-lead">
         <div className="workspace-page-lead-copy">
-          <h2>采购总结</h2>
-          {current && <span>{data.task_name} · 第 {current.task_revision} 版 · {generatedAt}</span>}
+          <h2>Procurement Decision Brief</h2>
+          {current && <span>{data.task_name} · Revision {current.task_revision} · {generatedAt}</span>}
         </div>
         <div className="summary-report-actions">
           {mayGenerate && (
@@ -367,7 +367,7 @@ export function SummaryPage() {
               type="button"
               disabled={generate.isPending}
               onClick={() => generate.mutate()}
-            >{generate.isPending ? '正在创建…' : '生成采购总结'}</button>
+            >{generate.isPending ? 'Creating…' : 'Generate procurement decision brief'}</button>
           )}
           {current?.status === 'FAILED' && current.is_current && data.status !== 'ABANDONED' && (
             <button
@@ -375,7 +375,7 @@ export function SummaryPage() {
               type="button"
               disabled={retry.isPending || current.calls_used >= current.max_calls}
               onClick={() => retry.mutate(current.summary_id)}
-            >重试生成</button>
+            >Retry generation</button>
           )}
         </div>
       </section>
@@ -384,37 +384,37 @@ export function SummaryPage() {
         <div className="form-error" role="alert">{errorMessage(generate.error ?? retry.error ?? exportDocument.error)}</div>
       )}
       {current && !current.is_current && (
-        <div className="run-notice">这是第 {current.task_revision} 版历史采购总结，需求、报价和制度信息均按当时冻结的数据展示。</div>
+        <div className="run-notice">This is the historical procurement summary for revision {current.task_revision}. Requirements, quotations, and policy information are shown as frozen at that time.</div>
       )}
       {current?.status === 'FAILED' && (
         <section className="card error-panel">
-          <strong>总结生成失败</strong>
+          <strong>Brief generation failed</strong>
           <p>{current.error_message}</p>
-          <small>已尝试 {current.calls_used} 次</small>
+          <small>{current.calls_used} attempts made</small>
         </section>
       )}
 
       {!narrative && current?.status !== 'FAILED' && (
         <section className="card summary-report-empty">
           <div>
-            <h2>{current ? '采购总结正在生成' : '尚未生成采购总结'}</h2>
-            <p>{current ? '生成完成后页面会自动更新。' : '完成决策比较后即可生成。'}</p>
-            {!current && !data.current_result_id && <Link className="button button-secondary" to={`/tasks/${taskId}/decision`}>前往决策比较</Link>}
+            <h2>{current ? 'Generating procurement decision brief' : 'Procurement decision brief not yet generated'}</h2>
+            <p>{current ? 'The page will update automatically when generation is complete.' : 'It can be generated after decision comparison is complete.'}</p>
+            {!current && !data.current_result_id && <Link className="button button-secondary" to={`/tasks/${taskId}/decision`}>Go to decision comparison</Link>}
           </div>
         </section>
       )}
 
       {narrative && current && !reportRequirement && (
         <section className="card error-panel" role="alert">
-          <strong>历史采购需求不可用</strong>
-          <p>该总结缺少对应版本的冻结需求，系统不会使用当前任务数据替代。</p>
+          <strong>Historical procurement requirements are unavailable</strong>
+          <p>The brief does not contain the frozen requirements for its revision. Current task data will not be substituted.</p>
         </section>
       )}
 
       {narrative && current && reportRequirement && (
         <div className="summary-report-layout">
-          <nav className="summary-report-outline" aria-label="报告目录">
-            <strong>报告目录</strong>
+          <nav className="summary-report-outline" aria-label="Report contents">
+            <strong>Report contents</strong>
             {reportOutline.map(([number, label, id], index) => (
               <a className={index === 0 ? 'is-active' : ''} href={`#${id}`} key={id}>
                 <span>{number}</span>{label}
@@ -426,70 +426,70 @@ export function SummaryPage() {
             <header className="summary-report-cover">
               <div>
                 <p>PROCUREMENT DECISION BRIEF</p>
-                <h1>{reportRequirement.manufacturer_part_number} 采购总结</h1>
+                <h1>{reportRequirement.manufacturer_part_number} Procurement Summary</h1>
                 <span>{reportRequirement.required_quantity} {reportRequirement.quantity_unit} · {reportRequirement.package} · {reportRequirement.manufacturer_part_number}</span>
               </div>
               <div className="summary-report-stamp">
-                <strong>{recommended ? '初步推荐已形成' : '采购分析已完成'}</strong>
-                <small>基于采购任务第 {current.task_revision} 版</small>
+                <strong>{recommended ? 'Preliminary recommendation available' : 'Procurement analysis completed'}</strong>
+                <small>Based on procurement task revision {current.task_revision}</small>
               </div>
             </header>
 
-            <ReportSection number="01" title="执行摘要" id="summary-executive">
+            <ReportSection number="01" title="Executive Summary" id="summary-executive">
               <p>{narrativeText(narrative.overview)}</p>
               <div className={`summary-recommendation-callout${recommended ? '' : ' no-recommendation'}`}>
                 <span aria-hidden="true">{recommended ? '✓' : '!'}</span>
                 <div>
-                  <strong>{recommended ? `建议优先推进 ${recommended.supplier_name}` : '当前不具备明确推荐条件'}</strong>
+                  <strong>{recommended ? `Proceed with recommended supplier ${recommended.supplier_name}` : 'No clear recommendation can currently be made'}</strong>
                   <p>{recommended
-                    ? `确认总成本 ${moneyText(reportRequirement.currency, recommended.total_cost)} · 预计到货 ${recommended.estimated_arrival_date ?? '待确认'} · 排序依据 ${rankingCriterionLabel(currentRanking) || '当前决策设置'}`
-                    : '请先处理待确认信息，再重新生成采购结论。'}</p>
+                    ? `Confirmed total cost ${moneyText(reportRequirement.currency, recommended.total_cost)} · Expected delivery date ${recommended.estimated_arrival_date ?? 'Pending confirmation'} · Ranking basis ${rankingCriterionLabel(currentRanking) || 'Current decision settings'}`
+                    : 'Resolve pending information before regenerating the procurement conclusion.'}</p>
                 </div>
-                <small>初步建议，不代表最终采购批准。</small>
+                <small>Preliminary recommendation; not final procurement approval.</small>
               </div>
             </ReportSection>
 
-            <ReportSection number="02" title="采购需求" id="summary-requirement">
+            <ReportSection number="02" title="Procurement Requirements" id="summary-requirement">
               <div className="summary-requirement-layout">
                 <p>
-                  本次采购对象为 {reportRequirement.manufacturer} 的 {reportRequirement.manufacturer_part_number}，
-                  需求数量为 {reportRequirement.required_quantity} {reportRequirement.quantity_unit}，
-                  预算上限为 {reportRequirement.currency} {reportRequirement.budget_amount}，
-                  并要求在 {reportRequirement.delivery_deadline} 前完成交付。
+                  This procurement is for {reportRequirement.manufacturer} {reportRequirement.manufacturer_part_number},
+                  with a required quantity of {reportRequirement.required_quantity} {reportRequirement.quantity_unit},
+                  a budget ceiling of {reportRequirement.currency} {reportRequirement.budget_amount},
+                  and delivery required by {reportRequirement.delivery_deadline}.
                 </p>
                 <dl>
-                  <div><dt>数量</dt><dd>{reportRequirement.required_quantity} {reportRequirement.quantity_unit}</dd></div>
-                  <div><dt>封装</dt><dd>{reportRequirement.package}</dd></div>
-                  <div><dt>预算</dt><dd>{reportRequirement.currency} {reportRequirement.budget_amount}</dd></div>
-                  <div><dt>交付截止</dt><dd>{reportRequirement.delivery_deadline}</dd></div>
+                  <div><dt>Quantity</dt><dd>{reportRequirement.required_quantity} {reportRequirement.quantity_unit}</dd></div>
+                  <div><dt>Package</dt><dd>{reportRequirement.package}</dd></div>
+                  <div><dt>Budget</dt><dd>{reportRequirement.currency} {reportRequirement.budget_amount}</dd></div>
+                  <div><dt>Delivery deadline</dt><dd>{reportRequirement.delivery_deadline}</dd></div>
                 </dl>
               </div>
             </ReportSection>
 
-            <ReportSection number="03" title="报价与取舍" id="summary-cost">
+            <ReportSection number="03" title="Quotations and Trade-offs" id="summary-cost">
               <p className="summary-section-intro">
-                先核对制度资格，再比较成本、交付和可行性；自然语言只解释冻结结论，不重新计算或改变推荐结果。
+                Policy eligibility is checked before cost, delivery, and feasibility are compared. Natural-language text only explains the frozen result; it does not recalculate or alter the recommendation.
               </p>
               <div className="summary-comparison-scroll">
                 <table className="summary-comparison-table" style={{ minWidth: Math.max(700, 142 + suppliers.length * 175) }}>
-                  <thead><tr><th>指标</th>{suppliers.map((supplier) => (
+                  <thead><tr><th>Criterion</th>{suppliers.map((supplier) => (
                     <th className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>
                       {supplier.supplier_name}
-                      {recommendedIds.has(supplier.quote_id) && <span>推荐</span>}
+                      {recommendedIds.has(supplier.quote_id) && <span>Recommendation</span>}
                     </th>
                   ))}</tr></thead>
                   <tbody>
-                    <tr><th>制度资格</th>{suppliers.map((supplier) => {
+                    <tr><th>Policy eligibility</th>{suppliers.map((supplier) => {
                       const eligibility = policyEligibility(policyAssessments.get(supplier.quote_id))
                       return <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}><span className={`summary-tradeoff summary-tradeoff-${eligibility.tone}`}>{eligibility.label}</span></td>
                     })}</tr>
-                    <tr><th>确认总成本</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended is-best' : ''} key={supplier.quote_id}>{moneyText(reportRequirement.currency, supplier.total_cost)}</td>)}</tr>
-                    <tr><th>相对首选差额</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{costDeltaText(supplier, recommended, reportRequirement.currency)}</td>)}</tr>
-                    <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, reportRequirement.quantity_unit)}</td>)}</tr>
-                    <tr><th>预计到货</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{supplier.estimated_arrival_date ?? '—'}</td>)}</tr>
-                    <tr><th>付款条件</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{paymentText(supplier)}</td>)}</tr>
-                    <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}><span className={`summary-status summary-status-${supplier.status.toLowerCase()}`}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>
-                    <tr><th>本次取舍</th>{suppliers.map((supplier) => {
+                    <tr><th>Confirmed total cost</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended is-best' : ''} key={supplier.quote_id}>{moneyText(reportRequirement.currency, supplier.total_cost)}</td>)}</tr>
+                    <tr><th>Difference from preferred option</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{costDeltaText(supplier, recommended, reportRequirement.currency)}</td>)}</tr>
+                    <tr><th>Actual Order Quantity</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, reportRequirement.quantity_unit)}</td>)}</tr>
+                    <tr><th>Expected Delivery Date</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{supplier.estimated_arrival_date ?? '—'}</td>)}</tr>
+                    <tr><th>Payment terms</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}>{paymentText(supplier)}</td>)}</tr>
+                    <tr><th>Feasibility</th>{suppliers.map((supplier) => <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}><span className={`summary-status summary-status-${supplier.status.toLowerCase()}`}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>
+                    <tr><th>Trade-off</th>{suppliers.map((supplier) => {
                       const selection = selectionSummaries.get(supplier.quote_id)
                       return <td className={recommendedIds.has(supplier.quote_id) ? 'is-recommended' : ''} key={supplier.quote_id}><strong className={`summary-tradeoff summary-tradeoff-${selection?.tone ?? 'neutral'}`}>{selection?.label}</strong><small>{selection?.detail}</small></td>
                     })}</tr>
@@ -498,7 +498,7 @@ export function SummaryPage() {
               </div>
               <div className="summary-cost-insight-grid">
                 <figure className="summary-cost-chart">
-                  <figcaption>已确认总成本与预算位置</figcaption>
+                  <figcaption>Confirmed total cost relative to budget</figcaption>
                   <div className="summary-cost-chart-body">
                     {chartRows.map((supplier) => (
                       <div className="summary-cost-row" key={supplier.quote_id}>
@@ -508,13 +508,13 @@ export function SummaryPage() {
                       </div>
                     ))}
                   </div>
-                  <small>预算上限：{moneyText(reportRequirement.currency, reportRequirement.budget_amount)}</small>
+                  <small>Budget ceiling: {moneyText(reportRequirement.currency, reportRequirement.budget_amount)}</small>
                 </figure>
                 <figure className="summary-tradeoff-chart">
-                  <figcaption>成本 × 预计到货位置</figcaption>
+                  <figcaption>Cost vs expected delivery</figcaption>
                   <div className="summary-tradeoff-plot">
-                    <span className="summary-axis-y">成本越低越好</span>
-                    <span className="summary-axis-x">预计到货日期 → 越晚</span>
+                    <span className="summary-axis-y">Lower cost is better</span>
+                    <span className="summary-axis-x">Expected delivery date → later</span>
                     {tradeoffRows.map((supplier) => {
                       const costRange = maxTradeoffCost - minTradeoffCost
                       const dateRange = maxTradeoffDate - minTradeoffDate
@@ -524,12 +524,12 @@ export function SummaryPage() {
                       const top = costRange > 0 ? 12 + ((cost - minTradeoffCost) / costRange) * 62 : 40
                       return <span className={`summary-tradeoff-point${recommendedIds.has(supplier.quote_id) ? ' is-recommended' : ''}`} style={{ left: `${left}%`, top: `${top}%` }} key={supplier.quote_id}><i /><small>{supplier.supplier_name}</small></span>
                     })}
-                    {tradeoffRows.length === 0 && <p>暂无同时确认成本与交期的报价。</p>}
+                    {tradeoffRows.length === 0 && <p>No quotation currently has both cost and delivery confirmed.</p>}
                   </div>
                 </figure>
               </div>
               <div className="summary-ai-brief">
-                <header><span>AI</span><div><strong>分析补充</strong><small>基于冻结事实生成，不参与计算</small></div></header>
+                <header><span>AI</span><div><strong>Analysis Notes</strong><small>Generated from frozen facts and not used in calculations</small></div></header>
                 {commercialSections.slice(0, 3).map((section, index) => (
                   <section key={section.heading + index}><h3>{narrativeText(section.heading)}</h3><p>{narrativeText(section.text)}</p></section>
                 ))}
@@ -537,8 +537,8 @@ export function SummaryPage() {
               </div>
             </ReportSection>
 
-            <ReportSection number="04" title="选择说明与建议沟通内容" id="summary-communication">
-              <p className="summary-section-intro">按供应商连续说明推荐或未选原因，并提供可由采购人员复核后使用的沟通措辞。</p>
+            <ReportSection number="04" title="Selection Rationale and Suggested Communication" id="summary-communication">
+              <p className="summary-section-intro">Explain the recommendation or non-selection reasons for each supplier and provide communication wording for procurement review.</p>
               <div className="summary-communication-report">
                 {suppliers.map((supplier) => {
                   const isRecommended = recommendedIds.has(supplier.quote_id)
@@ -553,29 +553,29 @@ export function SummaryPage() {
                   return (
                     <article className={isRecommended ? 'is-recommended' : ''} key={supplier.quote_id}>
                       <h3>{supplier.supplier_name}</h3>
-                      <p className="summary-selection-line"><strong>{isRecommended ? '推荐原因' : '本次取舍'}：</strong>{selectionSummaries.get(supplier.quote_id)?.detail}</p>
-                      <small>沟通目标：{communicationGoal(supplier, isRecommended, assessment)}</small>
-                      <p><strong>建议沟通：</strong>{draft}</p>
+                      <p className="summary-selection-line"><strong>{isRecommended ? 'Recommendation basis' : 'Trade-off'}: </strong>{selectionSummaries.get(supplier.quote_id)?.detail}</p>
+                      <small>Communication objective: {communicationGoal(supplier, isRecommended, assessment)}</small>
+                      <p><strong>Suggested message: </strong>{draft}</p>
                     </article>
                   )
                 })}
               </div>
-              {communicationSections.length > 0 && <div className="summary-communication-ai"><strong>AI 沟通提示</strong><p>{narrativeText(communicationSections[0].text)}</p></div>}
+              {communicationSections.length > 0 && <div className="summary-communication-ai"><strong>AI communication suggestions</strong><p>{narrativeText(communicationSections[0].text)}</p></div>}
             </ReportSection>
 
-            <ReportSection number="05" title="风险、制度与决策门槛" id="summary-risk">
+            <ReportSection number="05" title="Risks, Policy, and Decision Gates" id="summary-risk">
               <ComplianceAssessmentDetails assessment={result.data?.policy_compliance} taskId={taskId} resultId={result.data?.result_id} historical={result.data?.is_current === false} legacy={result.data?.legacy_compliance} />
               <p>
-                当前共有 {feasibleCount} 份报价可行、{pendingCount} 份等待确认、{infeasibleCount} 份不符合要求。
-                下列门槛用于判断能否进入正式批准，不会把未知值自动当作零或当作合格。
+                There are currently {feasibleCount} feasible quotations, {pendingCount} awaiting confirmation, and {infeasibleCount} that do not meet requirements.
+                The following gates determine readiness for formal approval. Unknown values are never treated as zero or automatically compliant.
               </p>
               <div className="summary-risk-table-wrap">
                 <table className="summary-risk-table">
                   <tbody>
-                    <tr><th>报价完整性</th><td><strong className={pendingCount > 0 ? 'risk-review' : 'risk-low'}>{pendingCount > 0 ? `${pendingCount} 份待确认` : '已冻结'}</strong></td><td>{pendingCount > 0 ? '补齐可能影响可行性或排序的字段。' : '成本、交付和数量均来自当前冻结结果。'}</td></tr>
-                    <tr><th>制度证据</th><td><strong className={(policyCounts?.REVIEW_REQUIRED ?? 0) > 0 ? 'risk-review' : 'risk-low'}>{reportPolicyBinding ? `${policyCounts?.REVIEW_REQUIRED ?? 0} 项待复核` : '未绑定制度'}</strong></td><td>{reportPolicyBinding ? `当前绑定制度版本 ${reportPolicyBinding.policy_set_version}。` : '正式采购前需补充适用制度。'}</td></tr>
-                    <tr><th>推荐稳定性</th><td><strong className={pendingCount > 0 ? 'risk-review' : 'risk-low'}>{pendingCount > 0 ? '需要关注' : '当前稳定'}</strong></td><td>输入发生变化后必须创建新版本并重新计算。</td></tr>
-                    <tr><th>批准状态</th><td><strong className="risk-review">尚未批准</strong></td><td>本报告是决策支持材料，不能替代有权限人员的采购批准。</td></tr>
+                    <tr><th>Quotation completeness</th><td><strong className={pendingCount > 0 ? 'risk-review' : 'risk-low'}>{pendingCount > 0 ? `${pendingCount} pending confirmation` : 'Frozen'}</strong></td><td>{pendingCount > 0 ? 'Complete fields that may affect feasibility or ranking.' : 'Cost, delivery, and quantity all come from the current frozen result.'}</td></tr>
+                    <tr><th>Policy evidence</th><td><strong className={(policyCounts?.REVIEW_REQUIRED ?? 0) > 0 ? 'risk-review' : 'risk-low'}>{reportPolicyBinding ? `${policyCounts?.REVIEW_REQUIRED ?? 0} require review` : 'No policy bound'}</strong></td><td>{reportPolicyBinding ? `Currently bound to policy revision ${reportPolicyBinding.policy_set_version}.` : 'An applicable policy must be added before formal procurement.'}</td></tr>
+                    <tr><th>Recommendation Stability</th><td><strong className={pendingCount > 0 ? 'risk-review' : 'risk-low'}>{pendingCount > 0 ? 'Attention required' : 'Currently stable'}</strong></td><td>A new version and recalculation are required whenever the inputs change.</td></tr>
+                    <tr><th>Approval Status</th><td><strong className="risk-review">Not approved</strong></td><td>This report provides decision support and does not replace approval by an authorised procurement representative.</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -587,56 +587,56 @@ export function SummaryPage() {
                 </div>
               ))}
               <div className="summary-policy-status">
-                <span>已确认合规 <strong>{policyCounts?.COMPLIANT ?? 0}</strong></span>
-                <span>需要人工确认 <strong>{policyCounts?.REVIEW_REQUIRED ?? feasibleCount}</strong></span>
-                <span>未进入评估 <strong>{policyCounts?.NOT_EVALUATED ?? infeasibleCount}</strong></span>
+                <span>Compliance confirmed <strong>{policyCounts?.COMPLIANT ?? 0}</strong></span>
+                <span>Human confirmation required <strong>{policyCounts?.REVIEW_REQUIRED ?? feasibleCount}</strong></span>
+                <span>Not included in assessment <strong>{policyCounts?.NOT_EVALUATED ?? infeasibleCount}</strong></span>
               </div>
             </ReportSection>
 
-            <ReportSection number="06" title="行动与留档" id="summary-next">
+            <ReportSection number="06" title="Actions and Records" id="summary-next">
               <ComparisonReasons reasons={result.data?.result.comparison_reasons ?? []} />
               <div className="summary-action-list">
-                <div><span>1</span><p><strong>完成供应商沟通</strong>确认沟通作战卡中的价格、交期、费用和待确认信息。</p></div>
-                <div><span>2</span><p><strong>关闭制度复核项</strong>核对制度证据与例外条件，保留人工确认记录。</p></div>
-                <div><span>3</span><p><strong>提交正式批准</strong>附上本版报价原件、比较结果和采购总结，由授权人员决定。</p></div>
+                <div><span>1</span><p><strong>Complete supplier communication</strong>Confirm price, delivery, fees, and outstanding information from the communication playbook.</p></div>
+                <div><span>2</span><p><strong>Close policy review items</strong>Review policy evidence and exception conditions, retaining the manual confirmation record.</p></div>
+                <div><span>3</span><p><strong>Submit for formal approval</strong>Attach the source quotations, comparison result, and procurement summary for an authorised decision-maker.</p></div>
               </div>
               <p className="summary-disclaimer">{narrativeText(narrative.disclaimer)}</p>
             </ReportSection>
 
             <footer className="summary-report-footer">
-              <span>采购总结 · 第 {current.task_revision} 版</span>
-              <span>生成时间 {generatedAt}</span>
+              <span>Procurement summary · Revision {current.task_revision}</span>
+              <span>Generated {generatedAt}</span>
             </footer>
           </article>
 
           <aside className="summary-report-rail">
-            <h2>报告信息</h2>
+            <h2>Report Information</h2>
             <dl>
-              <div><dt>状态</dt><dd className={isExportable ? 'report-ready' : ''}>{isExportable ? '可导出' : summaryStatusLabel(current.status)}</dd></div>
-              <div><dt>覆盖范围</dt><dd>6 个章节</dd></div>
-              <div><dt>引用证据</dt><dd>{suppliers.length} 份报价 · {referenceCount} 条引用</dd></div>
-              <div><dt>版本</dt><dd>第 {current.task_revision} 版</dd></div>
-              <div><dt>生成时间</dt><dd>{generatedAt}</dd></div>
+              <div><dt>Status</dt><dd className={isExportable ? 'report-ready' : ''}>{isExportable ? 'Ready to export' : summaryStatusLabel(current.status)}</dd></div>
+              <div><dt>Report coverage</dt><dd>6 sections</dd></div>
+              <div><dt>Supporting evidence</dt><dd>{suppliers.length} quotations · {referenceCount} references</dd></div>
+              <div><dt>Revision</dt><dd>Revision {current.task_revision}</dd></div>
+              <div><dt>Generated At</dt><dd>{generatedAt}</dd></div>
             </dl>
-            <p>导出文件均绑定当前 Summary、Result 和 Task Revision，并包含正文、图表、使用边界与版本信息。</p>
+            <p>Every export is bound to the current Summary, Result and Task Revision and includes report text, charts, usage boundaries and version information.</p>
             <div className="summary-export-options">
-              <button className="button button-submit" type="button" disabled={!isExportable} onClick={exportPdf}>导出 PDF</button>
-              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'md' })}>导出 Markdown</button>
-              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'docx' })}>导出 Word</button>
+              <button className="button button-submit" type="button" disabled={!isExportable} onClick={exportPdf}>Export PDF</button>
+              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'md' })}>Export Markdown</button>
+              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'docx' })}>Export Word</button>
             </div>
-            <small>PDF 用于正式提交；Markdown 便于协作；Word 便于继续编辑。</small>
+            <small>Use PDF for formal submission, Markdown for collaboration and Word for further editing.</small>
           </aside>
         </div>
       )}
 
       {summaries.data.items.length > 1 && (
         <section className="summary-history-section">
-          <div className="section-heading"><h2>历史采购总结</h2><span>{summaries.data.items.length}</span></div>
+          <div className="section-heading"><h2>Historical procurement brief</h2><span>{summaries.data.items.length}</span></div>
           <div className="summary-history-list">
             {summaries.data.items.map((item) => (
               <article className="card summary-history-record" key={item.summary_id}>
                 <strong>{summaryStatusLabel(item.status)}</strong>
-                <span>采购任务第 {item.task_revision} 版</span>
+                <span>Procurement task revision {item.task_revision}</span>
                 <small>{displayDate(item.created_at)}</small>
               </article>
             ))}

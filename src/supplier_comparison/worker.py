@@ -218,9 +218,9 @@ def _run_decision_conversation_job(
     except ModelClientError as exc:
         attempts += exc.attempts
         message = {
-            "conversation_model_output_invalid": "本次说明未通过事实与引用核验，未更改正式结果。可以重试生成说明。",
-            "conversation_intent_invalid": "未能可靠识别本次请求，尚未生成模拟。请明确主次排序指标、容差或供应商名称后重试。",
-            "conversation_intent_mismatch": "回答与已识别的请求不一致，本次未保存，也未更改正式结果。请重试。",
+            "conversation_model_output_invalid": "This explanation did not pass factual and citation validation. The official result was not changed. You may regenerate the explanation.",
+            "conversation_intent_invalid": "The request could not be interpreted reliably and no simulation was generated. Specify primary and secondary criteria, tolerance, or supplier names and try again.",
+            "conversation_intent_mismatch": "The answer did not match the interpreted request. It was not saved and the official result was not changed. Try again.",
         }.get(exc.error_code, str(exc))
         service.fail_conversation_job(
             job_id,
@@ -232,14 +232,14 @@ def _run_decision_conversation_job(
         raise
     except BackendError as exc:
         messages = {
-            "selection_review_required": "参与本次模拟的报价仍有待审核字段。请到“待处理事项／集中审核”确认这些字段，重新分析后再生成模拟；已排除报价重新纳入时也需要通过审核。",
-            "conversation_stale": "当前对话依据的结果已过期。请打开最新决策结果后重新提出模拟请求。",
-            "selection_input_stale": "计算期间任务版本发生变化，本次未保存。请刷新最新结果后重试。",
-            "conversation_model_output_invalid": "本次回复在保存前校验失败，未更改正式结果。请重试；若持续失败，请提供任务编号。",
+            "selection_review_required": "Quotations included in this simulation still contain fields requiring review. Confirm them under Action Items / Consolidated Review, rerun the analysis, and then generate the simulation. A previously excluded quotation must also pass review before being restored.",
+            "conversation_stale": "The result underlying this conversation is stale. Open the latest decision result and submit the simulation request again.",
+            "selection_input_stale": "The task revision changed during calculation, so this attempt was not saved. Refresh the latest result and try again.",
+            "conversation_model_output_invalid": "This response failed validation before saving and did not change the official result. Try again; if the issue persists, provide the task ID.",
         }
         service.fail_conversation_job(
             job_id, code=exc.code,
-            message=messages.get(exc.code, "本次模拟或保存未完成。请核对当前版本与待审核字段，再重试。"),
+            message=messages.get(exc.code, "This simulation or save operation did not complete. Check the current revision and fields requiring review, then try again."),
             attempts=attempts,
             diagnostic=f"stage={stage}; elapsed={time.monotonic()-started_at:.3f}s; code={exc.code}; {str(exc)}"[:1000],
         )

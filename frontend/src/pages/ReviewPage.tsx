@@ -35,23 +35,23 @@ interface ProblemGroup {
 }
 
 const optionLabels: Record<string, string> = {
-  NEW: '全新',
-  REFURBISHED: '翻新',
-  USED: '二手',
-  KNOWN_AMOUNT: '另有明确金额',
-  FREE: '免费',
-  INCLUDED: '已包含在报价中',
-  NOT_APPLICABLE: '不适用',
-  UNKNOWN: '未知，待补充',
-  CALENDAR_DAYS: '自然日',
-  BUSINESS_DAYS: '工作日',
-  ARRIVAL: '到货',
-  SHIPMENT: '发运',
-  ORDER_DATE: '下单日',
-  PAYMENT_RECEIPT: '收到付款',
-  EXCLUDED: '未包含',
-  piece: '颗',
-  tray: '盘',
+  NEW: 'New',
+  REFURBISHED: 'Refurbished',
+  USED: 'Used',
+  KNOWN_AMOUNT: 'Known amount',
+  FREE: 'Free',
+  INCLUDED: 'Included in quotation',
+  NOT_APPLICABLE: 'Not Applicable',
+  UNKNOWN: 'Unknown; follow-up required',
+  CALENDAR_DAYS: 'Calendar Days',
+  BUSINESS_DAYS: 'Business Days',
+  ARRIVAL: 'Arrival',
+  SHIPMENT: 'Shipment',
+  ORDER_DATE: 'Order date',
+  PAYMENT_RECEIPT: 'Payment Receipt',
+  EXCLUDED: 'Excluded',
+  piece: 'pieces',
+  tray: 'trays',
 }
 
 function problemKey(problem: Pick<CorrectionTarget, 'quote_id' | 'field_name'>) {
@@ -88,7 +88,7 @@ function initialValue(problem: CorrectionTarget, definition?: QuoteFieldSchemaDe
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     if (error.code === 'task_revision_conflict') {
-      return '审核数据已经更新，页面已重新同步。请核对后再次提交。'
+      return 'Review data has changed and the page has been synchronised. Review it before submitting again.'
     }
     if (error.code === 'field_correction_batch_invalid') {
       const errors = Array.isArray(error.details.errors) ? error.details.errors : []
@@ -96,24 +96,24 @@ function errorMessage(error: unknown) {
         item && typeof item === 'object' && 'code' in item && item.code === 'field_version_conflict'
       ))
       return stale
-        ? '字段版本已经更新，页面已重新同步。请核对最新值后再次提交。'
-        : '部分确认值未通过保存校验。请按卡片提示核对格式；仍无法提交时，请刷新后重试。'
+        ? 'The field schema revision has changed and the page has been synchronised. Review the latest values before submitting again.'
+        : 'Some confirmed values did not pass save validation. Check the format shown on each card; if submission still fails, refresh and try again.'
     }
     if (error.code === 'field_correction_invalid') {
-      return '该确认值无法保存。请按卡片提示核对格式，或选择“暂不确定”保留待处理。'
+      return 'This confirmed value cannot be saved. Check its format on the card, or select “Not yet known” to keep the item open.'
     }
     if (error.code === 'extraction_batch_stale') {
-      return '报价解析结果已经更新，页面已同步最新数据。请核对后再次提交。'
+      return 'The quotation extraction result has changed and the page now shows the latest data. Review it before submitting again.'
     }
     if (error.code === 'extraction_batch_missing') {
-      return '当前报价还没有可用的解析结果，请先完成报价解析。'
+      return 'The current quotation has no usable extraction result. Complete quotation extraction first.'
     }
     if (error.status === 500) {
-      return `后端在保存待处理事项时发生异常，本次不会视为已提交。${error.requestId ? `请求编号：${error.requestId}。` : ''}请刷新后核对当前版本；若仍失败，请将请求编号与 API 日志一并提供。`
+      return `The server failed while saving action items, so this attempt was not submitted. ${error.requestId ? `Request ID: ${error.requestId}. ` : ''}Refresh and verify the current revision. If it still fails, provide the request ID with the API logs.`
     }
     return error.message
   }
-  return '待处理事项读取失败。'
+  return 'Failed to load action items.'
 }
 
 function isStaleCorrectionError(error: unknown) {
@@ -134,14 +134,14 @@ function typedValue(value: string, definition: QuoteFieldSchemaDefinition | unde
 }
 
 function displayOption(value: string, fieldName?: string) {
-  if (fieldName === 'tax_mode' && value === 'INCLUDED') return '已含税'
-  if (fieldName === 'tax_mode' && value === 'EXCLUDED') return '不含税'
+  if (fieldName === 'tax_mode' && value === 'INCLUDED') return 'Tax included'
+  if (fieldName === 'tax_mode' && value === 'EXCLUDED') return 'Tax excluded'
   return optionLabels[value] ?? value
 }
 
 function userFieldLabel(fieldName: string, fallback?: string) {
   const label = fieldLabel(fieldName)
-  return label === '相关信息' ? (fallback ?? label) : label
+  return label === 'Related information' ? (fallback ?? label) : label
 }
 
 function quotedTexts(sourceRefs: Record<string, unknown>[], rawValue: string | null) {
@@ -159,22 +159,22 @@ function reviewProblemMessage(problem: ReviewProblem) {
 
 function valueFormatError(value: string, definition?: QuoteFieldSchemaDefinition): string | null {
   const normalized = value.trim()
-  if (!normalized) return '请填写确认值，或选择“暂不确定”。'
+  if (!normalized) return 'Enter a confirmed value, or select “Not yet known”.'
   if (definition?.allowed_values?.length && !definition.allowed_values.includes(normalized)) {
-    return '请选择系统提供的标准值。'
+    return 'Select one of the standard values provided by the system.'
   }
   const kind = definition?.value_type.toLowerCase() ?? ''
   if (kind.includes('integer') && !/^\d+$/.test(normalized)) {
-    return '请输入不含单位和文字的整数。'
+    return 'Enter a whole number without units or text.'
   }
   if (kind.includes('decimal') && !/^\d+(?:\.\d+)?$/.test(normalized)) {
-    return '请输入不含货币符号和文字的十进制数。'
+    return 'Enter a decimal number without a currency symbol or text.'
   }
   if (kind.includes('date')) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return '请使用 YYYY-MM-DD 日期格式。'
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return 'Use the YYYY-MM-DD date format.'
     const parsed = new Date(`${normalized}T00:00:00Z`)
     if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== normalized) {
-      return '请输入有效日期，例如 2026-10-18。'
+      return 'Enter a valid date, for example 2026-10-18.'
     }
   }
   return null
@@ -200,8 +200,8 @@ function BusinessValueInput({
 
   if (allowedValues.length > 0) {
     return (
-      <select aria-label={`${label}确认值`} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">请选择</option>
+      <select aria-label={`${label}Confirmed value`} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Select an option</option>
         {allowedValues.map((option) => (
           <option key={option} value={option}>{displayOption(option, definition?.field_name)}</option>
         ))}
@@ -211,10 +211,10 @@ function BusinessValueInput({
 
   if (kind.includes('boolean')) {
     return (
-      <select aria-label={`${label}确认值`} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">请选择</option>
-        <option value="true">是</option>
-        <option value="false">否</option>
+      <select aria-label={`${label}Confirmed value`} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Select an option</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
       </select>
     )
   }
@@ -222,7 +222,7 @@ function BusinessValueInput({
   return (
     <div className="review-business-value-control">
       <input
-        aria-label={`${label}确认值`}
+        aria-label={`${label}Confirmed value`}
         type="text"
         placeholder={kind.includes('date') ? 'YYYY-MM-DD' : undefined}
         inputMode={inputMode}
@@ -349,7 +349,7 @@ export function ReviewPage() {
       if (!amount) continue
       unique.set(key, { ...target, field_name: amountName, field_version: amount.field_version,
         raw_value: amount.raw_value, normalized_value: amount.normalized_value, unit: amount.unit,
-        source_refs: amount.source_refs ?? [], message: '请填写已确认金额；费用状态和金额一起保存。' })
+        source_refs: amount.source_refs ?? [], message: 'Enter the confirmed amount; save the fee status and amount together.' })
     }
     return [...unique.values()]
   }, [review.data, task.data, reviewProblems, drafts, reviewRevision])
@@ -376,7 +376,7 @@ export function ReviewPage() {
   })
 
   if (task.isPending || review.isPending || schema.isPending) {
-    return <section className="card loading-panel">正在读取待处理事项…</section>
+    return <section className="card loading-panel">Loading action items…</section>
   }
   if (task.isError || review.isError || schema.isError) {
     return <section className="card error-panel" role="alert">{errorMessage(task.error ?? review.error ?? schema.error)}</section>
@@ -437,7 +437,7 @@ export function ReviewPage() {
         rawValue: definition?.allowed_values?.includes(value) ? displayOption(value, problem.field_name) : value,
         normalizedValue: typedValue(value, definition, problem.normalized_value),
         unit: problem.unit || (isCurrency ? currency : null),
-        reason: '人工核对报价原文或供应商回复后修正',
+        reason: 'Corrected after manually reviewing the source quotation or supplier response',
       }
     }))
   }
@@ -448,7 +448,7 @@ export function ReviewPage() {
         taskId={data.task_id}
         scenarioId={data.scenario_id}
         title={data.task_name}
-        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${pendingCount} 个字段待处理`}
+        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${pendingCount} fields require attention`}
         status={data.status}
         revision={data.task_revision}
         resultId={data.current_result_id}
@@ -461,31 +461,31 @@ export function ReviewPage() {
 
       <section className="card workspace-page-lead" aria-labelledby="review-overview-title">
         <div className="workspace-page-lead-copy">
-          <h2 id="review-overview-title">待处理事项</h2>
-          <p>核对影响当前决策的字段；仅已确认的项目进入新版本重算。</p>
+          <h2 id="review-overview-title">Action Items</h2>
+          <p>Review fields that affect the current decision. Only confirmed items will be included in the next recalculation.</p>
         </div>
-        <dl className="review-overview-stats" aria-label="审核统计">
-          <div><dt>有效报价</dt><dd>{report.quotes.length}</dd></div>
-          <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>待处理字段</dt><dd>{pendingCount}</dd></div>
-          {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>PENDING 限制</dt><dd>{pendingLimitations.length}</dd></div>}
-          <div><dt>仅保留记录</dt><dd>{recordOnly.length}</dd></div>
+        <dl className="review-overview-stats" aria-label="Review statistics">
+          <div><dt>Active quotation</dt><dd>{report.quotes.length}</dd></div>
+          <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>Fields requiring attention</dt><dd>{pendingCount}</dd></div>
+          {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>Pending limitation</dt><dd>{pendingLimitations.length}</dd></div>}
+          <div><dt>Recorded only</dt><dd>{recordOnly.length}</dd></div>
         </dl>
       </section>
 
-      {waitingForReview && <div className="run-notice">部分报价仍在审核，完成后才可统一提交；页面会自动更新。</div>}
+      {waitingForReview && <div className="run-notice">Some quotations are still under review. Complete them before submitting the batch; this page will update automatically.</div>}
       {!report.review_pending && data.task_revision !== report.task_revision && (
-        <div className="run-notice">正在同步最新审核数据，请稍候。</div>
+        <div className="run-notice">Synchronising the latest review data…</div>
       )}
       {!report.review_pending && pendingCount === 0 && pendingLimitations.length === 0 && (
-        <section className="card audit-empty">当前没有需要补充的字段。</section>
+        <section className="card audit-empty">No fields currently require additional information.</section>
       )}
 
       {[false, true].map((excluded) => {
         const targets = actionable.filter((target) => excludedQuoteIds.has(target.quote_id) === excluded)
         if (!targets.length) return null
         return <section className="review-overview-group" key={String(excluded)} id={excluded ? 'excluded-review' : 'current-review'}>
-          <h3>{excluded ? '已排除供应商 · 重新纳入前审核' : '当前比较范围 · 待审核字段'}</h3>
-          {excluded && <p className="muted">以下问题不阻塞当前推荐。核对保存不会自动重新纳入供应商；审核完成后，请回到决策助手重新提出纳入请求。</p>}
+          <h3>{excluded ? 'Excluded suppliers · review before restoring' : 'Current comparison scope · fields requiring review'}</h3>
+          {excluded && <p className="muted">The following issues do not block the current recommendation. Saving the review will not automatically re-include the supplier; request inclusion again in the decision assistant after completing the review.</p>}
         <div className="review-problem-grid">
           {targets.map((target) => {
             const key = problemKey(target)
@@ -504,22 +504,22 @@ export function ReviewPage() {
             return (
               <article className="card review-problem-card review-action-card" key={key}>
                 <header>
-                  <div><strong>{target.original_filename ?? '报价文件'}</strong><span>{label}</span></div>
+                  <div><strong>{target.original_filename ?? 'Quotation Document'}</strong><span>{label}</span></div>
                   <span className={`status-pill ${isDeferred ? 'status-pending' : changed || isAdopted ? 'status-ready' : 'status-pending'}`}>
-                    {isDeferred ? '已保留待补充' : changed ? '已修改，待确认' : isAdopted ? '已采用当前值' : '待人工核对'}
+                    {isDeferred ? 'Kept open for completion' : changed ? 'Revised; confirmation pending' : isAdopted ? 'Current value accepted' : 'Manual review required'}
                   </span>
                 </header>
                 {group && group.problems.length > 1 && (
-                  <small className="review-merged-note">已合并 {group.problems.length} 条相关规则，填写一次即可。</small>
+                  <small className="review-merged-note">{group.problems.length} related rules have been combined; enter the value once.</small>
                 )}
                 {problemMessages.length > 0 && (
                   <div className="quote-field-note">
                     {problemMessages.map((message) => <p key={message}>{message}</p>)}
-                    <p>下一步：查看原文后，采用当前值、修改字段，或保留待补充。</p>
+                    <p>Next: review the source, accept the current value, edit the field or leave it pending.</p>
                   </div>
                 )}
                 <label className="field review-business-value">
-                  <span>确认值</span>
+                  <span>Confirmed value</span>
                   <BusinessValueInput
                     definition={definition}
                     label={label}
@@ -536,20 +536,20 @@ export function ReviewPage() {
                 <div className="review-card-actions">
                   {!changed && !isAdopted && !isDeferred && canAdopt && (
                     <button className="button button-secondary" type="button" onClick={() => setAdopted((current) => new Set([...current, stateKey]))}>
-                      已核对，采用此值
+                      Confirm current value
                     </button>
                   )}
                   {!isDeferred && (
                     <button className="button button-secondary" type="button" onClick={() => {
                       setDeferred((current) => new Set([...current, stateKey]))
                       setAdopted((current) => { const next = new Set(current); next.delete(stateKey); return next })
-                    }}>暂不确定，保留待处理</button>
+                    }}>Keep pending for now</button>
                   )}
-                  {isDeferred && <button className="button button-secondary" type="button" onClick={() => setDeferred((current) => { const next = new Set(current); next.delete(stateKey); return next })}>继续处理</button>}
+                  {isDeferred && <button className="button button-secondary" type="button" onClick={() => setDeferred((current) => { const next = new Set(current); next.delete(stateKey); return next })}>Continue</button>}
                 </div>
                 {evidenceTexts.length > 0 && (
                   <details className="review-rule-details">
-                    <summary>查看报价原文</summary>
+                    <summary>View source quotation</summary>
                     {evidenceTexts.map((text) => <blockquote key={text}>{text}</blockquote>)}
                   </details>
                 )}
@@ -562,14 +562,14 @@ export function ReviewPage() {
 
       {manualBlockers.length > 0 && (
         <section className="card review-manual-blockers">
-          <h3>需要补充信息</h3>
+          <h3>Additional information required</h3>
           {manualBlockers.map((group) => {
             const problem = group.problems[0]
             const message = problem.resolution === 'ADDITIONAL_INFORMATION_REQUIRED'
-              ? '报价原值已保留；需要补充换算或评估信息，不能通过改写报价值解决。'
-              : '当前字段无法在线修正，请重新上传报价或联系管理员。'
+              ? 'The original quotation value is retained. Additional conversion or evaluation information is required; changing the quotation value cannot resolve this item.'
+              : 'This field cannot be corrected online. Upload the quotation again or contact an administrator.'
             return (
-              <p key={group.key}>{problem.original_filename ?? '报价文件'} · {userFieldLabel(group.fieldName)}：{message}</p>
+              <p key={group.key}>{problem.original_filename ?? 'Quotation Document'} · {userFieldLabel(group.fieldName)}: {message}</p>
             )
           })}
         </section>
@@ -577,16 +577,16 @@ export function ReviewPage() {
 
       {pendingLimitations.length > 0 && (
         <section className="card review-pending-limitations">
-          <h3>系统暂不能计算，报价保持 PENDING</h3>
+          <h3>The system cannot complete the calculation, so the quotation remains pending.</h3>
           {pendingLimitations.map((group) => {
             const problem = group.problems[0]
             const isBusinessDays = problem.codes.includes('DAY_BASIS_UNSUPPORTED')
             return (
               <div key={group.key}>
-                <strong>{problem.original_filename ?? '报价文件'} · {userFieldLabel(group.fieldName)}</strong>
+                <strong>{problem.original_filename ?? 'Quotation Document'} · {userFieldLabel(group.fieldName)}</strong>
                 <p>{isBusinessDays
-                  ? '原报价中的“工作日”已正确保留，不会被换成自然日，也无需修改报价。当前系统没有业务日历，因此该供应商保持 PENDING；如需解除限制，应配置业务日历或取得明确到货日期。'
-                  : '报价原值已保留，无需为了继续分析而改写。当前系统缺少所需的换算或评估能力，因此该供应商保持 PENDING。'}</p>
+                  ? '“Business days” from the source quotation has been retained and will not be converted to calendar days. The quotation does not need revision. Because no business calendar is configured, this supplier remains PENDING. Configure a business calendar or obtain an explicit arrival date to resolve it.'
+                  : 'The original quotation value has been retained and should not be changed merely to continue the analysis. The required conversion or evaluation capability is unavailable, so this supplier remains PENDING.'}</p>
               </div>
             )
           })}
@@ -595,11 +595,11 @@ export function ReviewPage() {
 
       {recordOnly.length > 0 && (
         <details className="card review-records">
-          <summary>查看不影响当前推荐的记录（{recordOnly.length}）</summary>
+          <summary>View records that do not affect the current recommendation ({recordOnly.length})</summary>
           <div>
             {recordOnly.map((group) => (
               <p key={group.key}>
-                <strong>{group.problems[0].original_filename ?? '报价文件'} · {userFieldLabel(group.fieldName)}</strong>
+                <strong>{group.problems[0].original_filename ?? 'Quotation Document'} · {userFieldLabel(group.fieldName)}</strong>
                 <span>{reviewProblemMessage(group.problems[0])}</span>
               </p>
             ))}
@@ -610,16 +610,16 @@ export function ReviewPage() {
       {actionable.length > 0 && data.status !== 'ABANDONED' && (
         <button className="button button-submit" type="button" disabled={!complete || !reviewIsStable || correction.isPending} onClick={submitAll}>
           {correction.isPending
-            ? '正在提交…'
+            ? 'Submitting…'
             : waitingForReview
-              ? '等待报价审核完成'
+              ? 'Waiting for quotation review to complete'
               : !versionsAligned
-                ? '正在同步最新数据…'
-                : '保存确认并重新计算'}
+                ? 'Synchronising the latest data…'
+                : 'Save confirmation and recalculate'}
         </button>
       )}
       {actionable.length > 0 && !complete && (
-        <div className="run-notice">请对每个待处理字段明确点击“已核对，采用此值”或修改。保留待处理的项目不会发起新一轮计算。</div>
+        <div className="run-notice">Confirm the current value or edit each field. Items left pending will not trigger a new calculation.</div>
       )}
       {correction.isError && <div className="form-error" role="alert">{errorMessage(correction.error)}</div>}
     </div>

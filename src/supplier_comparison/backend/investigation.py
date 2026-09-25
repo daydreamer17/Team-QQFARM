@@ -205,7 +205,7 @@ class LiveInvestigationPlanner:
             "CALL must include tool_name and arguments matching that exact tool schema. "
             "STOP must have empty arguments and no tool_name. Choose CALL's tool_name from the available "
             "tools and use the response_schema. STOP example: "
-            '{"action":"STOP","plan":[],"reason":"可用资料仍不足","arguments":{}}. '
+            '{"action":"STOP","plan":[],"reason":"Available evidence remains insufficient","arguments":{}}. '
             "Do not put facts, answers, status, SQL, file paths or recommendations in your response."
         )
         record = {"model_id": self.model_id, "status": "ERROR", "error_code": None, "usage": {}}
@@ -354,7 +354,7 @@ class InvestigationRunner:
                         finish(CaseStatus.RESOLVED, resolution)
                         break
                     should_finalize = getattr(tools, "should_finalize", lambda _: False)(case)
-                    if should_finalize and finalize_decision("已覆盖关键差异或定位待补材料，停止重复核查并汇总结论"):
+                    if should_finalize and finalize_decision("Key differences are covered or missing evidence has been identified; stop repeated checks and summarise the findings"):
                         break
                     remaining = self.limits.max_seconds - initial_age - (self.clock() - started)
                     # Keep one deterministic tool slot for the final brief. A decision
@@ -362,7 +362,7 @@ class InvestigationRunner:
                     decision_needs_reserved_slot = case.kind == "DECISION" and tool_calls >= self.limits.max_tool_calls - 1
                     if (calls >= self.limits.max_model_calls or tool_calls >= self.limits.max_tool_calls
                             or decision_needs_reserved_slot or remaining <= 0):
-                        if finalize_decision("核查预算将达上限，汇总已验证事实与尚缺材料"):
+                        if finalize_decision("The investigation budget is nearly exhausted; summarise verified facts and missing evidence"):
                             break
                         finish(CaseStatus.LIMIT_REACHED, "BUDGET_EXHAUSTED")
                         break
@@ -387,7 +387,7 @@ class InvestigationRunner:
                         break
                     case = case.model_copy(update={"plan": choice.plan or case.plan})
                     if choice.action == "STOP":
-                        if finalize_decision(choice.reason or "完成本轮核查并汇总已观察事实"):
+                        if finalize_decision(choice.reason or "Complete this investigation and summarise the observed facts"):
                             break
                         finalize = getattr(tools, "finalize_on_stop", None)
                         if callable(finalize):
@@ -417,7 +417,7 @@ class InvestigationRunner:
                             if not case.known_facts.get("decision_stop_retried"):
                                 case = case.model_copy(update={"known_facts": case.known_facts | {
                                     "decision_stop_retried": True,
-                                    "decision_stop_feedback": "尚未核查任何报价、历史或制度依据；请先选择一项相关工具，或说明来源确实不可用。",
+                                    "decision_stop_feedback": "No quotation, historical, or policy evidence has been reviewed. Select a relevant tool first or state that the source is genuinely unavailable.",
                                 }})
                                 save(case)
                                 continue

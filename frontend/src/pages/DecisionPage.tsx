@@ -5,7 +5,7 @@ import { RunPanel } from '../components/RunPanel'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 
 function errorMessage(error: unknown) {
-  return error instanceof ApiClientError ? error.message : '任务读取失败。'
+  return error instanceof ApiClientError ? error.message : 'Unable to load the task.'
 }
 
 export function DecisionPage() {
@@ -49,7 +49,7 @@ export function DecisionPage() {
     },
   })
 
-  if (task.isPending) return <section className="card loading-panel">正在读取决策工作区…</section>
+  if (task.isPending) return <section className="card loading-panel">Loading decision workspace…</section>
   if (task.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error)}</section>
   const expectedRerunReady = expectedGraphRunId !== null
     && task.data.current_graph_run_id === expectedGraphRunId
@@ -76,7 +76,7 @@ export function DecisionPage() {
         taskId={data.task_id}
         scenarioId={data.scenario_id}
         title={data.task_name}
-        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} 份正式报价`}
+        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${data.quotes.length} submitted quotations`}
         status={data.status}
         revision={data.task_revision}
         resultId={data.current_result_id}
@@ -90,36 +90,36 @@ export function DecisionPage() {
 
       <section className="card workspace-page-lead decision-section-lead">
         <div className="workspace-page-lead-copy">
-          <h2>决策比较</h2>
+          <h2>Decision Comparison</h2>
           {expectedRevision !== null && !data.current_result_id && (
-            <p>正在生成第 {expectedRevision} 版决策结果，完成后将自动打开。</p>
+            <p>Generating decision results for Revision {expectedRevision}. The result will open automatically when ready.</p>
           )}
           {expectedGraphRunId !== null && (data.status === 'QUEUED' || data.status === 'RUNNING') && (
-            <p>正在按当前代码重新分析；旧结果仍保留为历史记录，新结果完成后将自动打开。</p>
+            <p>Reanalysing with the current code. The previous result remains in history, and the new result will open automatically.</p>
           )}
         </div>
       </section>
 
-      {complianceBlocked ? <section className="card decision-empty-state"><h2>请先处理制度检查</h2><p>核对材料并确认当前版本后，即可进入决策比较。</p><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>前往制度检查</Link></section> : data.quotes.length === 0 ? (
+      {complianceBlocked ? <section className="card decision-empty-state"><h2>Complete the compliance review first</h2><p>Review the evidence and confirm the current revision before comparing decisions.</p><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>Go to compliance review</Link></section> : data.quotes.length === 0 ? (
         <section className="card decision-empty-state">
-          <div><h2>暂无可比较的报价</h2></div>
-          <p>请先完成报价审核并正式提交。</p>
-          <Link className="button button-submit" to={`/tasks/${taskId}/quotes/new`}>前往报价审核</Link>
+          <div><h2>No comparable quotations</h2></div>
+          <p>Review and submit a quotation first.</p>
+          <Link className="button button-submit" to={`/tasks/${taskId}/quotes/new`}>Go to quotation review</Link>
         </section>
       ) : (
         <>
           {quoteBlocked && (
             <div className="run-notice decision-blocker-link">
-              报价字段或证据仍有阻塞项。
+              Quotation fields or evidence still contain blocking issues.
               <Link to={batchReviewBlocked ? `/tasks/${taskId}/review` : `/tasks/${taskId}/quotes/new`}>
-                {batchReviewBlocked ? '进入待处理事项' : '返回报价与证据处理'}
+                {batchReviewBlocked ? 'Go to action items' : 'Return to quotations and evidence'}
               </Link>
             </div>
           )}
           {policyBlocked && (
             <div className="run-notice decision-blocker-link">
-              制度检索需要人工复核。
-              <Link to={`/tasks/${taskId}/compliance`}>进入合规页面处理</Link>
+              Policy retrieval requires human review.
+              <Link to={`/tasks/${taskId}/compliance`}>Open compliance review</Link>
             </div>
           )}
           <RunPanel task={data} onRefresh={() => void task.refetch()} />

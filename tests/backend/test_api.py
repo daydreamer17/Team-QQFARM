@@ -1097,7 +1097,7 @@ def test_summary_is_bound_to_current_result_and_worker_output(
     assert markdown.status_code == 200
     assert markdown.headers["content-type"].startswith("text/markdown")
     assert "filename*=UTF-8''" in markdown.headers["content-disposition"]
-    assert "## 2. 采购需求" in markdown.text
+    assert "## 2. Procurement Requirements" in markdown.text
     assert "QW-MCU9-DEMO" in markdown.text
     word = http.get(
         f"/api/v1/tasks/{task['task_id']}/summaries/{report['summary_id']}/exports",
@@ -1111,7 +1111,7 @@ def test_summary_is_bound_to_current_result_and_worker_output(
         assert "word/document.xml" in archive.namelist()
         document_xml = archive.read("word/document.xml")
         ElementTree.fromstring(document_xml)
-        assert "采购需求" in document_xml.decode("utf-8")
+        assert "Procurement Requirements" in document_xml.decode("utf-8")
     replacement = service.create_summary(
         task["task_id"],
         expected_task_revision=1,
@@ -1547,8 +1547,8 @@ def test_decision_brief_keeps_confirmed_history_risk_separate_from_unresolved_it
     advantages, risks = tools._verified_findings(
         [observation], {"criterion": "FASTEST_CONFIRMED_DELIVERY"},
     )
-    assert any("历史准时率 100.00%" in item["summary"] for item in advantages)
-    assert any("综合评级 C" in item["summary"] and "历史拒收率 9.09%" in item["summary"] for item in risks)
+    assert any("historical on-time rate 100.00%" in item["summary"] for item in advantages)
+    assert any("overall grade C" in item["summary"] and "historical rejection rate 9.09%" in item["summary"] for item in risks)
 
 
 @pytest.mark.parametrize(("criterion", "expected_tools", "expected_focus", "fallback_tool"), [
@@ -2392,7 +2392,7 @@ def test_natural_language_intent_requires_confirmation_before_creating_scenario(
         'excluded_supplier_ids': ['SUP-024'],
         'cost_tolerance_amount': '300.00',
     }
-    assert '不会直接修改正式需求' in intent['confirmation_text']
+    assert 'official requirements will not be changed directly' in intent['confirmation_text']
     assert intent['attempts'] == 1
     assert calls[0][1]['available_supplier_ids'] == ['SUP-023', 'SUP-024']
     assert service.list_decision_scenarios(task['task_id'])['items'] == []
@@ -2733,20 +2733,20 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
     cases = [
         ('我就想在10月18号那天收到货，我就那天有时间',
          {'assistant_text': '', 'reference_ids': [], 'changes': None, 'clarification': 'EXACT_DELIVERY_DAY'},
-         '不能保证恰好当天', False),
+         'cannot guarantee delivery on one exact day', False),
         ('我想要成本最低',
          {'assistant_text': '', 'reference_ids': [], 'changes': {'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST'}},
-         '与当前设置一致', False),
+         'matches the current settings', False),
         ('改成到货最快优先',
          {'assistant_text': '错误说明：总成本为 SGD 1（RESULT:fake）。', 'reference_ids': ['RESULT:fake'], 'changes': {'primary_criterion': 'FASTEST_CONFIRMED_DELIVERY'}},
-         '待确认', True),
+         'awaiting confirmation', True),
         ('总价最低优先；如果比最低价最多贵 10 新币，就在这个范围内选最快到货的。',
          {'assistant_text': '错误说明：候选上限为 SGD 1（RESULT:fake）。',
           'reference_ids': ['RESULT:fake'], 'changes': {
               'primary_criterion': 'LOWEST_CONFIRMED_TOTAL_COST',
               'secondary_criterion': 'FASTEST_CONFIRMED_DELIVERY',
               'cost_tolerance_amount': '10'}},
-         '候选上限为 SGD 7,010.00', True),
+         'candidate ceiling is SGD 7,010.00', True),
     ]
     for index, (question, response, expected_text, has_intent) in enumerate(cases):
         routed_response = {
@@ -2765,7 +2765,7 @@ def test_conversation_clarification_noop_and_proposal_through_worker(batch_revie
         assert completed['job_status'] == 'SUCCEEDED'
         assert expected_text in completed['message']['content']
         assert bool(completed['message']['decision_intent_id']) == has_intent
-        assert '错误说明' not in completed['message']['content']
+        assert 'Error explanation' not in completed['message']['content']
         assert 'RESULT:fake' not in str(completed['message'])
     intent_id = completed['message']['decision_intent_id']
     confirmed = http.post(

@@ -278,17 +278,17 @@ def simulate_requirement_change(request: DecisionImpactRequest, changes: Require
 
 
 def draft_clarification(gap: QuoteSelectionGap) -> dict[str, Any]:
-    lines = ["请确认以下报价条件；本函为沟通草稿，未发送，不代表贵司已承诺："]
+    lines = ["Please confirm the following quotation conditions. This is an unsent communication draft and does not represent a supplier commitment:"]
     if gap.delivery_days_late:
-        lines.append(f"在价格及其他报价条件不变、没有加急费的前提下，能否在 {gap.target_arrival_deadline.isoformat()} 前到货（目前超期 {gap.delivery_days_late} 天）？")
+        lines.append(f"With price and all other quotation terms unchanged and no expedite fee, can delivery be completed by {gap.target_arrival_deadline.isoformat()}? The current estimate is {gap.delivery_days_late} days late.")
     if gap.budget_excess:
-        lines.append(f"当前已确认总成本超预算 {gap.budget_excess}；请提供可核对的新报价，不直接修改原报价金额。")
+        lines.append(f"The confirmed total cost exceeds budget by {gap.budget_excess}. Please provide a verifiable new quotation rather than changing the original quotation amount directly.")
     if gap.total_cost_reduction_to_tie_other:
-        lines.append(f"与另一家当前可行方案总成本持平需降低 {gap.total_cost_reduction_to_tie_other}；持平不代表唯一优选。")
+        lines.append(f"Matching another currently feasible option requires a total-cost reduction of {gap.total_cost_reduction_to_tie_other}. A tie does not imply a unique preference.")
     if gap.pending_reasons:
         names = sorted({name for reason in gap.pending_reasons for name in reason.fields})
-        lines.append("请补充或核对待确认项：" + "、".join(names) + "。")
+        lines.append("Please add or review these pending items: " + ", ".join(names) + ".")
     if gap.failed_reasons:
-        lines.append("还需处理全部已知不符合项：" + "、".join(sorted({r.code for r in gap.failed_reasons})) + "。")
-    lines.append("如改善交付需要增加费用或改变其他条件，请重新报价；任何入选结论须重新审核、计算并满足制度门禁。")
+        lines.append("All known non-compliant items must also be resolved: " + ", ".join(sorted({r.code for r in gap.failed_reasons})) + ".")
+    lines.append("If improving delivery requires extra fees or other changed terms, provide a revised quotation. Any selection outcome must be reviewed, recalculated, and pass policy gates.")
     return {"quote_id": gap.quote_id, "draft_only": True, "sent": False, "text": "\n".join(lines)}

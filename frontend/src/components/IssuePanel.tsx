@@ -10,18 +10,18 @@ interface IssuePanelProps {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof ApiClientError ? error.message : '问题回答未保存。'
+  return error instanceof ApiClientError ? error.message : 'The response was not saved.'
 }
 
 function issueTypeLabel(issueType: string) {
   const labels: Record<string, string> = {
-    POLICY_EVIDENCE_REVIEW: '制度证据需要重新检索',
-    CONFIRM_MISSING: '确认原报价未提供信息',
-    SHIPPING_AMOUNT: '补充已确认的运费',
-    BATCH_FIELD_REVIEW: '集中核对报价字段',
-    PAYMENT_INFORMATION: '补充付款账期起算信息',
+    POLICY_EVIDENCE_REVIEW: 'Policy evidence retrieval requires attention',
+    CONFIRM_MISSING: 'Confirm information missing from the source quotation',
+    SHIPPING_AMOUNT: 'Enter confirmed shipping fee',
+    BATCH_FIELD_REVIEW: 'Review quotation fields together',
+    PAYMENT_INFORMATION: 'Enter payment-term start information',
   }
-  return labels[issueType] ?? '需要人工确认'
+  return labels[issueType] ?? 'Human confirmation required'
 }
 
 export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
@@ -77,20 +77,20 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
     <section className="card issue-panel">
       <div>
         <p className="eyebrow">INPUT REQUIRED</p>
-        <h2>需要人工确认</h2>
+        <h2>Human confirmation required</h2>
         <p>{issue.question}</p>
       </div>
 
       <dl className="job-summary">
-        <div><dt>供应商</dt><dd>{task.quotes.find((quote) => quote.quote_id === issue.quote_id)?.supplier_id ?? '—'}</dd></div>
-        <div><dt>需要确认</dt><dd>{issue.field_name ? fieldLabel(issue.field_name) : '制度依据'}</dd></div>
-        <div><dt>处理事项</dt><dd>{issueTypeLabel(issue.issue_type)}</dd></div>
+        <div><dt>Supplier</dt><dd>{task.quotes.find((quote) => quote.quote_id === issue.quote_id)?.supplier_id ?? '—'}</dd></div>
+        <div><dt>Action Required</dt><dd>{issue.field_name ? fieldLabel(issue.field_name) : 'Policy Evidence'}</dd></div>
+        <div><dt>Action item</dt><dd>{issueTypeLabel(issue.issue_type)}</dd></div>
       </dl>
 
       {issue.issue_type === 'POLICY_EVIDENCE_REVIEW' && (
         <div className="issue-action policy-issue-action">
           <p>
-            仅在网络、模型服务或临时索引故障已经修复时重试。若制度内容或索引版本发生变化，需要新建任务并重新绑定制度版本。
+            Retry only after a network, model-service or temporary-index fault has been resolved. If the policy content or index version changed, create a new task and bind the new policy version.
           </p>
           <div className="policy-issue-statuses">
             {Object.entries(issue.answer_schema.retrieval_statuses ?? {}).map(([controlCode, status]) => (
@@ -108,16 +108,16 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
             disabled={answer.isPending}
             onClick={() => answer.mutate({ answer_type: 'RETRY_POLICY_RETRIEVAL' })}
           >
-            {answer.isPending ? '正在恢复分析…' : '修复后重新检索'}
+            {answer.isPending ? 'Resuming analysis…' : 'Retrieve again after repair'}
           </button>
-          <small>当前任务仍固定使用原制度版本与索引版本。</small>
+          <small>This task remains bound to its original policy and index versions.</small>
         </div>
       )}
 
       {issue.issue_type === 'CONFIRM_MISSING' && (
         <div className="issue-action">
           <p>
-            这里只确认“文档没有给出可用于计算的运费金额”，不会把未知运费当作 0。
+            This confirms only that the document provides no calculable shipping amount. Unknown shipping is never treated as zero.
           </p>
           <button
             className="button button-submit"
@@ -125,7 +125,7 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
             disabled={answer.isPending}
             onClick={() => answer.mutate({ answer_type: 'CONFIRM_MISSING' })}
           >
-            {answer.isPending ? '正在保存…' : '确认缺少可计算的运费金额'}
+            {answer.isPending ? 'Saving…' : 'Confirm missing calculable shipping amount'}
           </button>
         </div>
       )}
@@ -133,32 +133,32 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
       {issue.issue_type === 'SHIPPING_AMOUNT' && (
         <form className="issue-action" onSubmit={submitAmount}>
           <p>
-            请输入从供应商补充确认得到的金额。没有得到金额时不要填 0，也不要猜测。
+            Enter only an amount confirmed by the supplier. Do not enter zero or guess when no amount was provided.
           </p>
           <label>
-            运费金额（{currency}）
+            Shipping fee amount ({currency})
             <input
               required
               inputMode="decimal"
               pattern="\d+(?:\.\d{1,4})?"
-              placeholder="例如 125.00"
+              placeholder="For example, 125.00"
               value={amount}
               onChange={(event) => setAmount(event.target.value)}
             />
           </label>
           <button className="button button-submit" type="submit" disabled={answer.isPending}>
-            {answer.isPending ? '正在保存…' : '保存金额并继续'}
+            {answer.isPending ? 'Saving…' : 'Save amount and continue'}
           </button>
         </form>
       )}
 
       {issue.issue_type === 'PAYMENT_INFORMATION' && (
         <form className="issue-action" onSubmit={submitPaymentInformation}>
-          <p>请填写从报价文件或供应商补充确认得到的起算信息。该回答会单独审计，不会改写原始付款条款。</p>
-          <label><span>账期起算事件</span><select value="INVOICE_DATE" disabled><option value="INVOICE_DATE">发票日期</option></select></label>
-          <label><span>信息来源</span><select value={paymentSourceType} onChange={(event) => setPaymentSourceType(event.target.value as typeof paymentSourceType)}><option value="SUPPLIER_CONFIRMATION">供应商确认</option><option value="DOCUMENT_CLARIFICATION">文件补充说明</option><option value="USER_INPUT">采购人员补充</option></select></label>
-          <label><span>补充说明</span><textarea required maxLength={1000} value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} placeholder="例如：供应商邮件确认 Net 45 从发票日期起算" /></label>
-          <button className="button button-submit" type="submit" disabled={answer.isPending || !paymentNote.trim()}>{answer.isPending ? '正在保存…' : '保存并继续分析'}</button>
+          <p>Enter start information from the quotation or supplier confirmation. This response is audited separately and does not rewrite the original payment terms.</p>
+          <label><span>Payment-term start event</span><select value="INVOICE_DATE" disabled><option value="INVOICE_DATE">Invoice date</option></select></label>
+          <label><span>Information source</span><select value={paymentSourceType} onChange={(event) => setPaymentSourceType(event.target.value as typeof paymentSourceType)}><option value="SUPPLIER_CONFIRMATION">Supplier confirmation</option><option value="DOCUMENT_CLARIFICATION">Document clarification</option><option value="USER_INPUT">Buyer input</option></select></label>
+          <label><span>Note</span><textarea required maxLength={1000} value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} placeholder="For example: supplier email confirms Net 45 from invoice date" /></label>
+          <button className="button button-submit" type="submit" disabled={answer.isPending || !paymentNote.trim()}>{answer.isPending ? 'Saving…' : 'Save and continue analysis'}</button>
         </form>
       )}
 

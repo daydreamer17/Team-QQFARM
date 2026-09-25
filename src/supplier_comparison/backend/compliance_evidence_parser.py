@@ -163,7 +163,7 @@ def parse_compliance_evidence(
                 facts["approval_amount"] = amount.group(2)
 
     source = _label(text, "Source", "来源")
-    facts["source_refs"] = [source] if source else [f"上传文件：{Path(filename).name}"]
+    facts["source_refs"] = [source] if source else [f"Uploaded file: {Path(filename).name}"]
     expected = {
         "APPROVED_SUPPLIER": {"material_number", "supplier_id", "outcome"},
         "ROHS_COMPLIANCE": {"material_number", "supplier_id", "manufacturer", "manufacturer_part_number", "outcome"},

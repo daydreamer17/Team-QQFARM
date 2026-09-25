@@ -27,23 +27,23 @@ export function TaskPage() {
   })
 
   if (task.isPending) {
-    return <section className="card loading-panel">正在读取任务…</section>
+    return <section className="card loading-panel">Loading tasks…</section>
   }
 
   if (task.isError) {
     const message = task.error instanceof ApiClientError
       ? task.error.message
-      : '任务读取失败。'
+      : 'Unable to load the task.'
     return (
       <section className="card error-panel" role="alert">
         <p className="eyebrow">TASK ERROR</p>
-        <h1>无法读取任务</h1>
+        <h1>Unable to load task</h1>
         <p>{message}</p>
         <div className="inline-actions">
           <button className="button button-secondary" type="button" onClick={() => void task.refetch()}>
-            重新读取
+            Reload
           </button>
-          <Link className="button button-secondary" to="/">返回工作台</Link>
+          <Link className="button button-secondary" to="/">Back to workspace</Link>
         </div>
       </section>
     )
@@ -62,7 +62,7 @@ export function TaskPage() {
         taskId={task.data.task_id}
         scenarioId={task.data.scenario_id}
         title={task.data.task_name}
-        subtitle={`${requirement.required_quantity} ${requirement.quantity_unit} · ${requirement.currency} · 最晚交付 ${requirement.delivery_deadline}`}
+        subtitle={`${requirement.required_quantity} ${requirement.quantity_unit} · ${requirement.currency} · Delivery by ${requirement.delivery_deadline}`}
         status={task.data.status}
         revision={task.data.task_revision}
         resultId={task.data.current_result_id}
@@ -76,38 +76,38 @@ export function TaskPage() {
 
       <section className="card workspace-page-lead">
         <div className="workspace-page-lead-copy">
-          <h2>采购需求</h2>
-          <p>查看当前版本确认的采购范围与决策条件。</p>
+          <h2>Procurement Requirements</h2>
+          <p>View the confirmed procurement scope and decision settings for the current revision.</p>
         </div>
       </section>
 
       <section>
         <dl className="detail-grid">
-          <div><dt>制造商</dt><dd>{requirement.manufacturer}</dd></div>
-          <div><dt>制造商料号</dt><dd>{requirement.manufacturer_part_number}</dd></div>
-          <div><dt>封装 / 版本</dt><dd>{requirement.package} / {requirement.revision}</dd></div>
-          <div><dt>物料状态</dt><dd>{requirement.condition}</dd></div>
-          <div><dt>允许替代料</dt><dd>{requirement.allow_substitutes ? '是' : '否'}</dd></div>
-          <div><dt>需求数量</dt><dd>{requirement.required_quantity} {requirement.quantity_unit}</dd></div>
-          <div><dt>预算</dt><dd>{requirement.currency} {requirement.budget_amount}</dd></div>
-          <div><dt>预算包含运费</dt><dd>{requirement.includes_shipping ? '是' : '否'}</dd></div>
-          <div><dt>成本比较口径</dt><dd>{requirement.tax_mode}</dd></div>
-          <div><dt>其他费用要求</dt><dd>{requirement.other_fees_required ? '需要' : '不需要'}</dd></div>
-          <div><dt>计划下单日期</dt><dd>{requirement.planned_order_date ?? '—'}</dd></div>
-          <div><dt>交付截止日期</dt><dd>{requirement.delivery_deadline}</dd></div>
-          <div><dt>交付地点</dt><dd>{requirement.delivery_location}</dd></div>
-          <div><dt>主要排序偏好</dt><dd>{requirement.ranking_preference}</dd></div>
-          <div><dt>次要偏好</dt><dd>{requirement.secondary_preference ?? '—'}</dd></div>
-          <div><dt>制度绑定</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.policy_set_version} / ${task.data.policy_binding.policy_index_version}` : '未绑定'}</dd></div>
-          <div><dt>制度范围</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.category} · ${task.data.policy_binding.region}` : '未执行制度检索'}</dd></div>
+          <div><dt>Manufacturer</dt><dd>{requirement.manufacturer}</dd></div>
+          <div><dt>Manufacturer part number</dt><dd>{requirement.manufacturer_part_number}</dd></div>
+          <div><dt>Package / revision</dt><dd>{requirement.package} / {requirement.revision}</dd></div>
+          <div><dt>Item condition</dt><dd>{requirement.condition}</dd></div>
+          <div><dt>Allow Substitutes</dt><dd>{requirement.allow_substitutes ? 'Yes' : 'No'}</dd></div>
+          <div><dt>Required Quantity</dt><dd>{requirement.required_quantity} {requirement.quantity_unit}</dd></div>
+          <div><dt>Budget</dt><dd>{requirement.currency} {requirement.budget_amount}</dd></div>
+          <div><dt>Budget includes shipping</dt><dd>{requirement.includes_shipping ? 'Yes' : 'No'}</dd></div>
+          <div><dt>Cost Comparison Basis</dt><dd>{requirement.tax_mode}</dd></div>
+          <div><dt>Other Fee Requirement</dt><dd>{requirement.other_fees_required ? 'Required' : 'Not required'}</dd></div>
+          <div><dt>Planned Order Date</dt><dd>{requirement.planned_order_date ?? '—'}</dd></div>
+          <div><dt>Delivery Deadline</dt><dd>{requirement.delivery_deadline}</dd></div>
+          <div><dt>Delivery Location</dt><dd>{requirement.delivery_location}</dd></div>
+          <div><dt>Primary ranking criterion</dt><dd>{requirement.ranking_preference}</dd></div>
+          <div><dt>Secondary ranking criterion</dt><dd>{requirement.secondary_preference ?? '—'}</dd></div>
+          <div><dt>Policy binding</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.policy_set_version} / ${task.data.policy_binding.policy_index_version}` : 'Not bound'}</dd></div>
+          <div><dt>Policy scope</dt><dd>{task.data.policy_binding ? `${task.data.policy_binding.category} · ${task.data.policy_binding.region}` : 'Policy retrieval not run'}</dd></div>
         </dl>
         <div className="requirement-actions">
           <div className="inline-actions">
-            {task.data.status !== 'ABANDONED' && <Link className="button button-secondary" to={`/tasks/${taskId}/edit`}>修改采购需求</Link>}
-            {task.data.status !== 'ABANDONED' && <button className="button button-danger" type="button" onClick={() => setShowAbandon(true)}>废弃任务</button>}
-            {task.data.status === 'ABANDONED' && <span className="status-pill status-muted">任务已软废弃，历史记录保持只读</span>}
+            {task.data.status !== 'ABANDONED' && <Link className="button button-secondary" to={`/tasks/${taskId}/edit`}>Edit Procurement Requirements</Link>}
+            {task.data.status !== 'ABANDONED' && <button className="button button-danger" type="button" onClick={() => setShowAbandon(true)}>Abandon Task</button>}
+            {task.data.status === 'ABANDONED' && <span className="status-pill status-muted">This task has been abandoned. Historical records remain read-only.</span>}
           </div>
-          {showAbandon && <div className="card abandon-task-panel"><strong>确认废弃任务</strong><p>该操作不可恢复，但不会删除报价、原件、结果和审计记录。</p><label className="field"><span>废弃理由</span><textarea value={abandonReason} onChange={(event) => setAbandonReason(event.target.value)} minLength={3} maxLength={1000} /></label><div className="inline-actions"><button className="button button-secondary" type="button" onClick={() => setShowAbandon(false)}>取消</button><button className="button button-danger" type="button" disabled={abandonReason.trim().length < 3 || abandon.isPending} onClick={() => { if (window.confirm('确认将任务永久设为只读废弃状态吗？')) abandon.mutate() }}>{abandon.isPending ? '正在废弃…' : '确认废弃'}</button></div>{abandon.isError && <div className="form-error">{abandon.error instanceof ApiClientError ? abandon.error.message : '废弃任务失败。'}</div>}</div>}
+          {showAbandon && <div className="card abandon-task-panel"><strong>Confirm task abandonment</strong><p>This action cannot be reversed, but quotations, source documents, results and audit records will be retained.</p><label className="field"><span>Reason for abandonment</span><textarea value={abandonReason} onChange={(event) => setAbandonReason(event.target.value)} minLength={3} maxLength={1000} /></label><div className="inline-actions"><button className="button button-secondary" type="button" onClick={() => setShowAbandon(false)}>Cancel</button><button className="button button-danger" type="button" disabled={abandonReason.trim().length < 3 || abandon.isPending} onClick={() => { if (window.confirm('Permanently set this task to read-only abandoned status?')) abandon.mutate() }}>{abandon.isPending ? 'Abandoning…' : 'Confirm abandonment'}</button></div>{abandon.isError && <div className="form-error">{abandon.error instanceof ApiClientError ? abandon.error.message : 'Unable to abandon task.'}</div>}</div>}
         </div>
       </section>
     </div>

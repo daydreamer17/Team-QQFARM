@@ -8,18 +8,18 @@ import { TablePagination } from '../components/TablePagination'
 const EMPTY_TASKS: TaskListItem[] = []
 
 const statusLabels: Record<string, string> = {
-  DRAFT: '草稿',
-  QUEUED: '等待执行',
-  RUNNING: '分析中',
-  NEEDS_INPUT: '等待确认',
-  COMPLETED: '已完成',
-  FAILED: '执行失败',
-  ABANDONED: '已废弃',
+  DRAFT: 'Draft',
+  QUEUED: 'Queued',
+  RUNNING: 'Analysing',
+  NEEDS_INPUT: 'Action required',
+  COMPLETED: 'Completed',
+  FAILED: 'Failed',
+  ABANDONED: 'Abandoned',
 }
 
 function getErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) return error.message
-  return '后端连接检查失败。'
+  return 'Backend connectivity check failed.'
 }
 
 function taskTitle(task: TaskListItem) {
@@ -36,7 +36,7 @@ function statusTone(status: string) {
 function displayDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -45,10 +45,10 @@ function displayDate(value: string) {
 }
 
 function displayDay(value: string | null) {
-  if (!value) return '未设置'
+  if (!value) return 'Not set'
   const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -96,17 +96,17 @@ export function OverviewPage() {
     <div className="page-stack task-center-page">
       <section className="page-heading app-page-heading task-center-heading">
         <div>
-          <h1>任务中心</h1>
-          <p>查看和管理采购任务。</p>
+          <h1>Task Centre</h1>
+          <p>View and manage procurement tasks.</p>
         </div>
-        <Link className="button button-submit" to="/tasks/new">＋ 新建采购任务</Link>
+        <Link className="button button-submit" to="/tasks/new">+ Create procurement task</Link>
       </section>
 
-      <section className="task-center-metrics" aria-label="任务概况">
-        <article><span>全部任务</span><strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)}</strong></article>
-        <article><span>待我处理</span><strong>{waitingCount}</strong></article>
-        <article><span>运行中</span><strong>{runningCount}</strong></article>
-        <article><span>已完成</span><strong>{completedCount}</strong></article>
+      <section className="task-center-metrics" aria-label="Task overview">
+        <article><span>All tasks</span><strong>{Object.values(counts).reduce((sum, count) => sum + count, 0)}</strong></article>
+        <article><span>Action required</span><strong>{waitingCount}</strong></article>
+        <article><span>In progress</span><strong>{runningCount}</strong></article>
+        <article><span>Completed</span><strong>{completedCount}</strong></article>
       </section>
 
       {!isReady && !health.isPending && (
@@ -115,57 +115,57 @@ export function OverviewPage() {
 
       <section className="task-list-panel">
         <div className="section-heading task-list-heading">
-          <h2>最近采购任务</h2>
+          <h2>Recent Procurement Tasks</h2>
         </div>
 
         <div className="task-list-tools">
           <label className="task-search">
-            <span className="visually-hidden">搜索采购任务</span>
+            <span className="visually-hidden">Search procurement tasks</span>
             <span className="task-search-icon" aria-hidden="true">⌕</span>
             <input
               type="search"
-              placeholder="搜索任务名称、制造商或料号"
+              placeholder="Search by task name, manufacturer or part number"
               value={search}
               onChange={(event) => updateSearch(event.target.value)}
             />
           </label>
           <label>
-            <span>状态</span>
+            <span>Status</span>
             <select value={statusFilter} onChange={(event) => { setOffset(0); setStatusFilter(event.target.value) }}>
-              <option value="ALL">全部状态</option>
-              <option value="DRAFT">草稿</option>
-              <option value="QUEUED">等待执行</option>
-              <option value="RUNNING">分析中</option>
-              <option value="NEEDS_INPUT">等待确认</option>
-              <option value="COMPLETED">已完成</option>
-              <option value="FAILED">执行失败</option>
-              <option value="ABANDONED">已废弃</option>
+              <option value="ALL">All statuses</option>
+              <option value="DRAFT">Draft</option>
+              <option value="QUEUED">Queued</option>
+              <option value="RUNNING">Analysing</option>
+              <option value="NEEDS_INPUT">Action required</option>
+              <option value="COMPLETED">Completed</option>
+              <option value="FAILED">Failed</option>
+              <option value="ABANDONED">Abandoned</option>
             </select>
           </label>
           <label>
-            <span>排列</span>
+            <span>Sort by</span>
             <select value={sortBy} onChange={(event) => { setOffset(0); setSortBy(event.target.value as TaskSort) }}>
-              <option value="updated_desc">最近更新</option>
-              <option value="planned_asc">计划下单：从近到远</option>
-              <option value="planned_desc">计划下单：从远到近</option>
-              <option value="created_desc">最近创建</option>
+              <option value="updated_desc">Recently updated</option>
+              <option value="planned_asc">Planned order date: earliest first</option>
+              <option value="planned_desc">Planned order date: latest first</option>
+              <option value="created_desc">Recently created</option>
             </select>
           </label>
         </div>
 
-        {tasks.isPending && <div className="task-center-empty">正在读取任务…</div>}
-        {tasks.isError && <div className="task-center-empty">任务列表读取失败，请稍后重试。</div>}
+        {tasks.isPending && <div className="task-center-empty">Loading tasks…</div>}
+        {tasks.isError && <div className="task-center-empty">Unable to load the task list. Please try again later.</div>}
         {!tasks.isPending && !tasks.isError && items.length === 0 && !serverQuery && statusFilter === 'ALL' && (
           <div className="task-center-empty">
-            <strong>还没有采购任务</strong>
-            <p>创建第一项需求后，就可以上传供应商 PDF 或 CSV 报价。</p>
-            <Link className="button button-secondary" to="/tasks/new">创建任务</Link>
+            <strong>No procurement tasks yet</strong>
+            <p>Create your first requirements record, then upload supplier quotations in PDF or CSV format.</p>
+            <Link className="button button-secondary" to="/tasks/new">Create task</Link>
           </div>
         )}
         {total === 0 && (serverQuery || statusFilter !== 'ALL') && (
           <div className="task-center-empty task-center-empty-filtered">
-            <strong>没有匹配的采购任务</strong>
-            <p>可以更换搜索词或状态筛选条件。</p>
+            <strong>No matching procurement tasks</strong>
+            <p>Try a different search term or status filter.</p>
           </div>
         )}
         {visibleItems.length > 0 && (
@@ -173,12 +173,12 @@ export function OverviewPage() {
             <table className="task-center-table">
               <thead>
                 <tr>
-                  <th>任务</th>
-                  <th>物料</th>
-                  <th>当前状态</th>
-                  <th>计划下单</th>
-                  <th>最近更新</th>
-                  <th aria-label="操作" />
+                  <th>Task</th>
+                  <th>Item</th>
+                  <th>Current status</th>
+                  <th>Planned order date</th>
+                  <th>Recently updated</th>
+                  <th aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -191,7 +191,7 @@ export function OverviewPage() {
                     <td><span className={`status-pill ${statusTone(task.status)}`}>{statusLabels[task.status] ?? task.status}</span></td>
                     <td>{displayDay(task.planned_order_date)}</td>
                     <td>{displayDate(task.updated_at)}</td>
-                    <td><Link className="table-open-action" to={`/tasks/${task.task_id}`}>打开</Link></td>
+                    <td><Link className="table-open-action" to={`/tasks/${task.task_id}`}>Open</Link></td>
                   </tr>
                 ))}
               </tbody>
@@ -200,17 +200,17 @@ export function OverviewPage() {
         )}
         {total > 0 && <div className="task-center-pagination">
           <label className="task-page-size">
-            <span>每页</span>
+            <span>Per page</span>
             <select
-              aria-label="每页任务数"
+              aria-label="Tasks per page"
               value={pageSize}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as 10 | 15)
                 setOffset(0)
               }}
             >
-              <option value={10}>10 条</option>
-              <option value={15}>15 条</option>
+              <option value={10}>10</option>
+              <option value={15}>15</option>
             </select>
           </label>
           <TablePagination

@@ -46,37 +46,37 @@ const feeAmountFields: Record<string, string> = {
 }
 
 const resolvingFeeStatuses = [
-  ['FREE', '免费'],
-  ['INCLUDED', '已包含在报价中'],
-  ['NOT_APPLICABLE', '明确不适用／无此费用'],
-  ['KNOWN_AMOUNT', '已有单独费用金额'],
+  ['FREE', 'Free'],
+  ['INCLUDED', 'Included in quotation'],
+  ['NOT_APPLICABLE', 'Explicitly not applicable / no such fee'],
+  ['KNOWN_AMOUNT', 'A separate fee amount is available'],
 ] as const
 
 const fieldLabels: Record<string, string> = {
-  unit_price: '单价',
-  moq_quantity: '最低订购量（MOQ）',
-  shipping_fee_status: '运费状态',
-  shipping_fee_amount: '运费金额',
-  other_fees_status: '其他费用状态',
-  other_fees_amount: '其他费用金额',
-  tax_mode: '税费方式',
-  manufacturer_part_number: '制造商料号',
-  manufacturer_revision: '物料版本',
-  package: '封装',
-  condition: '物料状态',
-  currency: '币种',
-  packaging_type: '包装类型',
-  units_per_pack: '每包装数量',
-  order_multiple_units: '订购倍数',
-  lead_time_days: '交期天数',
-  day_basis: '交期日历口径',
-  delivery_semantics: '交付语义',
-  start_event: '交期起算事件',
-  start_date: '交期起算日期',
-  delivery_date: '明确交付日期',
-  payment_terms: '付款条件',
-  quote_date: '报价日期',
-  valid_until: '报价有效期',
+  unit_price: 'Unit Price',
+  moq_quantity: 'Minimum order quantity (MOQ)',
+  shipping_fee_status: 'Shipping Fee Status',
+  shipping_fee_amount: 'Shipping Fee Amount',
+  other_fees_status: 'Other Fees Status',
+  other_fees_amount: 'Other Fees Amount',
+  tax_mode: 'Tax Treatment',
+  manufacturer_part_number: 'Manufacturer part number',
+  manufacturer_revision: 'Item revision',
+  package: 'Package',
+  condition: 'Item condition',
+  currency: 'Currency',
+  packaging_type: 'Packaging type',
+  units_per_pack: 'Units per Pack',
+  order_multiple_units: 'Order Multiple',
+  lead_time_days: 'Lead Time (Days)',
+  day_basis: 'Day Basis',
+  delivery_semantics: 'Delivery semantics',
+  start_event: 'Lead-time Start Event',
+  start_date: 'Lead-time start date',
+  delivery_date: 'Explicit delivery date',
+  payment_terms: 'Payment terms',
+  quote_date: 'Quotation Date',
+  valid_until: 'Valid Until',
 }
 
 function findingDisplayMessage(finding: ReviewFinding) {
@@ -102,19 +102,19 @@ function blockingFindingSummary(
       if (!item || typeof item !== 'object' || Array.isArray(item)) return null
       const finding = item as Record<string, unknown>
       const fieldName =
-        typeof finding.field_name === 'string' ? finding.field_name : '未知字段'
+        typeof finding.field_name === 'string' ? finding.field_name : 'Unknown Fields'
       const codes = Array.isArray(finding.codes)
         ? finding.codes.filter((code): code is string => typeof code === 'string')
         : []
       const filename = filenames.get(quoteId) ?? quoteId
       const fieldLabel = fieldLabels[fieldName] ?? fieldName
       const reason = codes.length > 0
-        ? codes.map(reviewFindingCodeLabel).join('、')
-        : '仍未通过审核'
-      return `${filename} 的“${fieldLabel}”：${reason}`
+        ? codes.map(reviewFindingCodeLabel).join(', ')
+        : 'Still did not pass review'
+      return `${filename} — “${fieldLabel}”: ${reason}`
     })
     .filter((item): item is string => item !== null)
-    .join('；')
+    .join('; ')
 }
 
 function errorMessage(error: unknown, quotes: TaskQuote[] = []) {
@@ -123,9 +123,9 @@ function errorMessage(error: unknown, quotes: TaskQuote[] = []) {
     error.code === 'field_correction_batch_invalid'
   ) {
     return fieldCorrectionErrorMessage(error, quotes)
-      ?? `提交失败：${blockingFindingSummary(error.details, quotes) || '修正内容未通过校验'}。`
+      ?? `Submission failed: ${blockingFindingSummary(error.details, quotes) || 'The corrections did not pass validation.'}`
   }
-  return error instanceof ApiClientError ? error.message : '字段修正失败。'
+  return error instanceof ApiClientError ? error.message : 'Field correction failed.'
 }
 
 function editableValue(value: unknown) {
@@ -134,8 +134,8 @@ function editableValue(value: unknown) {
 }
 
 function displayFieldValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return '未提供'
-  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (value === null || value === undefined || value === '') return 'Not provided'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
@@ -282,7 +282,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
         ? ''
         : editableValue(field.normalized_value),
       unit: field.unit ?? '',
-      reason: '人工核对原始报价后修正',
+      reason: 'Corrected after human review of the source quotation',
       amountField,
       amount: editableValue(amountField?.normalized_value),
       currency: String(response.fields.find((item) => item.field_name === 'currency')?.normalized_value ?? task.requirement.currency),
@@ -333,7 +333,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
         rawValue: editableValue(field.raw_value),
         normalizedValue: editableValue(field.normalized_value),
         unit: field.unit ?? '',
-        reason: '人工核对原报价，确认系统提取值正确',
+        reason: 'Human review confirmed the extracted value against the source quotation',
         amountField: amount,
         amount: editableValue(amount?.normalized_value),
       },
@@ -351,9 +351,9 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
       <div className="section-heading compact-heading">
         <div>
           <p className="eyebrow">MANUAL REVIEW</p>
-          <h2>待审核字段与原因</h2>
+          <h2>Fields requiring review and reasons</h2>
         </div>
-        <span>按原文或已确认信息逐项修正；不要猜测缺失值</span>
+        <span>Correct each item using the source document or confirmed information. Do not guess missing values.</span>
       </div>
 
       <div className="review-quote-list">
@@ -365,13 +365,13 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                 <span>{quote.original_filename}</span>
               </div>
               <span className="status-pill">
-                {query.data?.review_status ?? (query.isPending ? '读取中' : '未审查')}
+                {query.data?.review_status ?? (query.isPending ? 'Loading' : 'Not reviewed')}
               </span>
             </header>
 
             {query.isError && <p className="form-error">{errorMessage(query.error)}</p>}
             {query.data && findings.length === 0 && (
-              <p className="review-empty">当前保存的审核记录没有未解决 finding。</p>
+              <p className="review-empty">The saved review has no unresolved findings.</p>
             )}
             {query.data && findings.length > 0 && (
               <ul className="review-finding-list">
@@ -398,18 +398,18 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                       <div className="review-finding-title">
                         <strong>{fieldLabels[finding.field_name] ?? fieldLabel(finding.field_name)}</strong>
                         <span className={'review-severity review-severity-' + severity.toLowerCase()}>
-                          {severity === 'BLOCKING' ? '必须处理' : severity === 'WARNING' ? '建议核对' : '提示'}
+                          {severity === 'BLOCKING' ? 'Must resolve' : severity === 'WARNING' ? 'Review recommended' : 'Information'}
                         </span>
-                        {staged && <span className="review-staged">已暂存</span>}
+                        {staged && <span className="review-staged">Staged</span>}
                       </div>
 
-                      <div className="review-current-values" aria-label="当前字段值">
+                      <div className="review-current-values" aria-label="Current field values">
                         <div>
-                          <span>当前原文值</span>
+                          <span>Current source value</span>
                           <strong>{displayFieldValue(field?.raw_value)}</strong>
                         </div>
                         <div>
-                          <span>当前标准化值</span>
+                          <span>Current normalised value</span>
                           <strong>
                             {displayFieldValue(field?.normalized_value)}
                             {field?.unit ? ` ${field.unit}` : ''}
@@ -418,14 +418,14 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                       </div>
 
                       <div className="review-finding-reason">
-                        <span>待审核原因</span>
+                        <span>Reason for review</span>
                         <strong>{reasonCodes.map(reviewFindingCodeLabel).join(' / ')}</strong>
                         {messages.map((message) => <p key={message}>{message}</p>)}
                       </div>
 
                       {staged && (
                         <div className="review-staged-value">
-                          暂存为：{displayFieldValue(staged.normalizedValue)}{staged.unit ? ` ${staged.unit}` : ''}
+                          Staged as: {displayFieldValue(staged.normalizedValue)}{staged.unit ? ` ${staged.unit}` : ''}
                         </div>
                       )}
 
@@ -436,7 +436,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                           type='button'
                           onClick={() => confirmCurrentValue(quote, finding, query.data)}
                         >
-                          确认当前值正确
+                          Confirm current value
                         </button>
                         )}
                         <button
@@ -445,7 +445,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                           disabled={!field}
                           onClick={() => openEditor(quote, finding, query.data)}
                         >
-                          {staged ? '修改暂存内容' : '核对并修正字段'}
+                          {staged ? 'Edit staged value' : 'Review and correct field'}
                         </button>
                       </div>
 
@@ -454,23 +454,23 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                           <div className="section-heading compact-heading">
                             <div>
                               <p className="eyebrow">FIELD CORRECTION</p>
-                              <h3>核对：{fieldLabels[editor.field.field_name] ?? editor.field.field_name}</h3>
+                              <h3>Review: {fieldLabels[editor.field.field_name] ?? editor.field.field_name}</h3>
                             </div>
                             <button className="button button-secondary button-small" type="button" onClick={() => setEditor(null)}>
-                              取消
+                              Cancel
                             </button>
                           </div>
                           <p className="review-editor-warning">
-                            此处只暂存。请填写从原报价或供应商确认得到的值，不要猜测。
+                            Changes are only staged here. Enter values from the original quotation or supplier confirmation; do not guess.
                           </p>
                           <div className="review-editor-grid">
                             <label>
-                              原文或人工确认依据
+                              Source text or manual confirmation basis
                               <input
                                 required
                                 placeholder={
                                   feeStatusFields.has(editor.field.field_name)
-                                    ? '例如：供应商确认运费免费'
+                                    ? 'For example: supplier confirms free shipping'
                                     : undefined
                                 }
                                 value={editor.rawValue}
@@ -478,7 +478,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                               />
                             </label>
                             <label>
-                              标准化值
+                              Normalised value
                               {feeStatusFields.has(editor.field.field_name) ? (
                                 <>
                                   <select
@@ -486,13 +486,13 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                                     value={editor.normalizedValue}
                                     onChange={(event) => setEditor({ ...editor, normalizedValue: event.target.value })}
                                   >
-                                    <option value="">请选择已经人工确认的实际状态</option>
+                                    <option value="">Select the confirmed actual status</option>
                                     {resolvingFeeStatuses.map(([value, label]) => (
                                         <option key={value} value={value}>{value} — {label}</option>
                                       ))}
                                   </select>
                                   <small>
-                                    已确认具体金额时，选择 KNOWN_AMOUNT 并填写金额，两项一起保存。
+                                    When a specific amount has been confirmed, select KNOWN_AMOUNT and enter the amount; save both together.
                                   </small>
                                 </>
                               ) : (
@@ -505,18 +505,18 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                             </label>
                             {feeStatusFields.has(editor.field.field_name) && editor.normalizedValue === 'KNOWN_AMOUNT' && (
                               <label>
-                                已确认费用金额（{editor.currency}）
+                                Confirmed fee amount ({editor.currency})
                                 <input required inputMode="decimal" pattern="\d+(?:\.\d{1,4})?"
                                   value={editor.amount ?? ''}
                                   onChange={(event) => setEditor({ ...editor, amount: event.target.value })} />
                               </label>
                             )}
                             <label>
-                              单位（没有可留空）
+                              Unit (leave blank if not applicable)
                               <input value={editor.unit} onChange={(event) => setEditor({ ...editor, unit: event.target.value })} />
                             </label>
                             <label>
-                              修正原因
+                              Reason for correction
                               <input
                                 required
                                 minLength={3}
@@ -525,7 +525,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                               />
                             </label>
                           </div>
-                          <button className="button button-submit" type="submit">加入待提交清单</button>
+                          <button className="button button-submit" type="submit">Add to submission list</button>
                         </form>
                       )}
                     </li>
@@ -539,10 +539,10 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
 
       <div className="review-batch-actions">
         <div>
-          <strong>批量修正</strong>
+          <strong>Batch corrections</strong>
           <p>
-            已暂存 {stagedBlockingCount} / {blockingKeys.length} 个阻塞字段。
-            全部填完后只创建一个 revision 和一个 Job。
+            {stagedBlockingCount} of {blockingKeys.length} blocking fields staged.
+            Completing all fields creates only one revision and one job.
           </p>
         </div>
         <button
@@ -555,7 +555,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
           }
           onClick={submitAllCorrections}
         >
-          {correction.isPending ? '正在提交全部修正…' : '提交全部修正并继续'}
+          {correction.isPending ? 'Submitting all corrections…' : 'Submit all corrections and continue'}
         </button>
       </div>
       {correction.isError && (

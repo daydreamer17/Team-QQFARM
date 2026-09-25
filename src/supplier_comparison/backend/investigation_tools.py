@@ -30,17 +30,17 @@ class PolicyArguments(FrozenModel):
 
 
 TOOLS = {
-    "get_task_context": (NoArguments, "读取当前需求、版本和本轮允许的工具"),
-    "analyze_decision_impact": (NoArguments, "读取程序刚生成的影响证明，不自行重算"),
-    "get_comparison_result": (NoArguments, "读取本轮程序比较结果，可能尚不可发布"),
-    "get_cost_breakdown": (NoArguments, "读取程序成本明细与已知小计，不猜测未知费用"),
-    "locate_quote_source": (FieldArguments, "核对当前报价字段原文；缺失时提供整份文件的有限文本预览"),
-    "get_confirmed_quote_records": (FieldArguments, "只找本任务当前报价文件仍适用的人工确认记录"),
-    "request_clarification": (NoArguments, "生成本轮需核对字段卡片，由用户批量纠正；不写回事实"),
-    "retrieve_policy": (PolicyArguments, "检索任务冻结制度；不能代替必查制度门禁"),
-    "analyze_selection_gap": (NoArguments, "程序计算本报价的全部阻塞项、成本与到货差距以及有明确假设的条件试算"),
-    "draft_clarification": (NoArguments, "生成未发送的供应商沟通草稿；不能修改需求、报价或承诺入选"),
-    "simulate_requirement_change": (NoArguments, "只按服务器记录的用户授权参数进行假设试算，不能自行改变正式需求"),
+    "get_task_context": (NoArguments, "Read current requirements, revision, and tools allowed for this investigation"),
+    "analyze_decision_impact": (NoArguments, "Read the impact proof just produced by deterministic code; do not recalculate it"),
+    "get_comparison_result": (NoArguments, "Read the deterministic comparison result for this investigation, which may not yet be publishable"),
+    "get_cost_breakdown": (NoArguments, "Read deterministic cost details and known subtotals; do not guess unknown fees"),
+    "locate_quote_source": (FieldArguments, "Review source text for current quotation fields; when absent, provide a limited preview of the whole file"),
+    "get_confirmed_quote_records": (FieldArguments, "Find only manual confirmation records still applicable to the current quotation file in this task"),
+    "request_clarification": (NoArguments, "Generate field-review cards for this investigation so the user can make batch corrections; do not write facts directly"),
+    "retrieve_policy": (PolicyArguments, "Retrieve the policy frozen with the task; this cannot replace mandatory policy gates"),
+    "analyze_selection_gap": (NoArguments, "Deterministically calculate all blocking items, cost and arrival gaps, and simulations with explicit assumptions"),
+    "draft_clarification": (NoArguments, "Generate an unsent supplier communication draft; do not modify requirements or quotations or promise selection"),
+    "simulate_requirement_change": (NoArguments, "Run a hypothetical simulation using only user-authorised parameters recorded by the server; do not change official requirements"),
 }
 
 
@@ -217,7 +217,7 @@ class ScopedInvestigationTools:
                 case_id="case_" + identity[:32], task_id=self.task_id, task_revision=self.task_revision,
                 graph_run_id=self.graph_run_id, quote_id=quote_id, quote_version=quote["quote_version"],
                 impact_input_sha256=self.input_sha256, policy_binding=self.policy_binding,
-                goal="查明该报价的待确认信息是否影响本次推荐，并给出可核对的下一步。",
+                goal="Determine whether pending information in this quotation affects the recommendation and provide a verifiable next step.",
                 known_facts={"comparison": rows.get(quote_id), "impact": impact or None,
                              "problems": problems, "original_filename": quote["original_filename"],
                              "impact_proof_available": self.impact is not None},
@@ -279,7 +279,7 @@ class ScopedInvestigationTools:
             "document_id": quote["document_id"], "original_filename": quote["original_filename"],
             "source_refs": candidates.get(name, {}).get("source_refs", []),
             "current_value": candidates.get(name, {}).get("normalized_value"),
-            "question": "请核对指定原文件或供应商确认信息，再提交真实字段值；未知金额不能填零。",
+            "question": "Review the specified source file or supplier confirmation, then submit the actual field value. An unknown amount must not be entered as zero.",
             "resolution": resolution(name),
         } for name in sorted(names))
 

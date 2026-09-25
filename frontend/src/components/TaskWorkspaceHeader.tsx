@@ -39,23 +39,23 @@ export function TaskWorkspaceHeader({
   const completed = [progress.requirement_completed, progress.quote_review_completed,
     Boolean(progress.compliance?.confirmed), progress.decision_completed, progress.summary_completed]
   const completedStage = completed.findIndex((value) => !value) === -1 ? 5 : completed.findIndex((value) => !value)
-  const stages = ['采购需求', '报价与审核', '制度检查', '决策比较', '采购总结']
+  const stages = ['Procurement Requirements', 'Quotations and review', 'Compliance Review', 'Decision Comparison', 'Procurement Decision Brief']
 
   return (
     <section className="workspace-header">
       <div className="workspace-task-head">
         <div>
-          <span className="workspace-task-label">采购任务</span>
+          <span className="workspace-task-label">Procurement Task</span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>
         <div className="workspace-state-stack">
           <span className="status-pill status-ready">{taskStatusLabel(status)}</span>
-          <span>{revisionContext === 'historical' ? `历史结果第 ${revision} 版` : `当前第 ${revision} 版`}</span>
+          <span>{revisionContext === 'historical' ? `Historical result · Revision ${revision}` : `Current revision · ${revision}`}</span>
         </div>
       </div>
       <div className="task-timeline-shell">
-        <ol className={`task-timeline task-timeline-stage-${completedStage}`} aria-label="任务完成进度">
+        <ol className={`task-timeline task-timeline-stage-${completedStage}`} aria-label="Task progress">
           {stages.map((label, index) => {
             const stage = index + 1
             // The timeline describes whether a workflow stage was completed, not
@@ -64,9 +64,9 @@ export function TaskWorkspaceHeader({
             // page, while a confirmed stage uses the same completed styling as
             // the surrounding workflow stages.
             const state = completed[index] ? 'complete' : 'upcoming'
-            const description = index === 2 ? complianceStageLabel(progress.compliance) : state === 'complete' ? '已完成' : '未完成'
+            const description = index === 2 ? complianceStageLabel(progress.compliance) : state === 'complete' ? 'Completed' : 'Incomplete'
             return (
-              <li className={`task-timeline-${state}`} key={label} aria-label={`${label}：${description}`}>
+              <li className={`task-timeline-${state}`} key={label} aria-label={`${label}: ${description}`}>
                 <span>{stage}</span>
                 <strong>{label}</strong>
               </li>
@@ -74,16 +74,16 @@ export function TaskWorkspaceHeader({
           })}
         </ol>
       </div>
-      <nav className="workspace-tabs" aria-label="任务工作台页面">
-        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>采购需求</Link>
-        <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>报价与证据</Link>
-        <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>待处理事项</Link>
-        <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>供应商信息</Link>
-        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>制度检查</Link>
-        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>决策结果</Link>
-        {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>差距详情</Link>}
-        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>采购总结</Link>
-        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>版本记录</Link>
+      <nav className="workspace-tabs" aria-label="Task workspace pages">
+        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>Procurement Requirements</Link>
+        <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>Quotations and Evidence</Link>
+        <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>Action Items</Link>
+        <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>Supplier Information</Link>
+        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>Compliance Review</Link>
+        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>Decision results</Link>
+        {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>Selection gap</Link>}
+        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>Procurement Decision Brief</Link>
+        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>Version History</Link>
       </nav>
     </section>
   )

@@ -57,7 +57,7 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
         if (!cancelled) setTextContent(content)
       })
       .catch(() => {
-        if (!cancelled) setTextError('文本内容读取失败。')
+        if (!cancelled) setTextError('Unable to load the text content.')
       })
     return () => {
       cancelled = true
@@ -69,38 +69,38 @@ export function FilePreviewDialog({ source, onClose }: FilePreviewDialogProps) {
   return (
     <OverlayPortal>
       <div className="file-preview-layer" role="presentation">
-        <button className="file-preview-backdrop" type="button" aria-label="关闭文件预览" onClick={onClose} />
-        <section className="file-preview-dialog" role="dialog" aria-modal="true" aria-label={`${source.name} 文件预览`}>
+        <button className="file-preview-backdrop" type="button" aria-label="CloseFile preview" onClick={onClose} />
+        <section className="file-preview-dialog" role="dialog" aria-modal="true" aria-label={`${source.name} File preview`}>
         <header>
           <div>
             <p className="eyebrow">FILE PREVIEW</p>
             <h2>{source.name}</h2>
-            <span>{source.mediaType || '未知格式'} · {formatBytes(source.sizeBytes)}</span>
+            <span>{source.mediaType || 'Unknown format'} · {formatBytes(source.sizeBytes)}</span>
           </div>
-          <button className="drawer-close" type="button" aria-label="关闭预览" onClick={onClose}>×</button>
+          <button className="drawer-close" type="button" aria-label="ClosePreview" onClick={onClose}>×</button>
         </header>
 
         <div className="file-preview-body">
           {(source.file || source.remoteUrl) && isPdf && objectUrl && (
-            <iframe title={`${source.name} PDF 预览`} src={objectUrl} />
+            <iframe title={`${source.name} PDF Preview`} src={objectUrl} />
           )}
           {(source.file || source.remoteUrl) && isTextFile(source) && (
-            <pre className="text-file-preview">{textError || textContent || '正在读取文本内容…'}</pre>
+            <pre className="text-file-preview">{textError || textContent || 'Loading text content…'}</pre>
           )}
           {(source.file || source.remoteUrl) && !isPdf && !isTextFile(source) && (
             <div className="file-preview-placeholder">
-              <strong>该格式暂不支持浏览器内预览</strong>
-              <p>文件已经选中，仍可继续上传。DOCX 等格式需要后端转换为 PDF 或 HTML 后才能完整预览。</p>
+              <strong>This format cannot be previewed in the browser.</strong>
+              <p>The file has been selected and can still be uploaded. Formats such as DOCX require backend conversion to PDF or HTML for full preview.</p>
             </div>
           )}
           {!source.file && !source.remoteUrl && (
             <div className="file-preview-placeholder">
-              <strong>文件内容流接口尚未接入</strong>
-              <p>{source.description ?? '当前可以查看文件名、格式、版本和哈希；接入受控文件下载接口后即可在此展示原文。'}</p>
+              <strong>The file content endpoint is not available.</strong>
+              <p>{source.description ?? 'The file name, format, version and hash are available. Source content will appear here when controlled file access is enabled.'}</p>
             </div>
           )}
         </div>
-        {source.downloadUrl && <footer className="inline-actions"><a className="button button-submit" href={source.downloadUrl}>下载原件</a></footer>}
+        {source.downloadUrl && <footer className="inline-actions"><a className="button button-submit" href={source.downloadUrl}>Download source</a></footer>}
         </section>
       </div>
     </OverlayPortal>

@@ -240,9 +240,9 @@ def test_investigation_route_uses_grounded_fallback_when_model_narration_is_inva
                     "data": {
                         "requires_follow_up": False,
                         "unresolved_items": [],
-                        "verified_advantages": [{"summary": "Alpha 的交期已经核实。"}],
-                        "verified_risks": [{"summary": "Alpha 的历史拒收率非零。"}],
-                        "stop_reason": "必要核查已经完成，未发现证据缺失或冲突。",
+                        "verified_advantages": [{"summary": "Alpha's delivery evidence has been verified."}],
+                        "verified_risks": [{"summary": "Alpha has a non-zero historical rejection rate."}],
+                        "stop_reason": "The required investigation is complete, with no missing or conflicting evidence found.",
                     },
                 },
             }],
@@ -264,12 +264,12 @@ def test_investigation_route_uses_grounded_fallback_when_model_narration_is_inva
 
     assert calls == 6
     assert turn["reference_ids"] == ["INVESTIGATION:case-fallback"]
-    assert "已核实优势" in turn["assistant_text"]
-    assert "已核实风险" in turn["assistant_text"]
-    assert "历史拒收率非零" in turn["assistant_text"]
+    assert "Verified advantages" in turn["assistant_text"]
+    assert "Verified risks" in turn["assistant_text"]
+    assert "non-zero historical rejection rate" in turn["assistant_text"]
     assert "Alpha" in turn["assistant_text"]
-    assert "尚待追查事项" in turn["assistant_text"]
-    assert "停止原因" in turn["assistant_text"]
+    assert "Outstanding follow-up" in turn["assistant_text"]
+    assert "Stopping reason" in turn["assistant_text"]
 
 
 def _investigation_risk_context():
@@ -419,7 +419,7 @@ def comparison_context(question: str):
 @pytest.mark.parametrize('question,expected', [
     ('四家供应商里，成本和交期分别谁最好？', ('Great Wall Components', 'Schwarzwald Circuits')),
     ('Great Wall Components 明明最便宜，为什么没有排第一？',
-     ('确认总成本最低', '最快确认到货', '当前推荐为 Schwarzwald Circuits')),
+     ('lowest confirmed total cost', 'fastest confirmed delivery', 'current recommendation is Schwarzwald Circuits')),
 ])
 def test_common_comparison_questions_use_stable_grounded_answer(monkeypatch, question, expected):
     from supplier_comparison.backend.decision_intents import ConversationIntent

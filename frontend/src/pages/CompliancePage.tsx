@@ -10,11 +10,11 @@ import { controlLabel } from '../lib/presentation'
 import { aggregateControlStatus, checkStatusLabel, complianceAnchorId, complianceReasonLabel, complianceStatusLabel, executionStageLabel, groupComplianceChecks } from '../lib/compliance'
 
 function errorMessage(error: unknown) {
-  if (error instanceof ApiClientError && (error.status === 409 || error.code.includes('revision'))) return '任务或检查版本已变化，请刷新后重新核对。未保存的填写仍保留。'
-  return error instanceof Error ? error.message : '制度检查操作失败。'
+  if (error instanceof ApiClientError && (error.status === 409 || error.code.includes('revision'))) return 'The task or check revision has changed. Refresh and review it again. Unsaved input has been retained.'
+  return error instanceof Error ? error.message : 'Compliance review operation failed.'
 }
 function errorText(error: string | Record<string, unknown>) {
-  return typeof error === 'string' ? complianceReasonLabel(error) : String(error.message ?? error.code ?? '制度依据不完整，请联系制度管理员。')
+  return typeof error === 'string' ? complianceReasonLabel(error) : String(error.message ?? error.code ?? 'Policy evidence is incomplete. Contact the policy administrator.')
 }
 function uniqueErrors(...groups: Array<Array<string | Record<string, unknown>> | undefined>) {
   const values = groups.flatMap((group) => group ?? [])
@@ -35,9 +35,9 @@ const PRECHECK_CONTROLS: ComplianceEvidenceFacts['control_code'][] = [
 ]
 
 function evidenceMaterialLabel(control: ComplianceEvidenceFacts['control_code']) {
-  return control === 'APPROVED_SUPPLIER' ? '供应商准入记录'
-    : control === 'ROHS_COMPLIANCE' ? 'RoHS 证明'
-      : '金额审批记录'
+  return control === 'APPROVED_SUPPLIER' ? 'Supplier eligibility record'
+    : control === 'ROHS_COMPLIANCE' ? 'RoHS evidence'
+      : 'Amount approval record'
 }
 
 function stateTone(status: string) {
@@ -81,7 +81,7 @@ function SupplierCheckDetails({ supplier, clauses, evidence, taskId, linkedCheck
 }) {
   const groups = groupComplianceChecks(supplier.checks)
   return <div className="compliance-detail-panel">
-    <div className="compliance-detail-heading"><div><strong>检查与材料</strong><span>{groups.length} 类检查 · {supplier.checks.length} 条制度要求 · {evidence.length} 份材料</span></div><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></div>
+    <div className="compliance-detail-heading"><div><strong>Checks and evidence</strong><span>{groups.length} check types · {supplier.checks.length} policy requirements · {evidence.length} evidence records</span></div><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></div>
     <div className="compliance-control-grid">
       {groups.map(([control, checks]) => {
         const status = aggregateControlStatus(checks, control)
@@ -90,19 +90,19 @@ function SupplierCheckDetails({ supplier, clauses, evidence, taskId, linkedCheck
         const currentRecord = records.find((record) => !record.superseded)
         const linked = checks.some((check) => check.clause_id === linkedCheck)
         return <article className={`compliance-control-card compliance-control-${stateTone(status)}`} key={control}>
-          <header><span className="compliance-control-icon" aria-hidden="true">{checkIcon(status)}</span><div><small>制度检查</small><h4>{controlLabel(control)}</h4></div><StateBadge status={status} label={checkStatusLabel(status)} /></header>
+          <header><span className="compliance-control-icon" aria-hidden="true">{checkIcon(status)}</span><div><small>Compliance Review</small><h4>{controlLabel(control)}</h4></div><StateBadge status={status} label={checkStatusLabel(status)} /></header>
           {reasons.length > 0 && <ul className="compliance-control-reasons">{reasons.map((reason) => <li key={reason}>{complianceReasonLabel(reason)}</li>)}</ul>}
-          <details className="compliance-source-details" open={linked || undefined}><summary>查看制度依据（{checks.length}）</summary>
+          <details className="compliance-source-details" open={linked || undefined}><summary>View policy basis ({checks.length})</summary>
             <div className="compliance-source-list">{checks.map((check, index) => {
               const matchingClauses = clauses.filter((clause) => clause.clause_id === check.clause_id)
               return <div className="compliance-source-row" id={complianceAnchorId(supplier.quote_id, check.clause_id)} tabIndex={-1} key={check.clause_id ?? index}>
                 <div><strong>{checkStatusLabel(check.status)}</strong>{check.execution_stage && <small>{executionStageLabel(check.execution_stage)}</small>}</div>
-                {matchingClauses.length > 0 ? matchingClauses.map((clause) => <details key={clause.clause_id}><summary>{clause.title ?? clause.section ?? '制度原文'} · 版本 {clause.document_version}</summary><blockquote>{clause.text}</blockquote><small>{clause.document_id} · {clause.clause_id}</small></details>) : <span>未关联可展示的制度原文</span>}
+                {matchingClauses.length > 0 ? matchingClauses.map((clause) => <details key={clause.clause_id}><summary>{clause.title ?? clause.section ?? 'Policy source text'} · Revision {clause.document_version}</summary><blockquote>{clause.text}</blockquote><small>{clause.document_id} · {clause.clause_id}</small></details>) : <span>No displayable policy source text is linked.</span>}
               </div>
             })}</div>
           </details>
-          {records.length > 0 && <details className="compliance-source-details"><summary>查看已提交材料（{records.length}）</summary><div className="compliance-material-list">{records.map((record) => <article key={record.evidence_id}><strong>{record.facts.material_number} · 第 {record.version} 版{record.superseded ? '（已替换）' : ''}</strong><p>{record.facts.supplier_id} · {record.facts.manufacturer} · {record.facts.manufacturer_part_number}</p><p>有效期：{record.facts.effective_from ?? '未说明'} 至 {record.facts.permanent ? '明确永久有效' : record.facts.expires_on ?? '未说明'}</p><p>核对人：{record.confirmed_by} · {record.confirmed_at}</p>{record.facts.source_refs.map((ref) => <p key={ref}>{ref}</p>)}{record.files.map((file) => <a className="compliance-file" key={file.file_id} href={complianceEvidenceUrl(taskId, record.evidence_id, file.file_id)}>{file.original_filename}</a>)}</article>)}</div></details>}
-          {!readonly && ['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE'].includes(control) && <div className="compliance-control-action"><button className="button button-secondary" type="button" onClick={() => onEdit(control as ComplianceEvidenceFacts['control_code'], currentRecord)}>{currentRecord ? '替换材料' : '补充材料'}</button></div>}
+          {records.length > 0 && <details className="compliance-source-details"><summary>View submitted evidence ({records.length})</summary><div className="compliance-material-list">{records.map((record) => <article key={record.evidence_id}><strong>{record.facts.material_number} · Revision {record.version}{record.superseded ? ' (replaced)' : ''}</strong><p>{record.facts.supplier_id} · {record.facts.manufacturer} · {record.facts.manufacturer_part_number}</p><p>Valid: {record.facts.effective_from ?? 'Not specified'} to {record.facts.permanent ? 'Explicitly permanent' : record.facts.expires_on ?? 'Not specified'}</p><p>Reviewed by: {record.confirmed_by} · {record.confirmed_at}</p>{record.facts.source_refs.map((ref) => <p key={ref}>{ref}</p>)}{record.files.map((file) => <a className="compliance-file" key={file.file_id} href={complianceEvidenceUrl(taskId, record.evidence_id, file.file_id)}>{file.original_filename}</a>)}</article>)}</div></details>}
+          {!readonly && ['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE'].includes(control) && <div className="compliance-control-action"><button className="button button-secondary" type="button" onClick={() => onEdit(control as ComplianceEvidenceFacts['control_code'], currentRecord)}>{currentRecord ? 'Replace Evidence' : 'Add Evidence'}</button></div>}
         </article>
       })}
     </div>
@@ -141,7 +141,7 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
     mutationFn: (selected: File) => api.parseComplianceEvidence(task.task_id, target.control, selected),
     onSuccess: (response) => {
       if (response.status === 'TYPE_MISMATCH') {
-        setParseMessage(`文件类型不匹配：这是${response.detected_control_code ? evidenceMaterialLabel(response.detected_control_code) : '其他类型材料'}，请关闭后从对应入口上传。`)
+        setParseMessage(`Evidence type mismatch: this appears to be ${response.detected_control_code ? evidenceMaterialLabel(response.detected_control_code) : 'another type of evidence'}. Close this form and upload it from the matching entry point.`)
         return
       }
       setFacts((current) => ({ ...current, ...response.facts, coverage_confirmed: false }))
@@ -149,18 +149,18 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
       const expectedSupplier = target.supplier.supplier_id ?? null
       const parsedPart = typeof response.facts.manufacturer_part_number === 'string' ? response.facts.manufacturer_part_number : null
       const messages = [response.status === 'FOUND'
-        ? `已自动解析并回填 ${response.parsed_fields.length} 个字段。`
-        : `已回填 ${response.parsed_fields.length} 个字段；其余字段请按原文核对。`]
+        ? `Automatically parsed and filled ${response.parsed_fields.length} fields.`
+        : `Filled ${response.parsed_fields.length} fields; review the remaining fields against the source document.`]
       if (parsedSupplier && expectedSupplier && parsedSupplier !== expectedSupplier) {
-        messages.push(`注意：文件供应商编号 ${parsedSupplier} 与当前报价 ${expectedSupplier} 不一致。`)
+        messages.push(`Warning: supplier ID ${parsedSupplier} in the file does not match ${expectedSupplier} in the current quotation.`)
       }
       if (parsedPart && task.requirement.manufacturer_part_number && parsedPart !== task.requirement.manufacturer_part_number) {
-        messages.push(`注意：文件料号 ${parsedPart} 与采购料号 ${task.requirement.manufacturer_part_number} 不一致。`)
+        messages.push(`Warning: part number ${parsedPart} in the file does not match procurement part number ${task.requirement.manufacturer_part_number}.`)
       }
       setParseMessage(messages.join(' '))
       setIdempotencyKey(createIdempotencyKey())
     },
-    onError: (error) => setParseMessage(`未能自动解析：${errorMessage(error)} 你仍可手动填写后保存。`),
+    onError: (error) => setParseMessage(`Automatic parsing failed: ${errorMessage(error)} You can still enter the fields manually and save.`),
   })
   const save = useMutation({ mutationFn: () => api.saveComplianceEvidence(task.task_id,
     { expectedTaskRevision: target.revision, facts: { ...facts, source_refs: facts.source_refs.map((ref) => ref.trim()).filter(Boolean) }, file, evidenceId: target.record?.evidence_id, runAfterSave: target.runAfterSave }, idempotencyKey),
@@ -178,7 +178,7 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
   function submit(event: FormEvent) {
     event.preventDefault()
     if (!ready || stale) return
-    if (facts.effective_from && facts.expires_on && facts.effective_from >= facts.expires_on) return setLocalError('失效日期须晚于生效日期。')
+    if (facts.effective_from && facts.expires_on && facts.effective_from >= facts.expires_on) return setLocalError('Effective-to date must be later than the effective-from date.')
     save.mutate()
   }
   return <dialog ref={dialog} className="card compliance-evidence-editor" aria-modal="true" aria-labelledby="compliance-editor-title" aria-describedby="compliance-editor-description" onCancel={(event) => { event.preventDefault(); if (!save.isPending) onClose() }} onKeyDown={(event) => {
@@ -189,26 +189,26 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
   }}>
-    <div className="section-heading"><div><h3 id="compliance-editor-title">{isAmountApproval ? target.record ? '替换金额审批记录并保留旧版本' : '补充金额审批记录' : target.record ? `替换材料：${evidenceMaterialLabel(target.control)}` : `补充材料：${evidenceMaterialLabel(target.control)}`} · {target.supplier.supplier_name}</h3><p>{evidenceMaterialLabel(target.control)} · 第 {target.supplier.quote_version} 版报价</p></div><button type="button" className="button button-secondary" disabled={save.isPending} onClick={onClose}>取消</button></div>
+    <div className="section-heading"><div><h3 id="compliance-editor-title">{isAmountApproval ? target.record ? 'Replace amount approval record and retain the previous revision' : 'Add amount approval record' : target.record ? `Replace evidence: ${evidenceMaterialLabel(target.control)}` : `Add evidence: ${evidenceMaterialLabel(target.control)}`} · {target.supplier.supplier_name}</h3><p>{evidenceMaterialLabel(target.control)} · Quotation revision {target.supplier.quote_version}</p></div><button type="button" className="button button-secondary" disabled={save.isPending} onClick={onClose}>Cancel</button></div>
     <p id="compliance-editor-description">{target.runAfterSave
-      ? isAmountApproval ? '请按审批原件核对审批对象、批准金额、币种和有效期；保存后将重新检查。' : '请按材料原文核对供应商和产品范围；保存后将重新检查。'
-      : '保存后可继续上传其他已有材料；系统会在你点击“开始制度检查”后统一核验。'}</p>
+      ? isAmountApproval ? 'Verify the approved supplier, amount, currency, and validity period against the approval source document. Checks will rerun after saving.' : 'Verify the supplier and product scope against the evidence source document. Checks will rerun after saving.'
+      : 'After saving, you can upload other available evidence. The system will evaluate everything together when you start the compliance review.'}</p>
     <form onSubmit={submit}><fieldset disabled={save.isPending || stale} className="compliance-form-grid">
-      <label className="field">{isAmountApproval ? '审批记录编号' : '材料编号'}<input required value={facts.material_number} onChange={(e) => change('material_number', e.target.value)} /></label>
-      <label className="field">{isAmountApproval ? '审批对象供应商编号' : '材料供应商编号'}<input required value={facts.supplier_id} onChange={(e) => change('supplier_id', e.target.value)} /></label>
-      {!isAmountApproval && <label className="field">材料制造商<input required={target.control === 'ROHS_COMPLIANCE'} value={facts.manufacturer ?? ''} onChange={(e) => change('manufacturer', e.target.value)} /></label>}
-      {!isAmountApproval && <label className="field">材料制造商料号<input required={target.control === 'ROHS_COMPLIANCE'} value={facts.manufacturer_part_number ?? ''} onChange={(e) => change('manufacturer_part_number', e.target.value)} /></label>}
-      {isAmountApproval && <label className="field">批准金额<input required inputMode="decimal" value={facts.approval_amount ?? ''} onChange={(e) => change('approval_amount', e.target.value || null)} /></label>}
-      {isAmountApproval && <label className="field">币种<input required maxLength={3} value={facts.currency ?? ''} onChange={(e) => change('currency', e.target.value.toUpperCase())} /></label>}
-      <label className="field">{isAmountApproval ? '审批结论' : '材料结论'}<select value={facts.outcome} onChange={(e) => change('outcome', e.target.value as 'PASS' | 'FAIL')}><option value="PASS">{isAmountApproval ? '已批准' : '材料表明符合'}</option><option value="FAIL">{isAmountApproval ? '未批准/已拒绝' : '材料表明不符合'}</option></select></label>
-      <label className="field">生效日期<input type="date" value={facts.effective_from ?? ''} onChange={(e) => change('effective_from', e.target.value || null)} /></label>
-      <label className="field">失效日期<input type="date" disabled={facts.permanent} value={facts.expires_on ?? ''} onChange={(e) => change('expires_on', e.target.value || null)} /></label>
-      <label className="compliance-checkbox"><input type="checkbox" checked={facts.permanent} onChange={(e) => { setFacts((current) => ({ ...current, permanent: e.target.checked, expires_on: e.target.checked ? null : current.expires_on })); setIdempotencyKey(createIdempotencyKey()); setLocalError('') }} />材料明确注明永久有效</label>
-      <label className="field compliance-wide">来源引用<textarea rows={2} placeholder="原始记录编号或来源链接，每行一条；也可上传附件" value={facts.source_refs.join('\n')} onChange={(e) => change('source_refs', e.target.value.split('\n'))} /></label>
-      <label className="field compliance-wide">材料附件（PDF、TXT、MD，最多 10 MiB）<input type="file" accept=".pdf,.txt,.md" onChange={(e) => {
+      <label className="field">{isAmountApproval ? 'Approval record number' : 'Evidence ID'}<input required value={facts.material_number} onChange={(e) => change('material_number', e.target.value)} /></label>
+      <label className="field">{isAmountApproval ? 'Approved supplier ID' : 'Evidence supplier ID'}<input required value={facts.supplier_id} onChange={(e) => change('supplier_id', e.target.value)} /></label>
+      {!isAmountApproval && <label className="field">Evidence manufacturer<input required={target.control === 'ROHS_COMPLIANCE'} value={facts.manufacturer ?? ''} onChange={(e) => change('manufacturer', e.target.value)} /></label>}
+      {!isAmountApproval && <label className="field">Evidence manufacturer part number<input required={target.control === 'ROHS_COMPLIANCE'} value={facts.manufacturer_part_number ?? ''} onChange={(e) => change('manufacturer_part_number', e.target.value)} /></label>}
+      {isAmountApproval && <label className="field">Approved Amount<input required inputMode="decimal" value={facts.approval_amount ?? ''} onChange={(e) => change('approval_amount', e.target.value || null)} /></label>}
+      {isAmountApproval && <label className="field">Currency<input required maxLength={3} value={facts.currency ?? ''} onChange={(e) => change('currency', e.target.value.toUpperCase())} /></label>}
+      <label className="field">{isAmountApproval ? 'Approval outcome' : 'Evidence outcome'}<select value={facts.outcome} onChange={(e) => change('outcome', e.target.value as 'PASS' | 'FAIL')}><option value="PASS">{isAmountApproval ? 'Approved' : 'Evidence indicates compliance'}</option><option value="FAIL">{isAmountApproval ? 'Not approved / rejected' : 'Evidence indicates non-compliance'}</option></select></label>
+      <label className="field">Effective from<input type="date" value={facts.effective_from ?? ''} onChange={(e) => change('effective_from', e.target.value || null)} /></label>
+      <label className="field">Effective to<input type="date" disabled={facts.permanent} value={facts.expires_on ?? ''} onChange={(e) => change('expires_on', e.target.value || null)} /></label>
+      <label className="compliance-checkbox"><input type="checkbox" checked={facts.permanent} onChange={(e) => { setFacts((current) => ({ ...current, permanent: e.target.checked, expires_on: e.target.checked ? null : current.expires_on })); setIdempotencyKey(createIdempotencyKey()); setLocalError('') }} />Evidence explicitly states that it is permanently valid</label>
+      <label className="field compliance-wide">Source references<textarea rows={2} placeholder="Original record number or source link, one per line; you may also upload an attachment" value={facts.source_refs.join('\n')} onChange={(e) => change('source_refs', e.target.value.split('\n'))} /></label>
+      <label className="field compliance-wide">Evidence attachment (PDF, TXT, or MD; up to 10 MiB)<input type="file" accept=".pdf,.txt,.md" onChange={(e) => {
         const selected = e.target.files?.[0] ?? null
         if (selected && (!/\.(pdf|txt|md)$/i.test(selected.name) || selected.size > 10 * 1024 * 1024 || selected.size === 0)) {
-          setLocalError('请选择非空 PDF、TXT 或 MD，文件大小不超过 10 MiB。'); setFile(null); return
+          setLocalError('Select a non-empty PDF, TXT, or MD file no larger than 10 MiB.'); setFile(null); return
         }
         setLocalError(''); setParseMessage(''); setFile(selected); setIdempotencyKey(createIdempotencyKey())
         if (selected) {
@@ -225,14 +225,14 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
           parseFile.mutate(selected)
         }
       }} /></label>
-      {(parseFile.isPending || parseMessage) && <p className="compliance-wide compliance-parse-status" role="status" aria-live="polite">{parseFile.isPending ? '正在自动解析证明文件…' : parseMessage}</p>}
-      <label className="field compliance-wide">核对说明<textarea rows={2} value={facts.note} onChange={(e) => change('note', e.target.value)} /></label>
-      <label className="compliance-checkbox compliance-wide"><input type="checkbox" checked={facts.coverage_confirmed} onChange={(e) => change('coverage_confirmed', e.target.checked)} />{isAmountApproval ? '我已核对审批原件，并确认审批对象、金额、币种、有效期和结论' : '我已核对材料原文，并确认所填写的供应商、产品范围和结论'}</label>
-      <button className="button button-submit" disabled={!ready || Boolean(localError) || parseFile.isPending} type="submit">{save.isPending ? '正在保存…' : target.runAfterSave
-        ? isAmountApproval ? '保存审批记录并重新检查' : '保存材料并重新检查'
-        : isAmountApproval ? '保存审批记录' : '保存材料'}</button>
+      {(parseFile.isPending || parseMessage) && <p className="compliance-wide compliance-parse-status" role="status" aria-live="polite">{parseFile.isPending ? 'Automatically parsing evidence file…' : parseMessage}</p>}
+      <label className="field compliance-wide">Review notes<textarea rows={2} value={facts.note} onChange={(e) => change('note', e.target.value)} /></label>
+      <label className="compliance-checkbox compliance-wide"><input type="checkbox" checked={facts.coverage_confirmed} onChange={(e) => change('coverage_confirmed', e.target.checked)} />{isAmountApproval ? 'I have reviewed the approval source document and confirmed the supplier, amount, currency, validity period, and outcome' : 'I have reviewed the evidence source document and confirmed the supplier, product scope, and outcome entered above'}</label>
+      <button className="button button-submit" disabled={!ready || Boolean(localError) || parseFile.isPending} type="submit">{save.isPending ? 'Saving…' : target.runAfterSave
+        ? isAmountApproval ? 'Save approval record and rerun checks' : 'Save evidence and rerun checks'
+        : isAmountApproval ? 'Save approval record' : 'Save evidence'}</button>
     </fieldset></form>
-    {(stale || localError || save.isError) && <p role="alert" className="form-error">{stale ? '任务版本已变化，请关闭表单后重新打开。' : localError || errorMessage(save.error)}</p>}
+    {(stale || localError || save.isError) && <p role="alert" className="form-error">{stale ? 'The task revision has changed. Close and reopen the form.' : localError || errorMessage(save.error)}</p>}
   </dialog>
 }
 
@@ -262,7 +262,7 @@ function Confirmation({ workspace, onRefresh }: { workspace: ComplianceWorkspace
   }, new Map<string, { key: string; supplier: string; control: string; status: string; stage?: string; itemIds: string[] }>()).values()]
   const represented = new Set(groupedMissing.flatMap((row) => row.itemIds))
   missing.filter((id) => !represented.has(id)).forEach((id) => groupedMissing.push({
-    key: id, supplier: '当前任务', control: '待确认事项', status: 'REVIEW_REQUIRED', itemIds: [id],
+    key: id, supplier: 'Current task', control: 'Pending confirmation item', status: 'REVIEW_REQUIRED', itemIds: [id],
   }))
   const confirm = useMutation({ mutationFn: () => api.confirmCompliance(workspace.task_id, {
     expected_task_revision: workspace.task_revision, expected_assessment_id: workspace.stage.assessment_id ?? assessment!.assessment_id!,
@@ -275,24 +275,24 @@ function Confirmation({ workspace, onRefresh }: { workspace: ComplianceWorkspace
   const partlyAcknowledged = !allAcknowledged && missing.some((id) => acknowledged.includes(id))
   const disabled = !assessment || !workspace.stage.can_confirm || errors.length > 0
     || missing.some((id) => !acknowledged.includes(id)) || (!assessment.policy_enabled && !noPolicy)
-  if (workspace.stage.can_compare) return <section className="card compliance-confirmation"><h3>制度检查已处理</h3><p>已保存本次处理记录。补充或替换材料后需要重新检查与确认。</p><Link className="button button-submit" to={`/tasks/${workspace.task_id}/decision`}>继续决策比较</Link></section>
-  return <section className="card compliance-confirmation"><div className="section-heading"><div><h3>确认本次处理结果</h3><p>缺少材料的供应商仍保持“未核验”。</p></div><span>{groupedMissing.length} 类待处理</span></div>
-    {groupedMissing.length > 0 && <div className="compliance-table-scroll"><table aria-label="待补充事项" className="supplier-data-table compliance-pending-table"><thead><tr><th><label className="compliance-select-all"><input aria-label="全选待补充事项" type="checkbox" disabled={confirm.isPending} checked={allAcknowledged} ref={(element) => { if (element) element.indeterminate = partlyAcknowledged }} onChange={(event) => {
+  if (workspace.stage.can_compare) return <section className="card compliance-confirmation"><h3>Compliance review processed</h3><p>This processing record has been saved. Checks must be rerun and reconfirmed after evidence is added or replaced.</p><Link className="button button-submit" to={`/tasks/${workspace.task_id}/decision`}>Continue to decision comparison</Link></section>
+  return <section className="card compliance-confirmation"><div className="section-heading"><div><h3>Confirm processing outcome</h3><p>Suppliers with missing evidence remain unverified.</p></div><span>{groupedMissing.length} pending categories</span></div>
+    {groupedMissing.length > 0 && <div className="compliance-table-scroll"><table aria-label="Items requiring additional evidence" className="supplier-data-table compliance-pending-table"><thead><tr><th><label className="compliance-select-all"><input aria-label="Select all items requiring additional evidence" type="checkbox" disabled={confirm.isPending} checked={allAcknowledged} ref={(element) => { if (element) element.indeterminate = partlyAcknowledged }} onChange={(event) => {
       setAcknowledged(event.target.checked ? [...missing] : [])
       setIdempotencyKey(createIdempotencyKey())
-    }} />全选</label></th><th>供应商</th><th>待补充事项</th><th>当前状态</th><th>处理方式</th></tr></thead><tbody>
+    }} />Select all</label></th><th>Supplier</th><th>Missing item</th><th>Current status</th><th>Handling</th></tr></thead><tbody>
       {groupedMissing.map((row) => {
         const checked = row.itemIds.every((id) => acknowledged.includes(id))
-        return <tr key={row.key}><td><input aria-label={`暂不补充 ${row.supplier} ${controlLabel(row.control)}`} type="checkbox" disabled={confirm.isPending} checked={checked} onChange={(event) => {
+        return <tr key={row.key}><td><input aria-label={`Defer ${row.supplier} ${controlLabel(row.control)}`} type="checkbox" disabled={confirm.isPending} checked={checked} onChange={(event) => {
           setAcknowledged((current) => event.target.checked
             ? [...new Set([...current, ...row.itemIds])]
             : current.filter((id) => !row.itemIds.includes(id)))
           setIdempotencyKey(createIdempotencyKey())
-        }} /></td><td><strong>{row.supplier}</strong></td><td>{controlLabel(row.control)}{row.itemIds.length > 1 && <small>合并 {row.itemIds.length} 条同类制度要求</small>}</td><td><StateBadge status={row.status} label={checkStatusLabel(row.status as Parameters<typeof checkStatusLabel>[0])} /></td><td><span className="compliance-defer-label">暂不补充，保留未核验状态</span>{row.stage && <small>{executionStageLabel(row.stage)}</small>}</td></tr>
+        }} /></td><td><strong>{row.supplier}</strong></td><td>{controlLabel(row.control)}{row.itemIds.length > 1 && <small>{row.itemIds.length} similar policy requirements combined</small>}</td><td><StateBadge status={row.status} label={checkStatusLabel(row.status as Parameters<typeof checkStatusLabel>[0])} /></td><td><span className="compliance-defer-label">Defer and retain unverified status</span>{row.stage && <small>{executionStageLabel(row.stage)}</small>}</td></tr>
       })}
     </tbody></table></div>}
-    {assessment && !assessment.policy_enabled && <label className="compliance-checkbox compliance-no-policy"><input type="checkbox" disabled={confirm.isPending} checked={noPolicy} onChange={(e) => { setNoPolicy(e.target.checked); setIdempotencyKey(createIdempotencyKey()) }} />确认本任务不启用制度检查，后续结果仅用于采购比较</label>}
-    <div className="compliance-confirm-actions"><button className="button button-submit" type="button" disabled={disabled || confirm.isPending} onClick={() => confirm.mutate()}>{confirm.isPending ? '正在确认…' : '确认处理结果并进入决策'}</button></div>
+    {assessment && !assessment.policy_enabled && <label className="compliance-checkbox compliance-no-policy"><input type="checkbox" disabled={confirm.isPending} checked={noPolicy} onChange={(e) => { setNoPolicy(e.target.checked); setIdempotencyKey(createIdempotencyKey()) }} />Confirm that compliance review is disabled for this task and later results are for procurement comparison only</label>}
+    <div className="compliance-confirm-actions"><button className="button button-submit" type="button" disabled={disabled || confirm.isPending} onClick={() => confirm.mutate()}>{confirm.isPending ? 'Confirming…' : 'Confirm outcome and continue to decision'}</button></div>
     {confirm.isError && <p role="alert" className="form-error">{errorMessage(confirm.error)}</p>}
   </section>
 }
@@ -325,8 +325,8 @@ export function CompliancePage() {
   }, [linkedQuote, linkedCheck, linkedIndex, workspace.data?.stage.assessment_id])
   const refresh = async () => { await client.invalidateQueries({ queryKey: ['tasks', taskId] }) }
   const start = useMutation({ mutationFn: () => api.startRun(taskId, task.data!.task_revision, createIdempotencyKey()), onSuccess: refresh })
-  if (task.isPending || workspace.isPending) return <ComplianceLoading label="正在读取制度检查" detail="正在获取当前任务、制度版本和已有核验结果…" />
-  if (task.isError || workspace.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error ?? workspace.error)}<button className="button button-secondary" onClick={() => void refresh()}>刷新重试</button></section>
+  if (task.isPending || workspace.isPending) return <ComplianceLoading label="Loading compliance review" detail="Retrieving the current task, policy revision, and existing verification results…" />
+  if (task.isError || workspace.isError) return <section className="card error-panel" role="alert">{errorMessage(task.error ?? workspace.error)}<button className="button button-secondary" onClick={() => void refresh()}>Refresh and retry</button></section>
   const data = workspace.data
   const clauses = data.plan?.clauses ?? []
   const errors = uniqueErrors(data.plan?.policy_errors, data.assessment?.policy_errors)
@@ -346,70 +346,70 @@ export function CompliancePage() {
   const failed = task.data.status === 'FAILED' && task.data.current_job?.job_status === 'FAILED'
   const counts = data.assessment?.counts
   const amountRequirements = uniqueAmountRequirements(data.assessment?.amount_requirements)
-  const policyCategory = data.policy_binding?.category === 'Electronics' ? '电子产品采购' : data.policy_binding?.category
-  const policyRegion = data.policy_binding?.region === 'SG' ? '新加坡' : data.policy_binding?.region
+  const policyCategory = data.policy_binding?.category === 'Electronics' ? 'Electronics procurement' : data.policy_binding?.category
+  const policyRegion = data.policy_binding?.region === 'SG' ? 'Singapore' : data.policy_binding?.region
   const policySummary = data.policy_binding
-    ? [data.policy_binding.policy_set_version && `规则版本 v${data.policy_binding.policy_set_version}`, policyCategory, policyRegion].filter(Boolean).join(' · ')
-    : '本任务未启用制度检查'
+    ? [data.policy_binding.policy_set_version && `Policy revision v${data.policy_binding.policy_set_version}`, policyCategory, policyRegion].filter(Boolean).join(' · ')
+    : 'Compliance review is not enabled for this task'
   return <div className="page-stack compliance-page">
-    <TaskWorkspaceHeader taskId={taskId} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} 份报价`} status={task.data.status} revision={data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={{ ...task.data.progress, compliance: data.stage }} active="compliance" />
+    <TaskWorkspaceHeader taskId={taskId} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} quotations`} status={task.data.status} revision={data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={{ ...task.data.progress, compliance: data.stage }} active="compliance" />
     <section className="card compliance-context workspace-page-lead">
-      <div className="compliance-context-heading workspace-page-lead-copy"><h2>制度检查</h2><p>{policySummary}</p></div>
-      {data.assessment && <div className="compliance-kpis" aria-label="制度检查概览">
-        <div><strong>{counts?.COMPLIANT ?? 0}</strong><span>已核验候选</span></div>
-        <div><strong>{counts?.REVIEW_REQUIRED ?? 0}</strong><span>待补充或复核</span></div>
-        <div><strong>{counts?.NON_COMPLIANT ?? 0}</strong><span>制度排除</span></div>
-        <div><strong>{counts?.NOT_EVALUATED ?? 0}</strong><span>尚未核验</span></div>
+      <div className="compliance-context-heading workspace-page-lead-copy"><h2>Compliance Review</h2><p>{policySummary}</p></div>
+      {data.assessment && <div className="compliance-kpis" aria-label="Compliance ReviewOverview">
+        <div><strong>{counts?.COMPLIANT ?? 0}</strong><span>Verified Candidate</span></div>
+        <div><strong>{counts?.REVIEW_REQUIRED ?? 0}</strong><span>Evidence or Review Required</span></div>
+        <div><strong>{counts?.NON_COMPLIANT ?? 0}</strong><span>Excluded by Policy</span></div>
+        <div><strong>{counts?.NOT_EVALUATED ?? 0}</strong><span>Not Evaluated</span></div>
       </div>}
-      <div className="compliance-context-tags"><StateBadge status={data.stage.status} label={complianceStatusLabel(data.stage.status)} />{Boolean(data.stage.pending_count) && <span>{data.stage.pending_count} 个检查项</span>}</div>
+      <div className="compliance-context-tags"><StateBadge status={data.stage.status} label={complianceStatusLabel(data.stage.status)} />{Boolean(data.stage.pending_count) && <span>{data.stage.pending_count} check items</span>}</div>
     </section>
-    {data.legacy_result && <p className="run-notice">这是旧流程任务，历史结果尚未经过本阶段确认。<Link to={`/tasks/${taskId}/audit`}>查看历史记录</Link></p>}
-    {!data.policy_binding && <section className="card"><h3>本任务未启用制度检查</h3><p>请在下方明确确认后继续。系统不会将未启用解释为供应商合规。</p></section>}
-    {errors.length > 0 && <section className="card error-panel" role="alert"><h3>制度依据需要处理</h3><ul>{errors.map((error, index) => <li key={index}>{errorText(error)}</li>)}</ul><p>请先完成制度条款或检索依据复核，当前不能确认。</p><Link to="/resources">查看制度资源</Link></section>}
-    {data.assessment?.publication_blocked && <p className="run-notice">仍有发布前条件未满足。确认处理记录不会解除这些条件，决策结果会保留相应限制。</p>}
-    {!data.assessment && data.stage.status === 'PROCESSING' && <ComplianceLoading label="正在进行制度检查" detail="系统正在检索适用条款，并核对当前版本的供应商材料和金额条件…" />}
-    {!data.assessment && data.stage.status !== 'PROCESSING' && (failed || !task.data.progress.quote_review_completed) && <section className={`card ${failed ? 'error-panel' : ''}`} role={failed ? 'alert' : undefined}><h3>{failed ? '制度检查未完成' : '等待报价处理完成'}</h3><p>{failed ? task.data.current_job?.error_message ?? '后台处理失败，请重新开始制度检查。' : '请先完成报价审核，再准备证明材料。'}</p><Link to={`/tasks/${taskId}/quotes/new`}>查看报价与审核</Link></section>}
+    {data.legacy_result && <p className="run-notice">This task uses a legacy workflow, and its historical result has not been confirmed at this stage. <Link to={`/tasks/${taskId}/audit`}>View history</Link></p>}
+    {!data.policy_binding && <section className="card"><h3>Compliance review is not enabled for this task</h3><p>Explicitly confirm this below before continuing. The system does not interpret disabled review as supplier compliance.</p></section>}
+    {errors.length > 0 && <section className="card error-panel" role="alert"><h3>Policy basis requires attention</h3><ul>{errors.map((error, index) => <li key={index}>{errorText(error)}</li>)}</ul><p>Review the policy clauses or retrieval basis first; confirmation is currently unavailable.</p><Link to="/resources">View policy resources</Link></section>}
+    {data.assessment?.publication_blocked && <p className="run-notice">Some pre-publication conditions remain unmet. Confirming the processing record will not remove these conditions, and the decision result will retain the corresponding restrictions.</p>}
+    {!data.assessment && data.stage.status === 'PROCESSING' && <ComplianceLoading label="Running compliance review" detail="Retrieving applicable clauses and checking supplier evidence and amount conditions for the current revision…" />}
+    {!data.assessment && data.stage.status !== 'PROCESSING' && (failed || !task.data.progress.quote_review_completed) && <section className={`card ${failed ? 'error-panel' : ''}`} role={failed ? 'alert' : undefined}><h3>{failed ? 'Compliance review incomplete' : 'Waiting for quotation processing to complete'}</h3><p>{failed ? task.data.current_job?.error_message ?? 'The background job failed. Restart the compliance review.' : 'Complete quotation review before preparing evidence.'}</p><Link to={`/tasks/${taskId}/quotes/new`}>View quotations and review</Link></section>}
     {!readonly && data.policy_binding && !data.assessment && data.stage.status === 'NOT_STARTED' && task.data.progress.quote_review_completed && <section className="card compliance-precheck-card">
-      <div className="section-heading"><div><p className="eyebrow">BEFORE CHECK</p><h3>检查前准备证明材料</h3><p>按供应商准备已有材料；没有的可先跳过，检查后系统会指明缺口。</p></div><span>已准备 {activeEvidence.length} / {precheckSuppliers.length * PRECHECK_CONTROLS.length} 份</span></div>
+      <div className="section-heading"><div><p className="eyebrow">BEFORE CHECK</p><h3>Prepare evidence before checking</h3><p>Prepare available evidence for each supplier. Missing items may be skipped; the system will identify gaps after checking.</p></div><span>{activeEvidence.length} / {precheckSuppliers.length * PRECHECK_CONTROLS.length} prepared</span></div>
       <div className="compliance-precheck-list">{precheckSuppliers.map((supplier) => {
         const records = PRECHECK_CONTROLS.map((control) => ({ control, record: currentEvidence(supplier.quote_id, control) }))
         const completed = records.filter(({ record }) => Boolean(record)).length
         const expanded = expandedPrecheckQuote === supplier.quote_id
         const panelId = `precheck-${supplier.quote_id}`
         return <article key={supplier.quote_id} className={`compliance-precheck-supplier${expanded ? ' is-expanded' : ''}`}>
-          <button className="compliance-precheck-summary" type="button" aria-expanded={expanded} aria-controls={panelId} aria-label={`${expanded ? '收起' : '准备'} ${supplier.supplier_name} 材料`} onClick={() => setExpandedPrecheckQuote(expanded ? null : supplier.quote_id)}>
-            <span className="compliance-precheck-name"><strong>{supplier.supplier_name}</strong><small>第 {supplier.quote_version} 版报价</small></span>
-            <span className="compliance-precheck-chips" aria-label={`${supplier.supplier_name} 材料状态`}>{records.map(({ control, record }) => <span className={record ? 'is-ready' : ''} key={control}>{control === 'APPROVED_SUPPLIER' ? '准入' : control === 'ROHS_COMPLIANCE' ? 'RoHS' : '审批'} {record ? '✓' : '—'}</span>)}</span>
-            <span className="compliance-precheck-progress"><strong>{completed}/{PRECHECK_CONTROLS.length}</strong><small>已准备</small></span>
-            <span className="compliance-precheck-action">{expanded ? '收起' : '准备材料'}</span>
+          <button className="compliance-precheck-summary" type="button" aria-expanded={expanded} aria-controls={panelId} aria-label={`${expanded ? 'Collapse' : 'Prepare'} evidence for ${supplier.supplier_name}`} onClick={() => setExpandedPrecheckQuote(expanded ? null : supplier.quote_id)}>
+            <span className="compliance-precheck-name"><strong>{supplier.supplier_name}</strong><small>Quotation revision {supplier.quote_version}</small></span>
+            <span className="compliance-precheck-chips" aria-label={`${supplier.supplier_name} evidence status`}>{records.map(({ control, record }) => <span className={record ? 'is-ready' : ''} key={control}>{control === 'APPROVED_SUPPLIER' ? 'Eligibility' : control === 'ROHS_COMPLIANCE' ? 'RoHS' : 'Approval'} {record ? '✓' : '—'}</span>)}</span>
+            <span className="compliance-precheck-progress"><strong>{completed}/{PRECHECK_CONTROLS.length}</strong><small>Prepared</small></span>
+            <span className="compliance-precheck-action">{expanded ? 'Collapse' : 'Prepare evidence'}</span>
           </button>
           {expanded && <div className="compliance-precheck-controls" id={panelId}>{records.map(({ control, record }) => <div className="compliance-precheck-control" key={control}>
-            <span><strong>{evidenceMaterialLabel(control)}</strong><small>{record ? `已上传：${record.facts.material_number}` : '尚未上传'}</small></span>
-            <button className="button button-secondary" type="button" aria-label={`${record ? '替换' : '上传'}${evidenceMaterialLabel(control)} · ${supplier.supplier_name}`} onClick={() => setTarget({ supplier, control, record, revision: data.task_revision, runAfterSave: false })}>{record ? '替换' : '上传'}</button>
+            <span><strong>{evidenceMaterialLabel(control)}</strong><small>{record ? `Uploaded: ${record.facts.material_number}` : 'Not uploaded'}</small></span>
+            <button className="button button-secondary" type="button" aria-label={`${record ? 'Replace' : 'Upload'} ${evidenceMaterialLabel(control)} · ${supplier.supplier_name}`} onClick={() => setTarget({ supplier, control, record, revision: data.task_revision, runAfterSave: false })}>{record ? 'Replace' : 'Upload'}</button>
           </div>)}</div>}
         </article>
       })}</div>
     </section>}
-    {!readonly && data.stage.status === 'NOT_STARTED' && task.data.progress.quote_review_completed && <section className="card compliance-start-card"><div><h3>开始制度检查</h3><p>{activeEvidence.length > 0 ? `将使用已上传的 ${activeEvidence.length} 份材料检索适用规则并统一核验。` : '当前没有已上传材料；仍可开始检查，随后按结果补充缺口。'}</p></div><button className="button button-submit" disabled={start.isPending || ['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)} onClick={() => start.mutate()}>{start.isPending ? '正在启动…' : failed ? '重新开始制度检查' : '开始制度检查'}</button>{start.isError && <p role="alert">{errorMessage(start.error)}</p>}</section>}
-    {suppliers.length > 0 && <section className="card compliance-results-card"><div className="section-heading"><div><h3>供应商检查结果</h3></div><span>{suppliers.length} 家供应商</span></div>
-      <div className="compliance-table-scroll"><table aria-label="供应商检查结果" className="supplier-data-table compliance-table"><thead><tr><th>供应商</th><th>供应商准入</th><th>RoHS</th><th>制度结论</th><th>推荐资格</th><th>材料与依据</th></tr></thead><tbody>
-        {pagination.pageItems.map((supplier) => { const admission = aggregateControlStatus(supplier.checks, 'APPROVED_SUPPLIER'); const rohs = aggregateControlStatus(supplier.checks, 'ROHS_COMPLIANCE'); const supplierName = supplier.supplier_name ?? supplier.supplier_id ?? supplier.quote_id; const expanded = supplier.quote_id === linkedQuote || expandedQuotes.includes(supplier.quote_id); const supplierEvidence = data.evidence.filter((record) => record.quote_id === supplier.quote_id); return <Fragment key={supplier.quote_id}><tr id={complianceAnchorId(supplier.quote_id)} tabIndex={-1}><td><strong>{supplierName}</strong><small>第 {supplier.quote_version} 版报价</small></td><td><StateBadge status={admission} label={checkStatusLabel(admission)} /></td><td><StateBadge status={rohs} label={checkStatusLabel(rohs)} /></td><td><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></td><td><StateBadge status={supplier.eligibility ?? 'UNVERIFIED'} label={complianceStatusLabel(supplier.eligibility ?? 'UNVERIFIED')} /></td><td>
-          {!readonly && errors.length > 0 && <small>制度规则需管理员处理，当前补充材料无法解除阻塞。</small>}
-          <button type="button" className="compliance-details-toggle" aria-expanded={expanded} aria-label={`${expanded ? '收起' : '展开'} ${supplierName} 检查与材料`} onClick={() => {
+    {!readonly && data.stage.status === 'NOT_STARTED' && task.data.progress.quote_review_completed && <section className="card compliance-start-card"><div><h3>Start compliance review</h3><p>{activeEvidence.length > 0 ? `The ${activeEvidence.length} uploaded evidence records will be used to retrieve applicable rules and run all checks together.` : 'No evidence has been uploaded. You can still start the review and fill the identified gaps afterwards.'}</p></div><button className="button button-submit" disabled={start.isPending || ['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)} onClick={() => start.mutate()}>{start.isPending ? 'Starting…' : failed ? 'Restart compliance review' : 'Start compliance review'}</button>{start.isError && <p role="alert">{errorMessage(start.error)}</p>}</section>}
+    {suppliers.length > 0 && <section className="card compliance-results-card"><div className="section-heading"><div><h3>Supplier check results</h3></div><span>{suppliers.length} suppliers</span></div>
+      <div className="compliance-table-scroll"><table aria-label="Supplier check results" className="supplier-data-table compliance-table"><thead><tr><th>Supplier</th><th>Supplier eligibility</th><th>RoHS</th><th>Compliance conclusion</th><th>Recommendation eligibility</th><th>Evidence and sources</th></tr></thead><tbody>
+        {pagination.pageItems.map((supplier) => { const admission = aggregateControlStatus(supplier.checks, 'APPROVED_SUPPLIER'); const rohs = aggregateControlStatus(supplier.checks, 'ROHS_COMPLIANCE'); const supplierName = supplier.supplier_name ?? supplier.supplier_id ?? supplier.quote_id; const expanded = supplier.quote_id === linkedQuote || expandedQuotes.includes(supplier.quote_id); const supplierEvidence = data.evidence.filter((record) => record.quote_id === supplier.quote_id); return <Fragment key={supplier.quote_id}><tr id={complianceAnchorId(supplier.quote_id)} tabIndex={-1}><td><strong>{supplierName}</strong><small>Quotation revision {supplier.quote_version}</small></td><td><StateBadge status={admission} label={checkStatusLabel(admission)} /></td><td><StateBadge status={rohs} label={checkStatusLabel(rohs)} /></td><td><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></td><td><StateBadge status={supplier.eligibility ?? 'UNVERIFIED'} label={complianceStatusLabel(supplier.eligibility ?? 'UNVERIFIED')} /></td><td>
+          {!readonly && errors.length > 0 && <small>Policy rules require administrator attention; adding evidence cannot currently remove the block.</small>}
+          <button type="button" className="compliance-details-toggle" aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${supplierName} Checks and Evidence`} onClick={() => {
             navigate({ pathname: location.pathname, hash: '' }, { replace: true })
             setExpandedQuotes((current) => expanded ? current.filter((quoteId) => quoteId !== supplier.quote_id) : [...current, supplier.quote_id])
-          }}>{expanded ? '收起' : '展开'}检查与材料（{supplier.checks.length + supplierEvidence.length}）</button>
+          }}>{expanded ? 'Collapse' : 'Expand'} checks and evidence ({supplier.checks.length + supplierEvidence.length})</button>
         </td></tr>{expanded && <tr className="compliance-detail-row"><td colSpan={6}><SupplierCheckDetails supplier={supplier} clauses={clauses} evidence={supplierEvidence} taskId={taskId} linkedCheck={linkedCheck} readonly={readonly} onEdit={(control, record) => setTarget({ supplier, control, record, revision: data.task_revision, runAfterSave: true })} /></td></tr>}</Fragment>})}
       </tbody></table></div><TablePagination page={pagination.page} pageSize={pagination.pageSize} pageCount={pagination.pageCount} total={suppliers.length} onPageChange={(page) => { navigate({ pathname: location.pathname, hash: '' }, { replace: true }); pagination.setPage(page) }} />
     </section>}
     {target && !readonly && <EvidenceEditor key={`${target.supplier.quote_id}:${target.control}:${target.record?.evidence_id ?? 'new'}:${target.revision}`} task={task.data} target={target} onClose={() => setTarget(null)} onSaved={refresh} />}
-    {amountRequirements.length > 0 && <section className="card compliance-amount-card"><div className="section-heading"><div><h3>金额条件与审批记录</h3></div><span>{amountRequirements.length} 条条件</span></div><div className="compliance-table-scroll"><table aria-label="金额条件与后续动作" className="supplier-data-table compliance-amount-table"><thead><tr><th>供应商</th><th>执行阶段</th><th>当前金额 / 门槛</th><th>判断</th><th>后续动作</th></tr></thead><tbody>{amountRequirements.map((item, index) => {
+    {amountRequirements.length > 0 && <section className="card compliance-amount-card"><div className="section-heading"><div><h3>Amount conditions and approval records</h3></div><span>{amountRequirements.length} conditions</span></div><div className="compliance-table-scroll"><table aria-label="Amount conditions and next actions" className="supplier-data-table compliance-amount-table"><thead><tr><th>Supplier</th><th>Execution stage</th><th>Current amount / threshold</th><th>Assessment</th><th>Next action</th></tr></thead><tbody>{amountRequirements.map((item, index) => {
       const supplier = suppliers.find((candidate) => candidate.quote_id === item.quote_id)
-      const supplierName = item.supplier_name ?? supplier?.supplier_name ?? '供应商身份待核对'
+      const supplierName = item.supplier_name ?? supplier?.supplier_name ?? 'Supplier identity requires review'
       const record = item.quote_id ? currentEvidence(item.quote_id, 'AMOUNT_APPROVAL') : undefined
       const deferred = item.execution_stage === 'AFTER_SELECTION'
-      const outcome = item.approval_confirmed ? '审批记录已核对' : item.triggered === true ? (deferred ? '选择后将触发' : '待核对审批') : item.triggered === false ? '未触发' : '待检查'
-      return <tr key={`${item.quote_id}:${item.execution_stage}:${item.threshold}:${item.action}:${index}`}><td><strong>{supplierName}</strong></td><td>{executionStageLabel(item.execution_stage)}</td><td>{item.amount && item.currency ? `${item.currency} ${item.amount}` : '金额待确认'}{item.threshold && <small>门槛：{item.currency ?? ''} {item.threshold}</small>}</td><td><StateBadge status={item.approval_confirmed ? 'PASS' : item.triggered === true ? 'REVIEW_REQUIRED' : item.triggered === false ? 'PASS' : 'NOT_EVALUATED'} label={outcome} />{item.triggered !== false && (item.reason_codes ?? []).map((code) => <small key={code}>{complianceReasonLabel(code)}</small>)}</td><td>{item.triggered ? item.action ?? '按制度办理' : '—'}{!readonly && errors.length === 0 && item.triggered === true && supplier && <button className="button button-secondary compliance-add" type="button" onClick={() => setTarget({ supplier, control: 'AMOUNT_APPROVAL', record, revision: data.task_revision, runAfterSave: true })}>{record ? '替换金额审批记录' : '补充金额审批记录'}</button>}</td></tr>
+      const outcome = item.approval_confirmed ? 'Approval record verified' : item.triggered === true ? (deferred ? 'Triggered after selection' : 'Approval requires review') : item.triggered === false ? 'Not triggered' : 'Awaiting check'
+      return <tr key={`${item.quote_id}:${item.execution_stage}:${item.threshold}:${item.action}:${index}`}><td><strong>{supplierName}</strong></td><td>{executionStageLabel(item.execution_stage)}</td><td>{item.amount && item.currency ? `${item.currency} ${item.amount}` : 'Amount pending confirmation'}{item.threshold && <small>Threshold: {item.currency ?? ''} {item.threshold}</small>}</td><td><StateBadge status={item.approval_confirmed ? 'PASS' : item.triggered === true ? 'REVIEW_REQUIRED' : item.triggered === false ? 'PASS' : 'NOT_EVALUATED'} label={outcome} />{item.triggered !== false && (item.reason_codes ?? []).map((code) => <small key={code}>{complianceReasonLabel(code)}</small>)}</td><td>{item.triggered ? item.action ?? 'Follow policy procedure' : '—'}{!readonly && errors.length === 0 && item.triggered === true && supplier && <button className="button button-secondary compliance-add" type="button" onClick={() => setTarget({ supplier, control: 'AMOUNT_APPROVAL', record, revision: data.task_revision, runAfterSave: true })}>{record ? 'Replace amount approval record' : 'Add amount approval record'}</button>}</td></tr>
     })}</tbody></table></div></section>}
     {!readonly && data.assessment && <Confirmation key={`${data.task_revision}:${data.stage.assessment_id}`} workspace={data} onRefresh={refresh} />}
   </div>

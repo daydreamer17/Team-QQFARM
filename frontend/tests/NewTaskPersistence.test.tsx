@@ -49,13 +49,13 @@ function renderPage() {
   )
 }
 
-describe('NewTaskPage 未提交草稿恢复', () => {
+describe('NewTaskPage 未提交Draft恢复', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     window.sessionStorage.clear()
   })
 
-  test('离开页面再返回后保留解析结果和用户修正', async () => {
+  test('离开页面再Back后保留解析结果和用户修正', async () => {
     vi.spyOn(api, 'listPolicySets').mockResolvedValue({ items: [], total: 0, limit: 100, offset: 0 })
     const upload = vi.spyOn(api, 'uploadRequirementDraft').mockResolvedValue(readyDraft)
     vi.spyOn(api, 'getRequirementDraft').mockResolvedValue(readyDraft)
@@ -65,22 +65,22 @@ describe('NewTaskPage 未提交草稿恢复', () => {
     expect(fileInput).not.toBeNull()
 
     await user.upload(fileInput!, new File(['Manufacturer: Parsed Maker'], 'procurement_requirement.txt', { type: 'text/plain' }))
-    await user.click(screen.getByRole('button', { name: '解析并填入' }))
-    await waitFor(() => expect(screen.getByLabelText('制造商')).toHaveValue('Parsed Maker'))
-    await user.clear(screen.getByLabelText('制造商'))
-    await user.type(screen.getByLabelText('制造商'), '用户修正制造商')
+    await user.click(screen.getByRole('button', { name: 'Parse and populate' }))
+    await waitFor(() => expect(screen.getByLabelText('Manufacturer')).toHaveValue('Parsed Maker'))
+    await user.clear(screen.getByLabelText('Manufacturer'))
+    await user.type(screen.getByLabelText('Manufacturer'), '用户修正Manufacturer')
     await waitFor(() => expect(window.sessionStorage.getItem('quotewise.new-task.v1')).not.toBeNull())
 
     firstRender.unmount()
     renderPage()
 
-    expect(await screen.findByRole('status')).toHaveTextContent('已恢复未提交的采购任务，请继续检查或创建任务。')
-    expect(screen.getByLabelText('制造商')).toHaveValue('用户修正制造商')
+    expect(await screen.findByRole('status')).toHaveTextContent('Your unsaved procurement task has been restored. Continue reviewing or create the task.')
+    expect(screen.getByLabelText('Manufacturer')).toHaveValue('用户修正Manufacturer')
     expect(screen.getByText('procurement_requirement.txt')).toBeInTheDocument()
-    expect(screen.getByText('解析完成')).toBeInTheDocument()
+    expect(screen.getByText('Parsing complete')).toBeInTheDocument()
     expect(upload).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole('button', { name: '清空表单' }))
+    await user.click(screen.getByRole('button', { name: 'Clear form' }))
     expect(window.sessionStorage.getItem('quotewise.new-task.v1')).toBeNull()
   })
 })

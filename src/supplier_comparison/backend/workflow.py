@@ -508,8 +508,8 @@ class WorkflowRunner:
                 filename = document.get("original_filename") or document["document_id"]
                 raise BackendError(
                     exc.code,
-                    f"报价解析失败：{filename}（{exc.code}）。已使用 {budget.calls_used} 次模型调用；"
-                    "请检查模型服务后重试，或使用人工录入。",
+                    f"Quotation extraction failed: {filename} ({exc.code}). {budget.calls_used} model calls were used. "
+                    "Check the model service and retry, or use manual entry.",
                 ) from exc
             finally:
                 self.service.record_document_calls(
@@ -728,7 +728,7 @@ class WorkflowRunner:
         issue = self.service.open_issue(
             task_id=state["task_id"], graph_run_id=state["graph_run_id"], task_revision=state["task_revision"],
             issue_type="BATCH_FIELD_REVIEW", quote_id=None, field_name=f"batch_review:{state['task_revision']}",
-            question="请一次核对本轮各报价的待确认字段，统一提交纠正；系统会重新审核与计算。",
+            question="Review the pending fields for all quotations in this run and submit corrections together. The system will review and recalculate them.",
             answer_schema={"answer_type": "BATCH_FIELD_CORRECTIONS",
                            "submit_to": f"/api/v1/tasks/{state['task_id']}/fields/corrections",
                            "expected_task_revision": state["task_revision"], "cards": cards},
@@ -818,7 +818,7 @@ class WorkflowRunner:
             issue_type="PAYMENT_INFORMATION",
             quote_id=quote_id,
             field_name="payment_start_event",
-            question="该报价的 Net 账期缺少起算口径。请根据供应商确认或文件补充信息确认账期从何时开始。",
+            question="The Net payment term is missing its start event. Use supplier confirmation or document evidence to confirm when the payment term begins.",
             answer_schema={
                 "answer_type": "PAYMENT_INFORMATION",
                 "payment_start_event_options": ["INVOICE_DATE"],
@@ -895,7 +895,7 @@ class WorkflowRunner:
             issue_type="CONFIRM_MISSING",
             quote_id=target_quote_id,
             field_name="shipping_fee_status",
-            question="请确认该报价 PDF/CSV 没有提供可用于计算的运费金额。",
+            question="Confirm that the quotation PDF/CSV does not provide a shipping amount usable for calculation.",
             answer_schema={"answer_type": "CONFIRM_MISSING"},
         )
         resumed = interrupt(self._safe_interrupt(issue))
@@ -1041,7 +1041,7 @@ class WorkflowRunner:
             issue_type="SHIPPING_AMOUNT",
             quote_id=state["target_quote_id"],
             field_name="shipping_fee_amount",
-            question=f"请提供该供应商的 {currency} 运费金额。",
+            question=f"Provide this supplier's shipping amount in {currency}.",
             answer_schema={
                 "answer_type": "SHIPPING_AMOUNT",
                 "amount": "decimal-string",
@@ -1529,8 +1529,8 @@ class WorkflowRunner:
             quote_id=None,
             field_name=f"policy_retrieval:{state['task_revision']}",
             question=(
-                "采购制度证据缺失、冲突或检索失败。修复临时故障后可重试；"
-                "制度内容或索引发生变化时，应使用新发布版本创建新任务。"
+                "Procurement policy evidence is missing, conflicting, or retrieval failed. Retry after repairing a transient failure. "
+                "If policy content or its index changed, create a new task using the newly published revision."
             ),
             answer_schema={
                 "answer_type": "RETRY_POLICY_RETRIEVAL",

@@ -18,34 +18,34 @@ import {
 import { reviewFindingAction, reviewFindingActionMessages } from '../lib/reviewMessages'
 
 const draftStatusLabels: Record<string, string> = {
-  UPLOADED: '已上传',
-  PROCESSING: '正在解析',
-  REVIEW_REQUIRED: '待处理',
-  READY_TO_SUBMIT: '审核完成',
-  SUBMITTED: '已正式提交',
-  FAILED: '处理失败',
-  STALE: '已过期',
-  DISCARDED: '已废弃',
+  UPLOADED: 'Uploaded',
+  PROCESSING: 'Processing',
+  REVIEW_REQUIRED: 'Action required',
+  READY_TO_SUBMIT: 'Review complete',
+  SUBMITTED: 'Submitted',
+  FAILED: 'Failed',
+  STALE: 'Expired',
+  DISCARDED: 'Abandoned',
 }
 
 const optionLabels: Record<string, string> = {
-  NEW: '全新',
-  REFURBISHED: '翻新',
-  USED: '二手',
-  KNOWN_AMOUNT: '另有明确金额',
-  FREE: '免费',
-  INCLUDED: '已包含在报价中',
-  NOT_APPLICABLE: '不适用',
-  UNKNOWN: '未知，待补充',
-  CALENDAR_DAYS: '自然日',
-  BUSINESS_DAYS: '工作日',
-  ARRIVAL: '到货',
-  SHIPMENT: '发货',
-  ORDER_DATE: '下单日',
-  PAYMENT_RECEIPT: '收到付款',
-  EXCLUDED: '未包含',
-  piece: '颗（piece）',
-  tray: '盘（tray）',
+  NEW: 'New',
+  REFURBISHED: 'Refurbished',
+  USED: 'Used',
+  KNOWN_AMOUNT: 'Known amount',
+  FREE: 'Free',
+  INCLUDED: 'Included in quotation',
+  NOT_APPLICABLE: 'Not Applicable',
+  UNKNOWN: 'Unknown; follow-up required',
+  CALENDAR_DAYS: 'Calendar Days',
+  BUSINESS_DAYS: 'Business Days',
+  ARRIVAL: 'Arrival',
+  SHIPMENT: 'Shipment',
+  ORDER_DATE: 'Order date',
+  PAYMENT_RECEIPT: 'Payment Receipt',
+  EXCLUDED: 'Excluded',
+  piece: 'Piece',
+  tray: 'Tray',
 }
 
 interface QuoteDraftReviewWorkspaceProps {
@@ -58,7 +58,7 @@ interface QuoteDraftReviewWorkspaceProps {
 
 function displayValue(value: unknown): string {
   const text = quoteValueAsText(value)
-  return text || '未提供'
+  return text || 'Not provided'
 }
 
 function findingMessage(finding: QuoteDraftResponse['review_findings'][number]): string {
@@ -67,18 +67,18 @@ function findingMessage(finding: QuoteDraftResponse['review_findings'][number]):
 }
 
 function apiErrorMessage(error: unknown): string {
-  if (!(error instanceof ApiClientError)) return error instanceof Error ? error.message : '操作失败，请稍后重试。'
-  if (error.code === 'quote_revision_unchanged') return '未检测到任何修改，无需生成新版本。如需继续修改，请更新字段后再提交。'
+  if (!(error instanceof ApiClientError)) return error instanceof Error ? error.message : 'Operation failed. Try again later.'
+  if (error.code === 'quote_revision_unchanged') return 'No changes were detected, so a new revision is not required. Update a field before submitting again.'
   if (error.status === 409) {
     const serverVersion = error.details.actual ?? error.details.actual_draft_revision ?? error.details.actual_field_version
     const suffix = typeof serverVersion === 'number' || typeof serverVersion === 'string'
-      ? `服务器当前版本：${serverVersion}。`
+      ? `Current server revision: ${serverVersion}. `
       : ''
-    return `草稿或字段版本已经变化。${suffix}当前输入仍保留在页面中，请核对最新版本后再提交。`
+    return `The draft or field schema revision has changed. ${suffix}Your current input remains on the page; review the latest revision before submitting.`
   }
-  if (error.code === 'quote_review_schema_conflict' || error.code === 'quote_draft_review_stale') return '字段规则已经更新，请刷新页面并按最新规则重新确认。'
-  if (error.code === 'quote_draft_not_reviewable') return '当前草稿已不能继续修改，请刷新页面查看最新状态。'
-  if (error.status === 422) return error.message || '部分字段未通过后端复核，请按下方具体提示修改。'
+  if (error.code === 'quote_review_schema_conflict' || error.code === 'quote_draft_review_stale') return 'Field rules have changed. Refresh the page and review the latest rules before confirming.'
+  if (error.code === 'quote_draft_not_reviewable') return 'This draft can no longer be revised. Refresh the page to view its latest status.'
+  if (error.status === 422) return error.message || 'Some fields did not pass server validation. Review the details below.'
   return error.message
 }
 
@@ -110,7 +110,7 @@ function backendValidationIssues(error: unknown): QuoteReviewValidationIssue[] {
 function backendIssueMessages(error: unknown): string[] {
   return [...new Set(backendValidationIssues(error).map((current) => (
     current.fieldNames.length > 0
-      ? `${current.fieldNames.join('、')}：${current.message}`
+      ? `${current.fieldNames.join(', ')}: ${current.message}`
       : current.message
   )))]
 }
@@ -124,15 +124,15 @@ function fieldInputMode(definition: QuoteFieldSchemaDefinition): 'decimal' | 'nu
 
 function EvidenceList({ field }: { field: QuoteField }) {
   if (field.evidence.length === 0) {
-    return <p className="quote-field-no-evidence">没有文档证据；如需补值，请确认信息来源后填写。</p>
+    return <p className="quote-field-no-evidence">No document evidence is available. Confirm the information source before entering a value.</p>
   }
   return (
     <div className="quote-field-evidence">
       {field.evidence.map((evidence, index) => (
         <blockquote key={`${evidence.source_id ?? 'source'}:${index}`}>
-          <p>{evidence.quoted_text || '该来源没有可显示的文本片段。'}</p>
+          <p>{evidence.quoted_text || 'This source has no displayable text excerpt.'}</p>
           <footer>
-            {evidence.page_number ? `第 ${evidence.page_number} 页` : evidence.row_number ? `第 ${evidence.row_number} 行` : '文档来源'}
+            {evidence.page_number ? `Page ${evidence.page_number}` : evidence.row_number ? `Row ${evidence.row_number}` : 'Document source'}
             {evidence.column_name ? ` · ${evidence.column_name}` : ''}
             {evidence.source_id ? ` · ${evidence.source_id}` : ''}
           </footer>
@@ -192,14 +192,14 @@ function QuoteFieldEditor({
         {needsAttention && (
           <div className="quote-field-badges">
             <span className="badge-review-state state-needs-attention">
-            {hasInterpretationDoubt && !handled ? '待人工核对' : errors.length > 0 ? (hasValue ? '提交前需处理' : '待补充，可先保存') : '待核对'}
+            {hasInterpretationDoubt && !handled ? 'Manual review required' : errors.length > 0 ? (hasValue ? 'Resolve before submission' : 'Missing; draft can still be saved') : 'Review required'}
             </span>
           </div>
         )}
       </header>
 
-      {handled && <p className="quote-field-note">{adopted ? '已核对当前值，待保存确认。' : '已修改，待保存确认。'}</p>}
-      {!handled && confirmed && <p className="quote-field-note">人工已确认{errors.length > 0 ? '；仍需处理下方数据问题。' : '。'}</p>}
+      {handled && <p className="quote-field-note">{adopted ? 'Current value reviewed; save to confirm.' : 'Revised; save to confirm.'}</p>}
+      {!handled && confirmed && <p className="quote-field-note">Manually confirmed{errors.length > 0 ? '; the data issues below still need attention.' : '.'}</p>}
       {!handled && unresolved.length > 0 && (
         <div className="quote-field-note">
           {unresolved.map((finding) => <p key={finding.finding_id}>{findingMessage(finding)}</p>)}
@@ -207,10 +207,10 @@ function QuoteFieldEditor({
       )}
 
       {hasValue && !handled && hasInterpretationDoubt && (
-        <button type="button" className="button button-secondary" disabled={disabled} onClick={onAdopt}>已核对，采用此值</button>
+        <button type="button" className="button button-secondary" disabled={disabled} onClick={onAdopt}>Confirm current value</button>
       )}
       {hasValue && (hasConflict || unresolved.length > 0) && (
-        <button type="button" className="button button-secondary" disabled={disabled} onClick={() => onChange(requiresResolvedFeeStatus ? 'UNKNOWN' : '')}>暂不确定，标记未知</button>
+        <button type="button" className="button button-secondary" disabled={disabled} onClick={() => onChange(requiresResolvedFeeStatus ? 'UNKNOWN' : '')}>Mark as unknown for now</button>
       )}
 
       <label className="field quote-review-input">
@@ -223,10 +223,10 @@ function QuoteFieldEditor({
             onChange={(event) => onChange(event.target.value)}
           >
             <option value="" disabled={requiresResolvedFeeStatus}>
-              {requiresResolvedFeeStatus ? '请选择费用状态' : '未提供 / 当前不适用'}
+              {requiresResolvedFeeStatus ? 'Select a fee status' : 'Not provided / not currently applicable'}
             </option>
             {selectableOptions.map((option) => (
-              <option key={option} value={option}>{optionLabels[option] ? `${optionLabels[option]}（${option}）` : option}</option>
+              <option key={option} value={option}>{optionLabels[option] ? `${optionLabels[option]} (${option})` : option}</option>
             ))}
           </select>
         ) : (
@@ -245,17 +245,17 @@ function QuoteFieldEditor({
       </label>
 
       <details className="quote-field-rules">
-        <summary>查看原文与依据</summary>
-        <p>原文：{displayValue(field.raw_value)}{field.unit ? ` ${field.unit}` : ''}</p>
-        <p>字段：{definition.field_name} · 状态：{field.validation_status}</p>
+        <summary>View source and evidence</summary>
+        <p>Source value: {displayValue(field.raw_value)}{field.unit ? ` ${field.unit}` : ''}</p>
+        <p>Field: {definition.field_name} · Status: {field.validation_status}</p>
         <EvidenceList field={field} />
         {Boolean(field.review_evidence?.length) && <>
-          <p>其他原文线索（可能包含历史价，请核对适用版本；不代表支持当前值）</p>
+          <p>Other source clues (may include historical prices; verify the applicable version and do not treat them as support for the current value)</p>
           <EvidenceList field={{ ...field, evidence: field.review_evidence! }} />
         </>}
         <p>{definition.normalization_rule}</p>
         {findings.filter((finding) => finding.decision !== 'PASS').map((finding) => (
-          <p key={finding.finding_id}>{finding.resolved ? '已人工处理：' : '原始预检：'}{findingMessage(finding)}</p>
+          <p key={finding.finding_id}>{finding.resolved ? 'Manually resolved: ' : 'Initial pre-check: '}{findingMessage(finding)}</p>
         ))}
       </details>
     </article>
@@ -332,7 +332,7 @@ export function QuoteDraftReviewWorkspace({
         code: 'FIELD_VALUE_CONFLICT',
         fieldNames: [field.field_name],
         groupId: schema.fields.find((definition) => definition.field_name === field.field_name)?.group_id ?? 'field',
-        message: `“${labels.get(field.field_name) ?? field.field_name}”存在冲突，请核对后选择正确内容。`,
+        message: `“${labels.get(field.field_name) ?? field.field_name}” contains conflicting values. Review them and select the correct one.`,
       }))
   }, [draft.fields, schema.fields, values, adoptedFields])
   const activeValidationIssues = useMemo(() => {
@@ -459,7 +459,7 @@ export function QuoteDraftReviewWorkspace({
         code: 'REVIEW_ACTION_BUILD_FAILED',
         fieldNames: [],
         groupId: 'schema',
-        message: error instanceof Error ? error.message : '无法生成字段确认请求，请刷新页面重试。',
+        message: error instanceof Error ? error.message : 'Unable to create the field-confirmation request. Refresh the page and try again.',
       }])
     }
   }
@@ -479,7 +479,7 @@ export function QuoteDraftReviewWorkspace({
       return (
         <article className="quote-review-field has-error" key={definition.field_name} id={`quote-field-${definition.field_name}`}>
           <strong>{definition.label}</strong>
-          <p className="field-error-text">系统没有生成此字段，请重新解析报价。</p>
+          <p className="field-error-text">The system did not generate this field. Reparse the quotation.</p>
         </article>
       )
     }
@@ -513,32 +513,32 @@ export function QuoteDraftReviewWorkspace({
           <h2>{draft.supplier_id} · {draft.original_filename}</h2>
         </div>
         <div className="quote-draft-header-actions">
-          <button className="button button-secondary" type="button" onClick={onPreview}>查看原件</button>
+          <button className="button button-secondary" type="button" onClick={onPreview}>View source</button>
           <span className={`status-pill draft-status-${draft.status.toLowerCase()}`}>{draftStatusLabels[draft.status] ?? draft.status}</span>
         </div>
       </header>
 
       {draft.status === 'PROCESSING' && (
-        <div className="draft-processing"><i className="activity-spinner" /><div><strong>正在解析并执行确定性预检</strong><span>完成后才能进行全字段人工确认。</span></div></div>
+        <div className="draft-processing"><i className="activity-spinner" /><div><strong>Parsing and running deterministic pre-checks</strong><span>Complete these items before confirming all fields.</span></div></div>
       )}
-      {draft.status === 'FAILED' && <div className="form-error compact-error"><div><strong>报价处理失败</strong><p>{draft.error_message}</p></div></div>}
-      {draft.status === 'STALE' && <div className="form-error compact-error"><div><strong>草稿已过期</strong><p>任务输入在审核期间发生变化，请废弃后重新上传。</p></div></div>}
-      {(schemaChanged || legacyReview) && <div className="review-schema-warning"><strong>审核规则已更新</strong><p>请按当前规则重新核对本报价。</p></div>}
+      {draft.status === 'FAILED' && <div className="form-error compact-error"><div><strong>Quotation processing failed</strong><p>{draft.error_message}</p></div></div>}
+      {draft.status === 'STALE' && <div className="form-error compact-error"><div><strong>Draft is stale</strong><p>The task inputs changed during review. Discard this draft and upload the quotation again.</p></div></div>}
+      {(schemaChanged || legacyReview) && <div className="review-schema-warning"><strong>Review rules have changed</strong><p>Review this quotation again using the current rules.</p></div>}
 
       {draft.fields.length > 0 && (
         <form onSubmit={confirmAndSubmit} noValidate>
           <div className="quote-review-overview">
-            {currentProblemFieldNames.size > 0 && <div><strong>{currentProblemFieldNames.size}</strong><span>需要处理</span></div>}
-            <div><strong>{autoFilledCount}</strong><span>已识别</span></div>
-            <div><strong>{optionalEmptyCount}</strong><span>报价未提供</span></div>
+            {currentProblemFieldNames.size > 0 && <div><strong>{currentProblemFieldNames.size}</strong><span>Action required</span></div>}
+            <div><strong>{autoFilledCount}</strong><span>Identified</span></div>
+            <div><strong>{optionalEmptyCount}</strong><span>Not provided in quotation</span></div>
           </div>
 
           {activeValidationIssues.length > 0 && (
             <div className="quote-review-error-summary" role="alert">
-              <strong>还有 {activeValidationIssues.length} 个问题需要处理</strong>
-              <p>可以先保存。识别疑问请核对并采用当前值或修改；数据不合法的项目需修正后才能正式提交。</p>
+              <strong>{activeValidationIssues.length} issues still need attention</strong>
+              <p>You may save first. Confirm or correct uncertain extractions; invalid data must be resolved before formal submission.</p>
               <details>
-                <summary>查看问题清单</summary>
+                <summary>View issue list</summary>
                 <ul>
                   {activeValidationIssues.map((current) => (
                     <li key={`${current.code}:${current.fieldNames.join(',')}`}>
@@ -557,7 +557,7 @@ export function QuoteDraftReviewWorkspace({
           <div className="quote-review-groups">
             {attentionFields.length > 0 && (
               <section className="quote-review-group quote-review-attention">
-                <header><div><span>{attentionFields.length}</span><h3>重点处理</h3></div><p>这些项目最初存在缺失或疑问，请优先核对。</p></header>
+                <header><div><span>{attentionFields.length}</span><h3>Priority items</h3></div><p>These items were initially missing or uncertain. Review them first.</p></header>
                 <div className="draft-field-grid">{attentionFields.map(renderField)}</div>
               </section>
             )}
@@ -566,7 +566,7 @@ export function QuoteDraftReviewWorkspace({
               open={otherFieldsOpen}
               onToggle={(event) => setOtherFieldsOpen(event.currentTarget.open)}
             >
-              <summary>查看其他内容（{readyFields.length} 项）</summary>
+              <summary>View other fields ({readyFields.length})</summary>
               <div className="quote-review-groups">
                 {groups.map(([groupId, group]) => {
                   const visibleFields = group.fields.filter((definition) => !priorityFieldNames.has(definition.field_name))
@@ -590,32 +590,32 @@ export function QuoteDraftReviewWorkspace({
                 finalize.mutate({ reviewKey: key, submitKey: createIdempotencyKey(),
                   actions: buildQuoteReviewActions(draft, schema, values, adoptedFields), submitOnly: false, saveOnly: true })
               } catch (error) {
-                setValidationIssues([{ code: 'REVIEW_ACTION_BUILD_FAILED', fieldNames: [], groupId: 'schema', message: error instanceof Error ? error.message : '请刷新字段版本后重试。' }])
+                setValidationIssues([{ code: 'REVIEW_ACTION_BUILD_FAILED', fieldNames: [], groupId: 'schema', message: error instanceof Error ? error.message : 'Refresh the field schema revision and try again.' }])
               }
-            }}>保存并确认审核</button>
+            }}>Save and confirm review</button>
             <button className="button button-submit" type="submit" disabled={finalize.isPending || draft.status === 'PROCESSING' || activeValidationIssues.length > 0}>
-              {finalize.isPending ? '正在检查并提交…' : '确认并提交报价'}
+              {finalize.isPending ? 'Checking and submitting…' : 'Confirm and submit quotation'}
             </button>
           </div>
-          {draft.human_review_complete && !isDirty && <p role="status">人工审核已保存。{draft.submission_ready ? '可以正式提交报价。' : '仍有待补充或需修正的信息，请处理后再提交；未知值不会按零计算。'}</p>}
+          {draft.human_review_complete && !isDirty && <p role="status">Manual review saved. {draft.submission_ready ? 'The quotation can now be submitted.' : 'Some information is still missing or needs correction. Resolve it before submission; unknown values are never treated as zero.'}</p>}
         </form>
       )}
 
       {unchangedRevision && (
         <div className="quote-no-change-notice" role="status">
-          <strong>无需更新</strong>
-          <p>报价内容没有变化，已保留当前版本。</p>
+          <strong>No update required</strong>
+          <p>The quotation content has not changed. The current version has been retained.</p>
         </div>
       )}
 
       {mutationError && !unchangedRevision && (
         <div className="form-error compact-error" role="alert">
           <div>
-            <strong>操作未完成</strong>
+            <strong>Operation not completed</strong>
             <p>{apiErrorMessage(mutationError)}</p>
             {backendMessages.length > 0 && <ul>{backendMessages.map((message) => <li key={message}>{message}</li>)}</ul>}
             {mutationError instanceof ApiClientError && mutationError.status === 409 && (
-              <button type="button" className="button button-secondary" onClick={onChanged}>重新加载最新草稿（替换当前表单）</button>
+              <button type="button" className="button button-secondary" onClick={onChanged}>Load latest draft and replace this form</button>
             )}
           </div>
         </div>
@@ -632,7 +632,7 @@ export function QuoteDraftReviewWorkspace({
           }}
           disabled={discard.isPending || draft.status === 'SUBMITTED'}
         >
-          {unchangedRevision ? '返回报价列表' : draft.replacement_quote_id ? '取消修改' : '废弃草稿'}
+          {unchangedRevision ? 'Back to quotation list' : draft.replacement_quote_id ? 'Cancel revision' : 'Discard draft'}
         </button>
       </div>
     </section>

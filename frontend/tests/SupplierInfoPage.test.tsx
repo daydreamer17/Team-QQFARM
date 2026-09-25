@@ -178,32 +178,32 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('历史冻结结果')).toBeInTheDocument()
-    expect(screen.getByText('截至 2026-08-06')).toBeInTheDocument()
-    expect(screen.getByText('合成演示数据')).toBeInTheDocument()
-    const overview = screen.getByLabelText('供应商概览')
+    expect(await screen.findByText('Historical frozen result')).toBeInTheDocument()
+    expect(screen.getByText('As of 2026-08-06')).toBeInTheDocument()
+    expect(screen.getByText('Synthetic demo data')).toBeInTheDocument()
+    const overview = screen.getByLabelText('Supplier overview')
     expect(within(overview).getAllByText('2')).toHaveLength(2)
-    expect(within(overview).getByText('身份已匹配')).toBeInTheDocument()
+    expect(within(overview).getByText('Identity matched')).toBeInTheDocument()
     expect(overview.closest('.supplier-context')).toBeInTheDocument()
-    const chart = screen.getByRole('img', { name: '供应商历史准时率和拒收订单行率散点图' })
+    const chart = screen.getByRole('img', { name: 'Supplier historical on-time and rejected order-line rates' })
     expect(chart).toBeInTheDocument()
     expect(chart.querySelectorAll('.supplier-bubble-index')).toHaveLength(2)
     expect(chart.querySelectorAll('.supplier-bubble-label')).toHaveLength(0)
-    const chartLegend = screen.getByLabelText('散点图供应商图例')
+    const chartLegend = screen.getByLabelText('Supplier chart legend')
     expect(within(chartLegend).getByRole('button', { name: /Sterling Components/ })).toBeInTheDocument()
     expect(within(chartLegend).getByRole('button', { name: /Redwood Components/ })).toBeInTheDocument()
     expect(screen.getByText('92.7%')).toBeInTheDocument()
-    expect(screen.queryByText('当前第 7 版')).not.toBeInTheDocument()
-    expect(screen.getByText('历史结果第 7 版')).toBeInTheDocument()
+    expect(screen.queryByText('Current第 7 版')).not.toBeInTheDocument()
+    expect(screen.getByText('Historical result · Revision 7')).toBeInTheDocument()
 
-    const supplierList = screen.getByRole('heading', { name: '本次比较供应商' }).closest('article')!
-    expect(within(supplierList).getByText('SUP-024 · 本次可行')).toBeInTheDocument()
+    const supplierList = screen.getByRole('heading', { name: 'Suppliers in this comparison' }).closest('article')!
+    expect(within(supplierList).getByText('SUP-024 · Feasible in this comparison')).toBeInTheDocument()
     await userEvent.click(within(supplierList).getByRole('button', { name: /Redwood Components/ }))
     const detail = screen.getByText('SELECTED SUPPLIER').closest('section')!
     expect(within(detail).getByRole('heading', { name: 'Redwood Components' })).toBeInTheDocument()
     expect(within(detail).getByText('86.0%')).toBeInTheDocument()
     expect(within(detail).getByText('SGD 6900.00')).toBeInTheDocument()
-    expect(within(detail).getByText('是')).toBeInTheDocument()
+    expect(within(detail).getByText('Yes')).toBeInTheDocument()
   })
 
   test('does not render a quote twice when a legacy response repeats it as unresolved', async () => {
@@ -223,7 +223,7 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    const supplierList = (await screen.findByRole('heading', { name: '本次比较供应商' })).closest('article')!
+    const supplierList = (await screen.findByRole('heading', { name: 'Suppliers in this comparison' })).closest('article')!
     expect(within(supplierList).getAllByRole('button')).toHaveLength(2)
   })
 
@@ -251,10 +251,10 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('范围：3 份有效 − 1 份设置排除 = 2 份参与比较')).toBeInTheDocument()
-    const overview = screen.getByLabelText('供应商概览')
-    expect(within(overview).getByText('参与比较')).toBeInTheDocument()
-    expect(within(overview).getByText('设置排除')).toBeInTheDocument()
-    expect(screen.getByText('不含已按当前设置排除的 SUP-030')).toBeInTheDocument()
+    expect(await screen.findByText('Scope: 3 active − 1 excluded = 2 compared')).toBeInTheDocument()
+    const overview = screen.getByLabelText('Supplier overview')
+    expect(within(overview).getByText('Compared quotations')).toBeInTheDocument()
+    expect(within(overview).getByText('Exclude supplier')).toBeInTheDocument()
+    expect(screen.getByText('Excludes SUP-030 under the current settings')).toBeInTheDocument()
   })
 })

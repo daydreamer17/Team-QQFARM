@@ -6,8 +6,8 @@ import type { PolicySetSummary, ProcurementRequirement, RankingCriterion, TaskDe
 import { RequirementFields, type RequirementFormValues } from '../components/RequirementFields'
 
 function message(error: unknown) {
-  if (error instanceof ApiClientError && error.code === 'requirement_unchanged') return '采购需求和绑定制度均未发生变化。'
-  return error instanceof ApiClientError ? error.message : '采购任务更新失败。'
+  if (error instanceof ApiClientError && error.code === 'requirement_unchanged') return 'Neither the procurement requirements nor the policy binding has changed.'
+  return error instanceof ApiClientError ? error.message : 'Unable to update the procurement task.'
 }
 
 function policyKey(policy: PolicySetSummary) {
@@ -87,13 +87,13 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
   function submit(event: FormEvent) {
     event.preventDefault()
     if (bindPolicy && (!policyBinding || !policyCategory || !policyRegion)) {
-      setLocalError('请选择已发布制度及其适用采购类别、地区。')
+      setLocalError('Select a published policy, applicable category and region.')
       return
     }
-    if (window.confirm('保存后会生成新的任务版本；已有报价将按新需求和制度重新分析。确认保存吗？')) update.mutate()
+    if (window.confirm('Saving creates a new task revision. Existing quotations will be reanalysed against the new requirements and policy. Continue?')) update.mutate()
   }
   return <form className="requirement-form" onSubmit={submit}>
-    <section className="page-heading"><div><h1>修改采购任务</h1><p>当前第 {task.task_revision} 版。采购需求或绑定制度变更后，系统会保留历史并重新分析。</p></div><Link className="button button-secondary" to={`/tasks/${task.task_id}`}>取消</Link></section>
+    <section className="page-heading"><div><h1>Edit Procurement Task</h1><p>Current revision: {task.task_revision}. Changes to requirements or policy binding retain history and trigger reanalysis.</p></div><Link className="button button-secondary" to={`/tasks/${task.task_id}`}>Cancel</Link></section>
     <RequirementFields value={value} onChange={(field, next) => {
       if (field === 'ranking_preference' && value.secondary_preference === next) {
         setValue((current) => ({ ...current, ranking_preference: String(next), secondary_preference: '' }))
@@ -103,40 +103,40 @@ function RequirementEditForm({ task }: { task: TaskDetail }) {
       set(field, next)
     }} />
     <fieldset className="form-section policy-binding-section">
-      <legend>制度检查</legend>
+      <legend>Compliance Review</legend>
       <label className="field checkbox-field policy-binding-toggle"><input type="checkbox" checked={bindPolicy} onChange={(event) => {
         setBindPolicy(event.target.checked)
         setLocalError('')
         update.reset()
-      }} /><span>为该任务启用制度检查</span></label>
+      }} /><span>Enable compliance review for this task</span></label>
       {bindPolicy && <div className="policy-binding-picker">
-        {policySets.isPending && <div className="policy-picker-state">正在读取已发布制度…</div>}
-        {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>无法读取制度列表。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
-        {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>暂无可用制度。</span><Link to="/resources">前往制度资源库</Link></div>}
+        {policySets.isPending && <div className="policy-picker-state">Loading published policies…</div>}
+        {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>Unable to load policies.</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>Retry</button></div>}
+        {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>No policies are available.</span><Link to="/resources">Go to policy library</Link></div>}
         {policySets.data && policySets.data.items.length > 0 && <>
-          <label className="field policy-picker-wide"><span>已发布制度</span><select value={effectiveSelectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择制度版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · 版本 {policy.policy_set_version}</option>)}</select></label>
-          {task.policy_binding && !selectedPolicy && <div className="policy-stale-warning">当前绑定的制度已不在可用目录中，请重新选择。</div>}
+          <label className="field policy-picker-wide"><span>Published policy</span><select value={effectiveSelectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">Select a policy version</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · Version {policy.policy_set_version}</option>)}</select></label>
+          {task.policy_binding && !selectedPolicy && <div className="policy-stale-warning">The bound policy is no longer available. Select another policy.</div>}
           {selectedPolicy && <>
             <div className="policy-binding-fields">
-              <label className="field"><span>适用采购类别</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); update.reset() }}><option value="">请选择</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-              <label className="field"><span>适用地区</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); update.reset() }}><option value="">请选择</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
+              <label className="field"><span>Applicable procurement categories</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); update.reset() }}><option value="">Select an option</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+              <label className="field"><span>Applicable region</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); update.reset() }}><option value="">Select an option</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
             </div>
-            <p className="policy-picker-limit">包含 {selectedPolicy.document_count} 个文件、{selectedPolicy.clause_count} 条制度条款，发布于 {selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}。</p>
+            <p className="policy-picker-limit">{selectedPolicy.document_count} documents · {selectedPolicy.clause_count} policy clauses · Published {selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('en-SG') : '—'}.</p>
           </>}
         </>}
       </div>}
     </fieldset>
     {localError && <div className="form-error" role="alert">{localError}</div>}
     {update.isError && <div className="form-error" role="alert">{message(update.error)}</div>}
-    <button className="button button-submit" disabled={update.isPending}>{update.isPending ? '正在保存并排队…' : '保存新版本'}</button>
+    <button className="button button-submit" disabled={update.isPending}>{update.isPending ? 'Saving and queueing…' : 'Save new revision'}</button>
   </form>
 }
 
 export function EditTaskPage() {
   const { taskId = '' } = useParams()
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
-  if (task.isPending) return <section className="card loading-panel">正在读取采购需求…</section>
+  if (task.isPending) return <section className="card loading-panel">Loading procurement requirements…</section>
   if (task.isError) return <section className="card error-panel">{message(task.error)}</section>
-  if (task.data.status === 'ABANDONED') return <section className="card error-panel">废弃任务只读，不能再修改采购需求。</section>
+  if (task.data.status === 'ABANDONED') return <section className="card error-panel">An abandoned task is read-only. Its procurement requirements cannot be changed.</section>
   return <RequirementEditForm task={task.data} />
 }

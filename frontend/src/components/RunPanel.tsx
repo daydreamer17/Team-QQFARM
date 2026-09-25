@@ -19,63 +19,63 @@ interface RunPanelProps {
 function runErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     if (error.code === 'task_revision_conflict') {
-      return '任务 revision 已变化，请刷新任务后重新启动。'
+      return 'The task revision has changed. Refresh the task before starting again.'
     }
     if (error.code === 'graph_run_active') {
-      return '该任务已有正在进行或等待输入的运行，请先刷新状态。'
+      return 'This task already has an active or input-waiting run. Refresh its status first.'
     }
     return error.message
   }
-  return '启动分析失败。'
+  return 'Unable to start analysis.'
 }
 
 function statusCopy(task: TaskDetail) {
   if (task.status === 'QUEUED' && task.current_job?.correction_batch_incomplete) {
-    return ['待完成批量修正', '请先在下方暂存所有阻塞字段，再统一提交；暂时无需重新启动分析。']
+    return ['Batch corrections pending', 'Stage all blocking-field corrections below, then submit them together. Do not restart analysis yet.']
   }
   switch (task.status) {
     case 'QUEUED':
-      return ['等待后台处理', '分析任务已排队，后台服务会自动开始处理。']
+      return ['Waiting for backend processing', 'The analysis job is queued and will start automatically.']
     case 'RUNNING':
-      return ['分析进行中', '后台正在处理报价，页面会自动刷新状态。']
+      return ['Analysis in progress', 'The backend is processing quotations. This page will refresh automatically.']
     case 'NEEDS_INPUT':
       return task.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
-        ? ['需要集中确认', '分析已暂停，请进入“待处理事项”一次性完成本轮确认。']
-        : ['需要人工确认', '分析已暂停，必须处理当前问题后才能继续。']
+        ? ['Consolidated confirmation required', 'Analysis is paused. Open Action Items and complete all confirmations for this round.']
+        : ['Human confirmation required', 'Analysis is paused until the current issue is resolved.']
     case 'COMPLETED':
-      return ['分析已完成', '当前版本已生成比较结果。']
+      return ['Analysis complete', 'Comparison results are available for the current revision.']
     case 'FAILED':
-      return ['分析失败', '运行没有完成，请查看安全错误信息并决定是否重试。']
+      return ['Analysis failed', 'The run did not complete. Review the safe error message before deciding whether to retry.']
     default:
-      return ['准备启动分析', '正式报价提交后，可创建一次新的决策分析运行。']
+      return ['Ready to start analysis', 'After a quotation is formally submitted, you can create a new decision-analysis run.']
   }
 }
 
 function jobErrorMessage(task: TaskDetail) {
   const code = task.current_job?.error_code
   const messages: Record<string, string> = {
-    review_required: '报价中有字段需要人工核对。请进入“待处理事项”，一次性处理全部阻塞项。',
-    csv_header_unregistered: 'CSV 表头不是当前支持的报价模板。请使用 V1、V2、V3、V5 的已登记供应商模板，或 V6 固定模板。',
-    csv_duplicate_headers: 'CSV 表头包含重复列名，无法确定字段来源。请修正重复列后重新上传。',
-    csv_header_missing: 'CSV 没有表头，无法识别字段。',
-    csv_authority_mismatch: 'CSV 内部身份信息与当前任务不一致。请刷新后重新上传；系统不会采用文件中的任务 ID 覆盖后端记录。',
-    pdf_page_requires_ocr: '该 PDF 是扫描件，当前环境未启用文字识别。请联系管理员启用后重新分析。',
-    blank_pdf: 'PDF 没有可读取的报价文字。请上传包含报价内容的文件。',
-    corrupted_pdf: 'PDF 文件已损坏，无法打开。请向供应商索取完整文件后重新上传。',
-    encrypted_pdf_unsupported: 'PDF 已加密。请先取得未加密版本再上传。',
-    pdf_page_limit_exceeded: 'PDF 页数超过系统上限（默认 5 页）。',
-    pdf_size_limit_exceeded: 'PDF 大小超过系统上限（默认 5 MiB）。',
-    workflow_failed: '后台分析发生未预期错误。请查看服务日志中的首个异常。',
+    review_required: 'Quotation fields require human review. Open Action Items and resolve all blocking issues together.',
+    csv_header_unregistered: 'The CSV header is not a supported quotation template. Use a registered V1, V2, V3 or V5 supplier template, or the fixed V6 template.',
+    csv_duplicate_headers: 'The CSV contains duplicate column names, so field sources cannot be determined. Remove duplicate columns and upload it again.',
+    csv_header_missing: 'The CSV has no header and its fields cannot be identified.',
+    csv_authority_mismatch: 'Identity information in the CSV does not match the current task. Refresh and upload again. File-supplied task IDs never override backend records.',
+    pdf_page_requires_ocr: 'This PDF is scanned and OCR is not enabled. Ask an administrator to enable it before reanalysing.',
+    blank_pdf: 'The PDF contains no readable quotation text. Upload a file containing the quotation.',
+    corrupted_pdf: 'The PDF is corrupted and cannot be opened. Obtain a complete file from the supplier and upload it again.',
+    encrypted_pdf_unsupported: 'The PDF is encrypted. Obtain an unencrypted version before uploading.',
+    pdf_page_limit_exceeded: 'The PDF exceeds the page limit (5 pages by default).',
+    pdf_size_limit_exceeded: 'The PDF exceeds the size limit (5 MiB by default).',
+    workflow_failed: 'An unexpected backend analysis error occurred. Review the first exception in the service logs.',
   }
   if (code && messages[code]) return messages[code]
-  return task.current_job?.error_message ?? '工作流未提供更多安全错误信息。'
+  return task.current_job?.error_message ?? 'The workflow did not provide more safe error details.'
 }
 
 function elapsedLabel(totalSeconds: number) {
-  if (totalSeconds < 60) return `${totalSeconds} 秒`
+  if (totalSeconds < 60) return `${totalSeconds} sec`
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
-  return `${minutes} 分 ${String(seconds).padStart(2, '0')} 秒`
+  return `${minutes} min ${String(seconds).padStart(2, '0')} sec`
 }
 
 function ActiveRunIndicator({ task }: { task: TaskDetail }) {
@@ -96,8 +96,8 @@ function ActiveRunIndicator({ task }: { task: TaskDetail }) {
   return (
     <span className={`run-state run-state-${task.status.toLowerCase()} run-state-active`}>
       <i className="activity-spinner" aria-hidden="true" />
-      <span>{task.status === 'RUNNING' ? '分析中' : '等待执行'}</span>
-      <small>已运行 {elapsedLabel(elapsedSeconds)}</small>
+      <span>{task.status === 'RUNNING' ? 'Analysing' : 'Queued'}</span>
+      <small>Running for {elapsedLabel(elapsedSeconds)}</small>
     </span>
   )
 }
@@ -220,13 +220,13 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
       </div>
 
       {task.task_revision === 1 && task.status === 'DRAFT' && (
-        <p className="run-notice">至少登记一份报价后才能启动分析。</p>
+        <p className="run-notice">Register at least one quotation before starting analysis.</p>
       )}
 
       {task.status === 'FAILED' && task.current_job?.error_code && (
         <div className="form-error compact-error" role="alert">
           <div>
-            <strong>分析未完成</strong>
+            <strong>Analysis incomplete</strong>
             <p>{jobErrorMessage(task)}</p>
           </div>
         </div>
@@ -236,36 +236,36 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
         jobId &&
         !task.current_job?.correction_batch_incomplete && (
         <div className="worker-instruction">
-          <strong>后台分析已排队</strong>
-          <span>后台服务会自动处理任务，无需复制命令或离开当前页面。</span>
-          <small>页面会自动刷新；若模型或网络失败，可以按当前版本重新分析。</small>
+          <strong>Backend analysis queued</strong>
+          <span>The backend will process the job automatically. You do not need to copy commands or leave this page.</span>
+          <small>This page refreshes automatically. If the model or network fails, reanalyse the current revision.</small>
         </div>
       )}
 
       {task.status === 'QUEUED' && task.current_job?.correction_batch_incomplete && (
         <div className="run-notice">
-          这是尚未完成的修正批次。请在下方补齐全部阻塞字段；系统只会为完整批次创建一次新的分析。
+          This correction batch is incomplete. Resolve all blocking fields below; the system creates one new analysis only for the complete batch.
         </div>
       )}
 
       {task.status === 'NEEDS_INPUT' && (
         <div className="run-notice">
           {task.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
-            ? '请进入“待处理事项”完成集中确认；提交后系统会统一重新审核与计算。'
-            : '请处理当前问题；提交后会从暂停位置继续分析。'}
+            ? 'Open Action Items and complete the consolidated confirmation. Submission triggers one review and recalculation.'
+            : 'Resolve the current issue. Analysis will resume from the paused point after submission.'}
         </div>
       )}
 
       {task.status === 'COMPLETED' && task.current_result_id && !compact && (
         <div className="run-notice">
-          当前版本的分析已经完成，可以查看比较结果。
+          Analysis for the current revision is complete. Comparison results are available.
         </div>
       )}
 
       {startRun.isError && (
         <div className="form-error compact-error" role="alert">
           <div>
-            <strong>运行未启动</strong>
+            <strong>Run not started</strong>
             <p>{runErrorMessage(startRun.error)}</p>
           </div>
           {lastSubmission && !revisionConflict && (
@@ -274,7 +274,7 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
               type="button"
               onClick={() => startRun.mutate(lastSubmission)}
             >
-              重试相同请求
+              Retry same request
             </button>
           )}
         </div>
@@ -283,7 +283,7 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
       {retryResume.isError && (
         <div className="form-error compact-error" role="alert">
           <div>
-            <strong>断点重试未排队</strong>
+            <strong>Checkpoint retry was not queued</strong>
             <p>{runErrorMessage(retryResume.error)}</p>
           </div>
         </div>
@@ -300,7 +300,7 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
               task.current_result_id
             }
           >
-            查看解析与比较结果
+            View parsing and comparison results
           </Link>
         )}
         {canStart && (
@@ -311,10 +311,10 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
             disabled={startRun.isPending}
           >
             {startRun.isPending
-              ? '正在排队…'
+              ? 'Queueing…'
               : task.status === 'FAILED' || task.status === 'NEEDS_INPUT'
-                ? '按当前版本重新分析'
-                : '启动分析'}
+                ? 'Reanalyse current revision'
+                : 'Start analysis'}
           </button>
         )}
         {canRetryResume && (
@@ -324,12 +324,12 @@ export function RunPanel({ task, onRefresh, compact = false }: RunPanelProps) {
             onClick={() => retryResume.mutate()}
             disabled={retryResume.isPending}
           >
-            {retryResume.isPending ? '正在恢复…' : '从断点重试（不重新解析）'}
+            {retryResume.isPending ? 'Resuming…' : 'Retry from checkpoint (without reparsing)'}
           </button>
         )}
         {(isActive || task.status === 'NEEDS_INPUT' || task.status === 'FAILED') && (
           <button className="button button-secondary" type="button" onClick={onRefresh}>
-            刷新状态
+            Refresh status
           </button>
         )}
       </div>

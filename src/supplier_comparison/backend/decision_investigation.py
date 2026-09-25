@@ -26,12 +26,12 @@ class EvidenceArguments(QuoteArguments):
 
 
 DECISION_TOOLS = {
-    "read_decision_overview": (NoArguments, "读取当前推荐、排序依据及全部供应商的关键结果"),
-    "compare_alternatives": (NoArguments, "计算所有方案的成本、交期与阻碍差异，不改动原报价"),
-    "inspect_quote_evidence": (EvidenceArguments, "选择成本、交期或条款主题，核对该供应商报价原文"),
-    "inspect_supplier_history": (QuoteArguments, "核查供应商历史表现及数据可用性"),
-    "inspect_policy_evidence": (NoArguments, "核查本次冻结的制度检索和合规待核验项"),
-    "compile_decision_brief": (NoArguments, "汇总已核查事实、局限及下一步；不构成审批"),
+    "read_decision_overview": (NoArguments, "Read the current recommendation, ranking basis, and key results for every supplier"),
+    "compare_alternatives": (NoArguments, "Calculate cost, delivery, and blocking differences across all options without changing source quotations"),
+    "inspect_quote_evidence": (EvidenceArguments, "Choose a cost, delivery, or terms focus and review the supplier's source quotation"),
+    "inspect_supplier_history": (QuoteArguments, "Review supplier historical performance and data availability"),
+    "inspect_policy_evidence": (NoArguments, "Review frozen policy retrieval and compliance items requiring verification"),
+    "compile_decision_brief": (NoArguments, "Summarise verified facts, limitations, and next steps; this does not constitute approval"),
 }
 
 
@@ -70,8 +70,8 @@ class DecisionInvestigationTools:
                 "quote_focus": "DELIVERY",
                 "requires_quote_evidence": True,
                 "requires_supplier_history": True,
-                "evidence_topics": ["交期原文", "历史准时率"],
-                "reason": "最快到货需要同时确认当前交付承诺及历史履约可靠性。",
+                "evidence_topics": ["source delivery terms", "historical on-time rate"],
+                "reason": "Fastest delivery requires both the current delivery commitment and historical fulfilment reliability to be verified.",
             }
         elif criterion == "LOWEST_CONFIRMED_TOTAL_COST":
             plan = {
@@ -79,8 +79,8 @@ class DecisionInvestigationTools:
                 "quote_focus": "COST",
                 "requires_quote_evidence": True,
                 "requires_supplier_history": False,
-                "evidence_topics": ["价格", "运费", "税费"],
-                "reason": "最低成本需要核对构成总成本的报价原文。",
+                "evidence_topics": ["price", "shipping fee", "tax"],
+                "reason": "Lowest cost requires source evidence for every component of total cost.",
             }
         elif criterion in {
             "HIGHEST_SUPPLIER_PERFORMANCE",
@@ -92,8 +92,8 @@ class DecisionInvestigationTools:
                 "quote_focus": None,
                 "requires_quote_evidence": False,
                 "requires_supplier_history": True,
-                "evidence_topics": ["供应商评级", "历史准时率", "拒收率"],
-                "reason": "供应商表现排序需要核对历史绩效记录及其可用性。",
+                "evidence_topics": ["supplier grade", "historical on-time rate", "rejection rate"],
+                "reason": "Supplier-performance ranking requires historical performance records and their availability to be verified.",
             }
         elif criterion == "LONGEST_CONFIRMED_PAYMENT_TERM":
             plan = {
@@ -101,8 +101,8 @@ class DecisionInvestigationTools:
                 "quote_focus": "TERMS",
                 "requires_quote_evidence": True,
                 "requires_supplier_history": False,
-                "evidence_topics": ["付款条件原文"],
-                "reason": "付款账期排序需要核对报价中的付款条款。",
+                "evidence_topics": ["source payment terms"],
+                "reason": "Payment-term ranking requires the payment clause in the quotation to be verified.",
             }
         else:
             plan = {
@@ -110,8 +110,8 @@ class DecisionInvestigationTools:
                 "quote_focus": "ALL",
                 "requires_quote_evidence": True,
                 "requires_supplier_history": True,
-                "evidence_topics": ["报价关键字段", "供应商历史表现"],
-                "reason": "排序依据不明确，核对推荐项与备选项的关键证据。",
+                "evidence_topics": ["key quotation fields", "supplier historical performance"],
+                "reason": "The ranking basis is unclear; review key evidence for the recommendation and alternatives.",
             }
 
         lowered = (question or "").casefold()
@@ -148,9 +148,9 @@ class DecisionInvestigationTools:
             kind="DECISION", quote_id=None, quote_version=None,
             impact_input_sha256=self.input_sha256,
             policy_binding=task.get("policy_binding") or {},
-            goal=("针对用户的问题核查本次冻结决策：" + normalized_question
+            goal=("Investigate this frozen decision in response to the user's question: " + normalized_question
                   if normalized_question else
-                  "核查当前供应商推荐与有竞争力的备选，针对发现的差异选择报价证据、历史表现或制度依据，形成可追溯的决策说明。"),
+                  "Review the current supplier recommendation and competitive alternatives, selecting quotation evidence, historical performance, or policy basis for identified differences to produce a traceable decision explanation."),
             known_facts={"requested_investigation": True, "result_id": self.result_id,
                          "quote_ids": list(self.rows), "question": normalized_question,
                          "ranking_investigation_plan": plan},
@@ -179,7 +179,7 @@ class DecisionInvestigationTools:
                 raise ConflictError("investigation_baseline_unavailable", "Decision baseline is unavailable.")
             case = case.model_copy(update={"observations": case.observations + (
                 ToolObservation(sequence=len(case.observations) + 1,
-                                reason="系统基线核查", arguments={}, result=result, latency_ms=0),
+                                reason="System baseline review", arguments={}, result=result, latency_ms=0),
             )})
             self.save(case)
         return case
@@ -269,14 +269,14 @@ class DecisionInvestigationTools:
                     "category": "DELIVERY",
                     "quote_id": quote_id,
                     "supplier_name": supplier,
-                    "summary": f"{supplier} 是当前最快确认到货的推荐项，预计到货日为 {row['estimated_arrival_date']}。",
+                    "summary": f"{supplier} is the recommended option with the fastest confirmed delivery; estimated arrival is {row['estimated_arrival_date']}.",
                 })
             elif criterion == "LOWEST_CONFIRMED_TOTAL_COST" and row.get("total_cost") is not None:
                 advantages.append({
                     "category": "COST",
                     "quote_id": quote_id,
                     "supplier_name": supplier,
-                    "summary": f"{supplier} 是当前确认总成本最低的推荐项，总成本为 {row['total_cost']}。",
+                    "summary": f"{supplier} is the recommended option with the lowest confirmed total cost of {row['total_cost']}.",
                 })
 
         for observation in observations:
@@ -284,7 +284,7 @@ class DecisionInvestigationTools:
                 continue
             data = observation.result.data
             quote_id = str(data.get("quote_id") or "")
-            supplier_name = str(data.get("supplier_name") or quote_id or "相关供应商")
+            supplier_name = str(data.get("supplier_name") or quote_id or "Relevant supplier")
             supplier = data.get("supplier") or {}
             history = supplier.get("history_snapshot") or {}
             if not isinstance(history, dict):
@@ -299,33 +299,33 @@ class DecisionInvestigationTools:
             favorable: list[str] = []
             adverse: list[str] = []
             if on_time_rate == "100.00%":
-                favorable.append("历史准时率 100.00%")
+                favorable.append("historical on-time rate 100.00%")
             elif on_time_rate:
-                adverse.append(f"历史准时率 {on_time_rate}")
+                adverse.append(f"historical on-time rate {on_time_rate}")
             if grade in {"A", "B"}:
-                favorable.append(f"综合评级 {grade}")
+                favorable.append(f"overall grade {grade}")
             elif grade in {"C", "D"}:
-                adverse.append(f"综合评级 {grade}")
+                adverse.append(f"overall grade {grade}")
             elif grade == "N" or availability in {"INSUFFICIENT_SAMPLE", "NO_DATA", "OUT_OF_SCOPE"}:
-                adverse.append("历史样本不足或不在适用范围")
+                adverse.append("historical sample is insufficient or outside the applicable scope")
             if rejected_rate and rejected_rate != "0.00%":
-                adverse.append(f"历史拒收率 {rejected_rate}")
+                adverse.append(f"historical rejection rate {rejected_rate}")
             elif rejected_rate == "0.00%":
-                favorable.append("历史拒收率 0.00%")
+                favorable.append("historical rejection rate 0.00%")
 
             if favorable:
                 advantages.append({
                     "category": "SUPPLIER_HISTORY",
                     "quote_id": quote_id,
                     "supplier_name": supplier_name,
-                    "summary": f"{supplier_name}：{'、'.join(favorable)}。",
+                    "summary": f"{supplier_name}: {', '.join(favorable)}.",
                 })
             if adverse:
                 risks.append({
                     "category": "SUPPLIER_HISTORY",
                     "quote_id": quote_id,
                     "supplier_name": supplier_name,
-                    "summary": f"{supplier_name}：{'、'.join(adverse)}。",
+                    "summary": f"{supplier_name}: {', '.join(adverse)}.",
                 })
 
         for observation in observations:
@@ -335,14 +335,14 @@ class DecisionInvestigationTools:
                 if not isinstance(gap, dict):
                     continue
                 quote_id = str(gap.get("quote_id") or "")
-                supplier_name = str(self.rows.get(quote_id, {}).get("supplier_name") or quote_id or "相关供应商")
+                supplier_name = str(self.rows.get(quote_id, {}).get("supplier_name") or quote_id or "Relevant supplier")
                 failed = gap.get("failed_reasons") or []
                 if failed:
                     risks.append({
                         "category": "QUOTE_FEASIBILITY",
                         "quote_id": quote_id,
                         "supplier_name": supplier_name,
-                        "summary": f"{supplier_name} 存在已确认的不符合项。",
+                        "summary": f"{supplier_name} has a confirmed non-compliant item.",
                     })
 
         unique_advantages = list({item["summary"]: item for item in advantages}.values())
@@ -382,12 +382,12 @@ class DecisionInvestigationTools:
         if "inspect_policy_evidence" in available and any(
             token in question for token in ("制度", "合规", "审批", "证明", "rohs")
         ):
-            return "inspect_policy_evidence", {}, "模型过早停止；按问题核对冻结的制度与合规依据"
+            return "inspect_policy_evidence", {}, "The model stopped too early; review frozen policy and compliance evidence relevant to the question"
         if "inspect_supplier_history" in available and any(
             token in question for token in ("历史", "准时率", "拒收", "供应商表现")
         ):
             quote_id = available["inspect_supplier_history"]["available_quote_ids"][0]
-            return "inspect_supplier_history", {"quote_id": quote_id}, "模型过早停止；按问题核对供应商历史表现"
+            return "inspect_supplier_history", {"quote_id": quote_id}, "The model stopped too early; review supplier historical performance relevant to the question"
         if "inspect_quote_evidence" in available:
             if any(token in question for token in ("交期", "到货", "交付")):
                 focus = "DELIVERY"
@@ -398,10 +398,10 @@ class DecisionInvestigationTools:
             else:
                 focus = str(plan.get("quote_focus") or "ALL")
             quote_id = available["inspect_quote_evidence"]["available_quote_ids"][0]
-            return "inspect_quote_evidence", {"quote_id": quote_id, "focus": focus}, "模型过早停止；按问题补充一次最相关的报价证据核查"
+            return "inspect_quote_evidence", {"quote_id": quote_id, "focus": focus}, "The model stopped too early; add one review of the most relevant quotation evidence"
         if "inspect_supplier_history" in available and plan.get("requires_supplier_history"):
             quote_id = available["inspect_supplier_history"]["available_quote_ids"][0]
-            return "inspect_supplier_history", {"quote_id": quote_id}, "模型过早停止；按当前排序依据核对供应商历史表现"
+            return "inspect_supplier_history", {"quote_id": quote_id}, "The model stopped too early; review supplier historical performance required by the current ranking basis"
         return None
 
     def available_schemas(self, case: InvestigationCase) -> dict[str, dict]:
@@ -427,12 +427,12 @@ class DecisionInvestigationTools:
             result["inspect_quote_evidence"] = self.schemas["inspect_quote_evidence"] | {
                 "available_quote_ids": evidence_remaining,
                 "preferred_focus": focus,
-                "guidance": f"当前主指标要求使用 {focus} 核对：{'、'.join(plan.get('evidence_topics') or [])}。每个报价只核查一次。",
+                "guidance": f"The current primary criterion requires {focus} review of: {', '.join(plan.get('evidence_topics') or [])}. Review each quotation only once.",
             }
         if history_remaining and plan.get("requires_supplier_history"):
             result["inspect_supplier_history"] = self.schemas["inspect_supplier_history"] | {
                 "available_quote_ids": history_remaining,
-                "guidance": f"当前主指标要求核对：{'、'.join(plan.get('evidence_topics') or [])}。",
+                "guidance": f"The current primary criterion requires review of: {', '.join(plan.get('evidence_topics') or [])}.",
             }
         if ("inspect_policy_evidence" not in used
                 and bool(self.result["input_snapshot"] and self.result["input_snapshot"].get("policy_set_version"))):
@@ -581,7 +581,7 @@ class DecisionInvestigationTools:
                             "supplier_name": self.rows.get(str(assessment.get("quote_id")), {}).get("supplier_name"),
                             "control_code": check.get("control_code"),
                             "reason_code": check.get("reason_code"),
-                            "action": "补充对应证明或审批记录后重新分析",
+                            "action": "Add the corresponding evidence or approval record, then analyse again",
                         })
             elif observation.result.status == "NOT_FOUND":
                 quote = str(observation.arguments.get("quote_id") or "")
@@ -593,7 +593,7 @@ class DecisionInvestigationTools:
                         "quote_id": quote or None,
                         "supplier_name": self.rows.get(quote, {}).get("supplier_name"),
                         "source": observation.result.tool_name,
-                        "action": "补充缺失数据后重新分析",
+                        "action": "Add missing data, then analyse again",
                     })
 
         facts: list[dict[str, Any]] = []
@@ -610,9 +610,9 @@ class DecisionInvestigationTools:
         plan = case.known_facts.get("ranking_investigation_plan") or self._investigation_plan()
         verified_advantages, verified_risks = self._verified_findings(observations, plan)
         if unresolved:
-            stop_reason = "必要核查已完成；剩余事项需要补充外部材料或人工记录，重复调用现有工具无法解决。"
+            stop_reason = "Required checks are complete. Remaining items need external evidence or manual records and cannot be resolved by repeatedly calling the available tools."
         else:
-            stop_reason = "当前排序依据要求的核查已完成，未发现证据缺失或冲突；已核实风险仍保留在结论中。"
+            stop_reason = "Checks required by the current ranking basis are complete. No missing or conflicting evidence was found; verified risks remain in the conclusion."
 
         return ToolResult(**common, status="OK", data={
             "recommended_quote_ids": self.result["result"]["recommended_quote_ids"],
@@ -624,5 +624,5 @@ class DecisionInvestigationTools:
             "requires_follow_up": bool(unresolved),
             "unresolved_items": unresolved,
             "stop_reason": stop_reason,
-            "boundary": "仅解释已冻结的采购比较；不修改需求、报价、制度或审批状态。",
+            "boundary": "Explain only the frozen procurement comparison; do not change requirements, quotations, policy, or approval status.",
         })

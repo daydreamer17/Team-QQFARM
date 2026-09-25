@@ -133,7 +133,7 @@ function makeHistoricalResult(): ComparisonResultResponse {
         actual_quantity: 1000,
         estimated_arrival_date: '2026-09-17',
         failed_reasons: [],
-        pending_reasons: [{ code: 'SHIPPING_UNKNOWN', fields: ['shipping_fee_amount'], message: '运费待确认。' }],
+        pending_reasons: [{ code: 'SHIPPING_UNKNOWN', fields: ['shipping_fee_amount'], message: '运费Pending Confirmation。' }],
       }],
       pending_quote_ids: ['quote-1'],
       comparison_reasons: [],
@@ -200,8 +200,8 @@ function renderRoute(path: string, route: string, element: ReactNode) {
         <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path={route} element={element} />
-            <Route path="/tasks/:taskId" element={<div>任务概览</div>} />
-            <Route path="/tasks/:taskId/decision" element={<div>决策页</div>} />
+            <Route path="/tasks/:taskId" element={<div>Task overview</div>} />
+            <Route path="/tasks/:taskId/decision" element={<div>Decision page</div>} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -224,7 +224,7 @@ describe('frontend and backend version consistency', () => {
         field_name: 'batch_review:6',
         issue_type: 'BATCH_FIELD_REVIEW',
         status: 'OPEN',
-        question: '请统一确认。',
+        question: '请统一Confirm。',
         answer_schema: {
           answer_type: 'BATCH_FIELD_CORRECTIONS',
           expected_task_revision: 6,
@@ -236,10 +236,10 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/decision', '/tasks/:taskId/decision', <DecisionPage />)
 
-    const link = await screen.findByRole('link', { name: '进入待处理事项' })
+    const link = await screen.findByRole('link', { name: 'Go to action items' })
     expect(link).toHaveAttribute('href', '/tasks/task-1/review')
-    expect(screen.queryByRole('link', { name: '返回报价与证据处理' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '按当前版本重新分析' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Return to quotations and evidence' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reanalyse current revision' })).toBeInTheDocument()
   })
 
   test('decision page does not redirect to a cached result older than the applied scenario revision', async () => {
@@ -264,7 +264,7 @@ describe('frontend and backend version consistency', () => {
       </QueryClientProvider>,
     )
 
-    expect(await screen.findByRole('heading', { name: '决策比较' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Decision Comparison' })).toBeInTheDocument()
     expect(screen.queryByText('旧结果页')).not.toBeInTheDocument()
   })
 
@@ -293,7 +293,7 @@ describe('frontend and backend version consistency', () => {
       </QueryClientProvider>,
     )
 
-    expect(await screen.findByText(/正在按当前代码重新分析/)).toBeInTheDocument()
+    expect(await screen.findByText(/Reanalysing with the current code/)).toBeInTheDocument()
     expect(screen.queryByText('旧结果页')).not.toBeInTheDocument()
   })
 
@@ -313,13 +313,13 @@ describe('frontend and backend version consistency', () => {
           base_task_revision: 6,
           base_result_id: 'result-current',
           status: 'ACTIVE',
-          title: '当前版本对话',
+          title: 'CurrentVersionConversation',
           messages: [{
             message_id: 'message-current',
             sequence: 1,
             role: 'ASSISTANT',
             status: 'SUCCEEDED',
-            content: '这是当前第六版的回答。',
+            content: '这是Current第六版的回答。',
             reference_ids: ['RESULT:result-current'],
             proposed_changes: null,
             decision_intent_id: null,
@@ -341,13 +341,13 @@ describe('frontend and backend version consistency', () => {
           base_task_revision: 5,
           base_result_id: 'result-old',
           status: 'STALE',
-          title: '历史版本对话',
+          title: 'HistoryVersionConversation',
           messages: [{
             message_id: 'message-old',
             sequence: 1,
             role: 'ASSISTANT',
             status: 'SUCCEEDED',
-            content: '这是历史第五版的回答；模型文本中的 quote_fake_999 不应成为引用。',
+            content: '这是History第五版的回答；模型文本中的 quote_fake_999 不应成为Citations。',
             reference_ids: ['RESULT:result-old', 'QUOTE:quote-1', 'POLICY:CIT-old'],
             proposed_changes: null,
             decision_intent_id: null,
@@ -375,25 +375,25 @@ describe('frontend and backend version consistency', () => {
     )
 
     expect(await screen.findByRole('heading', { name: 'FROZEN-PART' })).toBeInTheDocument()
-    expect(screen.getByText('历史结果第 5 版')).toBeInTheDocument()
-    expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
+    expect(screen.getByText('Historical result · Revision 5')).toBeInTheDocument()
+    expect(screen.getByText('This result is limited to procurement comparison. Supplier compliance must be verified separately.')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'CURRENT-PART' })).not.toBeInTheDocument()
-    expect(screen.getByText(/这是历史第五版的回答/)).toBeInTheDocument()
-    expect(screen.queryByText('这是当前第六版的回答。')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument()
+    expect(screen.getByText(/这是History第五版的回答/)).toBeInTheDocument()
+    expect(screen.queryByText('这是Current第六版的回答。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reanalyse' })).not.toBeInTheDocument()
     await waitFor(() => expect(fields).toHaveBeenCalledWith('task-1', 'quote-1', 'result-old'))
     expect(conversations).toHaveBeenCalledWith('task-1')
-    expect(screen.getByRole('option', { name: /当前版本 · 当前版本对话/ })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: /第 5 版 · 历史版本对话 · 历史/ })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /^查看引用/ })).toHaveLength(3)
+    expect(screen.getByRole('option', { name: /Current version · CurrentVersionConversation/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Revision 5 · HistoryVersionConversation · Historical/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /^View citation/ })).toHaveLength(3)
 
-    await userEvent.click(screen.getByRole('button', { name: '查看引用 [2] 供应商报价' }))
-    const quoteEvidenceDialog = screen.getByRole('dialog', { name: 'Supplier One 字段证据' })
+    await userEvent.click(screen.getByRole('button', { name: 'View citation [2] Supplier quotation' }))
+    const quoteEvidenceDialog = screen.getByRole('dialog', { name: 'Supplier One Field Evidence' })
     expect(quoteEvidenceDialog).toBeInTheDocument()
     expect(quoteEvidenceDialog.parentElement?.parentElement).toBe(document.body)
-    await userEvent.click(screen.getByRole('button', { name: '关闭' }))
-    await userEvent.click(screen.getByRole('button', { name: '查看引用 [3] 制度证据' }))
-    const policyCitationDialog = screen.getByRole('dialog', { name: '制度引用详情' })
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+    await userEvent.click(screen.getByRole('button', { name: 'View citation [3] Policy evidence' }))
+    const policyCitationDialog = screen.getByRole('dialog', { name: 'Policy citation details' })
     expect(policyCitationDialog.parentElement?.parentElement).toBe(document.body)
     expect(policyCitationDialog).toHaveTextContent(
       'A current supplier registry record is required before approval.',
@@ -433,8 +433,8 @@ describe('frontend and backend version consistency', () => {
       <ResultPage />,
     )
 
-    expect(await screen.findByText(/1 家不符合/)).toBeInTheDocument()
-    expect(screen.getByText(/不符合项仍保留在矩阵中，但不参与排序/)).toBeInTheDocument()
+    expect(await screen.findByText(/1 non-compliant/)).toBeInTheDocument()
+    expect(screen.getByText(/Non-compliant quotations remain in the matrix but are excluded from ranking/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Wrong Part Devices' })).toBeInTheDocument()
   })
 
@@ -460,10 +460,10 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/results/result-old', '/tasks/:taskId/results/:resultId', <ResultPage />)
 
-    expect(await screen.findByRole('heading', { name: '建议优先：Supplier One' })).toBeInTheDocument()
-    expect(screen.getByText(/满足当前报价比较条件/)).toBeInTheDocument()
-    expect(screen.queryByText(/满足当前采购要求/)).not.toBeInTheDocument()
-    expect(screen.getByText('该结果仅用于采购比较；供应商合规仍需单独核验。')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Recommended supplier: Supplier One' })).toBeInTheDocument()
+    expect(screen.getByText(/meets the current quotation-comparison conditions/)).toBeInTheDocument()
+    expect(screen.queryByText(/meets the current procurement requirements/)).not.toBeInTheDocument()
+    expect(screen.getByText('This result is limited to procurement comparison. Supplier compliance must be verified separately.')).toBeInTheDocument()
   })
 
   test('stale result can start analysis for the current quote version', async () => {
@@ -502,14 +502,14 @@ describe('frontend and backend version consistency', () => {
       <ResultPage />,
     )
 
-    await user.click(await screen.findByRole('button', { name: '重新分析' }))
+    await user.click(await screen.findByRole('button', { name: 'Reanalyse' }))
 
     await waitFor(() => expect(startRun).toHaveBeenCalledWith(
       'task-1',
       6,
       expect.any(String),
     ))
-    expect(await screen.findByText('决策页')).toBeInTheDocument()
+    expect(await screen.findByText('Decision page')).toBeInTheDocument()
   })
 
   test('current completed result can be rerun after deterministic logic changes', async () => {
@@ -562,18 +562,18 @@ describe('frontend and backend version consistency', () => {
       <ResultPage />,
     )
 
-    expect(await screen.findByText(/1 家待确认 · 1 家已排除/)).toBeInTheDocument()
-    expect(screen.getByText(/当前 2 份有效报价中，1 份进入比较，1 份按设置排除（SUP-030）/)).toBeInTheDocument()
-    expect(screen.getByText('当前未绑定制度。')).toBeInTheDocument()
-    expect(screen.getAllByText('当前第 6 版').length).toBeGreaterThan(0)
+    expect(await screen.findByText(/1 pending confirmation · 1 excluded/)).toBeInTheDocument()
+    expect(screen.getByText(/Of the 2 currently active quotations, 1 are compared and 1 are excluded by supplier/)).toBeInTheDocument()
+    expect(screen.getByText('No policy is bound to this task.')).toBeInTheDocument()
+    expect(screen.getAllByText('Current revision 6').length).toBeGreaterThan(0)
     expect(screen.queryByText('确定性比较')).not.toBeInTheDocument()
     expect(screen.queryByText('第 1 版')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看报价原文' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '查看选择依据' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '查看补充信息' })).not.toBeInTheDocument()
-    await user.click(await screen.findByRole('button', { name: '重新分析' }))
+    expect(screen.getByRole('button', { name: 'View source quotation' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View selection basis' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'View additional information' })).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: 'Reanalyse' }))
     await waitFor(() => expect(startRun).toHaveBeenCalledWith('task-1', 6, expect.any(String)))
-    expect(await screen.findByText('决策页')).toBeInTheDocument()
+    expect(await screen.findByText('Decision page')).toBeInTheDocument()
   })
 
   test('compliance page never falls back to a historical result', async () => {
@@ -594,9 +594,9 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/compliance', '/tasks/:taskId/compliance', <CompliancePage />)
 
-    expect(await screen.findByRole('heading', { name: '检查前准备证明材料' })).toBeInTheDocument()
-    expect(screen.getByText(/这是旧流程任务，历史结果尚未经过本阶段确认/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '开始制度检查' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Prepare evidence before checking' })).toBeInTheDocument()
+    expect(screen.getByText(/This task uses a legacy workflow, and its historical result has not been confirmed at this stage/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start compliance review' })).toBeInTheDocument()
     expect(history).not.toHaveBeenCalled()
   })
 
@@ -634,10 +634,10 @@ describe('frontend and backend version consistency', () => {
           references: {},
         },
         narrative: {
-          title: '历史采购总结',
-          overview: '这是历史结果。',
+          title: 'Historical procurement brief',
+          overview: 'Historical result for Revision 5.',
           sections: [],
-          disclaimer: '不构成采购批准。',
+          disclaimer: 'This does not constitute procurement approval.',
         },
         provider: 'fixed',
         model_id: 'fixed',
@@ -655,12 +655,12 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/summary', '/tasks/:taskId/summary', <SummaryPage />)
 
-    expect(await screen.findByRole('heading', { name: 'FROZEN-PART 采购总结' })).toBeInTheDocument()
-    expect(screen.getByText(/预算上限为 SGD 8000.00/)).toBeInTheDocument()
-    expect(screen.getByText(/第 5 版历史采购总结/)).toBeInTheDocument()
-    expect((await screen.findAllByText('待补充或复核')).length).toBeGreaterThan(0)
-    expect((await screen.findAllByText(/供应商资质尚未完成核验；有已核验合格候选时不优先推荐/)).length).toBeGreaterThan(0)
-    expect(await screen.findByText(/完成复核后再比较价格与交期/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Procurement Decision Brief' })).toBeInTheDocument()
+    expect(screen.getByText(/a budget ceiling of SGD 8000.00/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Historical result for Revision 5/).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Evidence or Review Required')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText(/Supplier eligibility verification is incomplete/)).length).toBeGreaterThan(0)
+    expect(await screen.findByText(/Complete the policy evidence and review/)).toBeInTheDocument()
   })
 
   test('requirement update invalidates all task caches before navigation', async () => {
@@ -672,17 +672,17 @@ describe('frontend and backend version consistency', () => {
 
     const rendered = renderRoute('/tasks/task-1/edit', '/tasks/:taskId/edit', <EditTaskPage />)
     const invalidate = vi.spyOn(rendered.queryClient, 'invalidateQueries')
-    await userEvent.click(await screen.findByRole('button', { name: '保存新版本' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Save new revision' }))
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['tasks'] }))
-    expect(await screen.findByText('任务概览')).toBeInTheDocument()
+    expect(await screen.findByText('Task overview')).toBeInTheDocument()
   })
 
   test('maps FastAPI location/message validation fields', () => {
     const error = new ApiClientError(422, 'validation_error', 'invalid', {
-      errors: [{ location: ['body', 'requirement', 'budget_amount'], message: '预算格式无效。' }],
+      errors: [{ location: ['body', 'requirement', 'budget_amount'], message: 'Budget格式无效。' }],
     })
-    expect(backendFieldErrors(error, ['budget_amount'])).toEqual({ budget_amount: '预算格式无效。' })
+    expect(backendFieldErrors(error, ['budget_amount'])).toEqual({ budget_amount: 'Budget格式无效。' })
   })
 
   test('policy management prioritizes published and pending lists before upload', async () => {
@@ -695,15 +695,15 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    expect(await screen.findByRole('heading', { name: '规则资源库' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '已发布制度' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '待处理版本' })).toBeInTheDocument()
-    expect(screen.queryByLabelText('制度集名称')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: '上传制度版本' }))
-    expect(screen.getByLabelText('上传方式')).toHaveValue('NEW')
-    expect(screen.getByLabelText('制度集名称')).toBeInTheDocument()
-    expect(screen.getByText('选择本版本的全部制度文件')).toBeInTheDocument()
-    const policyFileInput = screen.getByLabelText(/选择本版本的全部制度文件/)
+    expect(await screen.findByRole('heading', { name: 'Policy Library' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Published policy' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Versions awaiting review' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Policy set name')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Upload policy version' }))
+    expect(screen.getByLabelText('Upload method')).toHaveValue('NEW')
+    expect(screen.getByLabelText('Policy set name')).toBeInTheDocument()
+    expect(screen.getByText('Select all policy documents for this revision')).toBeInTheDocument()
+    const policyFileInput = screen.getByLabelText(/Select all policy documents for this revision/)
     expect(policyFileInput).toHaveAttribute('multiple')
     expect(policyFileInput).toHaveAttribute(
       'accept',
@@ -713,11 +713,11 @@ describe('frontend and backend version consistency', () => {
       policyFileInput,
       new File(['# Documentation'], 'README.md', { type: 'text/markdown' }),
     )
-    expect(screen.getByText(/README\.md.*说明文件/)).toBeInTheDocument()
-    expect(screen.getByText(/PDF \/ UTF-8 TXT \/ Markdown/)).toBeInTheDocument()
+    expect(screen.getByText(/README\.md.*explanatory file/)).toBeInTheDocument()
+    expect(screen.getByText(/Multiple PDF, UTF-8 TXT and Markdown files supported/)).toBeInTheDocument()
     expect(screen.queryByLabelText('策略集 ID')).not.toBeInTheDocument()
     expect(screen.queryByText('KNOWLEDGE RESOURCES')).not.toBeInTheDocument()
-    expect(await screen.findByText('当前没有待处理版本。')).toBeInTheDocument()
+    expect(await screen.findByText('No versions are awaiting review.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '筛选' })).not.toBeInTheDocument()
   })
 
@@ -771,17 +771,17 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    expect(await screen.findByText('最新 1 个版本')).toBeInTheDocument()
-    expect(screen.getByText('3 个文件 · 1 个待处理 · 2 个已识别')).toBeInTheDocument()
-    expect(screen.getByText('版本 v2')).toBeVisible()
-    for (const version of screen.getAllByText('版本 v1')) expect(version).not.toBeVisible()
+    expect(await screen.findByText('Latest revision')).toBeInTheDocument()
+    expect(screen.getByText('3 files · 1 require attention · 2 identified')).toBeInTheDocument()
+    expect(screen.getByText('Revision v2')).toBeVisible()
+    for (const version of screen.getAllByText('Revision v1')) expect(version).not.toBeVisible()
     expect(screen.getByText('data-center-hardware')).not.toBeVisible()
-    expect(screen.getByRole('link', { name: '继续处理' })).toHaveAttribute('href', '/resources/policies/v2-admission')
+    expect(screen.getByRole('link', { name: 'Continue' })).toHaveAttribute('href', '/resources/policies/v2-admission')
 
-    await userEvent.click(screen.getByText('其他待处理版本（2）'))
-    expect(screen.getAllByText('版本 v1')).toHaveLength(2)
+    await userEvent.click(screen.getByText('Other pending revisions (2)'))
+    expect(screen.getAllByText('Revision v1')).toHaveLength(2)
     expect(screen.getByText('data-center-hardware')).toBeVisible()
-    expect(screen.getAllByRole('link', { name: '查看草稿' })).toHaveLength(2)
+    expect(screen.getAllByRole('link', { name: 'View draft' })).toHaveLength(2)
   })
 
   test('published policy versions can start a replacement version or be deactivated', async () => {
@@ -817,18 +817,18 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    await userEvent.click(await screen.findByRole('button', { name: '发布新版本' }))
-    expect(screen.getByLabelText('上传方式')).toHaveValue('UPDATE')
-    expect(screen.getByLabelText('选择已有制度')).toHaveValue(
+    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }))
+    expect(screen.getByLabelText('Upload method')).toHaveValue('UPDATE')
+    expect(screen.getByLabelText('Select an existing policy')).toHaveValue(
       JSON.stringify(['electronics-sg-procurement', '2026.09.1', 'pidx-1']),
     )
-    expect(screen.getByLabelText('制度集名称')).toHaveValue('electronics-sg-procurement')
-    expect(screen.getByLabelText('制度集名称')).toHaveAttribute('readonly')
-    expect(screen.getByLabelText(/适用采购类别/)).toHaveValue('Electronics')
-    expect(screen.getByLabelText(/适用地区/)).toHaveValue('SG')
-    expect(screen.getByText(/正在更新 electronics-sg-procurement 的版本 2026\.09\.1/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Policy set name')).toHaveValue('electronics-sg-procurement')
+    expect(screen.getByLabelText('Policy set name')).toHaveAttribute('readonly')
+    expect(screen.getByLabelText(/Applicable procurement categories/)).toHaveValue('Electronics')
+    expect(screen.getByLabelText(/Applicable region/)).toHaveValue('SG')
+    expect(screen.getByText(/Updating revision 2026\.09\.1 of electronics-sg-procurement/)).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '停用制度版本' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Deactivate policy version' }))
     await waitFor(() => expect(deactivate).toHaveBeenCalledWith(
       'electronics-sg-procurement',
       '2026.09.1',
@@ -895,16 +895,16 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    expect(await screen.findByText('1 个制度集')).toBeInTheDocument()
+    expect(await screen.findByText('1 policy sets')).toBeInTheDocument()
     expect(screen.getAllByText('regional-electronics-ui-test')).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: '发布新版本' })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: '停用制度版本' })).toHaveLength(1)
-    expect(screen.getByText('版本 2026.09.24-123928')).toBeVisible()
+    expect(screen.getAllByRole('button', { name: 'Publish new version' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Deactivate policy version' })).toHaveLength(1)
+    expect(screen.getByText('Revision 2026.09.24-123928')).toBeVisible()
 
-    await userEvent.click(screen.getByText('查看历史版本（2）'))
-    expect(screen.getByText('版本 2026.09.24-122203')).toBeVisible()
-    expect(screen.getByText('版本 2026.09.24-121015')).toBeVisible()
-    expect(screen.getByText('已被替代')).toBeVisible()
+    await userEvent.click(screen.getByText('View revision history (2)'))
+    expect(screen.getByText('Revision 2026.09.24-122203')).toBeVisible()
+    expect(screen.getByText('Revision 2026.09.24-121015')).toBeVisible()
+    expect(screen.getByText('Superseded')).toBeVisible()
   })
 
   test('inactive policy sets stay hidden until the user asks to show them', async () => {
@@ -954,11 +954,11 @@ describe('frontend and backend version consistency', () => {
     expect(await screen.findByText('active-electronics-policy')).toBeVisible()
     expect(screen.queryByText('inactive-electronics-policy')).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: '显示已停用制度（1）' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Show inactive policies (1)' }))
     expect(screen.getByText('inactive-electronics-policy')).toBeVisible()
-    expect(screen.getByRole('button', { name: '隐藏已停用制度' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Hide inactive policies' })).toHaveAttribute('aria-pressed', 'true')
 
-    await userEvent.click(screen.getByRole('button', { name: '隐藏已停用制度' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hide inactive policies' }))
     expect(screen.queryByText('inactive-electronics-policy')).not.toBeInTheDocument()
   })
 
@@ -969,40 +969,40 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/new', '/tasks/new', <NewTaskPage />)
 
-    expect(await screen.findByRole('heading', { name: '新建任务' })).toBeInTheDocument()
-    expect(screen.getByLabelText(/^任务名称/)).toHaveValue('')
-    expect(screen.queryByLabelText('基础单位')).not.toBeInTheDocument()
-    expect(screen.queryByText('更多设置')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'New task' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/Task name/)).toHaveValue('')
+    expect(screen.queryByLabelText('Base unit')).not.toBeInTheDocument()
+    expect(screen.queryByText('More settings')).not.toBeInTheDocument()
     for (const label of [
-      '制造商', '制造商料号', '封装', '物料版本', '物料状态',
-      '数量单位', '币种', '成本比较口径', '计划下单日期 可选',
-      '交付截止日期', '交付地点', '主要排序偏好', '次要偏好 可选，仅在主指标并列时使用',
+      'Manufacturer', 'Manufacturer part number', 'Package', 'Item revision', 'Item condition',
+      'Quantity Unit', 'Currency', 'Cost Comparison Basis', 'Planned Order Date Optional',
+      'Delivery Deadline', 'Delivery Location', 'Primary ranking criterion', 'Secondary ranking criterion Optional; used only when the primary criterion is tied',
     ]) {
       expect(screen.getByLabelText(label), label).toHaveValue('')
     }
-    const primaryPreference = screen.getByLabelText('主要排序偏好')
-    const secondaryPreference = screen.getByLabelText('次要偏好 可选，仅在主指标并列时使用')
+    const primaryPreference = screen.getByLabelText('Primary ranking criterion')
+    const secondaryPreference = screen.getByLabelText('Secondary ranking criterion Optional; used only when the primary criterion is tied')
     expect(primaryPreference.closest('fieldset')).toBe(secondaryPreference.closest('fieldset'))
     expect(secondaryPreference.closest('details')).toBeNull()
-    expect(screen.getByLabelText('需求数量')).toHaveValue(null)
-    expect(screen.getByLabelText(/预算金额/)).toHaveValue('')
-    expect(screen.getByLabelText('允许替代料')).not.toBeChecked()
-    expect(screen.getByLabelText('预算包含运费')).not.toBeChecked()
-    expect(screen.getByLabelText('要求计入其他费用')).not.toBeChecked()
+    expect(screen.getByLabelText('Required Quantity')).toHaveValue(null)
+    expect(screen.getByLabelText(/Budget amount/)).toHaveValue('')
+    expect(screen.getByLabelText('Allow Substitutes')).not.toBeChecked()
+    expect(screen.getByLabelText('Budget includes shipping')).not.toBeChecked()
+    expect(screen.getByLabelText('Include Other Fees')).not.toBeChecked()
 
-    await userEvent.type(screen.getByLabelText('制造商'), 'Example Maker')
-    await userEvent.type(screen.getByLabelText('制造商料号'), 'EXAMPLE-PART')
-    expect((screen.getByLabelText(/^任务名称/) as HTMLInputElement).value).toMatch(/^EXAMPLE-PART · \d{4}-\d{2}-\d{2}$/)
-    await userEvent.selectOptions(screen.getByLabelText('物料状态'), 'NEW')
-    await userEvent.selectOptions(screen.getByLabelText('币种'), 'SGD')
-    await userEvent.click(screen.getByLabelText('预算包含运费'))
-    await userEvent.click(screen.getByRole('button', { name: '清空表单' }))
+    await userEvent.type(screen.getByLabelText('Manufacturer'), 'Example Maker')
+    await userEvent.type(screen.getByLabelText('Manufacturer part number'), 'EXAMPLE-PART')
+    expect((screen.getByLabelText(/Task name/) as HTMLInputElement).value).toMatch(/^EXAMPLE-PART · \d{4}-\d{2}-\d{2}$/)
+    await userEvent.selectOptions(screen.getByLabelText('Item condition'), 'NEW')
+    await userEvent.selectOptions(screen.getByLabelText('Currency'), 'SGD')
+    await userEvent.click(screen.getByLabelText('Budget includes shipping'))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear form' }))
 
-    expect(screen.getByLabelText('制造商')).toHaveValue('')
-    expect(screen.getByLabelText(/^任务名称/)).toHaveValue('')
-    expect(screen.getByLabelText('物料状态')).toHaveValue('')
-    expect(screen.getByLabelText('币种')).toHaveValue('')
-    expect(screen.getByLabelText('预算包含运费')).not.toBeChecked()
+    expect(screen.getByLabelText('Manufacturer')).toHaveValue('')
+    expect(screen.getByLabelText(/Task name/)).toHaveValue('')
+    expect(screen.getByLabelText('Item condition')).toHaveValue('')
+    expect(screen.getByLabelText('Currency')).toHaveValue('')
+    expect(screen.getByLabelText('Budget includes shipping')).not.toBeChecked()
   })
 })
 
@@ -1031,12 +1031,12 @@ test('policy editor locks fields during save and permits editing after completio
   let finish!: (value: PolicyImportResponse) => void
   vi.spyOn(api, 'reviewPolicyClauses').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
   const client = renderPolicy()
-  const field = await screen.findByRole('textbox', { name: /条款正文/ })
+  const field = await screen.findByRole('textbox', { name: /Clause Text/ })
   const user = userEvent.setup()
   await user.clear(field); await user.type(field, 'Submitted')
-  await user.click(screen.getByRole('button', { name: '保存确认结果' }))
+  await user.click(screen.getByRole('button', { name: 'Save confirmed result' }))
   expect(field).toBeDisabled()
-  expect(screen.getByRole('button', { name: '删除' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
   await user.type(field, 'Must not append')
   await act(async () => finish({ ...data, revision: 3, status: 'READY_TO_PUBLISH', clauses: [{ ...data.clauses[0], text: 'Submitted' }] }))
   expect(field).toHaveValue('Submitted')
@@ -1050,7 +1050,7 @@ test('editing a policy clause id keeps its rule settings expanded', async () => 
   const client = renderPolicy()
   const user = userEvent.setup()
 
-  const summary = await screen.findByText('检查规则设置')
+  const summary = await screen.findByText('Check-rule settings')
   const settings = summary.closest('details')!
   expect(settings).toHaveAttribute('open')
   await user.click(summary)
@@ -1058,7 +1058,7 @@ test('editing a policy clause id keeps its rule settings expanded', async () => 
   await user.click(summary)
   expect(settings).toHaveAttribute('open')
 
-  const clauseId = screen.getByLabelText('条款编号')
+  const clauseId = screen.getByLabelText('Clause ID')
   await user.clear(clauseId)
   await user.type(clauseId, 'CCD-ADM-001')
 
@@ -1085,13 +1085,13 @@ test('switching policy files replaces an unsaved clause draft instead of showing
   const client = renderPolicy('policy-admission')
   const user = userEvent.setup()
 
-  const title = await screen.findByLabelText('标题')
+  const title = await screen.findByLabelText('Title')
   await user.clear(title)
   await user.type(title, 'Unsaved admission edit')
   await user.click(screen.getByRole('link', { name: /amount\.md/ }))
 
-  expect(await screen.findByText('正在审核：amount.md')).toBeInTheDocument()
-  expect(await screen.findByLabelText('标题')).toHaveValue('Amount approval')
+  expect(await screen.findByText('Reviewing: amount.md')).toBeInTheDocument()
+  expect(await screen.findByLabelText('Title')).toHaveValue('Amount approval')
   expect(screen.queryByDisplayValue('Unsaved admission edit')).not.toBeInTheDocument()
   client.clear()
 })
@@ -1104,13 +1104,13 @@ test('advanced policy review opens by default and can be collapsed', async () =>
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  expect(await screen.findByLabelText('检查类型')).toBeInTheDocument()
-  expect(screen.getByRole('option', { name: '供应商准入' })).toHaveValue('APPROVED_SUPPLIER')
-  await userEvent.click(screen.getByRole('button', { name: '收起高级审核' }))
-  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
-  expect(screen.getByText(/系统无法判断该条款属于哪类采购检查/)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: '展开高级审核（1 条）' }))
-  expect(screen.getByLabelText('检查类型')).toBeInTheDocument()
+  expect(await screen.findByLabelText('Check Type')).toBeInTheDocument()
+  expect(screen.getByRole('option', { name: 'Supplier Eligibility' })).toHaveValue('APPROVED_SUPPLIER')
+  await userEvent.click(screen.getByRole('button', { name: 'Collapse advanced review' }))
+  expect(screen.queryByLabelText('Check Type')).not.toBeInTheDocument()
+  expect(screen.getByText(/The system cannot determine which procurement check this clause supports/)).toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Expand advanced review (1 clause)' }))
+  expect(screen.getByLabelText('Check Type')).toBeInTheDocument()
   client.clear()
 })
 test('unsupported policy clauses explain the capability gap without asking ordinary users for codes', async () => {
@@ -1133,11 +1133,11 @@ test('unsupported policy clauses explain the capability gap without asking ordin
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  await screen.findByRole('button', { name: '收起高级审核' })
-  await userEvent.click(screen.getByRole('button', { name: '收起高级审核' }))
-  expect(screen.getByText('当前不支持自动执行')).toBeInTheDocument()
-  expect(screen.getByText(/当前系统没有对应的检查器或数据来源/)).toBeInTheDocument()
-  expect(screen.queryByLabelText('检查类型')).not.toBeInTheDocument()
+  await screen.findByRole('button', { name: 'Collapse advanced review' })
+  await userEvent.click(screen.getByRole('button', { name: 'Collapse advanced review' }))
+  expect(screen.getByText('Automated execution is not currently supported')).toBeInTheDocument()
+  expect(screen.getByText(/The system has no corresponding checker or data source/)).toBeInTheDocument()
+  expect(screen.queryByLabelText('Check Type')).not.toBeInTheDocument()
   client.clear()
 })
 test('interrupted policy publication can be retried after reopening the page', async () => {
@@ -1146,8 +1146,8 @@ test('interrupted policy publication can be retried after reopening the page', a
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const publish = vi.spyOn(api, 'publishPolicy').mockResolvedValue({ ...data, revision: 3, status: 'PUBLISHED', policy_index_version: 'pidx-restored' })
   const client = renderPolicy()
-  await userEvent.click(await screen.findByRole('button', { name: '重试恢复发布' }))
-  expect(await screen.findByText('制度已发布，可绑定采购任务')).toBeInTheDocument()
+  await userEvent.click(await screen.findByRole('button', { name: 'Retry publication' }))
+  expect(await screen.findByText('Policy published and available for procurement tasks')).toBeInTheDocument()
   expect(publish).toHaveBeenCalledWith('policy-test', 2, expect.any(String))
   client.clear()
 })

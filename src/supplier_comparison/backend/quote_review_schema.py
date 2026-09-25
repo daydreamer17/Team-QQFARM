@@ -18,14 +18,14 @@ from supplier_comparison.extraction.review_contracts import REVIEW_POLICY_VERSIO
 QUOTE_REVIEW_SCHEMA_VERSION = "quote-review-schema/1.0.0"
 
 GROUP_ORDER = (
-    ("身份", "identity"),
-    ("规格", "specification"),
-    ("价格", "price"),
-    ("包装", "packaging"),
+    ("Identity", "identity"),
+    ("Specification", "specification"),
+    ("Price", "price"),
+    ("Packaging", "packaging"),
     ("MOQ", "moq"),
-    ("费用", "fees"),
-    ("交期", "delivery"),
-    ("商务", "commercial"),
+    ("Fees", "fees"),
+    ("Delivery", "delivery"),
+    ("Commercial", "commercial"),
 )
 
 GROUP_IDS = dict(GROUP_ORDER)
@@ -45,7 +45,7 @@ RELATION_GROUPS: tuple[dict[str, Any], ...] = (
         "group_id": "price_basis",
         "kind": "ALL_OR_NONE",
         "field_names": ["unit_price", "price_basis_quantity", "price_basis_unit"],
-        "message": "单价、计价数量和计价单位必须同时有效。",
+        "message": "Unit price, price-basis quantity, and price-basis unit must all be valid together.",
     },
     {
         "group_id": "money_currency",
@@ -56,19 +56,19 @@ RELATION_GROUPS: tuple[dict[str, Any], ...] = (
             "shipping_fee_amount",
             "other_fees_amount",
         ],
-        "message": "所有金额字段的币种必须与报价币种一致。",
+        "message": "The currency of every amount field must match the quotation currency.",
     },
     {
         "group_id": "shipping_fee",
         "kind": "FEE_STATUS_AMOUNT",
         "field_names": ["shipping_fee_status", "shipping_fee_amount"],
-        "message": "运费状态与运费金额不一致。",
+        "message": "Shipping-fee status and amount are inconsistent.",
     },
     {
         "group_id": "other_fees",
         "kind": "FEE_STATUS_AMOUNT",
         "field_names": ["other_fees_status", "other_fees_amount"],
-        "message": "其他费用状态与金额不一致。",
+        "message": "Other-fee status and amount are inconsistent.",
     },
     {
         "group_id": "moq_packaging",
@@ -80,7 +80,7 @@ RELATION_GROUPS: tuple[dict[str, Any], ...] = (
             "moq_quantity",
             "moq_unit",
         ],
-        "message": "MOQ 单位与包装方式或每包数量不一致。",
+        "message": "The MOQ unit is inconsistent with the packaging method or units per pack.",
     },
     {
         "group_id": "relative_delivery",
@@ -91,13 +91,13 @@ RELATION_GROUPS: tuple[dict[str, Any], ...] = (
             "delivery_semantics",
             "start_event",
         ],
-        "message": "相对交期的天数、日历口径、交付语义和起算事件必须完整。",
+        "message": "Relative delivery requires complete lead-time days, day basis, delivery semantics, and start event.",
     },
     {
         "group_id": "quote_validity",
         "kind": "DATE_ORDER",
         "field_names": ["quote_date", "valid_until"],
-        "message": "报价日期不能晚于有效截止日。",
+        "message": "The quotation date cannot be later than the validity end date.",
     },
 )
 

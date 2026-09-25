@@ -168,7 +168,7 @@ def test_quote_upload_advances_revision_and_rejects_stale_revision(
             idempotency_key="upload-duplicate",
         )
     assert duplicate.value.code == "duplicate_quote_uploaded"
-    assert str(duplicate.value) == "该报价单已上传。"
+    assert str(duplicate.value) == "This quotation has already been uploaded."
 
     with pytest.raises(ConflictError) as raised:
         service.upload_quote(

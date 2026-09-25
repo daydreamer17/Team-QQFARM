@@ -27,21 +27,21 @@ import {
 } from '../lib/presentation'
 
 function errorMessage(error: unknown) {
-  return error instanceof ApiClientError ? error.message : '结果读取失败。'
+  return error instanceof ApiClientError ? error.message : 'Failed to load result.'
 }
 
 function reanalysisErrorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
-    if (error.code === 'task_revision_conflict') return '任务内容已变化，请刷新后重试。'
-    if (error.code === 'graph_run_active') return '当前已有分析正在运行，请返回决策页查看状态。'
+    if (error.code === 'task_revision_conflict') return 'The task has changed. Refresh and try again.'
+    if (error.code === 'graph_run_active') return 'An analysis is already running. Return to the decision page to view its status.'
     return error.message
   }
-  return '重新分析启动失败。'
+  return 'Failed to start reanalysis.'
 }
 
 function valueText(value: unknown) {
   if (value === null || value === undefined || value === '') return '—'
-  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   return String(value)
 }
 
@@ -56,7 +56,7 @@ function moneyText(currency: string | undefined, value: string | null | undefine
 
 function quantityText(value: number | null, unit: string | undefined) {
   if (value === null) return '—'
-  const unitLabels: Record<string, string> = { piece: '件', pieces: '件', unit: '件', units: '件' }
+  const unitLabels: Record<string, string> = { piece: 'Piece', pieces: 'Piece', unit: 'Piece', units: 'Piece' }
   return `${new Intl.NumberFormat('zh-CN').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
 }
 
@@ -71,10 +71,10 @@ function displayDate(value: string) {
 
 function evidenceLocation(evidence: FieldEvidence) {
   const parts: string[] = []
-  if (evidence.page_number !== null) parts.push('第 ' + evidence.page_number + ' 页')
-  if (evidence.row_number !== null) parts.push('第 ' + evidence.row_number + ' 行')
-  if (evidence.column_name) parts.push('列 ' + evidence.column_name)
-  return parts.join(' · ') || evidence.kind || '来源位置'
+  if (evidence.page_number !== null) parts.push('Page ' + evidence.page_number)
+  if (evidence.row_number !== null) parts.push('Row ' + evidence.row_number)
+  if (evidence.column_name) parts.push('Column ' + evidence.column_name)
+  return parts.join(' · ') || evidence.kind || 'Source location'
 }
 
 function recommendationNarrative(
@@ -82,18 +82,18 @@ function recommendationNarrative(
   currency: string | undefined,
   ranking: string | undefined,
 ) {
-  if (!primary) return '当前结果没有可发布的推荐方案，请先处理阻塞项或补齐待确认信息。'
-  const rankingText = rankingCriterionLabel(ranking) || '当前排序规则'
+  if (!primary) return 'The current result has no publishable recommendation. Resolve blocking items or complete pending information first.'
+  const rankingText = rankingCriterionLabel(ranking) || 'current ranking rules'
   const arrival = primary.estimated_arrival_date
-    ? `，预计于 ${primary.estimated_arrival_date} 到货`
+    ? `, with expected arrival on ${primary.estimated_arrival_date}`
     : ''
-  return `按照“${rankingText}”，${primary.supplier_name} 满足当前报价比较条件，以 ${moneyText(currency, primary.total_cost)} 的已确认总成本成为首选${arrival}。`
+  return `Under “${rankingText}”, ${primary.supplier_name} meets the current quotation-comparison conditions and is preferred with a confirmed total cost of ${moneyText(currency, primary.total_cost)}${arrival}.`
 }
 
 function impactMessage(status: string, fallback: string) {
-  if (status === 'NON_BLOCKING') return '该报价已有确定的不符合项，因此这些未知字段目前不会改变推荐结果。'
-  if (status === 'REQUIRES_INVESTIGATION') return '这些未知字段可能影响报价的可行性或排序，需要确认后才能稳定当前推荐。'
-  if (status === 'UNDETERMINED') return '现有信息不足以判断这些未知字段是否会改变推荐，需要人工确认。'
+  if (status === 'NON_BLOCKING') return 'This quotation already has a confirmed non-compliance issue, so these unknown fields do not currently change the recommendation.'
+  if (status === 'REQUIRES_INVESTIGATION') return 'These unknown fields may affect quotation feasibility or ranking. Follow-up is required before the recommendation can be considered stable.'
+  if (status === 'UNDETERMINED') return 'There is not enough information to determine whether these unknown fields would change the recommendation. Manual confirmation is required.'
   return fallback
 }
 
@@ -108,7 +108,7 @@ function matrixSelectionSummary(
 ) {
   const commercial = impact?.unknown_fields.length && impact.status !== 'NON_BLOCKING'
     ? {
-      label: `${impact.unknown_fields.length} 项待确认`,
+      label: `${impact.unknown_fields.length} pending confirmation`,
       detail: impactMessage(impact.status, impact.message),
       tone: 'warning' as const,
     }
@@ -125,7 +125,7 @@ function Reasons({ title, reasons }: { title: string; reasons: ResultReason[] })
         {reasons.map((reason, index) => (
           <li key={reason.code + index}>
             <span>{reasonText(reason)}</span>
-            {reason.fields.length > 0 && <small>相关信息：{reason.fields.map(fieldLabel).join('、')}</small>}
+            {reason.fields.length > 0 && <small>Related information: {reason.fields.map(fieldLabel).join(', ')}</small>}
           </li>
         ))}
       </ul>
@@ -149,37 +149,37 @@ function EvidenceDrawer({
   return (
     <OverlayPortal>
       <div className="evidence-drawer-layer" role="presentation">
-        <button className="evidence-drawer-backdrop" type="button" aria-label="关闭证据抽屉" onClick={onClose} />
-        <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} 字段证据`}>
+        <button className="evidence-drawer-backdrop" type="button" aria-label="Close evidence drawer" onClick={onClose} />
+        <aside className="evidence-drawer" role="dialog" aria-modal="true" aria-label={`${supplier.supplier_name} Field Evidence`}>
         <header>
           <div>
-            <p className="eyebrow">报价原文</p>
+            <p className="eyebrow">Source Quotation</p>
             <h2>{supplier.supplier_name}</h2>
-            <span>第 {supplier.quote_version} 版报价</span>
+            <span>Quotation revision {supplier.quote_version}</span>
           </div>
-          <button className="drawer-close" type="button" onClick={onClose} aria-label="关闭">×</button>
+          <button className="drawer-close" type="button" onClick={onClose} aria-label="Close">×</button>
         </header>
 
         <div className="drawer-summary">
-          <div><span>可行性</span><strong>{quoteStatusLabel(supplier.status)}</strong></div>
-          <div><span>确认总成本</span><strong>{valueText(supplier.total_cost)}</strong></div>
-          <div><span>预计到货</span><strong>{valueText(supplier.estimated_arrival_date)}</strong></div>
+          <div><span>Feasibility</span><strong>{quoteStatusLabel(supplier.status)}</strong></div>
+          <div><span>Confirmed total cost</span><strong>{valueText(supplier.total_cost)}</strong></div>
+          <div><span>Expected Delivery Date</span><strong>{valueText(supplier.estimated_arrival_date)}</strong></div>
         </div>
 
-        <Reasons title="不符合项" reasons={supplier.failed_reasons} />
-        <Reasons title="待确认项" reasons={supplier.pending_reasons} />
+        <Reasons title="Non-compliant items" reasons={supplier.failed_reasons} />
+        <Reasons title="Pending confirmation" reasons={supplier.pending_reasons} />
 
-        {pending && <div className="fields-loading">正在读取字段和来源证据…</div>}
+        {pending && <div className="fields-loading">Loading fields and source evidence…</div>}
         {error !== null && (
           <div className="form-error compact-error">
-            <strong>字段结果读取失败</strong><p>{errorMessage(error)}</p>
+            <strong>Failed to load field results</strong><p>{errorMessage(error)}</p>
           </div>
         )}
         {fields && (
           <section className="drawer-fields">
             <div className="drawer-section-title">
-            <div><h3>解析字段与原文</h3></div>
-              <span>{fields.fields.length} 个字段</span>
+            <div><h3>Extracted fields and source text</h3></div>
+              <span>{fields.fields.length} fields</span>
             </div>
             {fields.fields.map((field) => (
               <article className="drawer-field" key={field.field_name}>
@@ -190,20 +190,20 @@ function EvidenceDrawer({
                   </span>
                 </div>
                 <dl>
-                  <div><dt>原始表达</dt><dd>{valueText(field.raw_value)}</dd></div>
-                  <div><dt>标准化值</dt><dd>{valueText(field.normalized_value)} {valueText(field.unit) === '—' ? '' : field.unit}</dd></div>
-                  <div><dt>来源类型</dt><dd>{originLabel(field.origin)}</dd></div>
+                  <div><dt>Source wording</dt><dd>{valueText(field.raw_value)}</dd></div>
+                  <div><dt>Normalised Value</dt><dd>{valueText(field.normalized_value)} {valueText(field.unit) === '—' ? '' : field.unit}</dd></div>
+                  <div><dt>Source type</dt><dd>{originLabel(field.origin)}</dd></div>
                 </dl>
                 {field.evidence.length > 0 ? (
                   <div className="drawer-evidence-list">
                     {field.evidence.map((evidence, index) => (
                       <blockquote key={(evidence.source_id ?? 'source') + index}>
                         <span>{evidenceLocation(evidence)}</span>
-                        <p>{evidence.quoted_text ?? '无引用片段'}</p>
+                        <p>{evidence.quoted_text ?? 'No citation excerpt'}</p>
                       </blockquote>
                     ))}
                   </div>
-                ) : <p className="drawer-no-evidence">该字段没有来源证据。</p>}
+                ) : <p className="drawer-no-evidence">No source evidence is available for this field.</p>}
               </article>
             ))}
           </section>
@@ -234,7 +234,7 @@ export function ResultPage() {
   const reanalysis = useMutation({
     mutationFn: () => {
       const currentTask = taskQuery.data
-      if (!currentTask) throw new Error('任务尚未读取完成。')
+      if (!currentTask) throw new Error('The task has not finished loading.')
       return api.startRun(
         currentTask.task_id,
         currentTask.task_revision,
@@ -276,15 +276,15 @@ export function ResultPage() {
   })
 
   if (resultQuery.isPending) {
-    return <section className="card loading-panel">正在读取解析与比较结果…</section>
+    return <section className="card loading-panel">Loading extraction and comparison results…</section>
   }
   if (resultQuery.isError) {
     return (
       <section className="card error-panel" role="alert">
-        <p className="eyebrow">结果读取失败</p>
-        <h1>无法读取结果</h1>
+        <p className="eyebrow">Failed to load result</p>
+        <h1>Unable to load result</h1>
         <p>{errorMessage(resultQuery.error)}</p>
-        <Link className="button button-secondary" to={'/tasks/' + taskId}>返回任务</Link>
+        <Link className="button button-secondary" to={'/tasks/' + taskId}>Back to task</Link>
       </section>
     )
   }
@@ -292,7 +292,7 @@ export function ResultPage() {
   const payload = resultQuery.data.result
   if (resultQuery.data.is_current && taskQuery.data?.workflow_contract_version === 'compliance/2.0'
       && !taskQuery.data.progress.compliance?.can_compare) {
-    return <section className="card"><h2>请先处理当前版本的制度检查</h2><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>前往制度检查</Link></section>
+    return <section className="card"><h2>Complete the compliance review for the current revision first</h2><Link className="button button-submit" to={`/tasks/${taskId}/compliance`}>Go to compliance review</Link></section>
   }
   const decisionImpact = resultQuery.data.decision_impact
   const policyRetrievals = resultQuery.data.policy_retrievals
@@ -372,14 +372,14 @@ export function ResultPage() {
           confirmed: true, can_compare: true,
         } : undefined,
       }
-  let policyState = '未绑定制度'
-  if (taskQuery.isPending) policyState = '正在读取制度绑定'
-  else if (taskQuery.isError) policyState = '制度绑定读取失败'
-  else if (resultQuery.data.input_snapshot?.policy_set_version && policyRetrievals.length === 0) policyState = '未执行制度检索'
+  let policyState = 'Not boundPolicy'
+  if (taskQuery.isPending) policyState = 'Loading policy binding'
+  else if (taskQuery.isError) policyState = 'Failed to load policy binding'
+  else if (resultQuery.data.input_snapshot?.policy_set_version && policyRetrievals.length === 0) policyState = 'Policy retrieval not run'
   else if (resultQuery.data.input_snapshot?.policy_set_version && successfulPolicyRetrievals === policyRetrievals.length) {
-    policyState = `${successfulPolicyRetrievals} / ${policyRetrievals.length} 找到证据`
+    policyState = `Evidence found for ${successfulPolicyRetrievals} / ${policyRetrievals.length}`
   } else if (resultQuery.data.input_snapshot?.policy_set_version) {
-    policyState = `${policyRetrievals.length - successfulPolicyRetrievals} 项需复核`
+    policyState = `${policyRetrievals.length - successfulPolicyRetrievals} require review`
   }
 
   return (
@@ -390,8 +390,8 @@ export function ResultPage() {
           scenarioId={task.scenario_id}
           title={task.task_name}
           subtitle={frozenRequirement
-            ? `${frozenRequirement.required_quantity} ${frozenRequirement.quantity_unit} · ${frozenRequirement.currency} · 最晚交付 ${frozenRequirement.delivery_deadline}`
-            : '该历史结果缺少可展示的冻结采购需求'}
+            ? `${frozenRequirement.required_quantity} ${frozenRequirement.quantity_unit} · ${frozenRequirement.currency} · Latest delivery ${frozenRequirement.delivery_deadline}`
+            : 'This historical result has no displayable frozen procurement requirements'}
           status={resultQuery.data.is_current ? task.status : 'COMPLETED'}
           revision={resultQuery.data.task_revision}
           revisionContext={resultQuery.data.is_current ? 'current' : 'historical'}
@@ -405,25 +405,25 @@ export function ResultPage() {
         />
       ) : (
         <section className="result-header">
-          <div><p className="eyebrow">AUDITABLE RESULT</p><h1>报价分析与推荐结果</h1></div>
-          <Link className="button button-secondary" to={'/tasks/' + taskId}>返回任务</Link>
+          <div><p className="eyebrow">AUDITABLE RESULT</p><h1>Quotation analysis and recommendation</h1></div>
+          <Link className="button button-secondary" to={'/tasks/' + taskId}>Back to task</Link>
         </section>
       )}
 
       {!resultQuery.data.is_current && (
-        <div className="run-notice">这是历史结果，不代表任务当前版本。</div>
+        <div className="run-notice">This is a historical result and does not represent the current task revision.</div>
       )}
 
       {resultQuery.data.policy_compliance.recommendation_scope !== 'COMPLIANCE_VERIFIED' && (
-        <div className="run-notice">该结果仅用于采购比较；供应商合规仍需单独核验。</div>
+        <div className="run-notice">This result is limited to procurement comparison. Supplier compliance must be verified separately.</div>
       )}
-      {resultQuery.data.legacy_compliance && <p className="run-notice">旧流程结果：当时未执行完整的材料确认阶段。</p>}
+      {resultQuery.data.legacy_compliance && <p className="run-notice">Legacy workflow result: the full evidence-confirmation stage was not run at the time.</p>}
       <ComplianceAssessmentDetails assessment={resultQuery.data.policy_compliance} taskId={taskId} resultId={resultId} historical={!resultQuery.data.is_current} legacy={resultQuery.data.legacy_compliance} />
 
       {reanalysis.isError && (
         <div className="form-error compact-error" role="alert">
           <div>
-            <strong>重新分析未启动</strong>
+            <strong>Reanalysis did not start</strong>
             <p>{reanalysisErrorMessage(reanalysis.error)}</p>
           </div>
         </div>
@@ -431,23 +431,23 @@ export function ResultPage() {
 
       <section className="decision-ready-banner">
         <div>
-          <strong>{resultQuery.data.is_current ? '报价审核已完成，可以比较' : '正在查看历史决策结果'}</strong>
+          <strong>{resultQuery.data.is_current ? 'Quotation review complete; ready for comparison' : 'Viewing historical decision result'}</strong>
           <span>
-            当前使用 {suppliers.length} 份正式提交且审核通过的报价。
-            {infeasibleCount > 0 ? ' 不符合项仍保留在矩阵中，但不参与排序。' : ''}
+            Currently using {suppliers.length} formally submitted and reviewed quotations.
+            {infeasibleCount > 0 ? ' Non-compliant quotations remain in the matrix but are excluded from ranking.' : ''}
             {excludedSupplierIds.length > 0
-              ? ` ${resultQuery.data.is_current && task ? `当前 ${task.quotes.length} 份有效报价中，` : ''}${suppliers.length} 份进入比较，${excludedActiveQuoteCount} 份按设置排除（${excludedSupplierIds.join('、')}）。`
+              ? ` ${resultQuery.data.is_current && task ? `Of the ${task.quotes.length} currently active quotations, ` : ''}${suppliers.length} are compared and ${excludedActiveQuoteCount} are excluded by supplier (${excludedSupplierIds.join(', ')}).`
               : ''}
           </span>
         </div>
         <div>
           <span>
-            {feasibleCount} 家可行
-            {pendingCount > 0 ? ` · ${pendingCount} 家待确认` : ''}
-            {infeasibleCount > 0 ? ` · ${infeasibleCount} 家不符合` : ''}
-            {excludedSupplierIds.length > 0 ? ` · ${excludedSupplierIds.length} 家已排除` : ''}
+            {feasibleCount} feasible
+            {pendingCount > 0 ? ` · ${pendingCount} pending confirmation` : ''}
+            {infeasibleCount > 0 ? ` · ${infeasibleCount} non-compliant` : ''}
+            {excludedSupplierIds.length > 0 ? ` · ${excludedSupplierIds.length} excluded` : ''}
           </span>
-          <strong>{resultQuery.data.is_current ? '分析完成' : '历史版本'}</strong>
+          <strong>{resultQuery.data.is_current ? 'Analysis complete' : 'Historical revision'}</strong>
           {canReanalyze && (
             <button
               className="button button-secondary"
@@ -455,7 +455,7 @@ export function ResultPage() {
               onClick={() => reanalysis.mutate()}
               disabled={reanalysis.isPending}
             >
-              {reanalysis.isPending ? '正在启动…' : '重新分析'}
+              {reanalysis.isPending ? 'Starting…' : 'Reanalyse'}
             </button>
           )}
         </div>
@@ -466,7 +466,7 @@ export function ResultPage() {
           <button className="button button-secondary" type="button"
             aria-expanded={assistantExpanded} aria-controls="decision-assistant-panel"
             onClick={() => setAssistantExpanded((expanded) => !expanded)}>
-            {assistantExpanded ? '收起 AI 决策助手' : '展开 AI 决策助手'}
+            {assistantExpanded ? 'Collapse AI Decision Assistant' : 'Expand AI Decision Assistant'}
           </button>
         </div>
       )}
@@ -475,10 +475,10 @@ export function ResultPage() {
           <section className="decision-summary-grid">
             <article className="decision-recommendation-hero">
               <div>
-                <h2>{recommendedNames.length > 0 ? `建议优先：${recommendedNames.join('、')}` : '暂无可发布推荐'}</h2>
+                <h2>{recommendedNames.length > 0 ? `Recommended supplier: ${recommendedNames.join(', ')}` : 'No publishable recommendation'}</h2>
                 <div className="decision-hero-cost">
                   <strong>{moneyText(currency, primaryRecommendation?.total_cost)}</strong>
-                  <span>已确认总成本</span>
+                  <span>Confirmed Total Cost</span>
                 </div>
                 <p>
                   {recommendationNarrative(primaryRecommendation, currency, currentRanking)}
@@ -486,36 +486,36 @@ export function ResultPage() {
                 {frozenRequirement && (
                   <div className="decision-hero-context">
                     <span>{rankingCriterionLabel(currentRanking)}</span>
-                    <span>截止 {frozenRequirement.delivery_deadline}</span>
-                    <span>{frozenRequirement.allow_substitutes ? '允许替代料' : '禁止替代料'}</span>
+                    <span>Deadline {frozenRequirement.delivery_deadline}</span>
+                    <span>{frozenRequirement.allow_substitutes ? 'Substitutes allowed' : 'Substitutes prohibited'}</span>
                   </div>
                 )}
               </div>
             </article>
 
-            <aside className="decision-compact-signals" aria-label="当前决策设置和制度证据摘要">
+            <aside className="decision-compact-signals" aria-label="Current decision settings and policy evidence summary">
               <article className="decision-settings-signal">
                 <div>
-                  <strong>当前决策设置</strong>
-                  <span className="signal-badge">当前第 {resultQuery.data.task_revision} 版</span>
+                  <strong>Current Decision Settings</strong>
+                  <span className="signal-badge">Current revision {resultQuery.data.task_revision}</span>
                 </div>
                 <dl>
-                  <div><dt>主指标</dt><dd>{rankingCriterionLabel(currentRanking)}</dd></div>
-                  <div><dt>次指标</dt><dd>{rankingCriterionLabel(currentSecondaryRanking)}</dd></div>
-                  <div><dt>成本容差</dt><dd>{!frozenDecisionProfile || frozenDecisionProfile.preferences.cost_tolerance_amount === null ? '未设置' : moneyText(currency, frozenDecisionProfile.preferences.cost_tolerance_amount)}</dd></div>
-                  <div><dt>排除供应商</dt><dd>{frozenDecisionProfile?.preferences.excluded_supplier_ids.join('、') || '无'}</dd></div>
+                  <div><dt>Primary criterion</dt><dd>{rankingCriterionLabel(currentRanking)}</dd></div>
+                  <div><dt>Secondary criterion</dt><dd>{rankingCriterionLabel(currentSecondaryRanking)}</dd></div>
+                  <div><dt>Cost Tolerance</dt><dd>{!frozenDecisionProfile || frozenDecisionProfile.preferences.cost_tolerance_amount === null ? 'Not set' : moneyText(currency, frozenDecisionProfile.preferences.cost_tolerance_amount)}</dd></div>
+                  <div><dt>Excluded Suppliers</dt><dd>{frozenDecisionProfile?.preferences.excluded_supplier_ids.join(', ') || 'None'}</dd></div>
                 </dl>
               </article>
               {hasPolicyBinding ? (
                 <article>
-                  <div><strong>制度检查</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
-                  <p>{policyState}{policyReviewCount > 0 ? `；${policyReviewCount} 家供应商仍需人工核验。` : '。'}</p>
-                  {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>查看制度依据</Link>}
+                  <div><strong>Compliance Review</strong><span className="signal-badge">{successfulPolicyRetrievals} / {policyRetrievals.length}</span></div>
+                  <p>{policyState}{policyReviewCount > 0 ? `; ${policyReviewCount} suppliers still require manual verification.` : '.'}</p>
+                  {task && resultQuery.data.is_current && <Link to={`/tasks/${task.task_id}/compliance`}>View policy evidence</Link>}
                 </article>
               ) : (
                 <article>
-                  <div><strong>制度检查</strong></div>
-                  <p>当前未绑定制度。</p>
+                  <div><strong>Compliance Review</strong></div>
+                  <p>No policy is bound to this task.</p>
                 </article>
               )}
             </aside>
@@ -523,34 +523,34 @@ export function ResultPage() {
 
           <section className="comparison-matrix-panel">
             <header>
-              <div><h2>供应商比较</h2></div>
+              <div><h2>Supplier Comparison</h2></div>
               <div>
-                {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/quotes/new`}>查看全部报价原文</Link>}
+                {task && <Link className="button button-secondary" to={`/tasks/${task.task_id}/quotes/new`}>View all source quotations</Link>}
               </div>
             </header>
             <div className="comparison-matrix-scroll">
               <table className="comparison-matrix-table" style={{ minWidth: Math.max(720, 128 + suppliers.length * 190) }}>
                 <thead>
                   <tr>
-                    <th>指标</th>
+                    <th>Criterion</th>
                     {suppliers.map((supplier, index) => (
                       <th className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>
                         <button className="supplier-link" type="button" onClick={() => setSelectedSupplierIndex(index)}>{supplier.supplier_name}</button>
-                        {supplier.quote_version > 1 && <small>第 {supplier.quote_version} 版</small>}
+                        {supplier.quote_version > 1 && <small>Revision {supplier.quote_version}</small>}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><th>已确认总成本</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{moneyText(currency, supplier.total_cost)}{recommended.has(supplier.quote_id) && <span className="matrix-tag">推荐</span>}</td>)}</tr>
-                  <tr><th>预计到货</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{valueText(supplier.estimated_arrival_date)}</td>)}</tr>
-                  <tr><th>实际采购量</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, frozenRequirement?.quantity_unit)}</td>)}</tr>
-                  <tr><th scope="row">付款账期</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixPaymentTerm supplier={supplier} /></td>)}</tr>
-                  <tr><th scope="row">供应商表现</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixSupplierPerformance supplier={supplier} /></td>)}</tr>
-                  {suppliers.some((supplier) => supplier.status !== 'FEASIBLE') && <tr><th>可行性</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>}
-                  <tr><th>报价原文</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? '读取中…' : '查看报价原文'}</button></td>)}</tr>
+                  <tr><th>Confirmed Total Cost</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{moneyText(currency, supplier.total_cost)}{recommended.has(supplier.quote_id) && <span className="matrix-tag">Recommendation</span>}</td>)}</tr>
+                  <tr><th>Expected Delivery Date</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended matrix-best' : ''} key={supplier.quote_id}>{valueText(supplier.estimated_arrival_date)}</td>)}</tr>
+                  <tr><th>Actual Order Quantity</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}>{quantityText(supplier.actual_quantity, frozenRequirement?.quantity_unit)}</td>)}</tr>
+                  <tr><th scope="row">Payment Term</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixPaymentTerm supplier={supplier} /></td>)}</tr>
+                  <tr><th scope="row">Supplier Performance</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><MatrixSupplierPerformance supplier={supplier} /></td>)}</tr>
+                  {suppliers.some((supplier) => supplier.status !== 'FEASIBLE') && <tr><th>Feasibility</th>{suppliers.map((supplier) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><span className={'supplier-status supplier-status-' + supplier.status.toLowerCase()}>{quoteStatusLabel(supplier.status)}</span></td>)}</tr>}
+                  <tr><th>Source Quotation</th>{suppliers.map((supplier, index) => <td className={recommended.has(supplier.quote_id) ? 'matrix-recommended' : ''} key={supplier.quote_id}><button className="evidence-action" type="button" onClick={() => setSelectedSupplierIndex(index)}>{fieldQueries[index]?.isPending ? 'Loading…' : 'View source quotation'}</button></td>)}</tr>
                   <tr>
-                    <th>推荐与未选原因</th>
+                    <th>Recommendation and reasons not selected</th>
                     {suppliers.map((supplier) => {
                       const gap = selectionGapsByQuote.get(supplier.quote_id)
                       const reasons = gap
@@ -585,7 +585,7 @@ export function ResultPage() {
                                 onClick={() => setExpandedGapQuoteId((current) => {
                                   return current === supplier.quote_id ? null : supplier.quote_id
                                 })}
-                              >{activeGapQuoteId === supplier.quote_id ? '收起补充信息' : '查看补充信息'}</button>
+                              >{activeGapQuoteId === supplier.quote_id ? 'Hide additional information' : 'View additional information'}</button>
                             )}
                           </div>
                         </td>
@@ -597,19 +597,19 @@ export function ResultPage() {
                       <td colSpan={suppliers.length + 1}>
                         <div className="matrix-expanded-detail">
                           <header>
-                            <div><strong>{activeGapSupplier.supplier_name} · 补充信息</strong>{activeGapSupplier.quote_version > 1 && <small>第 {activeGapSupplier.quote_version} 版报价</small>}</div>
+                            <div><strong>{activeGapSupplier.supplier_name} · Additional information</strong>{activeGapSupplier.quote_version > 1 && <small>Quotation revision {activeGapSupplier.quote_version}</small>}</div>
                             <span className={`supplier-status supplier-status-${activeGapSupplier.status.toLowerCase()}`}>{quoteStatusLabel(activeGapSupplier.status)}</span>
                           </header>
                           <div className="matrix-expanded-grid">
                             {activeAdditionalReasons.length > 0 && (
                               <section>
-                                <h3>其他不符合或待确认事项</h3>
+                                <h3>Other requirement failures or pending items</h3>
                                 <ul>{activeAdditionalReasons.map((reason, index) => <li key={`${reason.code}-${index}`}>{reasonText(reason)}</li>)}</ul>
                               </section>
                             )}
                             {activeUnknownFields.length > 0 && (
                               <section>
-                                <h3>待确认信息</h3>
+                                <h3>Pending information</h3>
                                 <p>{activeGapImpact && impactMessage(activeGapImpact.status, activeGapImpact.message)}</p>
                                 <div className="decision-impact-fields">
                                   {activeUnknownFields.map((field) => <span key={field}>{fieldLabel(field)}</span>)}
@@ -618,7 +618,7 @@ export function ResultPage() {
                             )}
                             {showCommunicationAdvice && (
                               <section>
-                                <h3>建议沟通内容</h3>
+                                <h3>Suggested Communication</h3>
                                 <p>{activeGapDraft?.text}</p>
                               </section>
                             )}
@@ -633,7 +633,7 @@ export function ResultPage() {
           </section>
 
           <p className="result-boundary">
-            结果更新于 {displayDate(payload.evaluated_at)}，详细计算记录可在版本记录中查看。
+            Result updated {displayDate(payload.evaluated_at)}. Detailed calculation records are available in revision history.
           </p>
         </main>
 

@@ -122,7 +122,7 @@ function clearPersistedNewTask() {
 
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) return error.message
-  return '任务创建失败，请稍后重试。'
+  return 'Unable to create the task. Try again later.'
 }
 
 function localDate() {
@@ -147,20 +147,20 @@ function validateForm(form: FormState): FieldErrors {
     'delivery_location', 'ranking_preference',
   ]
   for (const field of requiredText) {
-    if (!String(form[field]).trim()) errors[field] = '此字段为必填项。'
+    if (!String(form[field]).trim()) errors[field] = 'This field is required.'
   }
   const requiredQuantity = Number(form.required_quantity)
   if (!Number.isInteger(requiredQuantity) || requiredQuantity <= 0) {
-    errors.required_quantity = '需求数量必须是大于 0 的整数。'
+    errors.required_quantity = 'Required quantity must be an integer greater than zero.'
   }
   if (!/^\d+(\.\d{1,2})?$/.test(form.budget_amount)) {
-    errors.budget_amount = '请输入非负金额，最多保留两位小数。'
+    errors.budget_amount = 'Enter a non-negative amount with no more than two decimal places.'
   }
   if (form.planned_order_date && form.delivery_deadline && form.delivery_deadline < form.planned_order_date) {
-    errors.delivery_deadline = '交付截止日期不能早于计划下单日期。'
+    errors.delivery_deadline = 'Delivery deadline cannot be earlier than the planned order date.'
   }
   if (form.secondary_preference && form.secondary_preference === form.ranking_preference) {
-    errors.secondary_preference = '次要偏好不能与主要排序偏好相同。'
+    errors.secondary_preference = 'Secondary ranking criterion must differ from the primary criterion.'
   }
   return errors
 }
@@ -194,7 +194,7 @@ export function NewTaskPage() {
   ))
   const [requirementDraft, setRequirementDraft] = useState<RequirementDraftResponse | null>(() => restoredState?.requirementDraft ?? null)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
-  const [extractionNotice, setExtractionNotice] = useState(() => restoredState ? '已恢复未提交的采购任务，请继续检查或创建任务。' : '')
+  const [extractionNotice, setExtractionNotice] = useState(() => restoredState ? 'Your unsaved procurement task has been restored. Continue reviewing or create the task.' : '')
   const [autoFilledFields, setAutoFilledFields] = useState<Set<keyof RequirementFormValues>>(() => new Set(restoredState?.autoFilledFields ?? []))
   const [bindPolicy, setBindPolicy] = useState(() => restoredState?.bindPolicy ?? false)
   const [selectedPolicyKey, setSelectedPolicyKey] = useState(() => restoredState?.selectedPolicyKey ?? '')
@@ -226,12 +226,12 @@ export function NewTaskPage() {
       if (draft.status === 'DISCARDED' || draft.status === 'USED') {
         setRequirementDraft(null)
         setRequirementFileMetadata(null)
-        setExtractionNotice('此前的需求草稿已失效，表单内容仍已保留；如需文件证据请重新上传。')
+        setExtractionNotice('The previous requirements draft is stale. Form values were retained; upload the document again if source evidence is required.')
         return
       }
       setRequirementDraft(draft)
     }).catch(() => {
-      if (!cancelled) setExtractionNotice('已恢复表单内容，但暂时无法向后端校验需求草稿。')
+      if (!cancelled) setExtractionNotice('Form values were restored, but the requirements draft could not be validated with the backend.')
     })
     return () => { cancelled = true }
   }, [restoredState])
@@ -294,7 +294,7 @@ export function NewTaskPage() {
       setAutoFilledFields(nextFields)
       setFieldErrors({})
       setLocalError('')
-      setExtractionNotice(`已自动填入 ${draft.candidates.length} 个字段，请检查后创建任务。`)
+      setExtractionNotice(`${draft.candidates.length} fields were populated automatically. Review them before creating the task.`)
     },
   })
 
@@ -365,12 +365,12 @@ export function NewTaskPage() {
     }
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (!['pdf', 'md', 'txt'].includes(extension ?? '')) {
-      setLocalError('采购需求附件仅支持 PDF、Markdown 或 TXT。')
+      setLocalError('Requirements attachments must be PDF, Markdown or TXT files.')
       if (fileInput.current) fileInput.current.value = ''
       return
     }
     if (file.size > 10 * 1024 * 1024) {
-      setLocalError('采购需求附件不能超过 10 MiB。')
+      setLocalError('Requirements attachments cannot exceed 10 MiB.')
       if (fileInput.current) fileInput.current.value = ''
       return
     }
@@ -407,28 +407,28 @@ export function NewTaskPage() {
     const errors = validateForm(form)
     setFieldErrors(errors)
     if (Object.keys(errors).length > 0) {
-      setLocalError('部分字段未通过前端校验，请修改标红内容后重新提交。')
+      setLocalError('Some fields did not pass validation. Correct the highlighted entries and submit again.')
       return null
     }
     if (bindPolicy) {
       if (policySets.isError) {
-        setLocalError('已发布制度列表读取失败。请重试，或改选“不绑定制度”。')
+        setLocalError('Unable to load published policies. Retry or continue without a policy binding.')
         return null
       }
       if (!selectedPolicyKey) {
-        setLocalError('请选择一套已发布制度，或改选“不绑定制度”。')
+        setLocalError('Select a published policy or continue without a policy binding.')
         return null
       }
       if (!selectedPolicy) {
-        setLocalError('已选制度不再存在于服务端目录中，请重新选择。')
+        setLocalError('The selected policy is no longer in the backend catalogue. Select another policy.')
         return null
       }
       if (!policyCategory || !selectedPolicy.categories.includes(policyCategory)) {
-        setLocalError('请选择该制度支持的具体分类。')
+        setLocalError('Select an applicable category supported by this policy.')
         return null
       }
       if (!policyRegion || !selectedPolicy.regions.includes(policyRegion)) {
-        setLocalError('请选择该制度支持的具体地区。')
+        setLocalError('Select an applicable region supported by this policy.')
         return null
       }
     }
@@ -486,26 +486,26 @@ export function NewTaskPage() {
     <div className="page-stack new-task-page">
       <section className="page-heading app-page-heading">
         <div>
-          <h1>新建任务</h1>
-          <p>上传采购需求文件，或直接填写采购信息。</p>
+          <h1>New task</h1>
+          <p>Upload a requirements document or enter the procurement details manually.</p>
         </div>
-        <Link className="button button-secondary" to="/">返回工作台</Link>
+        <Link className="button button-secondary" to="/">Back to workspace</Link>
       </section>
 
       <section className="requirement-source-panel task-name-panel">
         <label className={`field field-wide ${fieldErrors.task_name ? 'field-invalid' : ''}`}>
-          <span>任务名称</span>
+          <span>Task name</span>
           <input
             form="new-task-form"
             required
             aria-invalid={Boolean(fieldErrors.task_name)}
-            placeholder={`例如：QW-MCU9-DEMO · ${localDate()}`}
+            placeholder={`For example: QW-MCU9-DEMO · ${localDate()}`}
             value={form.task_name}
             onChange={(event) => update('task_name', event.target.value)}
           />
           {fieldErrors.task_name
             ? <small className="field-error-text">{fieldErrors.task_name}</small>
-            : <small>默认按“制造商料号 · 创建日期”生成，也可以自行修改；同一用户下不可重名。</small>}
+            : <small>A name is generated from the manufacturer part number and creation date. You may change it, but task names must be unique for each user.</small>}
         </label>
       </section>
 
@@ -513,41 +513,41 @@ export function NewTaskPage() {
         <div className="requirement-source-intro">
           <span className="source-step">01</span>
           <div>
-            <h2>导入采购需求 <small>可选</small></h2>
+            <h2>Import Procurement Requirements <small>Optional</small></h2>
           </div>
         </div>
 
         <div className="requirement-source-actions">
           <label className="source-file-picker">
             <span aria-hidden="true">↑</span>
-            <strong>{requirementFileMetadata ? '更换需求文件' : '选择需求文件'}</strong>
-            <small>PDF / MD / TXT · 最大 10 MiB</small>
+            <strong>{requirementFileMetadata ? 'Replace requirements document' : 'Select requirements document'}</strong>
+            <small>PDF / MD / TXT · Maximum 10 MiB</small>
             <input ref={fileInput} type="file" accept=".pdf,.md,.txt,application/pdf,text/markdown,text/plain" onChange={(event) => handleRequirementFile(event.target.files?.[0] ?? null)} />
           </label>
 
           {requirementFileMetadata ? (
             <div className="source-file-selected">
               <span className="source-file-icon">DOC</span>
-              <div><strong>{requirementFileMetadata.name}</strong><small>{formatBytes(requirementFileMetadata.sizeBytes)} · {requirementDraft?.status === 'READY' ? '已解析' : requirementDraft?.status === 'PROCESSING' ? '正在解析' : '等待解析'}</small></div>
-              {requirementFile && <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>预览</button>}
+              <div><strong>{requirementFileMetadata.name}</strong><small>{formatBytes(requirementFileMetadata.sizeBytes)} · {requirementDraft?.status === 'READY' ? 'Parsed' : requirementDraft?.status === 'PROCESSING' ? 'Processing' : 'Awaiting parsing'}</small></div>
+              {requirementFile && <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>Preview</button>}
               {requirementDraft?.status === 'READY'
-                ? <span className="status-pill status-ready">解析完成</span>
+                ? <span className="status-pill status-ready">Parsing complete</span>
                 : requirementFile
-                  ? <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? '正在解析…' : '解析并填入'}</button>
-                  : <small>如需重新解析或预览，请重新选择原文件。</small>}
+                  ? <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? 'Processing…' : 'Parse and populate'}</button>
+                  : <small>Select the source file again to reparse or preview it.</small>}
             </div>
           ) : null}
         </div>
-        {requirementExtraction.isError && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
-        {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>需求文件解析失败</strong><p>{requirementDraft.error_message}</p></div>}
+        {requirementExtraction.isError && <div className="form-error compact-error"><strong>Requirements document parsing failed</strong><p>{errorMessage(requirementExtraction.error)}</p></div>}
+        {requirementDraft?.status === 'FAILED' && <div className="form-error compact-error"><strong>Requirements document parsing failed</strong><p>{requirementDraft.error_message}</p></div>}
         {extractionNotice && <div className="extraction-notice" role="status">✓ {extractionNotice}</div>}
-        {requirementDraft?.status === 'READY' && visibleRequirementCandidates.length > 0 && <details className="card requirement-evidence-list"><summary>查看自动填入字段的原文证据（{visibleRequirementCandidates.length}）</summary><div className="audit-list">{visibleRequirementCandidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{fieldLabel(candidate.field_name)}：{String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.quoted_text}</small>)}</article>)}</div></details>}
+        {requirementDraft?.status === 'READY' && visibleRequirementCandidates.length > 0 && <details className="card requirement-evidence-list"><summary>View source evidence for populated fields ({visibleRequirementCandidates.length})</summary><div className="audit-list">{visibleRequirementCandidates.map((candidate) => <article key={candidate.field_name} className="audit-record"><strong>{fieldLabel(candidate.field_name)}: {String(candidate.normalized_value ?? candidate.raw_value)}</strong>{candidate.source_refs.map((source) => <small key={source.source_id}>{source.quoted_text}</small>)}</article>)}</div></details>}
       </section>
 
       <form id="new-task-form" className="requirement-form" noValidate onSubmit={handleSubmit}>
         <div className="form-title-row">
-          <div><span className="source-step">02</span><div><h2>采购需求</h2></div></div>
-          <button className="button button-secondary" type="button" onClick={clearForm}>清空表单</button>
+          <div><span className="source-step">02</span><div><h2>Procurement Requirements</h2></div></div>
+          <button className="button button-secondary" type="button" onClick={clearForm}>Clear form</button>
         </div>
 
         <RequirementFields
@@ -560,28 +560,28 @@ export function NewTaskPage() {
         />
 
         <fieldset className="form-section policy-binding-section">
-          <legend>制度检查</legend>
-          <label className="field checkbox-field policy-binding-toggle"><input type="checkbox" checked={bindPolicy} onChange={(event) => setPolicyMode(event.target.checked)} /><span>启用制度检查</span></label>
+          <legend>Compliance Review</legend>
+          <label className="field checkbox-field policy-binding-toggle"><input type="checkbox" checked={bindPolicy} onChange={(event) => setPolicyMode(event.target.checked)} /><span>Enable compliance review</span></label>
 
           {bindPolicy && (
             <div className="policy-binding-picker">
-              {policySets.isPending && <div className="policy-picker-state">正在读取已发布制度…</div>}
-              {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>制度目录读取失败。仍可改为不绑定并继续创建。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
-              {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>当前没有已发布制度。请先到规则资源库完成发布，或选择不绑定。</span><Link to="/resources">前往规则资源库</Link></div>}
+              {policySets.isPending && <div className="policy-picker-state">Loading published policies…</div>}
+              {policySets.isError && <div className="policy-picker-state policy-picker-error"><span>Unable to load the policy catalogue. You may continue without a policy binding.</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>Retry</button></div>}
+              {policySets.data?.items.length === 0 && <div className="policy-picker-state"><span>No published policy is available. Publish one in the policy library or continue without a policy binding.</span><Link to="/resources">Go to policy library</Link></div>}
               {policySets.data && policySets.data.items.length > 0 && (
                 <>
-                  <label className="field policy-picker-wide"><span>已发布制度</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">请选择制度版本</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · 版本 {policy.policy_set_version}</option>)}</select></label>
-                  {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">已选制度已从服务端目录消失，请重新选择后再提交。</div>}
+                  <label className="field policy-picker-wide"><span>Published policy</span><select value={selectedPolicyKey} onChange={(event) => selectPolicy(event.target.value)}><option value="">Select a policy version</option>{policySets.data.items.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · Version {policy.policy_set_version}</option>)}</select></label>
+                  {selectedPolicyKey && !selectedPolicy && <div className="policy-stale-warning" role="alert">The selected policy is no longer available. Select another policy before submitting.</div>}
                   {selectedPolicy && (
                     <>
                       <div className="policy-binding-fields">
-                        <label className="field"><span>适用分类</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体分类</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
-                        <label className="field"><span>适用地区</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">请选择具体地区</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
+                        <label className="field"><span>Applicable category</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">Select a category</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+                        <label className="field"><span>Applicable region</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">Select a region</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
                       </div>
-                      <dl className="policy-picker-summary"><div><dt>文件</dt><dd>{selectedPolicy.document_count}</dd></div><div><dt>制度条款</dt><dd>{selectedPolicy.clause_count}</dd></div><div><dt>发布时间</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
+                      <dl className="policy-picker-summary"><div><dt>File</dt><dd>{selectedPolicy.document_count}</dd></div><div><dt>Policy Clause</dt><dd>{selectedPolicy.clause_count}</dd></div><div><dt>Published at</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
                     </>
                   )}
-                  {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">目录共有 {policySets.data.total} 个版本，当前显示最近的 {policySets.data.items.length} 个。</small>}
+                  {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">The catalogue contains {policySets.data.total} versions; the {policySets.data.items.length} most recent are shown.</small>}
                 </>
               )}
             </div>
@@ -591,15 +591,15 @@ export function NewTaskPage() {
         {(localError || createTask.isError) && (
           <div className="form-error" role="alert">
             <div>
-              <strong>无法创建任务</strong>
+              <strong>Unable to create task</strong>
               <p>{localError || errorMessage(createTask.error)}</p>
             </div>
-            {!localError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => createTask.mutate(lastSubmission)}>重试相同请求</button>}
+            {!localError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => createTask.mutate(lastSubmission)}>Retry same request</button>}
           </div>
         )}
 
         <div className="form-actions form-actions-compact">
-          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? '正在创建…' : '创建任务'}</button>
+          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? 'Creating…' : 'Create task'}</button>
         </div>
       </form>
 

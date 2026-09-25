@@ -161,7 +161,7 @@ def test_conversation_worker_persists_sanitized_model_failure(monkeypatch) -> No
         "job-conversation-invalid",
         {
             "code": "conversation_model_output_invalid",
-            "message": "本次说明未通过事实与引用核验，未更改正式结果。可以重试生成说明。",
+            "message": "This explanation did not pass factual and citation validation. The official result was not changed. You may regenerate the explanation.",
             "attempts": 1,
         },
     )
@@ -194,6 +194,6 @@ def test_conversation_review_gate_explains_next_step_and_preserves_call_count(mo
         worker._run_decision_conversation_job(service, 'job-review-required')
     assert service.failed['code'] == 'selection_review_required'
     assert service.failed['attempts'] == 1
-    assert '集中审核' in service.failed['message']
-    assert '重新分析后再生成模拟' in service.failed['message']
+    assert 'Consolidated Review' in service.failed['message']
+    assert 'rerun the analysis, and then generate the simulation' in service.failed['message']
     assert service.failed['diagnostic'].startswith('stage=simulation;')

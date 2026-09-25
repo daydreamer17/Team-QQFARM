@@ -122,7 +122,7 @@ describe('DecisionScenarioWorkspace', () => {
         base_task_revision: 6,
         base_result_id: 'result-1',
         status: 'ACTIVE',
-        title: '决策讨论',
+        title: 'Decision Discussion',
         messages: [{
           message_id: 'message-1',
           sequence: 1,
@@ -160,14 +160,14 @@ describe('DecisionScenarioWorkspace', () => {
     </MemoryRouter></QueryClientProvider>)
 
     await screen.findByText('可以生成一个提前交付的情景。')
-    expect(screen.getByText('你好！我是 QuoteWise，可以帮你解释推荐结果、核查报价与制度证据，也可以试算预算或交期变化。')).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: '当前版本 · 决策讨论' })).toBeInTheDocument()
+    expect(screen.getByText('Hello! I’m QuoteWise. I can explain the recommendation, review quotation and policy evidence, and simulate changes to the budget or delivery deadline.')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Current version · Decision Discussion' })).toBeInTheDocument()
     expect(screen.queryByText('SCENARIO-1')).not.toBeInTheDocument()
-    expect(screen.queryByText('AI 决策助手')).not.toBeInTheDocument()
-    expect(screen.queryByText('已完成')).not.toBeInTheDocument()
-    expect(screen.getByText('查看 1 个来源')).toBeInTheDocument()
+    expect(screen.queryByText('AI Decision Assistant')).not.toBeInTheDocument()
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument()
+    expect(screen.getByText('View 1 sources')).toBeInTheDocument()
     expect(screen.queryByText('RESULT:result-1')).not.toBeInTheDocument()
-    expect(screen.getByText('示例问题').parentElement).not.toHaveTextContent('3 个')
+    expect(screen.getByText('Suggested Questions').parentElement).not.toHaveTextContent('3')
   })
 
   test('opens Scenario management after confirming an intent and still allows collapse', async () => {
@@ -190,11 +190,11 @@ describe('DecisionScenarioWorkspace', () => {
     )
 
     await screen.findByText('可以生成一个提前交付的情景。')
-    const summary = screen.getByText('Scenario 管理 · 0 个')
+    const summary = screen.getByText('Scenario management · 0')
     const manager = summary.closest('details')
     expect(manager).not.toHaveAttribute('open')
 
-    await user.click(screen.getByRole('button', { name: '确认并生成 Scenario' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and generate scenario' }))
     await waitFor(() => expect(manager).toHaveAttribute('open'))
 
     await user.click(summary)
@@ -212,7 +212,7 @@ describe('DecisionScenarioWorkspace', () => {
     </MemoryRouter></QueryClientProvider>)
     const winner = await screen.findByText('Sterling Semitech（SUP-030）')
     expect(winner.tagName).toBe('STRONG')
-    expect(screen.getByText('本次条件的确定性模拟（未应用）')).toBeInTheDocument()
+    expect(screen.getByText('Deterministic simulation for these conditions (not applied)')).toBeInTheDocument()
   })
 
   test('stale assistant messages keep their original content and cannot apply old proposals', async () => {
@@ -224,15 +224,15 @@ describe('DecisionScenarioWorkspace', () => {
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
     expect(await screen.findByText('可以生成一个提前交付的情景。')).toBeInTheDocument()
-    expect(screen.getByText(/依据已更新，此回复保留为历史记录/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认并生成 Scenario' })).toBeDisabled()
+    expect(screen.getByText(/The underlying evidence has changed. This response is retained for history/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm and generate scenario' })).toBeDisabled()
   })
 
   test('restores the conversation selected by a historical citation link', async () => {
     const response = await api.listDecisionConversations('task-1')
     const original = response.items[0]
     response.items.push({ ...original, conversation_id: 'linked-conversation',
-      messages: [{ ...original.messages[0], message_id: 'linked-message', content: '历史引用对应的对话。' }],
+      messages: [{ ...original.messages[0], message_id: 'linked-message', content: 'HistoryCitations对应的Conversation。' }],
     })
     vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -241,7 +241,7 @@ describe('DecisionScenarioWorkspace', () => {
         <DecisionScenarioWorkspace task={task} result={result} compact />
       </MemoryRouter>
     </QueryClientProvider>)
-    expect(await screen.findByText('历史引用对应的对话。')).toBeInTheDocument()
+    expect(await screen.findByText('HistoryCitations对应的Conversation。')).toBeInTheDocument()
     expect(screen.queryByText('可以生成一个提前交付的情景。')).not.toBeInTheDocument()
     queryClient.clear()
   })
@@ -269,20 +269,20 @@ describe('DecisionScenarioWorkspace', () => {
     act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
       data: JSON.stringify({ reply_to_message_id: 'other', stage: 'narration' }),
     })))
-    expect(screen.queryByText('正在生成事实说明并核验引用')).not.toBeInTheDocument()
+    expect(screen.queryByText('Generating a factual explanation and validating citations')).not.toBeInTheDocument()
     act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
       data: JSON.stringify({ reply_to_message_id: 'message-1', stage: 'simulation' }),
     })))
-    expect(await screen.findByText('正在按新条件进行确定性模拟，不会修改正式结果')).toBeInTheDocument()
+    expect(await screen.findByText('Running a deterministic simulation with the new conditions; the official result will not change')).toBeInTheDocument()
     act(() => handlers['assistant.tool'](new MessageEvent('assistant.tool', {
       data: JSON.stringify({
         reply_to_message_id: 'message-1',
         tool_name: 'inspect_quote_evidence',
         status: 'OK',
-        reason: '核对最低价报价原文',
+        reason: '核对最低价Source Quotation',
       }),
     })))
-    expect(await screen.findByText('核对报价原文：完成；核对最低价报价原文')).toBeInTheDocument()
+    expect(await screen.findByText('Review quotation evidence: Completed; 核对最低价Source Quotation')).toBeInTheDocument()
     queryClient.clear()
   })
 
@@ -292,7 +292,7 @@ describe('DecisionScenarioWorkspace', () => {
     message.status = 'FAILED'
     message.content = null
     message.error_code = 'selection_review_required'
-    message.error_message = '请先审核重新纳入的供应商。'
+    message.error_message = '请先审核重新纳入的Supplier。'
     message.decision_intent_id = null
     message.proposed_changes = null
     vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
@@ -300,7 +300,7 @@ describe('DecisionScenarioWorkspace', () => {
     render(<QueryClientProvider client={queryClient}><MemoryRouter>
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
-    expect(await screen.findByRole('link', { name: '前往待处理事项' }))
+    expect(await screen.findByRole('link', { name: 'Go to action items' }))
       .toHaveAttribute('href', '/tasks/task-1/review#excluded-review')
   })
 
@@ -333,7 +333,7 @@ describe('DecisionScenarioWorkspace', () => {
       decision_intent_id: null,
       reply_to_message_id: 'user-message',
       error_code: 'conversation_model_output_invalid',
-      error_message: '本次回答未通过事实核验。',
+      error_message: '本次回答未Passed事实核验。',
     }
     response.items[0].messages = [userMessage, failed]
     vi.mocked(api.listDecisionConversations).mockResolvedValue(response)
@@ -352,10 +352,10 @@ describe('DecisionScenarioWorkspace', () => {
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
 
-    expect(await screen.findByText('生成失败')).toBeInTheDocument()
+    expect(await screen.findByText('Failed')).toBeInTheDocument()
     expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument()
     expect(screen.queryByText('FAILED')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '重新生成' }))
+    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
     await waitFor(() => expect(api.sendDecisionMessage).toHaveBeenCalledWith(
       'task-1', 'conversation-1', 6, '为什么没有选择最低价？', expect.any(String),
     ))
@@ -382,8 +382,8 @@ describe('DecisionScenarioWorkspace', () => {
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>)
-    await user.click(await screen.findByText('Scenario 管理 · 1 个'))
-    await user.click(screen.getByRole('button', { name: '应用并全量重算' }))
+    await user.click(await screen.findByText('Scenario management · 1'))
+    await user.click(screen.getByRole('button', { name: 'Apply and rerun full analysis' }))
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/tasks/task-1/decision:7'))
     expect(queryClient.getQueryData<TaskDetail>(['tasks', 'task-1'])?.current_result_id).toBeNull()
     expect(queryClient.getQueryData<TaskDetail>(['tasks', 'task-1'])?.task_revision).toBe(7)

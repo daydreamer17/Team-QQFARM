@@ -35,17 +35,17 @@ const investigation: InvestigationCase = {
   schema_version: 'investigation/1.0.0', case_id: 'case-1', artifact_id: 'artifact-1',
   task_id: 'task-1', task_revision: 6, graph_run_id: 'graph-1', kind: 'QUOTE', quote_id: 'quote-1',
   quote_version: 1, impact_input_sha256: 'a'.repeat(64), policy_binding: {},
-  goal: '先分析报价差距，再生成未发送的澄清草稿。',
+  goal: '先分析Quotation差距，再生成未Send的澄清Draft。',
   known_facts: { requested_investigation: true }, unknown_fields: [], impact_status: 'REQUIRES_INVESTIGATION',
-  plan: ['分析差距', '形成澄清草稿'], status: 'RESOLVED', stored_status: 'RESOLVED',
+  plan: ['分析差距', '形成澄清Draft'], status: 'RESOLVED', stored_status: 'RESOLVED',
   stop_reason: 'REQUEST_COMPLETED', model_calls: 2, model_id: 'test-agent', error_code: null,
   started_at: '2026-09-24T00:00:00Z', clarification: [], is_current: true,
   observations: [{
     sequence: 1, reason: '先读取确定性差距', arguments: {}, latency_ms: 3,
     result: { tool_name: 'analyze_selection_gap', task_id: 'task-1', task_revision: 6, quote_id: 'quote-1', input_sha256: 'a'.repeat(64), status: 'OK', data: { cost_difference_vs_other: '200.00' }, sources: [], error_code: null },
   }, {
-    sequence: 2, reason: '根据差距生成草稿', arguments: {}, latency_ms: 2,
-    result: { tool_name: 'draft_clarification', task_id: 'task-1', task_revision: 6, quote_id: 'quote-1', input_sha256: 'a'.repeat(64), status: 'OK', data: { text: '请确认最终运费。' }, sources: [], error_code: null },
+    sequence: 2, reason: '根据差距生成Draft', arguments: {}, latency_ms: 2,
+    result: { tool_name: 'draft_clarification', task_id: 'task-1', task_revision: 6, quote_id: 'quote-1', input_sha256: 'a'.repeat(64), status: 'OK', data: { text: '请Confirm最终运费。' }, sources: [], error_code: null },
   }],
 }
 
@@ -69,11 +69,11 @@ describe('InvestigationPage', () => {
 
   test('shows the historical trace without a separate investigation form', async () => {
     renderPage()
-    expect(await screen.findByText(/分析入选差距/)).toBeInTheDocument()
-    expect(screen.getByText('请确认最终运费。')).toBeInTheDocument()
-    expect(screen.getByText('调查目标已完成')).toBeInTheDocument()
-    expect(screen.queryByLabelText('调查目标')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '返回决策结果' })).toBeInTheDocument()
+    expect(await screen.findByText(/Analyse selection gap/)).toBeInTheDocument()
+    expect(screen.getByText('请Confirm最终运费。')).toBeInTheDocument()
+    expect(screen.getByText('Investigation completed')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Investigation Goal')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Back to decision results' })).toBeInTheDocument()
   })
 
   test('shows the actual hypothetical winner in an old simulation record', async () => {
@@ -89,6 +89,6 @@ describe('InvestigationPage', () => {
       }],
     }])
     renderPage()
-    expect(await screen.findByText(/试算推荐：Alpha/)).toBeInTheDocument()
+    expect(await screen.findByText(/simulated recommendation: Alpha/)).toBeInTheDocument()
   })
 })

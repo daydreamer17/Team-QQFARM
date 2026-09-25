@@ -44,19 +44,19 @@ function dateToIso(value: string) {
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError) {
     const messages: Record<string, string> = {
-      policy_metadata_invalid: '制度信息未通过校验，请检查标题、生效时间、分类和地区。',
-      unsupported_policy_media_type: '只支持 PDF、UTF-8 TXT 或 Markdown 制度文件。',
-      file_too_large: '制度文件不能超过 5 MiB。',
-      policy_pdf_requires_ocr: '该 PDF 没有可提取文字，当前策略上传不支持 OCR。',
-      policy_document_no_text: '制度文件没有可用正文。',
-      policy_document_not_policy: 'README 是说明文件，不属于制度正文，请只上传实际制度文件。',
-      policy_set_not_found: '没有找到该制度版本，请刷新后重试。',
-      policy_set_not_published: '该制度版本尚未发布，不能停用。',
-      policy_set_index_unavailable: '该制度版本没有可用的发布索引。',
+      policy_metadata_invalid: 'Policy information did not pass validation. Check the title, effective dates, categories, and regions.',
+      unsupported_policy_media_type: 'Only PDF, UTF-8 TXT, or Markdown policy documents are supported.',
+      file_too_large: 'A policy document cannot exceed 5 MiB.',
+      policy_pdf_requires_ocr: 'This PDF contains no extractable text, and policy upload does not currently support OCR.',
+      policy_document_no_text: 'The policy document has no usable body text.',
+      policy_document_not_policy: 'A README is an explanatory file, not policy content. Upload only the actual policy document.',
+      policy_set_not_found: 'This policy revision was not found. Refresh and try again.',
+      policy_set_not_published: 'This policy revision has not been published and cannot be deactivated.',
+      policy_set_index_unavailable: 'This policy revision has no usable published index.',
     }
     return messages[error.code] ?? error.message
   }
-  return '制度文件上传失败。'
+  return 'Policy document upload failed.'
 }
 
 function formatBytes(bytes: number) {
@@ -74,10 +74,10 @@ function formatDate(value: string | null) {
 
 function statusLabel(status: PolicyImportStatus) {
   const labels: Record<PolicyImportStatus, string> = {
-    REVIEW_REQUIRED: '待审核',
-    READY_TO_PUBLISH: '待发布',
-    PUBLISHING: '发布中',
-    PUBLISHED: '已发布',
+    REVIEW_REQUIRED: 'Review Required',
+    READY_TO_PUBLISH: 'Ready to publish',
+    PUBLISHING: 'Publishing',
+    PUBLISHED: 'Published',
   }
   return labels[status]
 }
@@ -170,31 +170,31 @@ function PendingVersionCard({ version, historical = false }: {
   const publishingCount = version.items.filter((item) => item.status === 'PUBLISHING').length
   const target = version.items.find((item) => item.status === 'REVIEW_REQUIRED') ?? version.items[0]
   const action = historical
-    ? '查看草稿'
+    ? 'View draft'
     : version.status === 'REVIEW_REQUIRED'
-    ? '继续处理'
-    : version.status === 'PUBLISHING' ? '查看进度' : '发布此版本'
+    ? 'Continue'
+    : version.status === 'PUBLISHING' ? 'View progress' : 'Publish this revision'
   return <article className={`pending-version-card${historical ? ' pending-version-card-history' : ''}`}>
     <header>
-      <div><strong>{version.policy_set_id}</strong><span>版本 {version.policy_set_version}</span></div>
+      <div><strong>{version.policy_set_id}</strong><span>Revision {version.policy_set_version}</span></div>
       <span className={`status-pill ${statusClass(version.status)}`}>{statusLabel(version.status)}</span>
     </header>
     <p className="pending-version-summary">
-      {version.items.length} 个文件
-      {reviewCount > 0 && ` · ${reviewCount} 个待处理`}
-      {readyCount > 0 && ` · ${readyCount} 个已识别`}
-      {publishingCount > 0 && ` · ${publishingCount} 个发布中`}
+      {version.items.length} files
+      {reviewCount > 0 && ` · ${reviewCount} require attention`}
+      {readyCount > 0 && ` · ${readyCount} identified`}
+      {publishingCount > 0 && ` · ${publishingCount} publishing`}
     </p>
     <dl>
-      <div><dt>适用范围</dt><dd>{version.categories.join(' / ') || '—'} · {version.regions.join(' / ') || '—'}</dd></div>
-      <div><dt>条款</dt><dd>{version.clause_count}</dd></div>
-      <div><dt>更新时间</dt><dd>{formatDate(version.updated_at)}</dd></div>
+      <div><dt>Scope</dt><dd>{version.categories.join(' / ') || '—'} · {version.regions.join(' / ') || '—'}</dd></div>
+      <div><dt>Clauses</dt><dd>{version.clause_count}</dd></div>
+      <div><dt>Updated At</dt><dd>{formatDate(version.updated_at)}</dd></div>
     </dl>
     <details className="pending-version-files">
-      <summary>查看文件（{version.items.length}）</summary>
+      <summary>View files ({version.items.length})</summary>
       <div>{version.items.map((item) => <div className="pending-version-file" key={item.policy_import_id}>
-        <span><strong>{item.original_filename}</strong><small>{item.clause_count} 条 · {formatBytes(item.size_bytes)}</small></span>
-        <span><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><Link to={`/resources/policies/${item.policy_import_id}`}>查看</Link></span>
+        <span><strong>{item.original_filename}</strong><small>{item.clause_count} clauses · {formatBytes(item.size_bytes)}</small></span>
+        <span><span className={`status-pill ${statusClass(item.status)}`}>{statusLabel(item.status)}</span><Link to={`/resources/policies/${item.policy_import_id}`}>View</Link></span>
       </div>)}</div>
     </details>
     <div className="pending-version-actions">
@@ -308,25 +308,25 @@ export function ResourcePage() {
       const extension = selectedFile.name.split('.').pop()?.toLowerCase()
       if (['readme.md', 'readme.txt'].includes(selectedFile.name.toLowerCase())) {
         setFiles([])
-        setLocalError(`“${selectedFile.name}”是说明文件，不属于制度正文，请不要上传。`)
+        setLocalError(`“${selectedFile.name}” is an explanatory file, not policy content. Do not upload it.`)
         if (fileInput.current) fileInput.current.value = ''
         return
       }
       if (extension !== 'pdf' && extension !== 'txt' && extension !== 'md') {
         setFiles([])
-        setLocalError(`“${selectedFile.name}”格式不支持，只能上传 PDF、UTF-8 TXT 或 Markdown。`)
+        setLocalError(`“${selectedFile.name}” is not supported. Upload a PDF, UTF-8 TXT, or Markdown file.`)
         if (fileInput.current) fileInput.current.value = ''
         return
       }
       if (selectedFile.size > MAX_POLICY_BYTES) {
         setFiles([])
-        setLocalError(`“${selectedFile.name}”超过 5 MiB。`)
+        setLocalError(`“${selectedFile.name}” exceeds 5 MiB.`)
         if (fileInput.current) fileInput.current.value = ''
         return
       }
       if (selectedFile.size === 0) {
         setFiles([])
-        setLocalError(`“${selectedFile.name}”是空文件。`)
+        setLocalError(`“${selectedFile.name}” is empty.`)
         if (fileInput.current) fileInput.current.value = ''
         return
       }
@@ -386,34 +386,34 @@ export function ResourcePage() {
   }
 
   function deactivateVersion(policy: PolicySetSummary) {
-    if (!window.confirm(`停用制度 ${policy.policy_set_id} · 版本 ${policy.policy_set_version}？\n停用后新采购任务将不能再绑定该版本，历史任务不受影响。`)) return
+    if (!window.confirm(`Deactivate policy ${policy.policy_set_id} · Revision ${policy.policy_set_version}?\nNew procurement tasks will no longer be able to bind this revision. Task history is unaffected.`)) return
     deactivate.mutate(policy)
   }
 
   function buildSubmission(): UploadSubmission | null {
     if (uploadMode === 'UPDATE' && basePolicy === null) {
-      setLocalError('请选择需要更新的已有制度版本。')
+      setLocalError('Select the existing policy revision to update.')
       return null
     }
     if (files.length === 0) {
-      setLocalError('请至少选择一个 PDF、TXT 或 Markdown 制度文件。')
+      setLocalError('Select at least one PDF, TXT, or Markdown policy document.')
       return null
     }
     const required: (keyof PolicyUploadForm)[] = [
       'policy_set_name', 'effective_from', 'categories', 'regions',
     ]
     if (required.some((field) => !form[field].trim())) {
-      setLocalError('请填写所有必填元数据。')
+      setLocalError('Complete all required metadata.')
       return null
     }
     const categories = splitList(form.categories)
     const regions = splitList(form.regions)
     if (categories.length === 0 || regions.length === 0) {
-      setLocalError('分类和地区至少各填写一项。')
+      setLocalError('Enter at least one category and one region.')
       return null
     }
     if (form.effective_to && form.effective_to <= form.effective_from) {
-      setLocalError('失效日期必须晚于生效日期。')
+      setLocalError('Effective-to date must be later than the effective-from date.')
       return null
     }
     const policySetId = form.policy_set_name.trim()
@@ -455,17 +455,17 @@ export function ResourcePage() {
     <div className="page-stack resource-page">
       <section className="page-heading resource-heading app-page-heading">
         <div>
-          <h1>规则资源库</h1>
-          <p>查看已发布制度，处理待审核文件，并按需发布新版本。</p>
+          <h1>Policy Library</h1>
+          <p>View published policies, process files awaiting review and publish new versions as needed.</p>
         </div>
-        <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? '收起上传' : '上传制度版本'}</button>
+        <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? 'Collapse upload' : 'Upload policy version'}</button>
       </section>
 
       <section className="card policy-directory">
         <div className="section-heading">
-          <div><h2>已发布制度</h2><p className="section-helper">每个制度集只展示当前版本；旧版本保留在历史记录中。</p></div>
+          <div><h2>Published policy</h2><p className="section-helper">Each policy set shows only its current version. Older versions remain in the history.</p></div>
           <div className="policy-directory-heading-actions">
-            {visiblePolicySetGroups.length > 0 && <span>{visiblePolicySetGroups.length} 个制度集</span>}
+            {visiblePolicySetGroups.length > 0 && <span>{visiblePolicySetGroups.length} policy sets</span>}
             {inactivePolicySetCount > 0 && (
               <button
                 className="button button-secondary"
@@ -473,37 +473,37 @@ export function ResourcePage() {
                 aria-pressed={showInactivePolicies}
                 onClick={() => setShowInactivePolicies((current) => !current)}
               >
-                {showInactivePolicies ? '隐藏已停用制度' : `显示已停用制度（${inactivePolicySetCount}）`}
+                {showInactivePolicies ? 'Hide inactive policies' : `Show inactive policies (${inactivePolicySetCount})`}
               </button>
             )}
           </div>
         </div>
-        {policySets.isPending && <div className="policy-directory-state">正在读取已发布制度…</div>}
-        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>已发布制度读取失败。</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>重试</button></div>}
+        {policySets.isPending && <div className="policy-directory-state">Loading published policies…</div>}
+        {policySets.isError && <div className="policy-directory-state policy-directory-error"><span>Unable to load published policies.</span><button className="button button-secondary" type="button" onClick={() => void policySets.refetch()}>Retry</button></div>}
         {policySets.data && visiblePolicySetGroups.length === 0 && (
           <div className="policy-directory-state">
             {inactivePolicySetCount > 0
-              ? `暂无可用制度；${inactivePolicySetCount} 个已停用制度已隐藏。`
-              : '暂无已发布制度。'}
+              ? `No policy is available; ${inactivePolicySetCount} inactive policies are hidden.`
+              : 'No published policies.'}
           </div>
         )}
         {visiblePolicySetGroups.length > 0 && (
           <div className="published-policy-grid">{visiblePolicySetGroups.map(({ current: item, history }) => (
             <article key={`${item.policy_set_id}:${item.policy_set_version}:${item.policy_index_version}`} className="published-policy-card">
-              <header><div><strong>{item.policy_set_id}</strong><span>版本 {item.policy_set_version}</span></div><span className={`status-pill ${item.status === 'PUBLISHED' ? 'status-ready' : 'status-muted'}`}>{item.status === 'PUBLISHED' ? '可使用' : '已停用'}</span></header>
-              <dl><div><dt>文件 / 条款</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>采购类别</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>地区</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>发布时间</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
+              <header><div><strong>{item.policy_set_id}</strong><span>Revision {item.policy_set_version}</span></div><span className={`status-pill ${item.status === 'PUBLISHED' ? 'status-ready' : 'status-muted'}`}>{item.status === 'PUBLISHED' ? 'Available' : 'Inactive'}</span></header>
+              <dl><div><dt>Documents / clauses</dt><dd>{item.document_count} / {item.clause_count}</dd></div><div><dt>Procurement category</dt><dd>{item.categories.join(' / ') || '—'}</dd></div><div><dt>Regions</dt><dd>{item.regions.join(' / ') || '—'}</dd></div><div><dt>Published at</dt><dd>{formatDate(item.published_at)}</dd></div></dl>
               {history.length > 0 && <details className="published-policy-history">
-                <summary>查看历史版本（{history.length}）</summary>
+                <summary>View revision history ({history.length})</summary>
                 <div className="published-policy-history-list">{history.map((version) => (
                   <div className="published-policy-history-row" key={`${version.policy_set_version}:${version.policy_index_version}`}>
-                    <span><strong>版本 {version.policy_set_version}</strong><small>{formatDate(version.published_at)}</small></span>
-                    <span className="status-pill status-muted">{version.status === 'PUBLISHED' ? '已被替代' : '已停用'}</span>
+                    <span><strong>Revision {version.policy_set_version}</strong><small>{formatDate(version.published_at)}</small></span>
+                    <span className="status-pill status-muted">{version.status === 'PUBLISHED' ? 'Superseded' : 'Inactive'}</span>
                   </div>
                 ))}</div>
               </details>}
               <div className="published-policy-actions">
-                <button className="button button-secondary" type="button" onClick={() => beginNewVersion(item)}>发布新版本</button>
-                {item.status === 'PUBLISHED' && <button className="button button-danger" type="button" disabled={deactivate.isPending} onClick={() => deactivateVersion(item)}>停用制度版本</button>}
+                <button className="button button-secondary" type="button" onClick={() => beginNewVersion(item)}>Publish new version</button>
+                {item.status === 'PUBLISHED' && <button className="button button-danger" type="button" disabled={deactivate.isPending} onClick={() => deactivateVersion(item)}>Deactivate policy version</button>}
               </div>
             </article>
           ))}</div>
@@ -513,18 +513,18 @@ export function ResourcePage() {
 
       <section className="card policy-directory pending-policy-directory">
         <div className="section-heading">
-          <div><h2>待处理版本</h2><p className="section-helper">只突出最近更新的一个版本；其他版本默认收起。</p></div>
-          {imports.data && currentPendingVersions.length > 0 && <span>最新 1 个版本</span>}
+          <div><h2>Versions awaiting review</h2><p className="section-helper">Only the most recently updated version is highlighted; other versions are collapsed by default.</p></div>
+          {imports.data && currentPendingVersions.length > 0 && <span>Latest revision</span>}
         </div>
-        {imports.isPending && <div className="policy-directory-state">正在读取待处理版本…</div>}
-        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>待处理版本读取失败。</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>重试</button></div>}
-        {imports.data && imports.data.length === 0 && <div className="policy-directory-state">当前没有待处理版本。</div>}
+        {imports.isPending && <div className="policy-directory-state">Loading versions awaiting review…</div>}
+        {imports.isError && <div className="policy-directory-state policy-directory-error"><span>Unable to load versions awaiting review.</span><button className="button button-secondary" type="button" onClick={() => void imports.refetch()}>Retry</button></div>}
+        {imports.data && imports.data.length === 0 && <div className="policy-directory-state">No versions are awaiting review.</div>}
         {currentPendingVersions.length > 0 && <div className="pending-version-grid">
           {currentPendingVersions.map((version) => <PendingVersionCard key={version.key} version={version} />)}
         </div>}
         {otherPendingVersions.length > 0 && <details className="pending-draft-history">
-          <summary>其他待处理版本（{otherPendingVersions.length}）</summary>
-          <p>这些版本仍可处理，但不会和最近更新的版本同时铺开。</p>
+          <summary>Other pending revisions ({otherPendingVersions.length})</summary>
+          <p>These versions can still be processed, but are not expanded alongside the latest version.</p>
           <div className="pending-version-grid pending-version-history-grid">
             {otherPendingVersions.map((version) => <PendingVersionCard key={version.key} version={version} historical />)}
           </div>
@@ -532,27 +532,27 @@ export function ResourcePage() {
       </section>
 
       {showUpload && <form className="card policy-upload-form" onSubmit={submit}>
-        <div className="section-heading"><div><h2>上传制度版本</h2><p className="section-helper">{basePolicy ? `正在更新 ${basePolicy.policy_set_id} 的版本 ${basePolicy.policy_set_version}；请上传新版本使用的完整文件集。` : uploadMode === 'UPDATE' ? '请选择需要更新的已有制度，再上传新版本完整文件集。' : '创建全新制度集；上传并审核完成后才能供采购任务使用。'}</p></div><button className="button button-secondary" type="button" onClick={() => setShowUpload(false)}>取消上传</button></div>
+        <div className="section-heading"><div><h2>Upload policy revision</h2><p className="section-helper">{basePolicy ? `Updating revision ${basePolicy.policy_set_version} of ${basePolicy.policy_set_id}; upload the complete file set for the new revision.` : uploadMode === 'UPDATE' ? 'Select an existing policy to update, then upload the complete file set for the new revision.' : 'Create a new policy set. It becomes available to procurement tasks only after upload and review are complete.'}</p></div><button className="button button-secondary" type="button" onClick={() => setShowUpload(false)}>Cancel upload</button></div>
         <div className="policy-form-grid">
-          <label className="field"><span>上传方式</span><select value={uploadMode} onChange={(event) => changeUploadMode(event.target.value as PolicyUploadMode)}><option value="NEW">新建制度集</option><option value="UPDATE">更新已有制度</option></select></label>
-          {uploadMode === 'UPDATE' && <label className="field policy-field-wide"><span>选择已有制度</span><select required value={basePolicy ? policyKey(basePolicy) : ''} onChange={(event) => selectBasePolicy(updateBasePolicies.find((policy) => policyKey(policy) === event.target.value) ?? null)}><option value="">请选择制度</option>{updateBasePolicies.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · 当前版本 {policy.policy_set_version}{policy.status === 'INACTIVE' ? '（已停用）' : ''}</option>)}</select>{updatePolicySets.isPending && <small>正在读取制度…</small>}{updatePolicySets.isError && <small className="field-error">制度读取失败，请稍后重试。</small>}</label>}
-          <label className="field policy-field-wide"><span>制度集名称</span><input required readOnly={uploadMode === 'UPDATE'} value={form.policy_set_name} onChange={(event) => update('policy_set_name', event.target.value)} placeholder="例如：电子元器件采购制度" /></label>
-          <label className="field"><span>适用采购类别 <small>多项用逗号分隔</small></span><input required value={form.categories} onChange={(event) => update('categories', event.target.value)} /></label>
-          <label className="field"><span>适用地区 <small>多项用逗号分隔</small></span><input required value={form.regions} onChange={(event) => update('regions', event.target.value)} /></label>
-          <label className="field"><span>生效日期</span><input required type="date" value={form.effective_from} onChange={(event) => update('effective_from', event.target.value)} /></label>
-          <label className="field"><span>失效日期 <small>可选</small></span><input type="date" value={form.effective_to} onChange={(event) => update('effective_to', event.target.value)} /></label>
+          <label className="field"><span>Upload method</span><select value={uploadMode} onChange={(event) => changeUploadMode(event.target.value as PolicyUploadMode)}><option value="NEW">Create policy set</option><option value="UPDATE">Update existing policy</option></select></label>
+          {uploadMode === 'UPDATE' && <label className="field policy-field-wide"><span>Select an existing policy</span><select required value={basePolicy ? policyKey(basePolicy) : ''} onChange={(event) => selectBasePolicy(updateBasePolicies.find((policy) => policyKey(policy) === event.target.value) ?? null)}><option value="">Select a policy</option>{updateBasePolicies.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · Current revision {policy.policy_set_version}{policy.status === 'INACTIVE' ? ' (inactive)' : ''}</option>)}</select>{updatePolicySets.isPending && <small>Loading policies…</small>}{updatePolicySets.isError && <small className="field-error">Unable to load policies. Please try again later.</small>}</label>}
+          <label className="field policy-field-wide"><span>Policy set name</span><input required readOnly={uploadMode === 'UPDATE'} value={form.policy_set_name} onChange={(event) => update('policy_set_name', event.target.value)} placeholder="For example: Electronic Components Procurement Policy" /></label>
+          <label className="field"><span>Applicable procurement categories <small>Separate multiple values with commas</small></span><input required value={form.categories} onChange={(event) => update('categories', event.target.value)} /></label>
+          <label className="field"><span>Applicable region <small>Separate multiple values with commas</small></span><input required value={form.regions} onChange={(event) => update('regions', event.target.value)} /></label>
+          <label className="field"><span>Effective from</span><input required type="date" value={form.effective_from} onChange={(event) => update('effective_from', event.target.value)} /></label>
+          <label className="field"><span>Effective to <small>Optional</small></span><input type="date" value={form.effective_to} onChange={(event) => update('effective_to', event.target.value)} /></label>
         </div>
         <label className="resource-dropzone policy-dropzone">
           <span className="resource-dropzone-icon" aria-hidden="true">↑</span>
-          <strong>{files.length > 0 ? `已选择 ${files.length} 个文件` : '选择本版本的全部制度文件'}</strong>
-          <small>{files.length > 0 ? `共 ${formatBytes(files.reduce((sum, item) => sum + item.size, 0))}` : '支持多选 PDF / UTF-8 TXT / Markdown · 单个文件最大 5 MiB'}</small>
+          <strong>{files.length > 0 ? `${files.length} files selected` : 'Select all policy documents for this revision'}</strong>
+          <small>{files.length > 0 ? `${formatBytes(files.reduce((sum, item) => sum + item.size, 0))} total` : 'Multiple PDF, UTF-8 TXT and Markdown files supported · Maximum 5 MiB per file'}</small>
           <input ref={fileInput} multiple type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" onChange={(event) => selectFiles(Array.from(event.target.files ?? []))} />
         </label>
-        {files.length > 0 && <div className="policy-selected-files"><p>发布新版本时，请上传该版本使用的完整文件集。</p>{files.map((selectedFile) => <div className="policy-selected-file" key={`${selectedFile.name}:${selectedFile.lastModified}`}><span><strong>{selectedFile.name}</strong><small>{formatBytes(selectedFile.size)}</small></span><button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>预览</button></div>)}</div>}
+        {files.length > 0 && <div className="policy-selected-files"><p>Upload the complete file set used by the new policy version.</p>{files.map((selectedFile) => <div className="policy-selected-file" key={`${selectedFile.name}:${selectedFile.lastModified}`}><span><strong>{selectedFile.name}</strong><small>{formatBytes(selectedFile.size)}</small></span><button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>Preview</button></div>)}</div>}
         {(localError || upload.isError) && <div className="form-error compact-error" role="alert">{localError || errorMessage(upload.error)}</div>}
         <div className="policy-form-actions">
-          {upload.isError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>重试相同请求</button>}
-          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? '正在上传并解析…' : files.length > 0 ? `上传 ${files.length} 个文件并审核` : '上传文件并审核'}</button>
+          {upload.isError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>Retry same request</button>}
+          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? 'Uploading and parsing…' : files.length > 0 ? `Upload and review ${files.length} files` : 'Upload file and review'}</button>
         </div>
       </form>}
 

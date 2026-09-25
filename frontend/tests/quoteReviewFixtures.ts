@@ -99,7 +99,7 @@ export function makeQuoteFieldSchema(): QuoteFieldSchemaResponse {
         group_label: currentGroup.label,
         value_type: valueType(fieldName),
         editor: enumValues[fieldName] ? 'select' : valueType(fieldName).includes('date') ? 'date' : 'text',
-        required_level: alwaysRequired.has(fieldName) ? '关键' : optional.has(fieldName) ? '可选' : '条件关键',
+        required_level: alwaysRequired.has(fieldName) ? 'Critical' : optional.has(fieldName) ? 'Optional' : 'Conditionally Critical',
         nullable: !alwaysRequired.has(fieldName),
         allowed_values: enumValues[fieldName] ?? null,
         minimum: fieldName === 'lead_time_days' ? 0 : valueType(fieldName).includes('integer') ? 1 : valueType(fieldName).includes('decimal') ? 0 : null,
@@ -107,17 +107,17 @@ export function makeQuoteFieldSchema(): QuoteFieldSchemaResponse {
         missing_handling: 'test',
         normalization_rule: '测试规范化规则',
         validation_boundary: '测试校验边界',
-        evidence_requirement: '测试证据要求',
+        evidence_requirement: '测试Evidence要求',
       }
     }),
     relation_groups: [
-      { group_id: 'price_basis', kind: 'ALL_OR_NONE', field_names: ['unit_price', 'price_basis_quantity', 'price_basis_unit'], message: '单价、计价数量和计价单位必须同时有效。' },
-      { group_id: 'money_currency', kind: 'MONEY_CURRENCY', field_names: ['currency', 'unit_price', 'shipping_fee_amount', 'other_fees_amount'], message: '金额币种必须一致。' },
-      { group_id: 'shipping_fee', kind: 'FEE_STATUS_AMOUNT', field_names: ['shipping_fee_status', 'shipping_fee_amount'], message: '运费状态与运费金额不一致。' },
-      { group_id: 'other_fees', kind: 'FEE_STATUS_AMOUNT', field_names: ['other_fees_status', 'other_fees_amount'], message: '其他费用状态与金额不一致。' },
-      { group_id: 'moq_packaging', kind: 'MOQ_PACKAGING', field_names: ['packaging_type', 'units_per_pack', 'order_multiple_units', 'moq_quantity', 'moq_unit'], message: 'MOQ 单位与包装方式或每包数量不一致。' },
+      { group_id: 'price_basis', kind: 'ALL_OR_NONE', field_names: ['unit_price', 'price_basis_quantity', 'price_basis_unit'], message: 'Unit Price、计价数量和计价单位必须同时有效。' },
+      { group_id: 'money_currency', kind: 'MONEY_CURRENCY', field_names: ['currency', 'unit_price', 'shipping_fee_amount', 'other_fees_amount'], message: '金额Currency必须一致。' },
+      { group_id: 'shipping_fee', kind: 'FEE_STATUS_AMOUNT', field_names: ['shipping_fee_status', 'shipping_fee_amount'], message: 'Shipping fee status and amount are inconsistent.' },
+      { group_id: 'other_fees', kind: 'FEE_STATUS_AMOUNT', field_names: ['other_fees_status', 'other_fees_amount'], message: 'Other fee status and amount are inconsistent.' },
+      { group_id: 'moq_packaging', kind: 'MOQ_PACKAGING', field_names: ['packaging_type', 'units_per_pack', 'order_multiple_units', 'moq_quantity', 'moq_unit'], message: 'The MOQ unit is inconsistent with the packaging type or units per pack.' },
       { group_id: 'relative_delivery', kind: 'ALL_OR_NONE', field_names: ['lead_time_days', 'day_basis', 'delivery_semantics', 'start_event'], message: '相对交期字段必须完整。' },
-      { group_id: 'quote_validity', kind: 'DATE_ORDER', field_names: ['quote_date', 'valid_until'], message: '报价日期不能晚于有效截止日。' },
+      { group_id: 'quote_validity', kind: 'DATE_ORDER', field_names: ['quote_date', 'valid_until'], message: 'The quotation date cannot be later than the validity date.' },
     ],
   }
 }

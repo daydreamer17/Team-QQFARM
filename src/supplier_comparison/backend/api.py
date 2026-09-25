@@ -550,22 +550,22 @@ def create_app(
         except ValueError as exc:
             code = str(exc)
             messages = {
-                'empty_file': '证明文件为空。',
-                'file_too_large': '证明文件超过 10 MiB。',
-                'unsupported_media_type': '仅支持 PDF、UTF-8 TXT 或 Markdown 证明文件。',
-                'invalid_text_encoding': 'TXT 或 Markdown 证明文件必须使用 UTF-8 编码。',
-                'invalid_pdf': 'PDF 证明文件无效或无法读取。',
-                'pdf_page_limit_exceeded': 'PDF 证明文件不能超过 50 页。',
-                'text_unavailable': '文件中没有足够的可解析文字。',
+                'empty_file': 'The evidence file is empty.',
+                'file_too_large': 'The evidence file exceeds 10 MiB.',
+                'unsupported_media_type': 'Only PDF, UTF-8 TXT, or Markdown evidence files are supported.',
+                'invalid_text_encoding': 'TXT and Markdown evidence files must use UTF-8 encoding.',
+                'invalid_pdf': 'The PDF evidence file is invalid or unreadable.',
+                'pdf_page_limit_exceeded': 'A PDF evidence file cannot exceed 50 pages.',
+                'text_unavailable': 'The file does not contain enough parseable text.',
             }
-            raise BackendError(code, messages.get(code, '无法解析证明文件。'))
+            raise BackendError(code, messages.get(code, 'Unable to parse the evidence file.'))
 
     def save_evidence(task_id, expected_task_revision, facts, idempotency_key, file, previous=None,
                       run_after_save=True):
         try:
             parsed = EvidenceInput.model_validate_json(facts)
         except ValidationError:
-            raise BackendError('evidence_fields_invalid', '材料字段不完整或格式错误，请核对身份、日期与来源。')
+            raise BackendError('evidence_fields_invalid', 'Evidence fields are incomplete or incorrectly formatted. Check identity, dates, and sources.')
         return service.save_compliance_evidence(task_id, expected_task_revision=expected_task_revision,
             facts=parsed, idempotency_key=idempotency_key, previous_evidence_id=previous,
             file=file.file if file else None, filename=file.filename if file else None,
@@ -1066,7 +1066,7 @@ def create_app(
         )
         definitions = {
             "ANALYZE_SELECTION_GAP": {
-                "goal": "分析该报价相对当前可行方案的成本、交付与阻塞差距，形成可核验结论。",
+                "goal": "Analyse this quotation's cost, delivery, and blocking gaps relative to the current feasible options and produce verifiable findings.",
                 "required": ("analyze_selection_gap",),
                 "allowed": (
                     "get_task_context", "analyze_decision_impact", "get_comparison_result",
@@ -1074,7 +1074,7 @@ def create_app(
                 ),
             },
             "DRAFT_CLARIFICATION": {
-                "goal": "先分析该报价未入选或待确认的原因，再生成一份未发送的供应商澄清草稿。",
+                "goal": "Analyse why this quotation was not selected or remains pending, then generate an unsent supplier clarification draft.",
                 "required": ("analyze_selection_gap", "draft_clarification"),
                 "allowed": (
                     "get_task_context", "analyze_decision_impact", "get_comparison_result",
@@ -1082,7 +1082,7 @@ def create_app(
                 ),
             },
             "SIMULATE_REQUIREMENT_CHANGE": {
-                "goal": "仅按用户明确授权的预算或交期变化进行假设试算，不修改正式采购需求。",
+                "goal": "Run a hypothetical simulation using only the budget or delivery changes explicitly authorised by the user, without changing official procurement requirements.",
                 "required": ("simulate_requirement_change",),
                 "allowed": (
                     "get_task_context", "analyze_decision_impact", "get_comparison_result",

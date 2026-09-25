@@ -22,17 +22,17 @@ TRANSIENT_CODES = {'embedding_transient_error', 'rerank_transient_error', 'polic
 def diagnose_policy(result: RetrievalResult) -> dict:
     if result.status == RetrievalStatus.OK:
         return {'code': 'EVIDENCE_FOUND', 'automatic_retry_allowed': False,
-                'next_action': '制度已召回，不代表供应商资质已核验或金额审批已完成。'}
+                'next_action': 'Policy was retrieved; this does not mean supplier eligibility is verified or amount approval is complete.'}
     if result.status == RetrievalStatus.NO_EVIDENCE:
         return {'code': 'MISSING_APPLICABLE_POLICY', 'automatic_retry_allowed': False,
-                'next_action': '核对类别、地区、生效日期和必查条款；制度内容有变须审核发布新版本并创建新任务。'}
+                'next_action': 'Check category, region, effective dates, and mandatory clauses. If policy content changed, review and publish a new revision and create a new task.'}
     if result.status == RetrievalStatus.CONFLICT:
         return {'code': 'CONFLICTING_POLICY', 'automatic_retry_allowed': False,
-                'next_action': '由制度管理员修订冲突并发布新版本；不能靠换个问题检索判通过。'}
+                'next_action': 'The policy administrator must resolve the conflict and publish a new revision; changing the retrieval question cannot establish a pass.'}
     transient = result.error_code in TRANSIENT_CODES
     return {'code': 'TRANSIENT_RETRIEVAL_FAILURE' if transient else 'OPERATOR_REPAIR_REQUIRED',
             'automatic_retry_allowed': transient, 'error_code': result.error_code,
-            'next_action': '允许同版本有限重试；仍失败则暂停。' if transient else '检查配置、索引、认证或返回契约；不自动重试未知错误。'}
+            'next_action': 'A limited retry is allowed for the same revision; pause if it still fails.' if transient else 'Check configuration, index, authentication, or the response contract; do not automatically retry an unknown error.'}
 
 
 class ScopedPolicyInvestigationTools:
@@ -50,10 +50,10 @@ class ScopedPolicyInvestigationTools:
                                          graph_run_id, comparison_result_id,
                                          {k: r.model_dump(mode='json') for k, r in requests.items()}])
         descriptions = {
-            'get_task_context': '读取冻结需求和制度版本，不允许修改',
-            'get_policy_retrieval_status': '程序诊断当前制度检索状态与下一步，不把制度原文当供应商证据',
-            'retry_policy_retrieval': '只对有明确临时故障依据的必查条款，同查询同版本有限重试',
-            'request_clarification': '集中列出制度问题和处理建议，保持正式发布暂停，不修改报价字段',
+            'get_task_context': 'Read frozen requirements and policy revision; modification is not allowed',
+            'get_policy_retrieval_status': 'Diagnose current policy retrieval status and next steps without treating policy text as supplier evidence',
+            'retry_policy_retrieval': 'Allow only limited retries of the same query and revision for mandatory clauses with a confirmed transient failure',
+            'request_clarification': 'List policy issues and recommended actions together, keep publication paused, and do not alter quotation fields',
         }
         self.schemas = {name: {'description': text, 'arguments': NoArguments.model_json_schema()}
                         for name, text in descriptions.items()}
@@ -143,7 +143,7 @@ class ScopedPolicyInvestigationTools:
                     case_id=case_id, task_id=self.task_id, task_revision=self.task_revision,
                     graph_run_id=self.graph_run_id, kind='POLICY', quote_id=None, quote_version=None,
                     impact_input_sha256=self.fingerprint, policy_binding=self.task['policy_binding'] or {},
-                    goal='查明必查制度未召回的原因；仅在允许时同版本有限重试，否则明确暂停和下一步。',
+                    goal='Determine why a mandatory policy was not retrieved. Retry the same revision only when allowed; otherwise state the pause and next step clearly.',
                     known_facts={'control_code': code, 'retrieval': result.model_dump(mode='json'),
                                  'diagnosis': diagnose_policy(result)}, unknown_fields=(code,),
                     impact_status='REQUIRES_INVESTIGATION',

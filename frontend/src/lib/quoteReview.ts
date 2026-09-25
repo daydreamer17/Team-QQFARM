@@ -105,13 +105,13 @@ export function requiredQuoteFields(
     const field = fields.get(fieldName)
     const definition = fieldDefinition(schema, fieldName)
     return field?.required_for_submission === true || Boolean(
-      field?.applicable && definition?.required_level === '条件关键',
+      field?.applicable && definition?.required_level === 'Conditionally Critical',
     )
   }
 
   for (const definition of schema.fields) {
     const field = fields.get(definition.field_name)
-    if (definition.required_level === '关键' || field?.criticality === 'ALWAYS') {
+    if (definition.required_level === 'Critical' || field?.criticality === 'ALWAYS') {
       result.add(definition.field_name)
     }
   }
@@ -170,7 +170,7 @@ export function requiredQuoteFields(
 
   for (const definition of schema.fields) {
     if (
-      definition.required_level !== '可选' &&
+      definition.required_level !== 'Optional' &&
       !coveredConditionalFields.has(definition.field_name) &&
       requiredByServer(definition.field_name)
     ) {
@@ -247,7 +247,7 @@ export function validateQuoteReview(
       'SCHEMA_FIELD_COUNT_INVALID',
       [],
       'schema',
-      `字段字典应包含 30 个业务字段，当前返回 ${schema.fields.length} 个。请刷新；若仍出现请联系管理员。`,
+      `The field dictionary should contain 30 business fields, but ${schema.fields.length} were returned. Refresh the page; contact an administrator if the issue persists.`,
     ))
   }
 
@@ -257,7 +257,7 @@ export function validateQuoteReview(
         finding.codes[0] ?? 'BATCH_PRECHECK_BLOCKING',
         [],
         'batch',
-        `整份报价无法进入人工确认：${finding.message}`,
+        `The quotation cannot proceed to human confirmation: ${finding.message}`,
       ))
     }
   }
@@ -269,7 +269,7 @@ export function validateQuoteReview(
         'DRAFT_FIELD_MISSING',
         [definition.field_name],
         definition.group_id,
-        `草稿缺少“${definition.label}”，无法完成整份报价确认。`,
+        `The draft is missing “${definition.label}”, so quotation confirmation cannot be completed.`,
       ))
       continue
     }
@@ -278,7 +278,7 @@ export function validateQuoteReview(
         'FIELD_ID_MISSING',
         [definition.field_name],
         definition.group_id,
-        `“${definition.label}”缺少字段版本标识，请刷新草稿后重试。`,
+        `“${definition.label}” has no field version. Refresh the draft and try again.`,
       ))
     }
 
@@ -288,7 +288,7 @@ export function validateQuoteReview(
         'REQUIRED_VALUE_MISSING',
         [definition.field_name],
         definition.group_id,
-        `系统未识别到“${definition.label}”，请补充。`,
+        `The system did not identify “${definition.label}”. Enter a value.`,
       ))
       continue
     }
@@ -302,7 +302,7 @@ export function validateQuoteReview(
           'INTEGER_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}”必须是大于或等于 ${minimum} 的整数。`,
+          `“${definition.label}” must be an integer greater than or equal to ${minimum}.`,
         ))
       }
     } else if (valueType(definition).includes('decimal')) {
@@ -312,7 +312,7 @@ export function validateQuoteReview(
           'MONEY_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}”必须是大于或等于 ${minimum} 的十进制金额，不能包含货币符号或文字。`,
+          `“${definition.label}” must be a decimal amount greater than or equal to ${minimum}, without a currency symbol or text.`,
         ))
       }
     } else if (valueType(definition).includes('date')) {
@@ -321,7 +321,7 @@ export function validateQuoteReview(
           'DATE_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}”必须使用 YYYY-MM-DD 格式。`,
+          `“${definition.label}” must use YYYY-MM-DD format.`,
         ))
       }
     }
@@ -331,7 +331,7 @@ export function validateQuoteReview(
         'ENUM_VALUE_INVALID',
         [definition.field_name],
         definition.group_id,
-        `“${definition.label}”必须从系统提供的选项中选择。`,
+        `Select “${definition.label}” from the options provided.`,
       ))
     }
   }
@@ -342,7 +342,7 @@ export function validateQuoteReview(
         'FIELD_NOT_IN_SCHEMA',
         [field.field_name],
         'schema',
-        `草稿字段 ${field.field_name} 不在当前字段字典中，请重新解析报价。`,
+        `Draft field ${field.field_name} is not in the current field dictionary. Parse the quotation again.`,
       ))
     }
   }
@@ -354,7 +354,7 @@ export function validateQuoteReview(
       'CURRENCY_INVALID',
       currencyField ? [currencyField] : [],
       'price',
-      '币种必须是三个大写字母，例如 SGD 或 USD。',
+      'Currency must be three uppercase letters, such as SGD or USD.',
     ))
   }
 
@@ -383,21 +383,21 @@ export function validateQuoteReview(
           'FEE_AMOUNT_REQUIRED',
           [statusField, amountField],
           relation.group_id,
-          `${label}为“另有明确金额”时，必须填写金额。`,
+          `Enter an amount when ${label} is “Known amount”.`,
         ))
       } else if (status === 'INCLUDED' && amount !== null) {
         issues.push(issue(
           'INCLUDED_FEE_HAS_AMOUNT',
           [statusField, amountField],
           relation.group_id,
-          `${label}为“已包含”时，金额必须留空，避免重复计算。`,
+          `Leave the amount blank when ${label} is “Included” to avoid double counting.`,
         ))
       } else if ((status === 'FREE' || status === 'NOT_APPLICABLE') && amount !== null && !isZeroDecimal(amount)) {
         issues.push(issue(
           'ZERO_FEE_HAS_NONZERO_AMOUNT',
           [statusField, amountField],
           relation.group_id,
-          `${label}免费或不适用时，金额应留空或填写 0。`,
+          `Leave the amount blank or enter 0 when ${label} is Free or Not Applicable.`,
         ))
       }
       continue
@@ -418,7 +418,7 @@ export function validateQuoteReview(
             'PACKAGING_CONVERSION_INCOMPLETE',
             relation.field_names,
             relation.group_id,
-            `MOQ 与计价单位不同时，${relation.message}`,
+            `When the MOQ unit differs from the price basis unit: ${relation.message}`,
           ))
         } else if (packagingType !== moqUnit) {
           issues.push(issue(
@@ -502,7 +502,7 @@ export function buildQuoteReviewActions(
   return schema.fields.map((definition) => {
     const field = byName.get(definition.field_name)
     if (!field?.field_id) {
-      throw new Error(`字段 ${definition.field_name} 缺少可审核的字段 ID。`)
+      throw new Error(`Field ${definition.field_name} has no reviewable field ID.`)
     }
     const current = normalizedText(values[definition.field_name])
     const unit = actionUnit(field, definition, schema, values)
@@ -518,26 +518,26 @@ export function buildQuoteReviewActions(
           return {
             ...base,
             action: 'MARK_MISSING' as const,
-            reason: '用户核对原始文件后确认冲突候选均不能作为当前字段值。',
+            reason: 'The user reviewed the source file and confirmed that none of the conflicting candidates is the current field value.',
           }
         }
         return {
           ...base,
           action: 'CONFIRM_CONFLICT' as const,
-          reason: '用户核对原始文件后确认该字段仍存在无法消除的冲突。',
+          reason: 'The user reviewed the source file and confirmed that the field still has an unresolved conflict.',
         }
       }
       if (isBlankQuoteValue(quoteValueAsText(field.normalized_value))) {
         return {
           ...base,
           action: 'CONFIRM_MISSING' as const,
-          reason: '用户核对整份原始文件后确认该字段未提供或不适用。',
+          reason: 'The user reviewed the complete source file and confirmed that the field was not provided or is not applicable.',
         }
       }
       return {
         ...base,
         action: 'MARK_MISSING' as const,
-        reason: '用户核对原始文件后确认自动提取值无效，原报价未提供该字段。',
+        reason: 'The user reviewed the source file and confirmed that the extracted value was invalid and the quotation did not provide this field.',
       }
     }
     if (
@@ -549,7 +549,7 @@ export function buildQuoteReviewActions(
       return {
         ...base,
         action: 'CONFIRM_CONFLICT' as const,
-        reason: '用户核对原始文件后确认该字段仍存在无法消除的冲突。',
+        reason: 'The user reviewed the source file and confirmed that the field still has an unresolved conflict.',
       }
     }
     if (
@@ -560,7 +560,7 @@ export function buildQuoteReviewActions(
       return {
         ...base,
         action: 'CONFIRM_VALUE' as const,
-        reason: '用户已对照原始文件确认自动提取值。',
+        reason: 'The user confirmed the extracted value against the source file.',
       }
     }
     return {
@@ -570,12 +570,12 @@ export function buildQuoteReviewActions(
       normalizedValue: normalizedActionValue(definition, current),
       unit,
       reason: field.validation_status === 'CONFLICT'
-        ? '用户核对原始文件后选择该值作为最终确认值。'
+        ? 'The user reviewed the source file and selected this as the final confirmed value.'
         : unitNeedsCorrection
-        ? '用户确认报价币种，并将金额字段的单位与报价币种保持一致。'
+        ? 'The user confirmed the quotation currency and aligned monetary field units with it.'
         : isBlankQuoteValue(quoteValueAsText(field.normalized_value))
-        ? '用户核对原始文件或向供应商确认后补充该字段。'
-        : '用户核对原始文件后修正自动提取值。',
+        ? 'The user entered the field after reviewing the source file or obtaining supplier confirmation.'
+        : 'The user corrected the extracted value after reviewing the source file.',
     }
   })
 }

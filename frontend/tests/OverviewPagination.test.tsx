@@ -9,7 +9,7 @@ import { OverviewPage } from '../src/pages/OverviewPage'
 
 const tasks: TaskListItem[] = Array.from({ length: 17 }, (_, index) => ({
   task_id: `task-${index + 1}`,
-  task_name: `采购任务 ${index + 1}`,
+  task_name: `Procurement Task ${index + 1}`,
   task_revision: 1,
   status: 'COMPLETED',
   policy_binding: null,
@@ -22,10 +22,10 @@ const tasks: TaskListItem[] = Array.from({ length: 17 }, (_, index) => ({
   updated_at: '2026-09-25T00:00:00Z',
 }))
 
-describe('任务中心分页', () => {
+describe('Task Centre分页', () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  test('默认每页十条，并可切换为十五条后继续服务端翻页', async () => {
+  test('默认Per page十条，并可切换为十五条后继续服务端翻页', async () => {
     vi.spyOn(api, 'healthReady').mockResolvedValue({ status: 'ready' })
     const listTasks = vi.spyOn(api, 'listTasks').mockImplementation(async (values = 8) => {
       const limit = typeof values === 'number' ? values : values.limit ?? 8
@@ -43,19 +43,19 @@ describe('任务中心分页', () => {
 
     render(<QueryClientProvider client={client}><MemoryRouter><OverviewPage /></MemoryRouter></QueryClientProvider>)
 
-    expect(await screen.findByText('采购任务 10')).toBeInTheDocument()
-    expect(screen.queryByText('采购任务 11')).not.toBeInTheDocument()
-    expect(screen.getByText('第 1–10 条，共 17 条')).toBeInTheDocument()
+    expect(await screen.findByText('Procurement Task 10')).toBeInTheDocument()
+    expect(screen.queryByText('Procurement Task 11')).not.toBeInTheDocument()
+    expect(screen.getByText('1–10 of 17')).toBeInTheDocument()
     expect(listTasks).toHaveBeenLastCalledWith({ limit: 10, offset: 0, query: '', status: undefined, sort: 'updated_desc' })
 
-    await user.selectOptions(screen.getByLabelText('每页任务数'), '15')
-    expect(await screen.findByText('采购任务 15')).toBeInTheDocument()
-    expect(screen.queryByText('采购任务 16')).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByLabelText('Tasks per page'), '15')
+    expect(await screen.findByText('Procurement Task 15')).toBeInTheDocument()
+    expect(screen.queryByText('Procurement Task 16')).not.toBeInTheDocument()
     expect(listTasks).toHaveBeenLastCalledWith({ limit: 15, offset: 0, query: '', status: undefined, sort: 'updated_desc' })
 
-    await user.click(screen.getByRole('button', { name: '下一页' }))
-    await waitFor(() => expect(screen.getByText('采购任务 16')).toBeInTheDocument())
-    expect(screen.getByText('第 16–17 条，共 17 条')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(screen.getByText('Procurement Task 16')).toBeInTheDocument())
+    expect(screen.getByText('16–17 of 17')).toBeInTheDocument()
     expect(listTasks).toHaveBeenLastCalledWith({ limit: 15, offset: 15, query: '', status: undefined, sort: 'updated_desc' })
     client.clear()
   })

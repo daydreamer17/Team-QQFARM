@@ -92,11 +92,11 @@ class ConversationTurnOutput(BaseModel):
 
 
 CLARIFICATION_TEXT = {
-    "UNSUPPORTED": "此助手只能解释采购事实或模拟支持的需求与排序变更，不能批准采购、下单、付款、修改报价事实或设置指标权重。请改为询问当前结果，或指定主次排序指标。",
-    "EXACT_DELIVERY_DAY": "系统目前只能设置最晚到货日，允许提前到货，不能保证恰好当天送达。您是否接受将要求改为最晚到货日？若只能当天收货，需要人工确认配送安排。",
-    "COST_LIMIT": "请说明可接受的预算上限，或相对最低价最多可以增加多少费用。",
-    "CHANGE_DETAILS": "请说明希望调整的排序偏好、预算或最晚到货日；排序最多支持一个主指标和一个次指标。",
-    "INVESTIGATION_UNAVAILABLE": "当前未启用证据核查 Agent，无法进一步验证报价原文、供应商历史或制度依据。您仍可询问当前已冻结的比较结果。",
+    "UNSUPPORTED": "This assistant can explain procurement facts or simulate supported requirement and ranking changes. It cannot approve procurement, place orders, make payments, alter quotation facts, or assign criterion weights. Ask about the current result or specify primary and secondary ranking criteria.",
+    "EXACT_DELIVERY_DAY": "The system can currently set only a latest-arrival date and allows earlier delivery; it cannot guarantee delivery on one exact day. Would you accept converting this to a latest-arrival requirement? If receipt is possible only on that day, delivery arrangements require manual confirmation.",
+    "COST_LIMIT": "Specify an acceptable budget ceiling or the maximum premium over the lowest price.",
+    "CHANGE_DETAILS": "Specify the ranking preference, budget, or latest-arrival date to change. Ranking supports at most one primary and one secondary criterion.",
+    "INVESTIGATION_UNAVAILABLE": "The evidence-investigation agent is not enabled, so source quotations, supplier history, and policy evidence cannot be verified further. You can still ask about the current frozen comparison result.",
 }
 
 
@@ -106,7 +106,7 @@ def render_conversation_turn(output: ConversationTurnOutput) -> str:
     if output.clarification:
         parts.append(CLARIFICATION_TEXT[output.clarification])
     if output.changes is not None:
-        parts.append("已整理为下方待确认的偏好变更；确认后生成模拟情景，正式应用仍需单独确认。")
+        parts.append("The proposed preference changes are listed below for confirmation. Confirming them generates a simulation scenario; applying them officially requires a separate confirmation.")
     return "\n\n".join(part for part in parts if part)
 
 
@@ -573,7 +573,7 @@ def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str
     ]
     suppliers: list[str] = []
     focuses: list[str] = []
-    focus_labels = {"COST": "成本", "DELIVERY": "交期", "TERMS": "商务条款", "ALL": "关键字段"}
+    focus_labels = {"COST": "cost", "DELIVERY": "delivery", "TERMS": "commercial terms", "ALL": "key fields"}
     for row in evidence:
         data = row["result"].get("data") or {}
         supplier = data.get("supplier_name")
@@ -583,8 +583,8 @@ def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str
         if focus and focus not in focuses:
             focuses.append(focus)
 
-    subject = "、".join(suppliers) if suppliers else "相关供应商"
-    scope = "、".join(focuses) if focuses else "相关"
+    subject = ", ".join(suppliers) if suppliers else "the relevant suppliers"
+    scope = ", ".join(focuses) if focuses else "relevant"
     brief = next((
         row["result"].get("data") or {} for row in reversed(observations)
         if isinstance(row, dict) and isinstance(row.get("result"), dict)
@@ -599,23 +599,23 @@ def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str
         if isinstance(item, dict) and item.get("summary")
     ]
     if record.get("status") == "RESOLVED":
-        conclusion = f"结论：本轮只读调查已完成，并核对了{subject}的{scope}依据（{reference_id}）。"
+        conclusion = f"Conclusion: this read-only investigation is complete and reviewed the {scope} evidence for {subject} ({reference_id})."
     else:
-        conclusion = f"结论：本轮只读调查保留了已取得的{scope}核查记录，但尚未完成全部目标（{reference_id}）。"
+        conclusion = f"Conclusion: this read-only investigation retained the available {scope} review records but did not complete every objective ({reference_id})."
     advantage_text = (
-        f"已核实优势：{' '.join(advantages)}（{reference_id}）。"
-        if advantages else f"已核实优势：本轮记录未单列额外优势（{reference_id}）。"
+        f"Verified advantages: {' '.join(advantages)} ({reference_id})."
+        if advantages else f"Verified advantages: no additional advantage was separately recorded in this investigation ({reference_id})."
     )
     risk_text = (
-        f"已核实风险：{' '.join(risks)}（{reference_id}）。"
-        if risks else f"已核实风险：本轮记录未单列已确认的不利事实；这不等于不存在其他风险（{reference_id}）。"
+        f"Verified risks: {' '.join(risks)} ({reference_id})."
+        if risks else f"Verified risks: no confirmed adverse fact was separately recorded in this investigation; this does not mean that no other risks exist ({reference_id})."
     )
     if brief.get("requires_follow_up"):
-        unresolved_text = f"尚待追查事项：仍需补充核查记录列出的证明或审批材料后再分析（{reference_id}）。"
+        unresolved_text = f"Outstanding follow-up: add the evidence or approval records listed in the investigation before analysing again ({reference_id})."
     else:
-        unresolved_text = f"尚待追查事项：未发现需要再次调用现有工具解决的证据缺失或冲突（{reference_id}）。"
-    stop_reason = str(brief.get("stop_reason") or "本轮可用证据核查已经结束。")
-    stop_text = f"停止原因：{stop_reason}（{reference_id}）。"
+        unresolved_text = f"Outstanding follow-up: no missing or conflicting evidence was found that requires another call to the available tools ({reference_id})."
+    stop_reason = str(brief.get("stop_reason") or "The available evidence review for this investigation has ended.")
+    stop_text = f"Stopping reason: {stop_reason} ({reference_id})."
     turn = {
         "assistant_text": conclusion + advantage_text + risk_text + unresolved_text + stop_text,
         "reference_ids": [reference_id],
@@ -628,12 +628,12 @@ def deterministic_investigation_explanation(context: dict[str, Any]) -> dict[str
 
 
 _CRITERION_LABELS = {
-    "LOWEST_CONFIRMED_TOTAL_COST": "确认总成本最低",
-    "FASTEST_CONFIRMED_DELIVERY": "最快确认到货",
-    "LONGEST_CONFIRMED_PAYMENT_TERM": "确认账期最长",
-    "HIGHEST_SUPPLIER_PERFORMANCE": "供应商综合表现最高",
-    "HIGHEST_HISTORICAL_ON_TIME_RATE": "历史准时率最高",
-    "LOWEST_HISTORICAL_REJECTED_LINE_RATE": "历史拒收订单行率最低",
+    "LOWEST_CONFIRMED_TOTAL_COST": "lowest confirmed total cost",
+    "FASTEST_CONFIRMED_DELIVERY": "fastest confirmed delivery",
+    "LONGEST_CONFIRMED_PAYMENT_TERM": "longest confirmed payment term",
+    "HIGHEST_SUPPLIER_PERFORMANCE": "highest overall supplier performance",
+    "HIGHEST_HISTORICAL_ON_TIME_RATE": "highest historical on-time rate",
+    "LOWEST_HISTORICAL_REJECTED_LINE_RATE": "lowest historical rejected-line rate",
 }
 
 
@@ -692,23 +692,23 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
         wants_cost = True
     if wants_choice and requirement_reference and primary in _CRITERION_LABELS:
         sentences.append(
-            f"当前排序主指标是“{_CRITERION_LABELS[primary]}”（{requirement_reference}）。"
+            f"The current primary ranking criterion is “{_CRITERION_LABELS[primary]}” ({requirement_reference})."
         )
         reference_ids.append(requirement_reference)
 
     if wants_cost:
-        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in cheapest)
+        names = ", ".join(str(row.get("supplier_name") or row.get("quote_id")) for row in cheapest)
         sentences.append(
-            f"可行报价中，{names} 的已确认总成本最低，为 SGD {lowest_cost:,.2f}（{result_reference}）。"
+            f"Among feasible quotations, {names} has the lowest confirmed total cost at SGD {lowest_cost:,.2f} ({result_reference})."
         )
     if wants_delivery:
-        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in fastest)
+        names = ", ".join(str(row.get("supplier_name") or row.get("quote_id")) for row in fastest)
         sentences.append(
-            f"可行报价中，{names} 的预计到货最早，为 {earliest_date}（{result_reference}）。"
+            f"Among feasible quotations, {names} has the earliest estimated arrival date: {earliest_date} ({result_reference})."
         )
     if wants_choice and recommended:
-        names = "、".join(str(row.get("supplier_name") or row.get("quote_id")) for row in recommended)
-        sentences.append(f"当前推荐为 {names}（{result_reference}）。")
+        names = ", ".join(str(row.get("supplier_name") or row.get("quote_id")) for row in recommended)
+        sentences.append(f"The current recommendation is {names} ({result_reference}).")
 
     already_described = {
         str(row.get("quote_id")) for row in cheapest + fastest + recommended
@@ -719,12 +719,12 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
                 or str(row.get("quote_id")) in already_described):
             continue
         sentences.append(
-            f"{name} 的已确认总成本为 SGD {Decimal(str(row['total_cost'])):,.2f}，"
-            f"预计到货日为 {row['estimated_arrival_date']}（{result_reference}）。"
+            f"{name} has a confirmed total cost of SGD {Decimal(str(row['total_cost'])):,.2f} "
+            f"and an estimated arrival date of {row['estimated_arrival_date']} ({result_reference})."
         )
     if wants_choice and requirement_reference and primary in _CRITERION_LABELS:
         sentences.append(
-            f"因此当前推荐遵循既定排序主指标，而不是改按另一项指标排序（{requirement_reference}；{result_reference}）。"
+            f"The current recommendation therefore follows the configured primary ranking criterion rather than switching to another criterion ({requirement_reference}; {result_reference})."
         )
     if not sentences:
         return None
@@ -830,15 +830,15 @@ def _validate_investigation_risk_summary(
     ), {})
     risks = [item for item in brief.get("verified_risks") or [] if isinstance(item, dict)]
     text = output.assistant_text
-    if "尚待追查" not in text and not re.search(r"尚缺|未决|待补|证据缺失|证据冲突", text):
+    if "Outstanding follow-up" not in text and "尚待追查" not in text and not re.search(r"尚缺|未决|待补|证据缺失|证据冲突|outstanding|missing evidence|evidence conflict", text, re.IGNORECASE):
         raise ValueError("investigation answer omitted unresolved-item status")
-    if "停止" not in text and not re.search(r"无需继续|不再继续|核查完成", text):
+    if "Stopping reason" not in text and "停止" not in text and not re.search(r"无需继续|不再继续|核查完成|no further|investigation complete", text, re.IGNORECASE):
         raise ValueError("investigation answer omitted its stopping reason")
     if not risks:
         return
-    if re.search(r"未发现[^。；]{0,12}风险|没有[^。；]{0,8}风险|无风险", text):
+    if re.search(r"未发现[^。；]{0,12}风险|没有[^。；]{0,8}风险|无风险|no risks?", text, re.IGNORECASE):
         raise ValueError("investigation answer confused no unresolved evidence with no risk")
-    if "风险" not in text:
+    if "风险" not in text and "risk" not in text.casefold():
         raise ValueError("investigation answer omitted verified risks")
     for risk in risks:
         supplier_name = str(risk.get("supplier_name") or "").strip()

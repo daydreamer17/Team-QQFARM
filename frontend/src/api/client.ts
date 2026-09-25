@@ -119,7 +119,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(
       0,
       'network_error',
-      '无法连接后端服务，请确认 Docker 和 API 服务是否正在运行。',
+      'Unable to connect to the backend. Confirm that Docker and the API service are running.',
     )
   }
 
@@ -141,7 +141,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiClientError(
       response.status,
       'unexpected_response',
-      `后端返回了未预期的响应（HTTP ${response.status}）。`,
+      `The backend returned an unexpected response (HTTP ${response.status}).`,
     )
   }
 
@@ -161,7 +161,7 @@ async function download(path: string): Promise<{ blob: Blob; filename: string }>
     throw new ApiClientError(
       0,
       'network_error',
-      '无法连接后端服务，请确认 Docker 和 API 服务是否正在运行。',
+      'Unable to connect to the backend. Confirm that Docker and the API service are running.',
     )
   }
   if (!response.ok) {
@@ -181,7 +181,7 @@ async function download(path: string): Promise<{ blob: Blob; filename: string }>
     throw new ApiClientError(
       response.status,
       'unexpected_response',
-      `文件导出失败（HTTP ${response.status}）。`,
+      `File export failed (HTTP ${response.status}).`,
     )
   }
   const disposition = response.headers.get('content-disposition') ?? ''

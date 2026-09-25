@@ -33,9 +33,9 @@ describe('QuoteDraftReviewWorkspace', () => {
     expect(editors).toHaveLength(30)
     editors.forEach((editor) => expect(editor).toBeEnabled())
     expect(within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')).toHaveValue('QQ Demo Components')
-    expect(screen.queryByRole('button', { name: '正式提交报价' })).not.toBeInTheDocument()
-    expect(screen.getByText('已识别')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认并提交报价' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Submit Quotation' })).not.toBeInTheDocument()
+    expect(screen.getByText('Identified')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm and submit quotation' })).toBeEnabled()
   })
 
   test('refreshes empty processing fields when extraction finishes', async () => {
@@ -129,9 +129,9 @@ describe('QuoteDraftReviewWorkspace', () => {
     expect(document.querySelector('#quote-field-payment_terms')).not.toHaveClass('has-error')
     expect(screen.queryByText('Candidate passed deterministic field review.')).not.toBeInTheDocument()
     expect(screen.queryByText('Field is legitimately missing and is not currently critical.')).not.toBeInTheDocument()
-    expect(screen.queryByText('金额币种随“报价币种”字段统一确认。')).not.toBeInTheDocument()
+    expect(screen.queryByText('金额Currency随“Quotation Currency”字段统一Confirm。')).not.toBeInTheDocument()
     expect(screen.queryByText('已自动填写')).not.toBeInTheDocument()
-    expect(screen.queryByText('系统已填写，可直接确认，也可以修改。')).not.toBeInTheDocument()
+    expect(screen.queryByText('系统已填写，可直接Confirm，也可以Revise。')).not.toBeInTheDocument()
   })
 
   test('marks an actual field conflict red', () => {
@@ -151,7 +151,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
 
     expect(document.querySelector('#quote-field-manufacturer')).toHaveClass('has-error')
-    expect(screen.getByText('待人工核对')).toBeInTheDocument()
+    expect(screen.getByText('Manual review required')).toBeInTheDocument()
   })
 
   test('submits an already reviewed draft without repeating the review call', async () => {
@@ -180,7 +180,7 @@ describe('QuoteDraftReviewWorkspace', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and submit quotation' }))
 
     await waitFor(() => expect(submitSpy).toHaveBeenCalledOnce())
     expect(reviewSpy).not.toHaveBeenCalled()
@@ -216,11 +216,11 @@ describe('QuoteDraftReviewWorkspace', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and submit quotation' }))
 
-    expect(await screen.findByText('无需更新')).toBeInTheDocument()
-    expect(screen.getByText('报价内容没有变化，已保留当前版本。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '返回报价列表' })).toBeInTheDocument()
+    expect(await screen.findByText('No update required')).toBeInTheDocument()
+    expect(screen.getByText('The quotation content has not changed. The current version has been retained.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back to quotation list' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/草稿或字段版本已经变化/)).not.toBeInTheDocument()
   })
@@ -263,7 +263,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
     const amountInput = within(document.querySelector('#quote-field-shipping_fee_amount')!).getByRole('textbox')
     await user.clear(amountInput)
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and submit quotation' }))
 
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
     await waitFor(() => expect(submitSpy).toHaveBeenCalledOnce())
@@ -299,10 +299,10 @@ describe('QuoteDraftReviewWorkspace', () => {
 
     const shippingStatus = within(document.querySelector('#quote-field-shipping_fee_status')!).getByRole('combobox')
     expect(shippingStatus).toHaveValue('UNKNOWN')
-    expect(within(shippingStatus).getByRole('option', { name: '请选择费用状态' })).toBeDisabled()
+    expect(within(shippingStatus).getByRole('option', { name: 'Select a fee status' })).toBeDisabled()
     expect(within(shippingStatus).getByRole('option', { name: /UNKNOWN/ })).toBeEnabled()
     expect(within(document.querySelector('#quote-field-shipping_fee_amount')!).getByRole('textbox')).toHaveValue('')
-    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    await user.click(screen.getByRole('button', { name: 'Save and confirm review' }))
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
     expect(submitSpy).not.toHaveBeenCalled()
   })
@@ -320,8 +320,8 @@ describe('QuoteDraftReviewWorkspace', () => {
     const manufacturer = within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')
     await user.clear(manufacturer)
     await user.type(manufacturer, 'Manually corrected maker')
-    expect(screen.getByRole('button', { name: '确认并提交报价' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    expect(screen.getByRole('button', { name: 'Confirm and submit quotation' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Save and confirm review' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
     const actions = reviewSpy.mock.calls[0][4]
     expect(actions.find((action) => action.fieldName === 'unit_price')).toMatchObject({ action: 'SET_VALUE', normalizedValue: 'abc' })
@@ -339,9 +339,9 @@ describe('QuoteDraftReviewWorkspace', () => {
     renderWorkspace(<QuoteDraftReviewWorkspace draft={draft} schema={makeQuoteFieldSchema()} taskRevision={1} onChanged={vi.fn()} onPreview={vi.fn()} />)
     const card = document.querySelector('#quote-field-unit_price')!
     expect(card).not.toHaveClass('has-error')
-    expect(within(card).getByText('人工已确认。')).toBeInTheDocument()
-    expect(within(card).getByText(/已人工处理：/).closest('details')).not.toHaveAttribute('open')
-    expect(within(card).queryByRole('button', { name: '已核对，采用此值' })).not.toBeInTheDocument()
+    expect(within(card).getByText('Manually confirmed.')).toBeInTheDocument()
+    expect(within(card).getByText(/Manually resolved:/).closest('details')).not.toHaveAttribute('open')
+    expect(within(card).queryByRole('button', { name: 'Confirm current value' })).not.toBeInTheDocument()
   })
 
   test('explicitly adopts an unchanged conflicting value and saves its correction', async () => {
@@ -352,10 +352,10 @@ describe('QuoteDraftReviewWorkspace', () => {
     renderWorkspace(<QuoteDraftReviewWorkspace draft={draft} schema={makeQuoteFieldSchema()} taskRevision={1} onChanged={vi.fn()} onPreview={vi.fn()} />)
     const card = document.querySelector('#quote-field-unit_price')!
     const originalValue = within(card).getByRole('textbox').getAttribute('value')
-    await user.click(within(card).getByRole('button', { name: '已核对，采用此值' }))
+    await user.click(within(card).getByRole('button', { name: 'Confirm current value' }))
     expect(card).not.toHaveClass('has-error')
-    expect(within(card).getByText('已核对当前值，待保存确认。')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '保存并确认审核' }))
+    expect(within(card).getByText('Current value reviewed; save to confirm.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Save and confirm review' }))
     await waitFor(() => expect(reviewSpy).toHaveBeenCalledOnce())
     expect(reviewSpy.mock.calls[0][4].find((action) => action.fieldName === 'unit_price')).toMatchObject({ action: 'SET_VALUE', normalizedValue: originalValue })
   })
@@ -417,11 +417,11 @@ describe('QuoteDraftReviewWorkspace', () => {
 
     const manufacturerInput = within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')
     await user.clear(manufacturerInput)
-    await user.type(manufacturerInput, '人工确认制造商')
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.type(manufacturerInput, '人工ConfirmManufacturer')
+    await user.click(screen.getByRole('button', { name: 'Confirm and submit quotation' }))
 
-    expect(await screen.findByText(/服务器当前版本：3/)).toBeInTheDocument()
-    expect(manufacturerInput).toHaveValue('人工确认制造商')
+    expect(await screen.findByText(/Current server revision: 3/)).toBeInTheDocument()
+    expect(manufacturerInput).toHaveValue('人工ConfirmManufacturer')
   })
 
   test('does not let users bypass a server-applicable delivery group by clearing all four fields', async () => {
@@ -454,9 +454,9 @@ describe('QuoteDraftReviewWorkspace', () => {
       if (editor instanceof HTMLSelectElement) await user.selectOptions(editor, '')
       else await user.clear(editor)
     }
-    await user.click(screen.getByRole('button', { name: '确认并提交报价' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm and submit quotation' }))
 
     expect(reviewSpy).not.toHaveBeenCalled()
-    expect(screen.getAllByText(/系统未识别到/).length).toBeGreaterThanOrEqual(4)
+    expect(screen.getAllByText(/The system did not identify/).length).toBeGreaterThanOrEqual(4)
   })
 })

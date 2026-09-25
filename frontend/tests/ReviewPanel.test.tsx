@@ -28,7 +28,7 @@ describe('ReviewPanel correction safeguards', () => {
       errors: [{ quote_id: 'quote-1', field_name: 'shipping_fee_status', code: 'field_correction_invalid' }],
     })
     expect(fieldCorrectionErrorMessage(error, [quote])).toBe(
-      '提交失败：redwood_quote.pdf 的“运费状态”修正值无效，请填写已确认的实际值。',
+      'Submission failed: The corrected value for Shipping Fee Status in redwood_quote.pdf is invalid. Enter the confirmed value..',
     )
   })
 
@@ -37,7 +37,7 @@ describe('ReviewPanel correction safeguards', () => {
       errors: [{ quote_id: 'quote-1', field_name: 'payment_terms', code: 'field_version_conflict' }],
     })
     expect(fieldCorrectionErrorMessage(error, [quote])).toBe(
-      '提交失败：redwood_quote.pdf 的“付款条件”已更新，请重新核对。',
+      'Submission failed: Payment terms in redwood_quote.pdf has changed. Review it again..',
     )
   })
 })

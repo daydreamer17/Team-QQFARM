@@ -13,9 +13,9 @@ export function groupComplianceChecks(checks: PolicyComplianceCheck[]) {
   }, new Map<string, PolicyComplianceCheck[]>()).entries()]
 }
 export function complianceStageLabel(stage?: ComplianceStage) {
-  if (stage?.status === 'DISABLED' && stage.confirmed) return '未启用'
-  if (stage?.confirmed) return stage.pending_count ? '已处理·有待补充' : '已处理'
-  return ({ PROCESSING: '检查中', BLOCKED: '需处理制度依据', AWAITING_CONFIRMATION: '等待确认' } as Record<string, string>)[stage?.status ?? ''] ?? '未完成'
+  if (stage?.status === 'DISABLED' && stage.confirmed) return 'Disabled'
+  if (stage?.confirmed) return stage.pending_count ? 'Processed · follow-up required' : 'Processed'
+  return ({ PROCESSING: 'Processing', BLOCKED: 'Policy evidence requires attention', AWAITING_CONFIRMATION: 'Action required' } as Record<string, string>)[stage?.status ?? ''] ?? 'Incomplete'
 }
 export function complianceCheckHref(taskId: string, quoteId: string, clauseId?: string) {
   const fragment = new URLSearchParams({ quote: quoteId })
@@ -26,14 +26,14 @@ export function complianceAnchorId(quoteId: string, clauseId?: string) {
   return `compliance-${encodeURIComponent(quoteId)}${clauseId ? `-${encodeURIComponent(clauseId)}` : ''}`
 }
 export function complianceStatusLabel(status: string) {
-  return ({ COMPLIANT: '已核验', NON_COMPLIANT: '不符合要求', REVIEW_REQUIRED: '待补充或复核', NOT_EVALUATED: '尚未核验', VERIFIED: '已核验候选', UNVERIFIED: '未核验候选', EXCLUDED: '制度排除', NOT_STARTED: '尚未开始', PROCESSING: '检查中', BLOCKED: '制度依据待处理', AWAITING_CONFIRMATION: '等待确认', PROCESSED: '已处理', DISABLED: '未启用' } as Record<string, string>)[status] ?? status
+  return ({ COMPLIANT: 'Verified', NON_COMPLIANT: 'Fail the check', REVIEW_REQUIRED: 'Evidence or Review Required', NOT_EVALUATED: 'Not Evaluated', VERIFIED: 'Verified Candidate', UNVERIFIED: 'Unverified Candidate', EXCLUDED: 'Excluded by Policy', NOT_STARTED: 'Not Started', PROCESSING: 'Processing', BLOCKED: 'Blocked by Policy Evidence', AWAITING_CONFIRMATION: 'Action required', PROCESSED: 'Processed', DISABLED: 'Disabled' } as Record<string, string>)[status] ?? status
 }
 export function checkStatusLabel(status: PolicyComplianceCheckStatus) {
-  return ({ PASS: '通过', FAIL: '不通过', REVIEW_REQUIRED: '待复核', NOT_APPLICABLE: '此阶段不适用', NOT_EVALUATED: '未执行' })[status]
+  return ({ PASS: 'Passed', FAIL: 'Failed', REVIEW_REQUIRED: 'Review required', NOT_APPLICABLE: 'Not applicable at this stage', NOT_EVALUATED: 'Not evaluated' })[status]
 }
 export function executionStageLabel(stage?: string) {
-  return ({ BEFORE_RECOMMENDATION: '推荐前', BEFORE_PUBLICATION: '发布前', AFTER_SELECTION: '选择供应商后' } as Record<string, string>)[stage ?? ''] ?? '未指定阶段'
+  return ({ BEFORE_RECOMMENDATION: 'Before recommendation', BEFORE_PUBLICATION: 'Before publication', AFTER_SELECTION: 'After supplier selection' } as Record<string, string>)[stage ?? ''] ?? 'Stage not specified'
 }
 export function complianceReasonLabel(code: string) {
-  return ({ EVIDENCE_MISSING: '缺少对应证明材料', COVERAGE_UNCONFIRMED: '尚未人工确认材料覆盖范围', VALIDITY_UNSPECIFIED: '材料有效期未说明', EVIDENCE_EXPIRED: '材料已过期', EVIDENCE_SCOPE_MISMATCH: '材料中的供应商或产品范围不匹配', EVIDENCE_CONFLICT: '多份材料互相冲突，请核对并替换', EVIDENCE_NOT_YET_EFFECTIVE: '材料尚未生效', EVIDENCE_CONFIRMED: '材料已核对', EXECUTABLE_PARAMETERS_REQUIRED: '条款缺少经人工审核的执行参数', SUPPLIER_IDENTITY_UNCONFIRMED: '供应商身份待确认', EXECUTION_STAGE_DEFERRED: '将在指定阶段检查', AMOUNT_UNKNOWN: '金额尚未确定', CURRENCY_MISMATCH: '金额币种不匹配', AMOUNT_RULE_EVALUATED: '金额条件已检查', AMOUNT_RULE_NOT_TRIGGERED: '未达到金额审批门槛', AMOUNT_APPROVAL_MISSING: '已达到金额门槛，缺少审批记录', AMOUNT_APPROVAL_SCOPE_MISMATCH: '审批记录对应其他供应商', AMOUNT_APPROVAL_CONFLICT: '金额审批记录互相冲突，请核对并替换', AMOUNT_APPROVAL_CURRENCY_MISMATCH: '审批币种与采购币种不一致', AMOUNT_APPROVAL_INSUFFICIENT: '批准金额不足以覆盖本方案', AMOUNT_APPROVAL_REJECTED: '审批记录表明未批准', AMOUNT_APPROVAL_CONFIRMED: '审批记录已核对且覆盖本方案', RULE_NOT_YET_REVIEWED: '规则审核时间晚于本次评估', QUOTE_NOT_FEASIBLE: '报价尚未满足采购要求' } as Record<string, string>)[code] ?? code
+  return ({ EVIDENCE_MISSING: 'Supporting evidence is missing', COVERAGE_UNCONFIRMED: 'Evidence coverage has not been confirmed', VALIDITY_UNSPECIFIED: 'The evidence validity period is not stated', EVIDENCE_EXPIRED: 'The evidence has expired', EVIDENCE_SCOPE_MISMATCH: 'The evidence does not match the supplier or product scope', EVIDENCE_CONFLICT: 'The submitted evidence conflicts; review and replace it', EVIDENCE_NOT_YET_EFFECTIVE: 'The evidence is not yet effective', EVIDENCE_CONFIRMED: 'Evidence confirmed', EXECUTABLE_PARAMETERS_REQUIRED: 'The clause lacks reviewed execution parameters', SUPPLIER_IDENTITY_UNCONFIRMED: 'Supplier identity requires confirmation', EXECUTION_STAGE_DEFERRED: 'This check will run at the specified stage', AMOUNT_UNKNOWN: 'The amount is not yet confirmed', CURRENCY_MISMATCH: 'The amount currency does not match', AMOUNT_RULE_EVALUATED: 'The amount condition has been evaluated', AMOUNT_RULE_NOT_TRIGGERED: 'The amount approval threshold was not reached', AMOUNT_APPROVAL_MISSING: 'The threshold was reached but approval evidence is missing', AMOUNT_APPROVAL_SCOPE_MISMATCH: 'The approval record applies to another supplier', AMOUNT_APPROVAL_CONFLICT: 'The amount approval records conflict; review and replace them', AMOUNT_APPROVAL_CURRENCY_MISMATCH: 'The approval currency does not match the procurement currency', AMOUNT_APPROVAL_INSUFFICIENT: 'The approved amount does not cover this option', AMOUNT_APPROVAL_REJECTED: 'The approval record states that approval was not granted', AMOUNT_APPROVAL_CONFIRMED: 'The approval record has been verified and covers this option', RULE_NOT_YET_REVIEWED: 'The rule was reviewed after this assessment', QUOTE_NOT_FEASIBLE: 'The quotation does not yet meet procurement requirements' } as Record<string, string>)[code] ?? code
 }

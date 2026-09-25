@@ -200,7 +200,7 @@ test('clearing an extracted optional value is audited as MARK_MISSING', () => {
   const action = buildQuoteReviewActions(draft, schema, formValues)
     .find((item) => item.fieldName === 'supplier_country')
   assert.equal(action.action, 'MARK_MISSING')
-  assert.match(action.reason, /未提供/)
+  assert.match(action.reason, /did not provide/)
 })
 
 test('an unchanged optional conflict remains explicit and cannot masquerade as confirmed', () => {

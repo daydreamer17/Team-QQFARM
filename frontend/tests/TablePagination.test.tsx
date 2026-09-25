@@ -22,21 +22,21 @@ function PaginatedFixture() {
 }
 
 describe('TablePagination', () => {
-  test('只展示当前页，并可翻到最后一页', async () => {
+  test('只展示Current页，并可翻到最后一页', async () => {
     const user = userEvent.setup()
     render(<PaginatedFixture />)
 
     expect(screen.getByText('记录 1')).toBeInTheDocument()
     expect(screen.queryByText('记录 5')).not.toBeInTheDocument()
-    expect(screen.getByText('第 1–4 条，共 10 条')).toBeInTheDocument()
+    expect(screen.getByText('1–4 of 10')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '下一页' }))
+    await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.getByText('记录 5')).toBeInTheDocument()
     expect(screen.getByText('2 / 3')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '下一页' }))
+    await user.click(screen.getByRole('button', { name: 'Next' }))
     expect(screen.getByText('记录 10')).toBeInTheDocument()
-    expect(screen.getByText('第 9–10 条，共 10 条')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled()
+    expect(screen.getByText('9–10 of 10')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
   })
 })

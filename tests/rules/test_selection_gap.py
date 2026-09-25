@@ -37,7 +37,7 @@ def test_delivery_only_gap_is_computed_and_conditionally_becomes_cheapest():
     assert original.model_dump(mode='json') == before
     draft = draft_clarification(gap)
     assert draft['draft_only'] and not draft['sent']
-    assert '2026-09-19' in draft['text'] and '重新审核' in draft['text']
+    assert '2026-09-19' in draft['text'] and 'reviewed, recalculated' in draft['text']
 
 
 def test_shorter_delivery_does_not_fix_budget_or_specification():
