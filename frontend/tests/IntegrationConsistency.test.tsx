@@ -264,7 +264,7 @@ describe('frontend and backend version consistency', () => {
       </QueryClientProvider>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'Decision Comparison' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Analysis' })).toBeInTheDocument()
     expect(screen.queryByText('旧结果页')).not.toBeInTheDocument()
   })
 
@@ -596,7 +596,7 @@ describe('frontend and backend version consistency', () => {
 
     expect(await screen.findByRole('heading', { name: 'Prepare evidence before checking' })).toBeInTheDocument()
     expect(screen.getByText(/This task uses a legacy workflow, and its historical result has not been confirmed at this stage/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Start compliance review' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument()
     expect(history).not.toHaveBeenCalled()
   })
 
@@ -655,7 +655,7 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/tasks/task-1/summary', '/tasks/:taskId/summary', <SummaryPage />)
 
-    expect(await screen.findByRole('heading', { name: 'Procurement Decision Brief' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Summary' })).toBeInTheDocument()
     expect(screen.getByText(/a budget ceiling of SGD 8000.00/)).toBeInTheDocument()
     expect(screen.getAllByText(/Historical result for Revision 5/).length).toBeGreaterThan(0)
     expect((await screen.findAllByText('Evidence or Review Required')).length).toBeGreaterThan(0)
@@ -699,7 +699,7 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByRole('heading', { name: 'Published policy' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Versions awaiting review' })).toBeInTheDocument()
     expect(screen.queryByLabelText('Policy set name')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Upload policy version' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Upload' }))
     expect(screen.getByLabelText('Upload method')).toHaveValue('NEW')
     expect(screen.getByLabelText('Policy set name')).toBeInTheDocument()
     expect(screen.getByText('Select all policy documents for this revision')).toBeInTheDocument()
@@ -817,7 +817,7 @@ describe('frontend and backend version consistency', () => {
 
     renderRoute('/resources', '/resources', <ResourcePage />)
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Publish new version' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Update' }))
     expect(screen.getByLabelText('Upload method')).toHaveValue('UPDATE')
     expect(screen.getByLabelText('Select an existing policy')).toHaveValue(
       JSON.stringify(['electronics-sg-procurement', '2026.09.1', 'pidx-1']),
@@ -828,7 +828,7 @@ describe('frontend and backend version consistency', () => {
     expect(screen.getByLabelText(/Applicable region/)).toHaveValue('SG')
     expect(screen.getByText(/Updating revision 2026\.09\.1 of electronics-sg-procurement/)).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('button', { name: 'Deactivate policy version' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Deactivate' }))
     await waitFor(() => expect(deactivate).toHaveBeenCalledWith(
       'electronics-sg-procurement',
       '2026.09.1',
@@ -897,8 +897,8 @@ describe('frontend and backend version consistency', () => {
 
     expect(await screen.findByText('1 policy sets')).toBeInTheDocument()
     expect(screen.getAllByText('regional-electronics-ui-test')).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: 'Publish new version' })).toHaveLength(1)
-    expect(screen.getAllByRole('button', { name: 'Deactivate policy version' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Update' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1)
     expect(screen.getByText('Revision 2026.09.24-123928')).toBeVisible()
 
     await userEvent.click(screen.getByText('View revision history (2)'))
@@ -975,8 +975,8 @@ describe('frontend and backend version consistency', () => {
     expect(screen.queryByText('More settings')).not.toBeInTheDocument()
     for (const label of [
       'Manufacturer', 'Manufacturer part number', 'Package', 'Item revision', 'Item condition',
-      'Quantity Unit', 'Currency', 'Cost Comparison Basis', 'Planned Order Date Optional',
-      'Delivery Deadline', 'Delivery Location', 'Primary ranking criterion', 'Secondary ranking criterion Optional; used only when the primary criterion is tied',
+      'Quantity Unit', 'Currency', 'Cost Comparison Basis', 'Planned order date Optional',
+      'Delivery deadline', 'Delivery Location', 'Primary ranking criterion', 'Secondary ranking criterion Optional; used only when the primary criterion is tied',
     ]) {
       expect(screen.getByLabelText(label), label).toHaveValue('')
     }
@@ -996,7 +996,7 @@ describe('frontend and backend version consistency', () => {
     await userEvent.selectOptions(screen.getByLabelText('Item condition'), 'NEW')
     await userEvent.selectOptions(screen.getByLabelText('Currency'), 'SGD')
     await userEvent.click(screen.getByLabelText('Budget includes shipping'))
-    await userEvent.click(screen.getByRole('button', { name: 'Clear form' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }))
 
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('')
     expect(screen.getByLabelText(/Task name/)).toHaveValue('')
@@ -1014,7 +1014,8 @@ function policyFixture(status = 'REVIEW_REQUIRED'): PolicyImportResponse {
     original_filename: 'test.txt', size_bytes: 100, media_type: 'text/plain', source_sha256: 'a'.repeat(64),
     extracted_text: 'Original', extraction_metadata: { parser: 'txt', page_count: null },
     policy_index_version: null, published_import_run_id: null,
-    clauses: [{ clause_id: 'C1', title: 'Clause', text: 'Saved text', control_code: 'AMOUNT_APPROVAL', rule_parameters: {}, position: 0 }],
+    clauses: [{ clause_id: 'C1', title: 'Clause', text: 'Saved text', control_code: 'AMOUNT_APPROVAL',
+      rule_parameters: { currency: 'SGD', threshold: '10000.00', operator: '>=' }, position: 0 }],
   }
 }
 function renderPolicy(policyImportId = 'policy-test') {
@@ -1031,10 +1032,11 @@ test('policy editor locks fields during save and permits editing after completio
   let finish!: (value: PolicyImportResponse) => void
   vi.spyOn(api, 'reviewPolicyClauses').mockImplementation(() => new Promise((resolve) => { finish = resolve }))
   const client = renderPolicy()
+  await userEvent.click(await screen.findByRole('button', { name: 'Edit Clause' }))
   const field = await screen.findByRole('textbox', { name: /Clause Text/ })
   const user = userEvent.setup()
   await user.clear(field); await user.type(field, 'Submitted')
-  await user.click(screen.getByRole('button', { name: 'Save confirmed result' }))
+  await user.click(screen.getByRole('button', { name: 'Save' }))
   expect(field).toBeDisabled()
   expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
   await user.type(field, 'Must not append')
@@ -1043,19 +1045,19 @@ test('policy editor locks fields during save and permits editing after completio
   expect(field).not.toBeDisabled()
   client.clear()
 })
-test('editing a policy clause id keeps its rule settings expanded', async () => {
+test('editing a policy clause id keeps its rule row and advanced settings expanded', async () => {
   vi.restoreAllMocks()
   const data = policyFixture()
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
   const user = userEvent.setup()
 
-  const summary = await screen.findByText('Check-rule settings')
+  await user.click(await screen.findByRole('button', { name: 'Edit Clause' }))
+  const row = screen.getByText('Clause', { selector: '.policy-rule-title strong' }).closest('details')!
+  if (!row.hasAttribute('open')) await user.click(row.querySelector('summary')!)
+  const summary = screen.getByText('Advanced execution settings')
+  await user.click(summary)
   const settings = summary.closest('details')!
-  expect(settings).toHaveAttribute('open')
-  await user.click(summary)
-  expect(settings).not.toHaveAttribute('open')
-  await user.click(summary)
   expect(settings).toHaveAttribute('open')
 
   const clauseId = screen.getByLabelText('Clause ID')
@@ -1063,6 +1065,7 @@ test('editing a policy clause id keeps its rule settings expanded', async () => 
   await user.type(clauseId, 'CCD-ADM-001')
 
   expect(clauseId).toHaveValue('CCD-ADM-001')
+  expect(row).toHaveAttribute('open')
   expect(settings).toHaveAttribute('open')
   client.clear()
 })
@@ -1085,17 +1088,19 @@ test('switching policy files replaces an unsaved clause draft instead of showing
   const client = renderPolicy('policy-admission')
   const user = userEvent.setup()
 
+  await user.click(await screen.findByRole('button', { name: 'Edit Supplier admission' }))
   const title = await screen.findByLabelText('Title')
   await user.clear(title)
   await user.type(title, 'Unsaved admission edit')
   await user.click(screen.getByRole('link', { name: /amount\.md/ }))
 
   expect(await screen.findByText('Reviewing: amount.md')).toBeInTheDocument()
+  await user.click(await screen.findByRole('button', { name: 'Edit Amount approval' }))
   expect(await screen.findByLabelText('Title')).toHaveValue('Amount approval')
   expect(screen.queryByDisplayValue('Unsaved admission edit')).not.toBeInTheDocument()
   client.clear()
 })
-test('advanced policy review opens by default and can be collapsed', async () => {
+test('policy rule review is compact by default and each clause can be edited independently', async () => {
   vi.restoreAllMocks()
   const data = {
     ...policyFixture(),
@@ -1104,13 +1109,13 @@ test('advanced policy review opens by default and can be collapsed', async () =>
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  expect(await screen.findByLabelText('Check Type')).toBeInTheDocument()
+  expect(await screen.findByLabelText('What should this clause check?')).toBeInTheDocument()
   expect(screen.getByRole('option', { name: 'Supplier Eligibility' })).toHaveValue('APPROVED_SUPPLIER')
-  await userEvent.click(screen.getByRole('button', { name: 'Collapse advanced review' }))
-  expect(screen.queryByLabelText('Check Type')).not.toBeInTheDocument()
   expect(screen.getByText(/The system cannot determine which procurement check this clause supports/)).toBeInTheDocument()
-  await userEvent.click(screen.getByRole('button', { name: 'Expand advanced review (1 clause)' }))
+  expect(screen.queryByLabelText('Clause ID')).not.toBeInTheDocument()
+  await userEvent.click(screen.getByRole('button', { name: 'Edit Clause' }))
   expect(screen.getByLabelText('Check Type')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Finish editing Clause' })).toBeInTheDocument()
   client.clear()
 })
 test('unsupported policy clauses explain the capability gap without asking ordinary users for codes', async () => {
@@ -1133,11 +1138,11 @@ test('unsupported policy clauses explain the capability gap without asking ordin
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const client = renderPolicy()
 
-  await screen.findByRole('button', { name: 'Collapse advanced review' })
-  await userEvent.click(screen.getByRole('button', { name: 'Collapse advanced review' }))
-  expect(screen.getByText('Automated execution is not currently supported')).toBeInTheDocument()
+  await screen.findByText('Automatic execution is not supported')
+  expect(screen.getByText('Automatic execution is not supported')).toBeInTheDocument()
   expect(screen.getByText(/The system has no corresponding checker or data source/)).toBeInTheDocument()
-  expect(screen.queryByLabelText('Check Type')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('What should this clause check?')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Keep as reference only' })).toBeInTheDocument()
   client.clear()
 })
 test('interrupted policy publication can be retried after reopening the page', async () => {
@@ -1146,7 +1151,7 @@ test('interrupted policy publication can be retried after reopening the page', a
   vi.spyOn(api, 'getPolicyImport').mockResolvedValue(data)
   const publish = vi.spyOn(api, 'publishPolicy').mockResolvedValue({ ...data, revision: 3, status: 'PUBLISHED', policy_index_version: 'pidx-restored' })
   const client = renderPolicy()
-  await userEvent.click(await screen.findByRole('button', { name: 'Retry publication' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Retry' }))
   expect(await screen.findByText('Policy published and available for procurement tasks')).toBeInTheDocument()
   expect(publish).toHaveBeenCalledWith('policy-test', 2, expect.any(String))
   client.clear()

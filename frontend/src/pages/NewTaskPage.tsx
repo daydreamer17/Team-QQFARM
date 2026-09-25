@@ -489,7 +489,7 @@ export function NewTaskPage() {
           <h1>New task</h1>
           <p>Upload a requirements document or enter the procurement details manually.</p>
         </div>
-        <Link className="button button-secondary" to="/">Back to workspace</Link>
+        <Link className="button button-secondary" to="/">Back</Link>
       </section>
 
       <section className="requirement-source-panel task-name-panel">
@@ -513,14 +513,14 @@ export function NewTaskPage() {
         <div className="requirement-source-intro">
           <span className="source-step">01</span>
           <div>
-            <h2>Import Procurement Requirements <small>Optional</small></h2>
+            <h2>Import requirements <small>Optional</small></h2>
           </div>
         </div>
 
         <div className="requirement-source-actions">
           <label className="source-file-picker">
             <span aria-hidden="true">↑</span>
-            <strong>{requirementFileMetadata ? 'Replace requirements document' : 'Select requirements document'}</strong>
+            <strong>{requirementFileMetadata ? 'Replace' : 'Choose file'}</strong>
             <small>PDF / MD / TXT · Maximum 10 MiB</small>
             <input ref={fileInput} type="file" accept=".pdf,.md,.txt,application/pdf,text/markdown,text/plain" onChange={(event) => handleRequirementFile(event.target.files?.[0] ?? null)} />
           </label>
@@ -531,7 +531,7 @@ export function NewTaskPage() {
               <div><strong>{requirementFileMetadata.name}</strong><small>{formatBytes(requirementFileMetadata.sizeBytes)} · {requirementDraft?.status === 'READY' ? 'Parsed' : requirementDraft?.status === 'PROCESSING' ? 'Processing' : 'Awaiting parsing'}</small></div>
               {requirementFile && <button type="button" onClick={() => setPreview({ name: requirementFile.name, mediaType: requirementFile.type, sizeBytes: requirementFile.size, file: requirementFile })}>Preview</button>}
               {requirementDraft?.status === 'READY'
-                ? <span className="status-pill status-ready">Parsing complete</span>
+                ? <span className="status-pill status-ready">Parsed</span>
                 : requirementFile
                   ? <button className="button button-submit" type="button" onClick={runRequirementExtraction} disabled={requirementExtraction.isPending}>{requirementExtraction.isPending ? 'Processing…' : 'Parse and populate'}</button>
                   : <small>Select the source file again to reparse or preview it.</small>}
@@ -546,8 +546,8 @@ export function NewTaskPage() {
 
       <form id="new-task-form" className="requirement-form" noValidate onSubmit={handleSubmit}>
         <div className="form-title-row">
-          <div><span className="source-step">02</span><div><h2>Procurement Requirements</h2></div></div>
-          <button className="button button-secondary" type="button" onClick={clearForm}>Clear form</button>
+          <div><span className="source-step">02</span><div><h2>Requirements</h2></div></div>
+          <button className="button button-secondary" type="button" onClick={clearForm}>Clear</button>
         </div>
 
         <RequirementFields
@@ -560,7 +560,7 @@ export function NewTaskPage() {
         />
 
         <fieldset className="form-section policy-binding-section">
-          <legend>Compliance Review</legend>
+          <legend>Compliance</legend>
           <label className="field checkbox-field policy-binding-toggle"><input type="checkbox" checked={bindPolicy} onChange={(event) => setPolicyMode(event.target.checked)} /><span>Enable compliance review</span></label>
 
           {bindPolicy && (
@@ -578,7 +578,7 @@ export function NewTaskPage() {
                         <label className="field"><span>Applicable category</span><select value={policyCategory} onChange={(event) => { setPolicyCategory(event.target.value); setLocalError(''); createTask.reset() }}><option value="">Select a category</option>{selectedPolicy.categories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
                         <label className="field"><span>Applicable region</span><select value={policyRegion} onChange={(event) => { setPolicyRegion(event.target.value); setLocalError(''); createTask.reset() }}><option value="">Select a region</option>{selectedPolicy.regions.map((region) => <option key={region} value={region}>{region}</option>)}</select></label>
                       </div>
-                      <dl className="policy-picker-summary"><div><dt>File</dt><dd>{selectedPolicy.document_count}</dd></div><div><dt>Policy Clause</dt><dd>{selectedPolicy.clause_count}</dd></div><div><dt>Published at</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('zh-CN') : '—'}</dd></div></dl>
+                      <dl className="policy-picker-summary"><div><dt>File</dt><dd>{selectedPolicy.document_count}</dd></div><div><dt>Policy Clause</dt><dd>{selectedPolicy.clause_count}</dd></div><div><dt>Published at</dt><dd>{selectedPolicy.published_at ? new Date(selectedPolicy.published_at).toLocaleString('en-SG') : '—'}</dd></div></dl>
                     </>
                   )}
                   {policySets.data.total > policySets.data.items.length && <small className="policy-picker-limit">The catalogue contains {policySets.data.total} versions; the {policySets.data.items.length} most recent are shown.</small>}
@@ -594,12 +594,12 @@ export function NewTaskPage() {
               <strong>Unable to create task</strong>
               <p>{localError || errorMessage(createTask.error)}</p>
             </div>
-            {!localError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => createTask.mutate(lastSubmission)}>Retry same request</button>}
+            {!localError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => createTask.mutate(lastSubmission)}>Retry</button>}
           </div>
         )}
 
         <div className="form-actions form-actions-compact">
-          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? 'Creating…' : 'Create task'}</button>
+          <button className="button button-submit" type="submit" disabled={createTask.isPending}>{createTask.isPending ? 'Creating…' : 'Create'}</button>
         </div>
       </form>
 

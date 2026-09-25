@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useState } from 'react'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { IssueAnswer, TaskDetail } from '../api/types'
-import { controlLabel, fieldLabel, policyStatusLabel } from '../lib/presentation'
+import { controlLabel, fieldLabel, issueQuestionText, policyStatusLabel } from '../lib/presentation'
 
 interface IssuePanelProps {
   task: TaskDetail
@@ -78,7 +78,7 @@ export function IssuePanel({ task, onRefresh }: IssuePanelProps) {
       <div>
         <p className="eyebrow">INPUT REQUIRED</p>
         <h2>Human confirmation required</h2>
-        <p>{issue.question}</p>
+        <p>{issueQuestionText(issue.question, issue.issue_type)}</p>
       </div>
 
       <dl className="job-summary">

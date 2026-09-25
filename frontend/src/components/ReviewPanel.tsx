@@ -22,6 +22,16 @@ interface ReviewPanelProps {
   onRefresh: () => void
 }
 
+function reviewStatusLabel(value: string | null | undefined) {
+  const labels: Record<string, string> = {
+    READY_FOR_DOWNSTREAM: 'Ready',
+    REVIEW_REQUIRED: 'Review needed',
+    REJECTED: 'Rejected',
+    MODEL_FAILED: 'Failed',
+  }
+  return value ? (labels[value] ?? 'Review') : 'Not reviewed'
+}
+
 interface EditorState {
   quote: TaskQuote
   finding: ReviewFinding
@@ -365,7 +375,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                 <span>{quote.original_filename}</span>
               </div>
               <span className="status-pill">
-                {query.data?.review_status ?? (query.isPending ? 'Loading' : 'Not reviewed')}
+                {query.isPending ? 'Loading' : reviewStatusLabel(query.data?.review_status)}
               </span>
             </header>
 
@@ -525,7 +535,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
                               />
                             </label>
                           </div>
-                          <button className="button button-submit" type="submit">Add to submission list</button>
+                          <button className="button button-submit" type="submit">Add</button>
                         </form>
                       )}
                     </li>
@@ -555,7 +565,7 @@ export function ReviewPanel({ task, onRefresh }: ReviewPanelProps) {
           }
           onClick={submitAllCorrections}
         >
-          {correction.isPending ? 'Submitting all corrections…' : 'Submit all corrections and continue'}
+          {correction.isPending ? 'Submitting…' : 'Submit'}
         </button>
       </div>
       {correction.isError && (

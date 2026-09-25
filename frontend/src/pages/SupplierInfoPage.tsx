@@ -13,11 +13,11 @@ const percent = (value: string | null | undefined) => value === null || value ==
 
 function availabilityLabel(status: string) {
   return ({
-    AVAILABLE: 'Historical Data Available',
-    INSUFFICIENT_SAMPLE: 'Insufficient Sample',
-    NO_DATA: 'No Historical Data',
-    OUT_OF_SCOPE: 'Not applicable to current scope',
-    NOT_RECORDED: 'Not recorded at the time',
+    AVAILABLE: 'Available',
+    INSUFFICIENT_SAMPLE: 'Limited',
+    NO_DATA: 'Unavailable',
+    OUT_OF_SCOPE: 'Out of scope',
+    NOT_RECORDED: 'Unrecorded',
   } as Record<string, string>)[status] ?? status
 }
 
@@ -29,10 +29,10 @@ function decisionStatusLabel(entry: SupplierInformationEntry) {
   const statuses = entry.quotes
     .map((quote) => quote.evaluation?.status)
     .filter((status): status is string => Boolean(status))
-  if (statuses.includes('FEASIBLE')) return 'Feasible in this comparison'
-  if (statuses.includes('PENDING')) return 'Pending confirmation'
-  if (statuses.includes('INFEASIBLE')) return 'Does not meet requirements'
-  return 'Not yet compared'
+  if (statuses.includes('FEASIBLE')) return 'Feasible'
+  if (statuses.includes('PENDING')) return 'Pending'
+  if (statuses.includes('INFEASIBLE')) return 'Infeasible'
+  return 'Unanalysed'
 }
 
 export function SupplierInfoPage() {
@@ -103,10 +103,10 @@ export function SupplierInfoPage() {
     ? task.quotes.filter((quote) => excludedSupplierIds.includes(quote.supplier_id)).length
     : excludedSupplierIds.length
   const scopeSummary = info.view_state === 'QUOTE_ONLY'
-    ? `${info.quote_count} active quotations; comparison has not run`
+    ? `${info.quote_count} active · not analysed`
     : info.is_current
-      ? `Scope: ${task.quotes.length} active − ${excludedQuoteCount} excluded = ${info.quote_count} compared`
-      : `${info.quote_count} quotations were included in this frozen revision${excludedSupplierIds.length ? `; excluded: ${excludedSupplierIds.join(', ')}` : ''}`
+      ? `${task.quotes.length} active · ${excludedQuoteCount} excluded · ${info.quote_count} compared`
+      : `${info.quote_count} frozen${excludedSupplierIds.length ? ` · excluded: ${excludedSupplierIds.join(', ')}` : ''}`
 
   return (
     <main className="page supplier-info-page">
@@ -121,33 +121,33 @@ export function SupplierInfoPage() {
 
       <section className="supplier-context card workspace-page-lead">
         <div className="supplier-context-heading workspace-page-lead-copy">
-          <h2>Supplier Information</h2>
+          <h2>Suppliers</h2>
           <p>{String(context.category ?? 'Electronics')} / {String(context.item ?? task.requirement.manufacturer_part_number)}</p>
           <p className="supplier-scope-copy">{scopeSummary}</p>
         </div>
         <div className="supplier-kpis" aria-label="Supplier overview">
-          <div><strong>{info.quote_count}</strong><span>{info.view_state === 'QUOTE_ONLY' ? 'Active quotation' : 'Compared quotations'}</span></div>
-          {excludedSupplierIds.length > 0 && <div><strong>{excludedQuoteCount}</strong><span>Exclude supplier</span></div>}
-          <div><strong>{info.matched_supplier_count}</strong><span>Identity matched</span></div>
-          <div><strong>{info.unresolved_identity_quote_count}</strong><span>Identity review required</span></div>
-          <div><strong>{entries.filter((entry) => entry.history_availability_status !== 'AVAILABLE').length}</strong><span>Historical data not comparable</span></div>
+          <div><strong>{info.quote_count}</strong><span>{info.view_state === 'QUOTE_ONLY' ? 'Active' : 'Compared'}</span></div>
+          {excludedSupplierIds.length > 0 && <div><strong>{excludedQuoteCount}</strong><span>Excluded</span></div>}
+          <div><strong>{info.matched_supplier_count}</strong><span>Matched</span></div>
+          <div><strong>{info.unresolved_identity_quote_count}</strong><span>Unmatched</span></div>
+          <div><strong>{entries.filter((entry) => entry.history_availability_status !== 'AVAILABLE').length}</strong><span>Unavailable</span></div>
         </div>
         <div className="supplier-context-tags">
-          <span>{info.view_state === 'QUOTE_ONLY' ? 'Comparison not run' : info.view_state === 'CURRENT_RESULT' ? 'Current frozen result' : 'Historical frozen result'}</span>
-          {context.as_of_date ? <span>As of {String(context.as_of_date)}</span> : null}
-          {context.is_synthetic ? <span>Synthetic demo data</span> : null}
+          <span>{info.view_state === 'QUOTE_ONLY' ? 'Unanalysed' : info.view_state === 'CURRENT_RESULT' ? 'Frozen' : 'Historical'}</span>
+          {context.as_of_date ? <span>{String(context.as_of_date)}</span> : null}
+          {context.is_synthetic ? <span>Synthetic</span> : null}
         </div>
       </section>
 
       <section className="supplier-overview-grid">
         <article className="card supplier-list-card">
-          <div className="section-heading"><div><p className="eyebrow">CURRENT SCOPE</p><h2>Suppliers in this comparison</h2>{excludedSupplierIds.length > 0 && <p>Excludes {excludedSupplierIds.join(', ')} under the current settings</p>}</div></div>
+          <div className="section-heading"><div><p className="eyebrow">SCOPE</p><h2>Suppliers</h2>{excludedSupplierIds.length > 0 && <p>Excludes {excludedSupplierIds.join(', ')} under the current settings</p>}</div></div>
           <div className="supplier-list">
             {entries.map((entry) => {
               const key = entry.supplier_identity_id ?? entry.quotes[0]?.quote_id
               const history = entry.history_snapshot
               return <button type="button" key={key} className={selected === entry ? 'supplier-row supplier-row-active' : 'supplier-row'} onClick={() => setSelectedId(key)}>
-                <span><strong>{entry.display_name}</strong><small>{entry.supplier_id ?? 'Identity review required'} · {decisionStatusLabel(entry)}</small></span>
+                <span><strong>{entry.display_name}</strong><small>{entry.supplier_id ?? 'Unmatched'} · {decisionStatusLabel(entry)}</small></span>
                 <span><b>{history?.overall_grade ?? '—'}</b><small>{availabilityLabel(entry.history_availability_status)}</small></span>
               </button>
             })}
@@ -194,16 +194,16 @@ export function SupplierInfoPage() {
 
       {selected && <section className="card supplier-detail" aria-live="polite">
         <ComplianceAssessmentDetails assessments={selected.quotes.flatMap((quote) => quote.policy_assessment ? [quote.policy_assessment] : [])} taskId={taskId} resultId={resultId} historical={Boolean(resultId && resultId !== task.current_result_id)} />
-        <div className="section-heading"><div><p className="eyebrow">SELECTED SUPPLIER</p><h2>{selected.display_name}</h2><p>{selected.identity_match_status === 'MATCHED' ? 'Matched to the current versioned history catalogue' : 'Identity has not been reliably matched'}</p></div><span className="signal-badge">{selected.history_snapshot?.overall_grade ? `MCU-9 historical grade ${selected.history_snapshot.overall_grade}` : availabilityLabel(selected.history_availability_status)}</span></div>
+        <div className="section-heading"><div><p className="eyebrow">SELECTED</p><h2>{selected.display_name}</h2><p>{selected.identity_match_status === 'MATCHED' ? 'Matched' : 'Unmatched'}</p></div><span className="signal-badge">{selected.history_snapshot?.overall_grade ? `Grade ${selected.history_snapshot.overall_grade}` : availabilityLabel(selected.history_availability_status)}</span></div>
         <div className="supplier-detail-grid">
-          <div><h3>Historical performance</h3><dl><div><dt>On-time rate</dt><dd>{percent(selected.history_snapshot?.on_time?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>Rejected order-line rate</dt><dd>{percent(selected.history_snapshot?.rejected_lines?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>Dataset version</dt><dd>{String(context.dataset_version ?? 'Not recorded')}</dd></div></dl></div>
-          <div><h3>Current quotation</h3>{selected.quotes.map((quote) => <dl key={quote.quote_id}><div><dt>Quotation version</dt><dd>v{quote.quote_version}</dd></div><div><dt>Requirement status</dt><dd>{quote.evaluation ? decisionStatusLabel({ ...selected, quotes: [quote] }) : 'Not yet compared'}</dd></div><div><dt>Confirmed total cost</dt><dd>{quote.evaluation?.total_cost ? `${task.requirement.currency} ${quote.evaluation.total_cost}` : '—'}</dd></div><div><dt>Expected delivery date</dt><dd>{quote.evaluation?.estimated_arrival_date ?? '—'}</dd></div></dl>)}</div>
-          <div><h3>Current ranking impact</h3><dl><div><dt>Primary criterion</dt><dd>{rankingCriterionLabel(info.effective_preferences?.primary_criterion)}</dd></div><div><dt>Secondary criterion</dt><dd>{rankingCriterionLabel(info.effective_preferences?.secondary_criterion)}</dd></div><div><dt>Secondary criterion applied</dt><dd>{info.ranking_trace?.secondary_applied ? 'Yes' : 'No'}</dd></div></dl></div>
+          <div><h3>Performance</h3><dl><div><dt>On-time</dt><dd>{percent(selected.history_snapshot?.on_time?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>Rejected</dt><dd>{percent(selected.history_snapshot?.rejected_lines?.rate)?.toFixed(1) ?? '—'}%</dd></div><div><dt>Dataset</dt><dd>{String(context.dataset_version ?? 'Unrecorded')}</dd></div></dl></div>
+          <div><h3>Quotation</h3>{selected.quotes.map((quote) => <dl key={quote.quote_id}><div><dt>Version</dt><dd>v{quote.quote_version}</dd></div><div><dt>Status</dt><dd>{quote.evaluation ? decisionStatusLabel({ ...selected, quotes: [quote] }) : 'Unanalysed'}</dd></div><div><dt>Cost</dt><dd>{quote.evaluation?.total_cost ? `${task.requirement.currency} ${quote.evaluation.total_cost}` : '—'}</dd></div><div><dt>Delivery</dt><dd>{quote.evaluation?.estimated_arrival_date ?? '—'}</dd></div></dl>)}</div>
+          <div><h3>Ranking</h3><dl><div><dt>Primary</dt><dd>{rankingCriterionLabel(info.effective_preferences?.primary_criterion)}</dd></div><div><dt>Secondary</dt><dd>{rankingCriterionLabel(info.effective_preferences?.secondary_criterion)}</dd></div><div><dt>Applied</dt><dd>{info.ranking_trace?.secondary_applied ? 'Yes' : 'No'}</dd></div></dl></div>
         </div>
-        {selected.quotes[0] && <div className="supplier-detail-links"><Link to={`/tasks/${taskId}/decision`}>View decision matrix</Link><Link to={`/tasks/${taskId}/compliance`}>View compliance review</Link><Link to={`/tasks/${taskId}/quotes/new`}>View quotation evidence</Link></div>}
+        {selected.quotes[0] && <div className="supplier-detail-links"><Link to={`/tasks/${taskId}/decision`}>Analysis</Link><Link to={`/tasks/${taskId}/compliance`}>Compliance</Link><Link to={`/tasks/${taskId}/quotes/new`}>Quotation</Link></div>}
       </section>}
 
-      <details className="card supplier-source"><summary>Data source and version</summary><pre>{JSON.stringify({ context_sha256: info.context_sha256, snapshot_id: info.snapshot_id, result_id: info.result_id, history_binding: info.history_binding }, null, 2)}</pre></details>
+      <details className="card supplier-source"><summary>Data source</summary><pre>{JSON.stringify({ context_sha256: info.context_sha256, snapshot_id: info.snapshot_id, result_id: info.result_id, history_binding: info.history_binding }, null, 2)}</pre></details>
     </main>
   )
 }

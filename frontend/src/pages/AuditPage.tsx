@@ -7,13 +7,13 @@ import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePre
 import { TablePagination } from '../components/TablePagination'
 import { useTablePagination } from '../hooks/useTablePagination'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
-import { fieldLabel, policyStatusLabel, taskStatusLabel } from '../lib/presentation'
+import { fieldLabel, issueQuestionText, policyStatusLabel, taskStatusLabel } from '../lib/presentation'
 
 function displayDate(value: string | null | undefined) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
@@ -142,7 +142,7 @@ export function AuditPage() {
 
       <section className="card audit-summary-bar workspace-page-lead">
         <div className="audit-summary-copy workspace-page-lead-copy">
-          <h2>Version History</h2>
+          <h2>History</h2>
           <p>A revision is created when a quotation is submitted, requirements are changed, or manual processing is completed. Drafts and analysis runs do not create revisions.</p>
         </div>
         <dl className="audit-summary-status" aria-label="Current version status">
@@ -161,7 +161,7 @@ export function AuditPage() {
         </div>
         {quotes.isPending && <div className="card loading-panel">Loading quotation revisions…</div>}
         {quotes.data?.items.length === 0 && <div className="card audit-empty">No quotation revisions.</div>}
-        {quoteRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-quote-table"><thead><tr><th>Supplier</th><th>Status</th><th>Revision</th><th>File</th><th>Submitted</th><th aria-label="Actions">Actions</th></tr></thead><tbody>{quotePage.pageItems.map(({ quote, version }) => <tr className={version.is_current ? 'audit-current-row' : ''} key={`${quote.quote_id}-${version.quote_version}`}><td><strong>{quote.supplier_id}</strong></td><td><span className={`status-pill ${version.is_current && quote.active ? 'status-ready' : 'status-muted'}`}>{version.is_current ? (quote.active ? 'Current quotation' : 'Revision before deactivation') : 'Historical revision'}</span></td><td>Revision {version.quote_version}</td><td><span title={version.original_filename}>{version.original_filename}</span></td><td>{displayDate(version.created_at)}</td><td><button className="quote-preview-action" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>Preview / download</button></td></tr>)}</tbody></table></div><TablePagination page={quotePage.page} pageSize={quotePage.pageSize} pageCount={quotePage.pageCount} total={quoteRows.length} onPageChange={quotePage.setPage} /></>}
+        {quoteRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-quote-table"><thead><tr><th>Supplier</th><th>Status</th><th>Revision</th><th>File</th><th>Submitted</th><th aria-label="Actions">Actions</th></tr></thead><tbody>{quotePage.pageItems.map(({ quote, version }) => <tr className={version.is_current ? 'audit-current-row' : ''} key={`${quote.quote_id}-${version.quote_version}`}><td><strong>{quote.supplier_id}</strong></td><td><span className={`status-pill ${version.is_current && quote.active ? 'status-ready' : 'status-muted'}`}>{version.is_current ? (quote.active ? 'Current' : 'Inactive') : 'Historical'}</span></td><td>Revision {version.quote_version}</td><td><span title={version.original_filename}>{version.original_filename}</span></td><td>{displayDate(version.created_at)}</td><td><button className="quote-preview-action" type="button" onClick={() => setPreview({ name: version.original_filename, mediaType: version.media_type, sizeBytes: version.size_bytes, remoteUrl: documentContentUrl(taskId, version.document_id), downloadUrl: documentContentUrl(taskId, version.document_id, 'attachment') })}>Preview / download</button></td></tr>)}</tbody></table></div><TablePagination page={quotePage.page} pageSize={quotePage.pageSize} pageCount={quotePage.pageCount} total={quoteRows.length} onPageChange={quotePage.setPage} /></>}
       </section>
 
       <section className="audit-section">
@@ -178,7 +178,7 @@ export function AuditPage() {
               <tbody>
                 {issuePage.pageItems.map((issue) => (
                   <tr key={issue.issue_id}>
-                    <td><strong>{issueLabel(issue)}</strong><span>{issue.question}</span><small>{issue.field_name ? fieldLabel(issue.field_name) : 'Policy Evidence'}</small></td>
+                    <td><strong>{issueLabel(issue)}</strong><span>{issueQuestionText(issue.question, issue.issue_type)}</span><small>{issue.field_name ? fieldLabel(issue.field_name) : 'Policy Evidence'}</small></td>
                     <td><span className={`status-pill ${issue.status === 'RESOLVED' ? 'status-ready' : 'status-pending'}`}>{issueStatus(issue.status)}</span></td>
                     <td>Created {issue.created_revision}<br />Resolved {issue.resolved_revision ?? '—'}</td>
                     <td>{displayAnswer(issue.answer)}</td>
@@ -199,7 +199,7 @@ export function AuditPage() {
         </div>
         {results.isPending && <div className="card loading-panel">Loading result history…</div>}
         {results.data?.length === 0 && <div className="card audit-empty">No comparison results.</div>}
-        {resultRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-result-table"><thead><tr><th>Task revision</th><th>Result status</th><th>Quotations</th><th>Rule revision</th><th>Policy retrieval</th><th>Evaluated</th><th aria-label="Actions">Actions</th></tr></thead><tbody>{resultPage.pageItems.map((result) => <tr className={result.is_current ? 'audit-current-row' : ''} key={result.result_id}><td><strong>Revision {result.task_revision}</strong></td><td><span className={`status-pill ${result.is_current ? 'status-ready' : 'status-muted'}`}>{result.is_current ? 'Current result' : 'Historical result'}</span></td><td>{result.result.supplier_results.length}</td><td>{result.result.rule_version}</td><td>{retrievalSummary(result)}</td><td>{displayDate(result.result.evaluated_at)}</td><td><Link className="table-open-action" to={`/tasks/${taskId}/results/${result.result_id}`}>View</Link></td></tr>)}</tbody></table></div><TablePagination page={resultPage.page} pageSize={resultPage.pageSize} pageCount={resultPage.pageCount} total={resultRows.length} onPageChange={resultPage.setPage} /></>}
+        {resultRows.length > 0 && <><div className="audit-table-wrap"><table className="audit-table audit-result-table"><thead><tr><th>Task revision</th><th>Result status</th><th>Quotations</th><th>Rule revision</th><th>Policy retrieval</th><th>Evaluated</th><th aria-label="Actions">Actions</th></tr></thead><tbody>{resultPage.pageItems.map((result) => <tr className={result.is_current ? 'audit-current-row' : ''} key={result.result_id}><td><strong>Revision {result.task_revision}</strong></td><td><span className={`status-pill ${result.is_current ? 'status-ready' : 'status-muted'}`}>{result.is_current ? 'Current' : 'Historical'}</span></td><td>{result.result.supplier_results.length}</td><td>{result.result.rule_version}</td><td>{retrievalSummary(result)}</td><td>{displayDate(result.result.evaluated_at)}</td><td><Link className="table-open-action" to={`/tasks/${taskId}/results/${result.result_id}`}>View</Link></td></tr>)}</tbody></table></div><TablePagination page={resultPage.page} pageSize={resultPage.pageSize} pageCount={resultPage.pageCount} total={resultRows.length} onPageChange={resultPage.setPage} /></>}
       </section>
 
       <section className="audit-section">

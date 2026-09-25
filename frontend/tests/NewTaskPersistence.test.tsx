@@ -77,10 +77,10 @@ describe('NewTaskPage 未提交Draft恢复', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Your unsaved procurement task has been restored. Continue reviewing or create the task.')
     expect(screen.getByLabelText('Manufacturer')).toHaveValue('用户修正Manufacturer')
     expect(screen.getByText('procurement_requirement.txt')).toBeInTheDocument()
-    expect(screen.getByText('Parsing complete')).toBeInTheDocument()
+    expect(screen.getByText('Parsed')).toBeInTheDocument()
     expect(upload).toHaveBeenCalledTimes(1)
 
-    await user.click(screen.getByRole('button', { name: 'Clear form' }))
+    await user.click(screen.getByRole('button', { name: 'Clear' }))
     expect(window.sessionStorage.getItem('quotewise.new-task.v1')).toBeNull()
   })
 })

@@ -36,7 +36,7 @@ function mount(page = <CompliancePage />, path = 'compliance', hash = '') {
 }
 async function openFirstSupplierMaterial(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole('button', { name: 'Expand Supplier One Checks and Evidence' }))
-  const opener = screen.getByRole('button', { name: /Add Evidence/ })
+  const opener = screen.getByRole('button', { name: 'Upload' })
   await user.click(opener)
   return opener
 }
@@ -49,11 +49,11 @@ test('compliance independently loads before results and requires per-item missin
   const confirm = vi.spyOn(api, 'confirmCompliance').mockResolvedValue({ task_revision: 4 } as never)
   const getResult = vi.spyOn(api, 'getResult')
   mount()
-  const results = await screen.findByRole('table', { name: 'Supplier check results' })
+  const results = await screen.findByRole('table', { name: 'Supplier checks' })
   expect(within(results).getByText('Supplier One')).toBeInTheDocument()
   expect(getResult).not.toHaveBeenCalled()
-  expect(screen.getByLabelText('Compliance Review: Action required')).not.toHaveClass('task-timeline-complete')
-  const button = screen.getByRole('button', { name: 'Confirm outcome and continue to decision' })
+  expect(screen.getByLabelText('Compliance: Action required')).not.toHaveClass('task-timeline-complete')
+  const button = screen.getByRole('button', { name: 'Confirm' })
   expect(button).toBeDisabled()
   await user.click(screen.getByLabelText('Select all items requiring additional evidence'))
   expect(screen.getByLabelText(/Defer/)).toBeChecked()
@@ -125,9 +125,9 @@ test('no policy requires explicit acknowledgement before continuing', async () =
     assessment: { ...workspace.assessment, policy_enabled: false, missing_item_ids: [], assessments: [] } } as never)
   vi.spyOn(api, 'confirmCompliance').mockResolvedValue({ task_revision: 4 } as never)
   mount()
-  expect(await screen.findByRole('button', { name: 'Confirm outcome and continue to decision' })).toBeDisabled()
+  expect(await screen.findByRole('button', { name: 'Confirm' })).toBeDisabled()
   await user.click(screen.getByLabelText(/Confirm that compliance review is disabled for this task/))
-  expect(screen.getByRole('button', { name: 'Confirm outcome and continue to decision' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Confirm' })).toBeEnabled()
 })
 test('decision entry cannot bypass an unconfirmed compliance stage', async () => {
   mount(<DecisionPage />, 'decision')
@@ -140,7 +140,7 @@ test('a not-started workspace starts analysis instead of polling forever', async
     stage: { status: 'NOT_STARTED', confirmed: false, can_confirm: false, can_compare: false } } as never)
   const start = vi.spyOn(api, 'startRun').mockResolvedValue({ task_revision: 3, job_id: 'job-1' } as never)
   mount()
-  await user.click(await screen.findByRole('button', { name: 'Start compliance review' }))
+  await user.click(await screen.findByRole('button', { name: 'Start' }))
   await waitFor(() => expect(start).toHaveBeenCalledWith('task-1', 3, expect.any(String)))
 })
 
@@ -198,7 +198,7 @@ test('historical assessment keeps frozen material downloads without sending read
   const assessment = { ...workspace.assessment, evidence: [{ evidence_id: 'evidence-old', quote_id: 'quote-1',
     facts: { material_number: 'OLD-CERT' }, version: 1, files: [{ file_id: 'file-old', original_filename: 'original.pdf' }] }] }
   render(<MemoryRouter><ComplianceAssessmentDetails assessment={assessment as never} taskId="task-1" resultId="result-old" historical /></MemoryRouter>)
-  await user.click(screen.getByText('Compliance records for this result'))
+  await user.click(screen.getByText('Compliance'))
   expect(screen.getByRole('link', { name: 'original.pdf' })).toHaveAttribute('href', '/api/v1/tasks/task-1/compliance/evidence/evidence-old/files/file-old/content?download=true')
   expect(screen.queryByRole('link', { name: 'View current compliance review and evidence' })).not.toBeInTheDocument()
 })
@@ -216,16 +216,16 @@ test('bound policy summary and separate control columns preserve incomplete mult
   expect(screen.queryByText('SUPPLIER CHECKS')).not.toBeInTheDocument()
   expect(screen.queryByText('AMOUNT RULES')).not.toBeInTheDocument()
   expect(screen.queryByText('FINAL CHECK')).not.toBeInTheDocument()
-  expect(screen.getByRole('columnheader', { name: 'Supplier eligibility' })).toBeInTheDocument()
+  expect(screen.getByRole('columnheader', { name: 'Eligibility' })).toBeInTheDocument()
   expect(screen.getByRole('columnheader', { name: 'RoHS' })).toBeInTheDocument()
-  const row = within(screen.getByRole('table', { name: 'Supplier check results' })).getByRole('row', { name: /Supplier One/ })
-  expect(within(row).getByRole('cell', { name: 'Evidence or Review Required' })).toBeInTheDocument()
+  const row = within(screen.getByRole('table', { name: 'Supplier checks' })).getByRole('row', { name: /Supplier One/ })
+  expect(within(row).getByRole('cell', { name: 'Pending' })).toBeInTheDocument()
   expect(within(row).getByRole('cell', { name: 'Passed' })).toBeInTheDocument()
   const amountRow = within(screen.getByRole('table', { name: 'Amount conditions and next actions' })).getByRole('row', { name: /Supplier One/ })
   expect(within(amountRow).getByText('After supplier selection')).toBeInTheDocument()
-  expect(within(amountRow).getByText('Triggered after selection')).toBeInTheDocument()
+  expect(within(amountRow).getByText('Triggered')).toBeInTheDocument()
   expect(within(amountRow).getByText('Manager review')).toBeInTheDocument()
-  expect(within(amountRow).getByRole('button', { name: 'Add amount approval record' })).toBeInTheDocument()
+  expect(within(amountRow).getByRole('button', { name: 'Add' })).toBeInTheDocument()
 })
 
 test('amount approval editor captures exact approval facts and keeps approval separate from supplier qualification', async () => {
@@ -237,7 +237,7 @@ test('amount approval editor captures exact approval facts and keeps approval se
   vi.mocked(api.getCompliance).mockResolvedValue(data as never)
   const save = vi.spyOn(api, 'saveComplianceEvidence').mockResolvedValue({ task_revision: 4 } as never)
   mount()
-  await user.click(await screen.findByRole('button', { name: 'Add amount approval record' }))
+  await user.click(await screen.findByRole('button', { name: 'Add' }))
   expect(screen.queryByLabelText('Evidence manufacturer')).not.toBeInTheDocument()
   await user.type(screen.getByLabelText('Approval record number'), 'APR-1')
   await user.type(screen.getByLabelText('Approved Amount'), '8000.00')
@@ -275,7 +275,7 @@ test('a specific check link chooses the supplier page and expands the requested 
     checks: [{ ...data.assessment.assessments[0].checks[0], reason_codes: ['EVIDENCE_EXPIRED'] }] }))
   vi.mocked(api.getCompliance).mockResolvedValue(data as never)
   mount(undefined, 'compliance', '#quote=quote-9&check=rohs-1')
-  const results = await screen.findByRole('table', { name: 'Supplier check results' })
+  const results = await screen.findByRole('table', { name: 'Supplier checks' })
   expect(within(results).getByText('Supplier 9')).toBeInTheDocument()
   expect(screen.getByText('The evidence has expired')).toBeVisible()
   expect(screen.getByRole('button', { name: 'Collapse Supplier 9 Checks and Evidence' })).toHaveAttribute('aria-expanded', 'true')
@@ -287,9 +287,9 @@ test('confirmed compliance with missing evidence is completed without being labe
   vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, stage: { ...workspace.stage,
     status: 'PROCESSED', confirmed: true, can_compare: true, pending_count: 1 } } as never)
   mount()
-  expect(await screen.findByLabelText('Compliance Review: Processed · follow-up required')).toBeInTheDocument()
-  expect(screen.getByText('1 check items')).toBeInTheDocument()
-  expect(screen.getByLabelText('Compliance Review: Processed · follow-up required')).toHaveClass('task-timeline-complete')
+  expect(await screen.findByLabelText('Compliance: Processed · follow-up required')).toBeInTheDocument()
+  expect(screen.getByText('1 item')).toBeInTheDocument()
+  expect(screen.getByLabelText('Compliance: Processed · follow-up required')).toHaveClass('task-timeline-complete')
 })
 
 test('processing compliance shows an animated progress indicator', async () => {
@@ -305,13 +305,13 @@ test('confirmed disabled policy remains explicitly not enabled', async () => {
   vi.mocked(api.getCompliance).mockResolvedValue({ ...workspace, stage: { ...workspace.stage,
     status: 'DISABLED', confirmed: true, can_compare: true, pending_count: 0 } } as never)
   mount()
-  expect(await screen.findByLabelText('Compliance Review: Disabled')).toHaveClass('task-timeline-complete')
+  expect(await screen.findByLabelText('Compliance: Disabled')).toHaveClass('task-timeline-complete')
 })
 
 test('current assessment links identify the exact supplier and check', async () => {
   const user = userEvent.setup()
   render(<MemoryRouter><ComplianceAssessmentDetails assessment={workspace.assessment as never} taskId="task-1" /></MemoryRouter>)
-  await user.click(screen.getByText('Compliance records for this result'))
+  await user.click(screen.getByText('Compliance'))
   expect(screen.getByRole('link', { name: 'View supplier evidence' })).toHaveAttribute('href', '/tasks/task-1/compliance#quote=quote-1')
-  expect(screen.getByRole('link', { name: 'Open this check' })).toHaveAttribute('href', '/tasks/task-1/compliance#quote=quote-1&check=rohs-1')
+  expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute('href', '/tasks/task-1/compliance#quote=quote-1&check=rohs-1')
 })

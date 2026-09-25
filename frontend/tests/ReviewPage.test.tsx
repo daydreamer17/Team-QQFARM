@@ -159,10 +159,10 @@ describe('ReviewPage', () => {
     const correct = vi.spyOn(api, 'correctQuoteFields').mockResolvedValue({ task_id: 'task-1', task_revision: 4,
       graph_run_id: 'run-2', job_id: 'job-1', job_type: 'REVIEW', job_status: 'PENDING', correction_count: 2 })
     renderPage()
-    await userEvent.selectOptions(await screen.findByLabelText('Shipping Fee StatusConfirmed value'), 'KNOWN_AMOUNT')
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeDisabled()
-    await userEvent.type(screen.getByLabelText('Shipping Fee AmountConfirmed value'), '320')
-    await userEvent.click(screen.getByRole('button', { name: 'Save confirmation and recalculate' }))
+    await userEvent.selectOptions(await screen.findByLabelText('Shipping Fee Status value'), 'KNOWN_AMOUNT')
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeDisabled()
+    await userEvent.type(screen.getByLabelText('Shipping Fee Amount value'), '320')
+    await userEvent.click(screen.getByRole('button', { name: 'Save & recalculate' }))
     await waitFor(() => expect(correct).toHaveBeenCalledOnce())
     expect(correct.mock.calls[0][2]).toEqual(expect.arrayContaining([
       expect.objectContaining({ fieldName: 'shipping_fee_status', normalizedValue: 'KNOWN_AMOUNT' }),
@@ -175,15 +175,15 @@ describe('ReviewPage', () => {
     vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
     vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
     renderPage()
-    const heading = await screen.findByRole('heading', { name: 'Action Items' })
+    const heading = await screen.findByRole('heading', { name: 'Actions' })
     const row = heading.closest('section')!
     expect(row).toHaveClass('workspace-page-lead')
-    expect(screen.getByRole('link', { name: 'Procurement Requirements' })).toHaveAttribute('href', '/tasks/task-1')
+    expect(screen.getByRole('link', { name: 'Requirements' })).toHaveAttribute('href', '/tasks/task-1')
     expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument()
     const stats = within(row).getByLabelText('Review statistics')
-    expect(within(stats).getByText('Active quotation')).toBeInTheDocument()
-    expect(within(stats).getByText('Fields requiring attention')).toBeInTheDocument()
-    expect(within(stats).getByText('Recorded only')).toBeInTheDocument()
+    expect(within(stats).getByText('Quotations')).toBeInTheDocument()
+    expect(within(stats).getByText('Pending')).toBeInTheDocument()
+    expect(within(stats).getByText('Recorded')).toBeInTheDocument()
     expect(screen.queryByText(/项待处理$/)).not.toBeInTheDocument()
   })
 
@@ -207,14 +207,14 @@ describe('ReviewPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('The system cannot complete the calculation, so the quotation remains pending.')).toBeInTheDocument()
+    expect(await screen.findByText('Calculation pending')).toBeInTheDocument()
     expect(screen.getByText(/“Business days” from the source quotation has been retained and will not be converted to calendar days/)).toBeInTheDocument()
     const stats = screen.getByLabelText('Review statistics')
-    expect(within(stats).getByText('Pending limitation')).toBeInTheDocument()
-    expect(within(stats).getByText('Fields requiring attention')).toBeInTheDocument()
+    expect(within(stats).getByText('Limitations')).toBeInTheDocument()
+    expect(within(stats).getByText('Pending')).toBeInTheDocument()
     expect(within(stats).getAllByText('0')).toHaveLength(2)
-    expect(screen.queryByLabelText('交期计算方式Confirmed value')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save confirmation and recalculate' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('交期计算方式 value')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save & recalculate' })).not.toBeInTheDocument()
   })
 
   test('completed decision pages keep the review navigation without a blocking issue', () => {
@@ -223,7 +223,7 @@ describe('ReviewPage', () => {
       title="Task" subtitle="测试" status="COMPLETED" revision={3} resultId="result-1"
       quoteCount={1} summaryComplete={false} progress={task.progress}
       reviewBlocked={false} active="decision" /></MemoryRouter>)
-    expect(screen.getByRole('link', { name: 'Action Items' })).toHaveAttribute('href', '/tasks/task-1/review')
+    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute('href', '/tasks/task-1/review')
   })
 
   test('merges duplicate findings and derives technical correction fields from one business value', async () => {
@@ -243,15 +243,15 @@ describe('ReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText('2 related rules have been combined; enter the value once.')).toBeInTheDocument()
-    expect(screen.getAllByLabelText('Shipping Fee StatusConfirmed value')).toHaveLength(1)
+    expect(screen.getAllByLabelText('Shipping Fee Status value')).toHaveLength(1)
     expect(screen.queryByText('核对后的Source wording')).not.toBeInTheDocument()
     expect(screen.queryByText('Normalised Value')).not.toBeInTheDocument()
     expect(screen.queryByText('修正理由')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Confirm current value' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeDisabled()
 
-    await userEvent.selectOptions(screen.getByLabelText('Shipping Fee StatusConfirmed value'), 'FREE')
-    await userEvent.click(screen.getByRole('button', { name: 'Save confirmation and recalculate' }))
+    await userEvent.selectOptions(screen.getByLabelText('Shipping Fee Status value'), 'FREE')
+    await userEvent.click(screen.getByRole('button', { name: 'Save & recalculate' }))
 
     await waitFor(() => expect(correct).toHaveBeenCalled())
     expect(correct.mock.calls[0][2]).toEqual([{
@@ -274,7 +274,7 @@ describe('ReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText('Some quotations are still under review. Complete them before submitting the batch; this page will update automatically.')).toBeInTheDocument()
-    const submit = screen.getByRole('button', { name: 'Waiting for quotation review to complete' })
+    const submit = screen.getByRole('button', { name: 'Waiting…' })
     expect(submit).toBeDisabled()
     await userEvent.click(submit)
     expect(correct).not.toHaveBeenCalled()
@@ -313,10 +313,10 @@ describe('ReviewPage', () => {
 
     renderPage()
 
-    await userEvent.selectOptions(await screen.findByLabelText('Shipping Fee StatusConfirmed value'), 'FREE')
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeEnabled()
+    await userEvent.selectOptions(await screen.findByLabelText('Shipping Fee Status value'), 'FREE')
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeEnabled()
     expect(screen.queryByText(/部分报价仍在审核/)).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Save confirmation and recalculate' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Save & recalculate' }))
     await waitFor(() => expect(correct).toHaveBeenCalledOnce())
   })
 
@@ -356,11 +356,11 @@ describe('ReviewPage', () => {
     expect(screen.queryByText('Cost Comparison Basis')).not.toBeInTheDocument()
     expect(screen.queryByText('QuotationTax TreatmentDoes Not Meet Requirements。')).not.toBeInTheDocument()
     expect(screen.queryByText('采购要求：')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeDisabled()
-    await userEvent.click(screen.getByRole('button', { name: 'Confirm current value' }))
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeEnabled()
-    const details = screen.getByText('View source quotation').closest('details')!
-    await userEvent.click(screen.getByText('View source quotation'))
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeEnabled()
+    const details = screen.getByText('Source').closest('details')!
+    await userEvent.click(screen.getByText('Source'))
     expect(within(details).getByText('Not applicable for this synthetic scenario')).toBeInTheDocument()
     expect(within(details).queryByText('Current Quotation值')).not.toBeInTheDocument()
     expect(within(details).queryByText('采购要求')).not.toBeInTheDocument()
@@ -380,14 +380,14 @@ describe('ReviewPage', () => {
 
     renderPage()
 
-    await screen.findByLabelText('Shipping Fee StatusConfirmed value')
-    await userEvent.click(screen.getByRole('button', { name: 'Keep pending for now' }))
-    expect(screen.getByText('Kept open for completion')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save confirmation and recalculate' })).toBeDisabled()
+    await screen.findByLabelText('Shipping Fee Status value')
+    await userEvent.click(screen.getByRole('button', { name: 'Defer' }))
+    expect(screen.getAllByText('Pending').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Save & recalculate' })).toBeDisabled()
 
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
-    await userEvent.selectOptions(screen.getByLabelText('Shipping Fee StatusConfirmed value'), 'FREE')
-    await userEvent.click(screen.getByRole('button', { name: 'Save confirmation and recalculate' }))
+    await userEvent.selectOptions(screen.getByLabelText('Shipping Fee Status value'), 'FREE')
+    await userEvent.click(screen.getByRole('button', { name: 'Save & recalculate' }))
 
     await waitFor(() => expect(correct).toHaveBeenCalledOnce())
     expect(await screen.findByRole('alert')).toHaveTextContent('Request ID: request-review-500')
@@ -415,8 +415,8 @@ describe('ReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText(/The original quotation value has been retained/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('Tax TreatmentConfirmed value')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Save confirmation and recalculate' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Tax Treatment value')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Save & recalculate' })).not.toBeInTheDocument()
   })
 
   test('keeps the review page accessible after completion with no pending fields', async () => {
@@ -437,9 +437,9 @@ describe('ReviewPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('No fields currently require additional information.')).toBeInTheDocument()
+    expect(await screen.findByText('No pending fields.')).toBeInTheDocument()
     expect(screen.queryByText('decision-page')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Action Items' })).toHaveAttribute('href', '/tasks/task-1/review')
+    expect(screen.getByRole('link', { name: 'Actions' })).toHaveAttribute('href', '/tasks/task-1/review')
   })
 
   test('exposes excluded supplier findings for manual correction without changing exclusions', async () => {
@@ -458,11 +458,11 @@ describe('ReviewPage', () => {
       job_status: 'PENDING', corrected_fields: [],
     })
     renderPage()
-    expect(await screen.findByText('Excluded suppliers · review before restoring')).toBeInTheDocument()
-    expect(screen.queryByText('No fields currently require additional information.')).not.toBeInTheDocument()
+    expect(await screen.findByText('Excluded')).toBeInTheDocument()
+    expect(screen.queryByText('No pending fields.')).not.toBeInTheDocument()
     const user = userEvent.setup()
     await user.selectOptions(screen.getByRole('combobox'), 'FREE')
-    await user.click(screen.getByRole('button', { name: 'Save confirmation and recalculate' }))
+    await user.click(screen.getByRole('button', { name: 'Save & recalculate' }))
     await waitFor(() => expect(correct).toHaveBeenCalled())
     expect(task.decision_profile.preferences.excluded_supplier_ids).toEqual(['SUP-001'])
   })

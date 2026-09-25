@@ -57,13 +57,13 @@ function moneyText(currency: string | undefined, value: string | null | undefine
 function quantityText(value: number | null, unit: string | undefined) {
   if (value === null) return '—'
   const unitLabels: Record<string, string> = { piece: 'Piece', pieces: 'Piece', unit: 'Piece', units: 'Piece' }
-  return `${new Intl.NumberFormat('zh-CN').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
+  return `${new Intl.NumberFormat('en-SG').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
 }
 
 function displayDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)

@@ -39,13 +39,13 @@ export function TaskWorkspaceHeader({
   const completed = [progress.requirement_completed, progress.quote_review_completed,
     Boolean(progress.compliance?.confirmed), progress.decision_completed, progress.summary_completed]
   const completedStage = completed.findIndex((value) => !value) === -1 ? 5 : completed.findIndex((value) => !value)
-  const stages = ['Procurement Requirements', 'Quotations and review', 'Compliance Review', 'Decision Comparison', 'Procurement Decision Brief']
+  const stages = ['Requirements', 'Quotations', 'Compliance', 'Analysis', 'Summary']
 
   return (
     <section className="workspace-header">
       <div className="workspace-task-head">
         <div>
-          <span className="workspace-task-label">Procurement Task</span>
+          <span className="workspace-task-label">Task</span>
           <h1>{title}</h1>
           <p>{subtitle}</p>
         </div>
@@ -75,15 +75,15 @@ export function TaskWorkspaceHeader({
         </ol>
       </div>
       <nav className="workspace-tabs" aria-label="Task workspace pages">
-        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>Procurement Requirements</Link>
-        <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>Quotations and Evidence</Link>
-        <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>Action Items</Link>
-        <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>Supplier Information</Link>
-        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>Compliance Review</Link>
-        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>Decision results</Link>
-        {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>Selection gap</Link>}
-        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>Procurement Decision Brief</Link>
-        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>Version History</Link>
+        <Link className={tabClass(active === 'overview')} to={`/tasks/${taskId}`}>Requirements</Link>
+        <Link className={tabClass(active === 'quotes')} to={`/tasks/${taskId}/quotes/new`}>Quotations</Link>
+        <Link className={tabClass(active === 'review')} to={`/tasks/${taskId}/review`}>Actions</Link>
+        <Link className={tabClass(active === 'suppliers')} to={`/tasks/${taskId}/suppliers`}>Suppliers</Link>
+        <Link className={tabClass(active === 'compliance')} to={`/tasks/${taskId}/compliance`}>Compliance</Link>
+        <Link className={tabClass(active === 'decision')} to={`/tasks/${taskId}/decision`}>Analysis</Link>
+        {active === 'gaps' && <Link className={tabClass(true)} to={`/tasks/${taskId}/gaps`}>Gaps</Link>}
+        <Link className={tabClass(active === 'summary')} to={`/tasks/${taskId}/summary`}>Summary</Link>
+        <Link className={tabClass(active === 'audit')} to={`/tasks/${taskId}/audit`}>History</Link>
       </nav>
     </section>
   )

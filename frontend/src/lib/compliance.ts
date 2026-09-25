@@ -28,8 +28,28 @@ export function complianceAnchorId(quoteId: string, clauseId?: string) {
 export function complianceStatusLabel(status: string) {
   return ({ COMPLIANT: 'Verified', NON_COMPLIANT: 'Fail the check', REVIEW_REQUIRED: 'Evidence or Review Required', NOT_EVALUATED: 'Not Evaluated', VERIFIED: 'Verified Candidate', UNVERIFIED: 'Unverified Candidate', EXCLUDED: 'Excluded by Policy', NOT_STARTED: 'Not Started', PROCESSING: 'Processing', BLOCKED: 'Blocked by Policy Evidence', AWAITING_CONFIRMATION: 'Action required', PROCESSED: 'Processed', DISABLED: 'Disabled' } as Record<string, string>)[status] ?? status
 }
+export function compactComplianceStatusLabel(status: string) {
+  return ({
+    COMPLIANT: 'Verified',
+    NON_COMPLIANT: 'Failed',
+    REVIEW_REQUIRED: 'Pending',
+    NOT_EVALUATED: 'Unchecked',
+    VERIFIED: 'Verified',
+    UNVERIFIED: 'Unverified',
+    EXCLUDED: 'Excluded',
+    NOT_STARTED: 'Not started',
+    PROCESSING: 'Checking',
+    BLOCKED: 'Blocked',
+    AWAITING_CONFIRMATION: 'Pending',
+    PROCESSED: 'Processed',
+    DISABLED: 'Disabled',
+  } as Record<string, string>)[status] ?? status
+}
 export function checkStatusLabel(status: PolicyComplianceCheckStatus) {
   return ({ PASS: 'Passed', FAIL: 'Failed', REVIEW_REQUIRED: 'Review required', NOT_APPLICABLE: 'Not applicable at this stage', NOT_EVALUATED: 'Not evaluated' })[status]
+}
+export function compactCheckStatusLabel(status: PolicyComplianceCheckStatus) {
+  return ({ PASS: 'Passed', FAIL: 'Failed', REVIEW_REQUIRED: 'Review', NOT_APPLICABLE: 'N/A', NOT_EVALUATED: 'Unchecked' })[status]
 }
 export function executionStageLabel(stage?: string) {
   return ({ BEFORE_RECOMMENDATION: 'Before recommendation', BEFORE_PUBLICATION: 'Before publication', AFTER_SELECTION: 'After supplier selection' } as Record<string, string>)[stage ?? ''] ?? 'Stage not specified'

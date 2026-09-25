@@ -1,3 +1,4 @@
+import { EnglishDateInput } from './EnglishDateInput'
 import { RankingCriterionSelect } from './RankingCriterionSelect'
 
 export interface RequirementFormValues {
@@ -77,8 +78,8 @@ export function RequirementFields({
     <fieldset className="form-section">
       <legend>Delivery and ranking</legend>
       <div className="form-grid">
-        <label className={fieldClass('planned_order_date')}><span>Planned Order Date <small>Optional</small></span><input type="date" value={value.planned_order_date} onChange={(event) => onChange('planned_order_date', event.target.value)} />{error('planned_order_date')}</label>
-        <label className={fieldClass('delivery_deadline')}><span>Delivery Deadline</span><input required aria-invalid={Boolean(errors.delivery_deadline)} type="date" value={value.delivery_deadline} onChange={(event) => onChange('delivery_deadline', event.target.value)} />{error('delivery_deadline')}</label>
+        <label className={fieldClass('planned_order_date')}><span>Planned order date <small>Optional</small></span><EnglishDateInput value={value.planned_order_date} onChange={(next) => onChange('planned_order_date', next)} />{error('planned_order_date')}</label>
+        <label className={fieldClass('delivery_deadline')}><span>Delivery deadline</span><EnglishDateInput required aria-invalid={Boolean(errors.delivery_deadline)} value={value.delivery_deadline} onChange={(next) => onChange('delivery_deadline', next)} />{error('delivery_deadline')}</label>
         <label className={fieldClass('delivery_location', 'field-wide')}><span>Delivery Location</span><input required aria-invalid={Boolean(errors.delivery_location)} value={value.delivery_location} onChange={(event) => onChange('delivery_location', event.target.value)} />{error('delivery_location')}</label>
         <label className={fieldClass('ranking_preference')}><span>Primary ranking criterion</span><RankingCriterionSelect required historyApplicable={historyApplicable} invalid={Boolean(errors.ranking_preference)} value={value.ranking_preference} exclude={value.secondary_preference} onChange={(next) => onChange('ranking_preference', next)} />{error('ranking_preference')}</label>
         <label className={fieldClass('secondary_preference')}><span>Secondary ranking criterion <small>Optional; used only when the primary criterion is tied</small></span><RankingCriterionSelect allowEmpty historyApplicable={historyApplicable} invalid={Boolean(errors.secondary_preference)} value={value.secondary_preference} exclude={value.ranking_preference} onChange={(next) => onChange('secondary_preference', next)} />{error('secondary_preference')}</label>

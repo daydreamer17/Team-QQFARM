@@ -57,7 +57,7 @@ describe('QuoteUploadPage supplier identification', () => {
     renderPage()
     const user = userEvent.setup()
     const supplier = await screen.findByLabelText(/Supplier ID/)
-    const file = screen.getByLabelText(/^Quotation Document/)
+    const file = screen.getByLabelText(/^Quotation document/)
 
     await user.upload(file, new File(['supplier_id,price\nSUP-029,6.20\n'], 'quote.csv', { type: 'text/csv' }))
     await waitFor(() => expect(supplier).toHaveValue('SUP-029'))
@@ -79,7 +79,7 @@ describe('QuoteUploadPage supplier identification', () => {
     renderPage()
     const user = userEvent.setup()
     const supplier = await screen.findByLabelText(/Supplier ID/)
-    const file = screen.getByLabelText(/^Quotation Document/)
+    const file = screen.getByLabelText(/^Quotation document/)
 
     await user.upload(file, new File(['supplier_id\nSUP-029\n'], 'one.csv', { type: 'text/csv' }))
     await waitFor(() => expect(supplier).toHaveValue('SUP-029'))

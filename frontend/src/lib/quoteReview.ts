@@ -5,6 +5,7 @@ import type {
   QuoteFieldSchemaDefinition,
   QuoteFieldSchemaResponse,
 } from '../api/types'
+import { fieldLabel } from './presentation'
 
 export type QuoteReviewValues = Record<string, string>
 
@@ -269,7 +270,7 @@ export function validateQuoteReview(
         'DRAFT_FIELD_MISSING',
         [definition.field_name],
         definition.group_id,
-        `The draft is missing “${definition.label}”, so quotation confirmation cannot be completed.`,
+        `The draft is missing “${fieldLabel(definition.field_name)}”, so quotation confirmation cannot be completed.`,
       ))
       continue
     }
@@ -278,7 +279,7 @@ export function validateQuoteReview(
         'FIELD_ID_MISSING',
         [definition.field_name],
         definition.group_id,
-        `“${definition.label}” has no field version. Refresh the draft and try again.`,
+        `“${fieldLabel(definition.field_name)}” has no field version. Refresh the draft and try again.`,
       ))
     }
 
@@ -288,7 +289,7 @@ export function validateQuoteReview(
         'REQUIRED_VALUE_MISSING',
         [definition.field_name],
         definition.group_id,
-        `The system did not identify “${definition.label}”. Enter a value.`,
+        `The system did not identify “${fieldLabel(definition.field_name)}”. Enter a value.`,
       ))
       continue
     }
@@ -302,7 +303,7 @@ export function validateQuoteReview(
           'INTEGER_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}” must be an integer greater than or equal to ${minimum}.`,
+          `“${fieldLabel(definition.field_name)}” must be an integer greater than or equal to ${minimum}.`,
         ))
       }
     } else if (valueType(definition).includes('decimal')) {
@@ -312,7 +313,7 @@ export function validateQuoteReview(
           'MONEY_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}” must be a decimal amount greater than or equal to ${minimum}, without a currency symbol or text.`,
+          `“${fieldLabel(definition.field_name)}” must be a decimal amount greater than or equal to ${minimum}, without a currency symbol or text.`,
         ))
       }
     } else if (valueType(definition).includes('date')) {
@@ -321,7 +322,7 @@ export function validateQuoteReview(
           'DATE_VALUE_INVALID',
           [definition.field_name],
           definition.group_id,
-          `“${definition.label}” must use YYYY-MM-DD format.`,
+          `“${fieldLabel(definition.field_name)}” must use YYYY-MM-DD format.`,
         ))
       }
     }
@@ -331,7 +332,7 @@ export function validateQuoteReview(
         'ENUM_VALUE_INVALID',
         [definition.field_name],
         definition.group_id,
-        `Select “${definition.label}” from the options provided.`,
+        `Select “${fieldLabel(definition.field_name)}” from the options provided.`,
       ))
     }
   }
@@ -377,7 +378,7 @@ export function validateQuoteReview(
       if (!statusField || !amountField) continue
       const status = value(statusField)
       const amount = value(amountField)
-      const label = schemaFields.get(statusField)?.label ?? statusField
+      const label = fieldLabel(statusField)
       if (status === 'KNOWN_AMOUNT' && amount === null) {
         issues.push(issue(
           'FEE_AMOUNT_REQUIRED',

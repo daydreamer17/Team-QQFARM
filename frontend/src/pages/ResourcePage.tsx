@@ -3,6 +3,7 @@ import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey } from '../api/client'
 import type { PolicyImportStatus, PolicyImportSummary, PolicyImportUploadMetadata, PolicySetSummary } from '../api/types'
+import { EnglishDateInput } from '../components/EnglishDateInput'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 
 const MAX_POLICY_BYTES = 5 * 1024 * 1024
@@ -66,7 +67,7 @@ function formatBytes(bytes: number) {
 
 function formatDate(value: string | null) {
   if (!value) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   }).format(new Date(value))
@@ -458,7 +459,7 @@ export function ResourcePage() {
           <h1>Policy Library</h1>
           <p>View published policies, process files awaiting review and publish new versions as needed.</p>
         </div>
-        <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? 'Collapse upload' : 'Upload policy version'}</button>
+        <button className="button button-submit" type="button" onClick={toggleBlankUpload}>{showUpload ? 'Close' : 'Upload'}</button>
       </section>
 
       <section className="card policy-directory">
@@ -502,8 +503,8 @@ export function ResourcePage() {
                 ))}</div>
               </details>}
               <div className="published-policy-actions">
-                <button className="button button-secondary" type="button" onClick={() => beginNewVersion(item)}>Publish new version</button>
-                {item.status === 'PUBLISHED' && <button className="button button-danger" type="button" disabled={deactivate.isPending} onClick={() => deactivateVersion(item)}>Deactivate policy version</button>}
+                <button className="button button-secondary" type="button" onClick={() => beginNewVersion(item)}>Update</button>
+                {item.status === 'PUBLISHED' && <button className="button button-danger" type="button" disabled={deactivate.isPending} onClick={() => deactivateVersion(item)}>Deactivate</button>}
               </div>
             </article>
           ))}</div>
@@ -532,15 +533,15 @@ export function ResourcePage() {
       </section>
 
       {showUpload && <form className="card policy-upload-form" onSubmit={submit}>
-        <div className="section-heading"><div><h2>Upload policy revision</h2><p className="section-helper">{basePolicy ? `Updating revision ${basePolicy.policy_set_version} of ${basePolicy.policy_set_id}; upload the complete file set for the new revision.` : uploadMode === 'UPDATE' ? 'Select an existing policy to update, then upload the complete file set for the new revision.' : 'Create a new policy set. It becomes available to procurement tasks only after upload and review are complete.'}</p></div><button className="button button-secondary" type="button" onClick={() => setShowUpload(false)}>Cancel upload</button></div>
+        <div className="section-heading"><div><h2>Upload policy revision</h2><p className="section-helper">{basePolicy ? `Updating revision ${basePolicy.policy_set_version} of ${basePolicy.policy_set_id}; upload the complete file set for the new revision.` : uploadMode === 'UPDATE' ? 'Select an existing policy to update, then upload the complete file set for the new revision.' : 'Create a new policy set. It becomes available to procurement tasks only after upload and review are complete.'}</p></div><button className="button button-secondary" type="button" onClick={() => setShowUpload(false)}>Cancel</button></div>
         <div className="policy-form-grid">
           <label className="field"><span>Upload method</span><select value={uploadMode} onChange={(event) => changeUploadMode(event.target.value as PolicyUploadMode)}><option value="NEW">Create policy set</option><option value="UPDATE">Update existing policy</option></select></label>
           {uploadMode === 'UPDATE' && <label className="field policy-field-wide"><span>Select an existing policy</span><select required value={basePolicy ? policyKey(basePolicy) : ''} onChange={(event) => selectBasePolicy(updateBasePolicies.find((policy) => policyKey(policy) === event.target.value) ?? null)}><option value="">Select a policy</option>{updateBasePolicies.map((policy) => <option key={policyKey(policy)} value={policyKey(policy)}>{policy.policy_set_id} · Current revision {policy.policy_set_version}{policy.status === 'INACTIVE' ? ' (inactive)' : ''}</option>)}</select>{updatePolicySets.isPending && <small>Loading policies…</small>}{updatePolicySets.isError && <small className="field-error">Unable to load policies. Please try again later.</small>}</label>}
           <label className="field policy-field-wide"><span>Policy set name</span><input required readOnly={uploadMode === 'UPDATE'} value={form.policy_set_name} onChange={(event) => update('policy_set_name', event.target.value)} placeholder="For example: Electronic Components Procurement Policy" /></label>
           <label className="field"><span>Applicable procurement categories <small>Separate multiple values with commas</small></span><input required value={form.categories} onChange={(event) => update('categories', event.target.value)} /></label>
           <label className="field"><span>Applicable region <small>Separate multiple values with commas</small></span><input required value={form.regions} onChange={(event) => update('regions', event.target.value)} /></label>
-          <label className="field"><span>Effective from</span><input required type="date" value={form.effective_from} onChange={(event) => update('effective_from', event.target.value)} /></label>
-          <label className="field"><span>Effective to <small>Optional</small></span><input type="date" value={form.effective_to} onChange={(event) => update('effective_to', event.target.value)} /></label>
+          <label className="field"><span>Effective from</span><EnglishDateInput required value={form.effective_from} onChange={(value) => update('effective_from', value)} /></label>
+          <label className="field"><span>Effective to <small>Optional</small></span><EnglishDateInput value={form.effective_to} onChange={(value) => update('effective_to', value)} /></label>
         </div>
         <label className="resource-dropzone policy-dropzone">
           <span className="resource-dropzone-icon" aria-hidden="true">↑</span>
@@ -551,8 +552,8 @@ export function ResourcePage() {
         {files.length > 0 && <div className="policy-selected-files"><p>Upload the complete file set used by the new policy version.</p>{files.map((selectedFile) => <div className="policy-selected-file" key={`${selectedFile.name}:${selectedFile.lastModified}`}><span><strong>{selectedFile.name}</strong><small>{formatBytes(selectedFile.size)}</small></span><button type="button" onClick={() => setPreview({ name: selectedFile.name, mediaType: selectedFile.type, sizeBytes: selectedFile.size, file: selectedFile })}>Preview</button></div>)}</div>}
         {(localError || upload.isError) && <div className="form-error compact-error" role="alert">{localError || errorMessage(upload.error)}</div>}
         <div className="policy-form-actions">
-          {upload.isError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>Retry same request</button>}
-          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? 'Uploading and parsing…' : files.length > 0 ? `Upload and review ${files.length} files` : 'Upload file and review'}</button>
+          {upload.isError && lastSubmission && <button className="button button-secondary" type="button" onClick={() => upload.mutate(lastSubmission)}>Retry</button>}
+          <button className="button button-submit" type="submit" disabled={upload.isPending}>{upload.isPending ? 'Uploading…' : 'Upload'}</button>
         </div>
       </form>}
 

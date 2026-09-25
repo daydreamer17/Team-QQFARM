@@ -76,7 +76,7 @@ export function TaskPage() {
 
       <section className="card workspace-page-lead">
         <div className="workspace-page-lead-copy">
-          <h2>Procurement Requirements</h2>
+          <h2>Requirements</h2>
           <p>View the confirmed procurement scope and decision settings for the current revision.</p>
         </div>
       </section>
@@ -103,11 +103,11 @@ export function TaskPage() {
         </dl>
         <div className="requirement-actions">
           <div className="inline-actions">
-            {task.data.status !== 'ABANDONED' && <Link className="button button-secondary" to={`/tasks/${taskId}/edit`}>Edit Procurement Requirements</Link>}
-            {task.data.status !== 'ABANDONED' && <button className="button button-danger" type="button" onClick={() => setShowAbandon(true)}>Abandon Task</button>}
-            {task.data.status === 'ABANDONED' && <span className="status-pill status-muted">This task has been abandoned. Historical records remain read-only.</span>}
+            {task.data.status !== 'ABANDONED' && <Link className="button button-secondary" to={`/tasks/${taskId}/edit`}>Edit</Link>}
+            {task.data.status !== 'ABANDONED' && <button className="button button-danger" type="button" onClick={() => setShowAbandon(true)}>Abandon</button>}
+            {task.data.status === 'ABANDONED' && <><span className="status-pill status-muted">Abandoned</span><small>Historical records are read-only.</small></>}
           </div>
-          {showAbandon && <div className="card abandon-task-panel"><strong>Confirm task abandonment</strong><p>This action cannot be reversed, but quotations, source documents, results and audit records will be retained.</p><label className="field"><span>Reason for abandonment</span><textarea value={abandonReason} onChange={(event) => setAbandonReason(event.target.value)} minLength={3} maxLength={1000} /></label><div className="inline-actions"><button className="button button-secondary" type="button" onClick={() => setShowAbandon(false)}>Cancel</button><button className="button button-danger" type="button" disabled={abandonReason.trim().length < 3 || abandon.isPending} onClick={() => { if (window.confirm('Permanently set this task to read-only abandoned status?')) abandon.mutate() }}>{abandon.isPending ? 'Abandoning…' : 'Confirm abandonment'}</button></div>{abandon.isError && <div className="form-error">{abandon.error instanceof ApiClientError ? abandon.error.message : 'Unable to abandon task.'}</div>}</div>}
+            {showAbandon && <div className="card abandon-task-panel"><strong>Confirm task abandonment</strong><p>This action cannot be reversed, but quotations, source documents, results and audit records will be retained.</p><label className="field"><span>Reason for abandonment</span><textarea value={abandonReason} onChange={(event) => setAbandonReason(event.target.value)} minLength={3} maxLength={1000} /></label><div className="inline-actions"><button className="button button-secondary" type="button" onClick={() => setShowAbandon(false)}>Cancel</button><button className="button button-danger" type="button" disabled={abandonReason.trim().length < 3 || abandon.isPending} onClick={() => { if (window.confirm('Permanently set this task to read-only abandoned status?')) abandon.mutate() }}>{abandon.isPending ? 'Abandoning…' : 'Abandon'}</button></div>{abandon.isError && <div className="form-error">{abandon.error instanceof ApiClientError ? abandon.error.message : 'Unable to abandon task.'}</div>}</div>}
         </div>
       </section>
     </div>

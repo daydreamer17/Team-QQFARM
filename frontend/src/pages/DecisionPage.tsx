@@ -90,7 +90,7 @@ export function DecisionPage() {
 
       <section className="card workspace-page-lead decision-section-lead">
         <div className="workspace-page-lead-copy">
-          <h2>Decision Comparison</h2>
+          <h2>Analysis</h2>
           {expectedRevision !== null && !data.current_result_id && (
             <p>Generating decision results for Revision {expectedRevision}. The result will open automatically when ready.</p>
           )}

@@ -16,6 +16,7 @@ import {
   validateQuoteReview,
 } from '../lib/quoteReview'
 import { reviewFindingAction, reviewFindingActionMessages } from '../lib/reviewMessages'
+import { fieldLabel, quoteFieldGroupLabel, quoteRuleText } from '../lib/presentation'
 
 const draftStatusLabels: Record<string, string> = {
   UPLOADED: 'Uploaded',
@@ -180,6 +181,7 @@ function QuoteFieldEditor({
   const requiresResolvedFeeStatus = definition.field_name === 'shipping_fee_status' || definition.field_name === 'other_fees_status'
   const selectableOptions = definition.allowed_values ?? []
   const displayedValue = value
+  const displayLabel = fieldLabel(definition.field_name)
   return (
     <article
       className={`quote-review-field${needsAttention ? ' has-error' : ''}`}
@@ -187,12 +189,12 @@ function QuoteFieldEditor({
     >
       <header>
         <div>
-          <strong>{definition.label}</strong>
+          <strong>{displayLabel}</strong>
         </div>
         {needsAttention && (
           <div className="quote-field-badges">
             <span className="badge-review-state state-needs-attention">
-            {hasInterpretationDoubt && !handled ? 'Manual review required' : errors.length > 0 ? (hasValue ? 'Resolve before submission' : 'Missing; draft can still be saved') : 'Review required'}
+            {hasInterpretationDoubt && !handled ? 'Review needed' : errors.length > 0 ? (hasValue ? 'Resolve' : 'Missing') : 'Review needed'}
             </span>
           </div>
         )}
@@ -217,7 +219,7 @@ function QuoteFieldEditor({
         {definition.allowed_values && definition.allowed_values.length > 0 ? (
           <select
             disabled={disabled}
-            aria-label={definition.label}
+            aria-label={displayLabel}
             aria-invalid={errors.length > 0}
             value={displayedValue}
             onChange={(event) => onChange(event.target.value)}
@@ -232,7 +234,7 @@ function QuoteFieldEditor({
         ) : (
           <input
             disabled={disabled}
-            aria-label={definition.label}
+            aria-label={displayLabel}
             aria-invalid={errors.length > 0}
             type="text"
             placeholder={definition.value_type.toLowerCase().includes('date') ? 'YYYY-MM-DD' : undefined}
@@ -253,7 +255,7 @@ function QuoteFieldEditor({
           <p>Other source clues (may include historical prices; verify the applicable version and do not treat them as support for the current value)</p>
           <EvidenceList field={{ ...field, evidence: field.review_evidence! }} />
         </>}
-        <p>{definition.normalization_rule}</p>
+        <p>{quoteRuleText(definition.normalization_rule)}</p>
         {findings.filter((finding) => finding.decision !== 'PASS').map((finding) => (
           <p key={finding.finding_id}>{finding.resolved ? 'Manually resolved: ' : 'Initial pre-check: '}{findingMessage(finding)}</p>
         ))}
@@ -313,7 +315,10 @@ export function QuoteDraftReviewWorkspace({
   const groups = useMemo(() => {
     const result = new Map<string, { label: string; fields: QuoteFieldSchemaDefinition[] }>()
     for (const definition of schema.fields) {
-      const current = result.get(definition.group_id) ?? { label: definition.group_label, fields: [] }
+      const current = result.get(definition.group_id) ?? {
+        label: quoteFieldGroupLabel(definition.group_label, definition.group_id),
+        fields: [],
+      }
       current.fields.push(definition)
       result.set(definition.group_id, current)
     }
@@ -324,7 +329,7 @@ export function QuoteDraftReviewWorkspace({
     [draft, schema, values],
   )
   const conflictIssues = useMemo<QuoteReviewValidationIssue[]>(() => {
-    const labels = new Map(schema.fields.map((definition) => [definition.field_name, definition.label]))
+    const labels = new Map(schema.fields.map((definition) => [definition.field_name, fieldLabel(definition.field_name)]))
     return draft.fields
       .filter((field) => field.validation_status === 'CONFLICT' && !adoptedFields.has(field.field_name)
         && (values[field.field_name] ?? '') === quoteValueAsText(field.normalized_value))
@@ -478,7 +483,7 @@ export function QuoteDraftReviewWorkspace({
     if (!field) {
       return (
         <article className="quote-review-field has-error" key={definition.field_name} id={`quote-field-${definition.field_name}`}>
-          <strong>{definition.label}</strong>
+          <strong>{fieldLabel(definition.field_name)}</strong>
           <p className="field-error-text">The system did not generate this field. Reparse the quotation.</p>
         </article>
       )
@@ -615,7 +620,7 @@ export function QuoteDraftReviewWorkspace({
             <p>{apiErrorMessage(mutationError)}</p>
             {backendMessages.length > 0 && <ul>{backendMessages.map((message) => <li key={message}>{message}</li>)}</ul>}
             {mutationError instanceof ApiClientError && mutationError.status === 409 && (
-              <button type="button" className="button button-secondary" onClick={onChanged}>Load latest draft and replace this form</button>
+              <button type="button" className="button button-secondary" onClick={onChanged}>Reload</button>
             )}
           </div>
         </div>
@@ -632,7 +637,7 @@ export function QuoteDraftReviewWorkspace({
           }}
           disabled={discard.isPending || draft.status === 'SUBMITTED'}
         >
-          {unchangedRevision ? 'Back to quotation list' : draft.replacement_quote_id ? 'Cancel revision' : 'Discard draft'}
+          {unchangedRevision ? 'Back' : draft.replacement_quote_id ? 'Cancel' : 'Discard'}
         </button>
       </div>
     </section>

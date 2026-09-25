@@ -35,6 +35,13 @@ describe('QuoteDraftReviewWorkspace', () => {
     expect(within(document.querySelector('#quote-field-manufacturer')!).getByRole('textbox')).toHaveValue('QQ Demo Components')
     expect(screen.queryByRole('button', { name: 'Submit Quotation' })).not.toBeInTheDocument()
     expect(screen.getByText('Identified')).toBeInTheDocument()
+    expect(screen.getByText('Identity')).toBeInTheDocument()
+    expect(screen.getByText('Specifications')).toBeInTheDocument()
+    expect(screen.getByText('Supplier Name')).toBeInTheDocument()
+    expect(screen.getByText('Supplier Country')).toBeInTheDocument()
+    expect(screen.queryByText('身份')).not.toBeInTheDocument()
+    expect(screen.queryByText('规格')).not.toBeInTheDocument()
+    expect(screen.queryByText('出具报价的供应商名称')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Confirm and submit quotation' })).toBeEnabled()
   })
 
@@ -151,7 +158,7 @@ describe('QuoteDraftReviewWorkspace', () => {
     )
 
     expect(document.querySelector('#quote-field-manufacturer')).toHaveClass('has-error')
-    expect(screen.getByText('Manual review required')).toBeInTheDocument()
+    expect(screen.getByText('Review needed')).toBeInTheDocument()
   })
 
   test('submits an already reviewed draft without repeating the review call', async () => {
@@ -220,7 +227,7 @@ describe('QuoteDraftReviewWorkspace', () => {
 
     expect(await screen.findByText('No update required')).toBeInTheDocument()
     expect(screen.getByText('The quotation content has not changed. The current version has been retained.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Back to quotation list' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Back' })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText(/草稿或字段版本已经变化/)).not.toBeInTheDocument()
   })

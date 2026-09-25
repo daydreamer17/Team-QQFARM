@@ -3,6 +3,7 @@ import { type FormEvent, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey, documentContentUrl, quoteDraftContentUrl } from '../api/client'
 import type { QuoteSupplierIdentification } from '../api/types'
+import { EnglishFilePicker } from '../components/EnglishFilePicker'
 import { FilePreviewDialog, type PreviewFileSource } from '../components/FilePreviewDialog'
 import { IssuePanel } from '../components/IssuePanel'
 import { QuoteDraftReviewWorkspace } from '../components/QuoteDraftReviewWorkspace'
@@ -250,18 +251,18 @@ export function QuoteUploadPage() {
   if (task.data?.status === 'ABANDONED') {
     return <div className="page-stack quote-review-page">
       <TaskWorkspaceHeader taskId={task.data.task_id} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle="Task abandoned; quotations and source documents remain read-only" status={task.data.status} revision={task.data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={task.data.progress} active="quotes" />
-      <section className="card workspace-page-lead"><div className="workspace-page-lead-copy"><h2>Quotations and review</h2><p>View submitted quotation documents and review records.</p></div></section>
+      <section className="card workspace-page-lead"><div className="workspace-page-lead-copy"><h2>Quotations</h2><p>View submitted quotation documents and review records.</p></div></section>
       <section className="card run-notice"><strong>This task has been abandoned</strong><p>Quotations cannot be uploaded, corrected or submitted. Historical files remain available for preview and download.</p></section>
       <section>{quoteHistory.isPending ? <div className="card empty-upload-list">Loading quotation history…</div> : submittedQuoteTable(true)}</section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
-      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? 'Opening compliance review…' : 'Next: Compliance review'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
+      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? 'Opening…' : 'Continue'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
     </div>
   }
 
   return (
     <div className="page-stack quote-review-page">
       {task.data ? <TaskWorkspaceHeader taskId={task.data.task_id} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} submitted quotations`} status={task.data.status} revision={task.data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={task.data.progress} reviewBlocked={Boolean(activeDraft || legacyFieldReview || legacyIssueReview || batchReview)} active="quotes" /> : <section className="card loading-panel">Loading task workspace…</section>}
-      <section className="card workspace-page-lead quote-review-lead"><div className="workspace-page-lead-copy"><h2>Quotations and review</h2><p>Upload a quotation document and the system will extract its contents.</p></div></section>
+      <section className="card workspace-page-lead quote-review-lead"><div className="workspace-page-lead-copy"><h2>Quotations</h2><p>Upload a quotation document and the system will extract its contents.</p></div></section>
       {!activeDraft && (
         <form className="card upload-form" onSubmit={handleSubmit}>
           <label className="field">
@@ -274,11 +275,11 @@ export function QuoteUploadPage() {
             {!isIdentifyingSupplier && supplierIdentification?.status === 'AMBIGUOUS' && <small className="supplier-identification-note">Multiple supplier IDs were found. Review the document and enter the correct one manually.</small>}
             {!isIdentifyingSupplier && identificationError && <small className="supplier-identification-note">Automatic identification is temporarily unavailable. You may still enter the supplier ID manually.</small>}
           </label>
-          <label className="field">
-            <span>Quotation Document</span>
-            <input ref={fileInput} required type="file" accept=".pdf,.csv,application/pdf,text/csv" onChange={(event) => handleFile(event.target.files?.[0] ?? null)} />
+          <div className="field">
+            <span>Quotation document</span>
+            <EnglishFilePicker ref={fileInput} required aria-label="Quotation document" fileName={selectedFile?.name} accept=".pdf,.csv,application/pdf,text/csv" onChange={(event) => handleFile(event.target.files?.[0] ?? null)} />
             <small>PDF and CSV supported, maximum 5 MiB.</small>
-          </label>
+          </div>
           {selectedFile && (
             <div className="selected-file">
               <div><strong>{selectedFile.name}</strong><span>{formatBytes(selectedFile.size)}</span></div>
@@ -287,7 +288,7 @@ export function QuoteUploadPage() {
           )}
           {currentUploadNotice && <div className="form-error compact-error"><div><strong>{currentUploadNotice.title}</strong><p>{currentUploadNotice.message}</p></div></div>}
           {!currentUploadNotice && latestDraftFailureNotice && latestDraft && <div className="form-error compact-error"><div><strong>{latestDraftFailureNotice.title}</strong><p>{latestDraft.original_filename}: {latestDraftFailureNotice.message}</p></div></div>}
-          <button className="button button-submit" type="submit" disabled={upload.isPending || (isIdentifyingSupplier && !supplierId.trim())}>{upload.isPending ? 'Uploading…' : 'Upload and start review'}</button>
+          <button className="button button-submit" type="submit" disabled={upload.isPending || (isIdentifyingSupplier && !supplierId.trim())}>{upload.isPending ? 'Uploading…' : 'Upload'}</button>
         </form>
       )}
       {drafts.isError && <section className="card error-panel">Failed to load drafts: {errorMessage(drafts.error)}</section>}

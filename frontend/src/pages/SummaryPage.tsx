@@ -16,7 +16,7 @@ function errorMessage(error: unknown) {
 function displayDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-SG', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -37,7 +37,7 @@ function moneyText(currency: string | undefined, value: string | null | undefine
 function quantityText(value: number | null, unit: string | undefined) {
   if (value === null) return '—'
   const unitLabels: Record<string, string> = { piece: 'Piece', pieces: 'Piece', unit: 'Piece', units: 'Piece' }
-  return `${new Intl.NumberFormat('zh-CN').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
+  return `${new Intl.NumberFormat('en-SG').format(value)} ${unitLabels[unit ?? ''] ?? unit ?? ''}`.trim()
 }
 
 function paymentText(supplier: SupplierComparisonResult) {
@@ -266,7 +266,8 @@ export function SummaryPage() {
         }
       : result.data?.is_current ? data.policy_binding : null)
   const supplierNames = new Map(suppliers.map((item) => [item.quote_id, item.supplier_name]))
-  const narrativeText = (value: string) => cleanSummaryText(value, supplierNames)
+  const narrativeText = (value: string, fallback = 'Regenerate this report to create an updated English narrative for this section.') =>
+    /[\u3400-\u9fff]/.test(value) ? fallback : cleanSummaryText(value, supplierNames)
   const narrative = current?.narrative
   const policySections = narrative?.sections.filter((section) =>
     /\u5236\u5ea6|\u653f\u7b56|\u5408\u89c4|\u5ba1\u6279|RoHS/i.test(section.heading + section.text)) ?? []
@@ -285,6 +286,9 @@ export function SummaryPage() {
     current?.facts.recommended_quote_ids ?? result.data?.result.recommended_quote_ids ?? [],
   )
   const recommended = suppliers.find((item) => recommendedIds.has(item.quote_id))
+  const overviewFallback = reportRequirement
+    ? `This brief covers the procurement of ${reportRequirement.manufacturer} ${reportRequirement.manufacturer_part_number} (${reportRequirement.package}), with a required quantity of ${reportRequirement.required_quantity} ${reportRequirement.quantity_unit}, a budget of ${reportRequirement.currency} ${reportRequirement.budget_amount}, and delivery required by ${reportRequirement.delivery_deadline}. It evaluates ${suppliers.length} submitted ${suppliers.length === 1 ? 'quotation' : 'quotations'}${recommended ? ` and identifies ${recommended.supplier_name} as the preliminary recommended supplier at a confirmed total cost of ${moneyText(reportRequirement.currency, recommended.total_cost)}` : '; no publishable recommendation is currently available'}.`
+    : 'The frozen procurement facts are unavailable. Regenerate this report to create an English executive summary.'
   const policyAssessments = new Map(
     (result.data?.policy_compliance.assessments ?? []).map((assessment) => [assessment.quote_id, assessment]),
   )
@@ -357,7 +361,7 @@ export function SummaryPage() {
 
       <section className="summary-report-toolbar card workspace-page-lead">
         <div className="workspace-page-lead-copy">
-          <h2>Procurement Decision Brief</h2>
+          <h2>Summary</h2>
           {current && <span>{data.task_name} · Revision {current.task_revision} · {generatedAt}</span>}
         </div>
         <div className="summary-report-actions">
@@ -367,7 +371,7 @@ export function SummaryPage() {
               type="button"
               disabled={generate.isPending}
               onClick={() => generate.mutate()}
-            >{generate.isPending ? 'Creating…' : 'Generate procurement decision brief'}</button>
+            >{generate.isPending ? 'Creating…' : 'Generate'}</button>
           )}
           {current?.status === 'FAILED' && current.is_current && data.status !== 'ABANDONED' && (
             <button
@@ -430,13 +434,13 @@ export function SummaryPage() {
                 <span>{reportRequirement.required_quantity} {reportRequirement.quantity_unit} · {reportRequirement.package} · {reportRequirement.manufacturer_part_number}</span>
               </div>
               <div className="summary-report-stamp">
-                <strong>{recommended ? 'Preliminary recommendation available' : 'Procurement analysis completed'}</strong>
-                <small>Based on procurement task revision {current.task_revision}</small>
+                <strong>{recommended ? 'Recommended' : 'Analysed'}</strong>
+                <small>Task revision {current.task_revision}</small>
               </div>
             </header>
 
             <ReportSection number="01" title="Executive Summary" id="summary-executive">
-              <p>{narrativeText(narrative.overview)}</p>
+              <p>{narrativeText(narrative.overview, overviewFallback)}</p>
               <div className={`summary-recommendation-callout${recommended ? '' : ' no-recommendation'}`}>
                 <span aria-hidden="true">{recommended ? '✓' : '!'}</span>
                 <div>
@@ -533,7 +537,7 @@ export function SummaryPage() {
                 {commercialSections.slice(0, 3).map((section, index) => (
                   <section key={section.heading + index}><h3>{narrativeText(section.heading)}</h3><p>{narrativeText(section.text)}</p></section>
                 ))}
-                {commercialSections.length === 0 && <p>{narrativeText(narrative.overview)}</p>}
+                {commercialSections.length === 0 && <p>{narrativeText(narrative.overview, overviewFallback)}</p>}
               </div>
             </ReportSection>
 
@@ -600,7 +604,7 @@ export function SummaryPage() {
                 <div><span>2</span><p><strong>Close policy review items</strong>Review policy evidence and exception conditions, retaining the manual confirmation record.</p></div>
                 <div><span>3</span><p><strong>Submit for formal approval</strong>Attach the source quotations, comparison result, and procurement summary for an authorised decision-maker.</p></div>
               </div>
-              <p className="summary-disclaimer">{narrativeText(narrative.disclaimer)}</p>
+              <p className="summary-disclaimer">{narrativeText(narrative.disclaimer, 'This report provides decision support and does not constitute final procurement approval.')}</p>
             </ReportSection>
 
             <footer className="summary-report-footer">
@@ -620,9 +624,9 @@ export function SummaryPage() {
             </dl>
             <p>Every export is bound to the current Summary, Result and Task Revision and includes report text, charts, usage boundaries and version information.</p>
             <div className="summary-export-options">
-              <button className="button button-submit" type="button" disabled={!isExportable} onClick={exportPdf}>Export PDF</button>
-              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'md' })}>Export Markdown</button>
-              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'docx' })}>Export Word</button>
+              <button className="button button-submit" type="button" disabled={!isExportable} onClick={exportPdf}>PDF</button>
+              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'md' })}>Markdown</button>
+              <button className="button button-secondary" type="button" disabled={!isExportable || exportDocument.isPending} onClick={() => exportDocument.mutate({ summaryId: current.summary_id, format: 'docx' })}>Word</button>
             </div>
             <small>Use PDF for formal submission, Markdown for collaboration and Word for further editing.</small>
           </aside>

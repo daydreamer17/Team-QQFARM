@@ -3,11 +3,13 @@ import { Fragment, type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, complianceEvidenceUrl, createIdempotencyKey } from '../api/client'
 import type { ComplianceClause, ComplianceEvidenceFacts, ComplianceEvidenceRecord, ComplianceWorkspace, PolicyComplianceSupplierAssessment, TaskDetail } from '../api/types'
+import { EnglishDateInput } from '../components/EnglishDateInput'
+import { EnglishFilePicker } from '../components/EnglishFilePicker'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { TablePagination } from '../components/TablePagination'
 import { useTablePagination } from '../hooks/useTablePagination'
 import { controlLabel } from '../lib/presentation'
-import { aggregateControlStatus, checkStatusLabel, complianceAnchorId, complianceReasonLabel, complianceStatusLabel, executionStageLabel, groupComplianceChecks } from '../lib/compliance'
+import { aggregateControlStatus, compactCheckStatusLabel, compactComplianceStatusLabel, complianceAnchorId, complianceReasonLabel, executionStageLabel, groupComplianceChecks } from '../lib/compliance'
 
 function errorMessage(error: unknown) {
   if (error instanceof ApiClientError && (error.status === 409 || error.code.includes('revision'))) return 'The task or check revision has changed. Refresh and review it again. Unsaved input has been retained.'
@@ -81,7 +83,7 @@ function SupplierCheckDetails({ supplier, clauses, evidence, taskId, linkedCheck
 }) {
   const groups = groupComplianceChecks(supplier.checks)
   return <div className="compliance-detail-panel">
-    <div className="compliance-detail-heading"><div><strong>Checks and evidence</strong><span>{groups.length} check types · {supplier.checks.length} policy requirements · {evidence.length} evidence records</span></div><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></div>
+    <div className="compliance-detail-heading"><div><strong>Details</strong><span>{groups.length} checks · {supplier.checks.length} requirements · {evidence.length} records</span></div><StateBadge status={supplier.status} label={compactComplianceStatusLabel(supplier.status)} /></div>
     <div className="compliance-control-grid">
       {groups.map(([control, checks]) => {
         const status = aggregateControlStatus(checks, control)
@@ -90,19 +92,19 @@ function SupplierCheckDetails({ supplier, clauses, evidence, taskId, linkedCheck
         const currentRecord = records.find((record) => !record.superseded)
         const linked = checks.some((check) => check.clause_id === linkedCheck)
         return <article className={`compliance-control-card compliance-control-${stateTone(status)}`} key={control}>
-          <header><span className="compliance-control-icon" aria-hidden="true">{checkIcon(status)}</span><div><small>Compliance Review</small><h4>{controlLabel(control)}</h4></div><StateBadge status={status} label={checkStatusLabel(status)} /></header>
+          <header><span className="compliance-control-icon" aria-hidden="true">{checkIcon(status)}</span><div><small>Check</small><h4>{controlLabel(control)}</h4></div><StateBadge status={status} label={compactCheckStatusLabel(status)} /></header>
           {reasons.length > 0 && <ul className="compliance-control-reasons">{reasons.map((reason) => <li key={reason}>{complianceReasonLabel(reason)}</li>)}</ul>}
-          <details className="compliance-source-details" open={linked || undefined}><summary>View policy basis ({checks.length})</summary>
+          <details className="compliance-source-details" open={linked || undefined}><summary>Policy ({checks.length})</summary>
             <div className="compliance-source-list">{checks.map((check, index) => {
               const matchingClauses = clauses.filter((clause) => clause.clause_id === check.clause_id)
               return <div className="compliance-source-row" id={complianceAnchorId(supplier.quote_id, check.clause_id)} tabIndex={-1} key={check.clause_id ?? index}>
-                <div><strong>{checkStatusLabel(check.status)}</strong>{check.execution_stage && <small>{executionStageLabel(check.execution_stage)}</small>}</div>
+                <div><strong>{compactCheckStatusLabel(check.status)}</strong>{check.execution_stage && <small>{executionStageLabel(check.execution_stage)}</small>}</div>
                 {matchingClauses.length > 0 ? matchingClauses.map((clause) => <details key={clause.clause_id}><summary>{clause.title ?? clause.section ?? 'Policy source text'} · Revision {clause.document_version}</summary><blockquote>{clause.text}</blockquote><small>{clause.document_id} · {clause.clause_id}</small></details>) : <span>No displayable policy source text is linked.</span>}
               </div>
             })}</div>
           </details>
-          {records.length > 0 && <details className="compliance-source-details"><summary>View submitted evidence ({records.length})</summary><div className="compliance-material-list">{records.map((record) => <article key={record.evidence_id}><strong>{record.facts.material_number} · Revision {record.version}{record.superseded ? ' (replaced)' : ''}</strong><p>{record.facts.supplier_id} · {record.facts.manufacturer} · {record.facts.manufacturer_part_number}</p><p>Valid: {record.facts.effective_from ?? 'Not specified'} to {record.facts.permanent ? 'Explicitly permanent' : record.facts.expires_on ?? 'Not specified'}</p><p>Reviewed by: {record.confirmed_by} · {record.confirmed_at}</p>{record.facts.source_refs.map((ref) => <p key={ref}>{ref}</p>)}{record.files.map((file) => <a className="compliance-file" key={file.file_id} href={complianceEvidenceUrl(taskId, record.evidence_id, file.file_id)}>{file.original_filename}</a>)}</article>)}</div></details>}
-          {!readonly && ['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE'].includes(control) && <div className="compliance-control-action"><button className="button button-secondary" type="button" onClick={() => onEdit(control as ComplianceEvidenceFacts['control_code'], currentRecord)}>{currentRecord ? 'Replace Evidence' : 'Add Evidence'}</button></div>}
+          {records.length > 0 && <details className="compliance-source-details"><summary>Evidence ({records.length})</summary><div className="compliance-material-list">{records.map((record) => <article key={record.evidence_id}><strong>{record.facts.material_number} · Revision {record.version}{record.superseded ? ' (replaced)' : ''}</strong><p>{record.facts.supplier_id} · {record.facts.manufacturer} · {record.facts.manufacturer_part_number}</p><p>Valid: {record.facts.effective_from ?? 'Not specified'} to {record.facts.permanent ? 'Explicitly permanent' : record.facts.expires_on ?? 'Not specified'}</p><p>Reviewed by: {record.confirmed_by} · {record.confirmed_at}</p>{record.facts.source_refs.map((ref) => <p key={ref}>{ref}</p>)}{record.files.map((file) => <a className="compliance-file" key={file.file_id} href={complianceEvidenceUrl(taskId, record.evidence_id, file.file_id)}>{file.original_filename}</a>)}</article>)}</div></details>}
+          {!readonly && ['APPROVED_SUPPLIER', 'ROHS_COMPLIANCE'].includes(control) && <div className="compliance-control-action"><button className="button button-secondary" type="button" onClick={() => onEdit(control as ComplianceEvidenceFacts['control_code'], currentRecord)}>{currentRecord ? 'Replace' : 'Upload'}</button></div>}
         </article>
       })}
     </div>
@@ -201,11 +203,11 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
       {isAmountApproval && <label className="field">Approved Amount<input required inputMode="decimal" value={facts.approval_amount ?? ''} onChange={(e) => change('approval_amount', e.target.value || null)} /></label>}
       {isAmountApproval && <label className="field">Currency<input required maxLength={3} value={facts.currency ?? ''} onChange={(e) => change('currency', e.target.value.toUpperCase())} /></label>}
       <label className="field">{isAmountApproval ? 'Approval outcome' : 'Evidence outcome'}<select value={facts.outcome} onChange={(e) => change('outcome', e.target.value as 'PASS' | 'FAIL')}><option value="PASS">{isAmountApproval ? 'Approved' : 'Evidence indicates compliance'}</option><option value="FAIL">{isAmountApproval ? 'Not approved / rejected' : 'Evidence indicates non-compliance'}</option></select></label>
-      <label className="field">Effective from<input type="date" value={facts.effective_from ?? ''} onChange={(e) => change('effective_from', e.target.value || null)} /></label>
-      <label className="field">Effective to<input type="date" disabled={facts.permanent} value={facts.expires_on ?? ''} onChange={(e) => change('expires_on', e.target.value || null)} /></label>
+      <label className="field">Effective from<EnglishDateInput value={facts.effective_from ?? ''} onChange={(value) => change('effective_from', value || null)} /></label>
+      <label className="field">Effective to<EnglishDateInput disabled={facts.permanent} value={facts.expires_on ?? ''} onChange={(value) => change('expires_on', value || null)} /></label>
       <label className="compliance-checkbox"><input type="checkbox" checked={facts.permanent} onChange={(e) => { setFacts((current) => ({ ...current, permanent: e.target.checked, expires_on: e.target.checked ? null : current.expires_on })); setIdempotencyKey(createIdempotencyKey()); setLocalError('') }} />Evidence explicitly states that it is permanently valid</label>
       <label className="field compliance-wide">Source references<textarea rows={2} placeholder="Original record number or source link, one per line; you may also upload an attachment" value={facts.source_refs.join('\n')} onChange={(e) => change('source_refs', e.target.value.split('\n'))} /></label>
-      <label className="field compliance-wide">Evidence attachment (PDF, TXT, or MD; up to 10 MiB)<input type="file" accept=".pdf,.txt,.md" onChange={(e) => {
+      <div className="field compliance-wide"><span>Evidence attachment (PDF, TXT, or MD; up to 10 MiB)</span><EnglishFilePicker aria-label="Evidence attachment" fileName={file?.name} accept=".pdf,.txt,.md" onChange={(e) => {
         const selected = e.target.files?.[0] ?? null
         if (selected && (!/\.(pdf|txt|md)$/i.test(selected.name) || selected.size > 10 * 1024 * 1024 || selected.size === 0)) {
           setLocalError('Select a non-empty PDF, TXT, or MD file no larger than 10 MiB.'); setFile(null); return
@@ -224,7 +226,7 @@ function EvidenceEditor({ task, target, onClose, onSaved }: {
           }))
           parseFile.mutate(selected)
         }
-      }} /></label>
+      }} /></div>
       {(parseFile.isPending || parseMessage) && <p className="compliance-wide compliance-parse-status" role="status" aria-live="polite">{parseFile.isPending ? 'Automatically parsing evidence file…' : parseMessage}</p>}
       <label className="field compliance-wide">Review notes<textarea rows={2} value={facts.note} onChange={(e) => change('note', e.target.value)} /></label>
       <label className="compliance-checkbox compliance-wide"><input type="checkbox" checked={facts.coverage_confirmed} onChange={(e) => change('coverage_confirmed', e.target.checked)} />{isAmountApproval ? 'I have reviewed the approval source document and confirmed the supplier, amount, currency, validity period, and outcome' : 'I have reviewed the evidence source document and confirmed the supplier, product scope, and outcome entered above'}</label>
@@ -275,7 +277,7 @@ function Confirmation({ workspace, onRefresh }: { workspace: ComplianceWorkspace
   const partlyAcknowledged = !allAcknowledged && missing.some((id) => acknowledged.includes(id))
   const disabled = !assessment || !workspace.stage.can_confirm || errors.length > 0
     || missing.some((id) => !acknowledged.includes(id)) || (!assessment.policy_enabled && !noPolicy)
-  if (workspace.stage.can_compare) return <section className="card compliance-confirmation"><h3>Compliance review processed</h3><p>This processing record has been saved. Checks must be rerun and reconfirmed after evidence is added or replaced.</p><Link className="button button-submit" to={`/tasks/${workspace.task_id}/decision`}>Continue to decision comparison</Link></section>
+  if (workspace.stage.can_compare) return <section className="card compliance-confirmation compliance-complete-bar"><div className="compliance-complete-copy"><span className="compliance-complete-icon" aria-hidden="true">✓</span><div><h3>Review complete</h3><p>Saved for this revision. New or replaced evidence requires another review.</p></div></div><Link className="button button-submit" to={`/tasks/${workspace.task_id}/decision`}>Continue</Link></section>
   return <section className="card compliance-confirmation"><div className="section-heading"><div><h3>Confirm processing outcome</h3><p>Suppliers with missing evidence remain unverified.</p></div><span>{groupedMissing.length} pending categories</span></div>
     {groupedMissing.length > 0 && <div className="compliance-table-scroll"><table aria-label="Items requiring additional evidence" className="supplier-data-table compliance-pending-table"><thead><tr><th><label className="compliance-select-all"><input aria-label="Select all items requiring additional evidence" type="checkbox" disabled={confirm.isPending} checked={allAcknowledged} ref={(element) => { if (element) element.indeterminate = partlyAcknowledged }} onChange={(event) => {
       setAcknowledged(event.target.checked ? [...missing] : [])
@@ -288,11 +290,11 @@ function Confirmation({ workspace, onRefresh }: { workspace: ComplianceWorkspace
             ? [...new Set([...current, ...row.itemIds])]
             : current.filter((id) => !row.itemIds.includes(id)))
           setIdempotencyKey(createIdempotencyKey())
-        }} /></td><td><strong>{row.supplier}</strong></td><td>{controlLabel(row.control)}{row.itemIds.length > 1 && <small>{row.itemIds.length} similar policy requirements combined</small>}</td><td><StateBadge status={row.status} label={checkStatusLabel(row.status as Parameters<typeof checkStatusLabel>[0])} /></td><td><span className="compliance-defer-label">Defer and retain unverified status</span>{row.stage && <small>{executionStageLabel(row.stage)}</small>}</td></tr>
+        }} /></td><td><strong>{row.supplier}</strong></td><td>{controlLabel(row.control)}{row.itemIds.length > 1 && <small>{row.itemIds.length} similar policy requirements combined</small>}</td><td><StateBadge status={row.status} label={compactCheckStatusLabel(row.status as Parameters<typeof compactCheckStatusLabel>[0])} /></td><td><span className="compliance-defer-label">Deferred</span>{row.stage && <small>{executionStageLabel(row.stage)}</small>}</td></tr>
       })}
     </tbody></table></div>}
     {assessment && !assessment.policy_enabled && <label className="compliance-checkbox compliance-no-policy"><input type="checkbox" disabled={confirm.isPending} checked={noPolicy} onChange={(e) => { setNoPolicy(e.target.checked); setIdempotencyKey(createIdempotencyKey()) }} />Confirm that compliance review is disabled for this task and later results are for procurement comparison only</label>}
-    <div className="compliance-confirm-actions"><button className="button button-submit" type="button" disabled={disabled || confirm.isPending} onClick={() => confirm.mutate()}>{confirm.isPending ? 'Confirming…' : 'Confirm outcome and continue to decision'}</button></div>
+    <div className="compliance-confirm-actions"><button className="button button-submit" type="button" disabled={disabled || confirm.isPending} onClick={() => confirm.mutate()}>{confirm.isPending ? 'Confirming…' : 'Confirm'}</button></div>
     {confirm.isError && <p role="alert" className="form-error">{errorMessage(confirm.error)}</p>}
   </section>
 }
@@ -354,14 +356,14 @@ export function CompliancePage() {
   return <div className="page-stack compliance-page">
     <TaskWorkspaceHeader taskId={taskId} scenarioId={task.data.scenario_id} title={task.data.task_name} subtitle={`${task.data.requirement.required_quantity} ${task.data.requirement.quantity_unit} · ${task.data.quotes.length} quotations`} status={task.data.status} revision={data.task_revision} resultId={task.data.current_result_id} quoteCount={task.data.quotes.length} summaryComplete={task.data.summary_completed} progress={{ ...task.data.progress, compliance: data.stage }} active="compliance" />
     <section className="card compliance-context workspace-page-lead">
-      <div className="compliance-context-heading workspace-page-lead-copy"><h2>Compliance Review</h2><p>{policySummary}</p></div>
-      {data.assessment && <div className="compliance-kpis" aria-label="Compliance ReviewOverview">
-        <div><strong>{counts?.COMPLIANT ?? 0}</strong><span>Verified Candidate</span></div>
-        <div><strong>{counts?.REVIEW_REQUIRED ?? 0}</strong><span>Evidence or Review Required</span></div>
-        <div><strong>{counts?.NON_COMPLIANT ?? 0}</strong><span>Excluded by Policy</span></div>
-        <div><strong>{counts?.NOT_EVALUATED ?? 0}</strong><span>Not Evaluated</span></div>
+      <div className="compliance-context-heading workspace-page-lead-copy"><h2>Compliance</h2><p>{policySummary}</p></div>
+      {data.assessment && <div className="compliance-kpis" aria-label="Compliance overview">
+        <div><strong>{counts?.COMPLIANT ?? 0}</strong><span>Verified</span></div>
+        <div><strong>{counts?.REVIEW_REQUIRED ?? 0}</strong><span>Pending</span></div>
+        <div><strong>{counts?.NON_COMPLIANT ?? 0}</strong><span>Excluded</span></div>
+        <div><strong>{counts?.NOT_EVALUATED ?? 0}</strong><span>Unchecked</span></div>
       </div>}
-      <div className="compliance-context-tags"><StateBadge status={data.stage.status} label={complianceStatusLabel(data.stage.status)} />{Boolean(data.stage.pending_count) && <span>{data.stage.pending_count} check items</span>}</div>
+      <div className="compliance-context-tags"><StateBadge status={data.stage.status} label={compactComplianceStatusLabel(data.stage.status)} />{Boolean(data.stage.pending_count) && <span>{data.stage.pending_count} {data.stage.pending_count === 1 ? 'item' : 'items'}</span>}</div>
     </section>
     {data.legacy_result && <p className="run-notice">This task uses a legacy workflow, and its historical result has not been confirmed at this stage. <Link to={`/tasks/${taskId}/audit`}>View history</Link></p>}
     {!data.policy_binding && <section className="card"><h3>Compliance review is not enabled for this task</h3><p>Explicitly confirm this below before continuing. The system does not interpret disabled review as supplier compliance.</p></section>}
@@ -390,15 +392,15 @@ export function CompliancePage() {
         </article>
       })}</div>
     </section>}
-    {!readonly && data.stage.status === 'NOT_STARTED' && task.data.progress.quote_review_completed && <section className="card compliance-start-card"><div><h3>Start compliance review</h3><p>{activeEvidence.length > 0 ? `The ${activeEvidence.length} uploaded evidence records will be used to retrieve applicable rules and run all checks together.` : 'No evidence has been uploaded. You can still start the review and fill the identified gaps afterwards.'}</p></div><button className="button button-submit" disabled={start.isPending || ['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)} onClick={() => start.mutate()}>{start.isPending ? 'Starting…' : failed ? 'Restart compliance review' : 'Start compliance review'}</button>{start.isError && <p role="alert">{errorMessage(start.error)}</p>}</section>}
-    {suppliers.length > 0 && <section className="card compliance-results-card"><div className="section-heading"><div><h3>Supplier check results</h3></div><span>{suppliers.length} suppliers</span></div>
-      <div className="compliance-table-scroll"><table aria-label="Supplier check results" className="supplier-data-table compliance-table"><thead><tr><th>Supplier</th><th>Supplier eligibility</th><th>RoHS</th><th>Compliance conclusion</th><th>Recommendation eligibility</th><th>Evidence and sources</th></tr></thead><tbody>
-        {pagination.pageItems.map((supplier) => { const admission = aggregateControlStatus(supplier.checks, 'APPROVED_SUPPLIER'); const rohs = aggregateControlStatus(supplier.checks, 'ROHS_COMPLIANCE'); const supplierName = supplier.supplier_name ?? supplier.supplier_id ?? supplier.quote_id; const expanded = supplier.quote_id === linkedQuote || expandedQuotes.includes(supplier.quote_id); const supplierEvidence = data.evidence.filter((record) => record.quote_id === supplier.quote_id); return <Fragment key={supplier.quote_id}><tr id={complianceAnchorId(supplier.quote_id)} tabIndex={-1}><td><strong>{supplierName}</strong><small>Quotation revision {supplier.quote_version}</small></td><td><StateBadge status={admission} label={checkStatusLabel(admission)} /></td><td><StateBadge status={rohs} label={checkStatusLabel(rohs)} /></td><td><StateBadge status={supplier.status} label={complianceStatusLabel(supplier.status)} /></td><td><StateBadge status={supplier.eligibility ?? 'UNVERIFIED'} label={complianceStatusLabel(supplier.eligibility ?? 'UNVERIFIED')} /></td><td>
+    {!readonly && data.stage.status === 'NOT_STARTED' && task.data.progress.quote_review_completed && <section className="card compliance-start-card"><div><h3>Start compliance review</h3><p>{activeEvidence.length > 0 ? `The ${activeEvidence.length} uploaded evidence records will be used to retrieve applicable rules and run all checks together.` : 'No evidence has been uploaded. You can still start the review and fill the identified gaps afterwards.'}</p></div><button className="button button-submit" disabled={start.isPending || ['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)} onClick={() => start.mutate()}>{start.isPending ? 'Starting…' : failed ? 'Restart' : 'Start'}</button>{start.isError && <p role="alert">{errorMessage(start.error)}</p>}</section>}
+    {suppliers.length > 0 && <section className="card compliance-results-card"><div className="section-heading"><div><h3>Checks</h3></div><span>{suppliers.length} suppliers</span></div>
+      <div className="compliance-table-scroll"><table aria-label="Supplier checks" className="supplier-data-table compliance-table"><thead><tr><th>Supplier</th><th>Eligibility</th><th>RoHS</th><th>Status</th><th>Recommendation</th><th>Evidence</th></tr></thead><tbody>
+        {pagination.pageItems.map((supplier) => { const admission = aggregateControlStatus(supplier.checks, 'APPROVED_SUPPLIER'); const rohs = aggregateControlStatus(supplier.checks, 'ROHS_COMPLIANCE'); const supplierName = supplier.supplier_name ?? supplier.supplier_id ?? supplier.quote_id; const expanded = supplier.quote_id === linkedQuote || expandedQuotes.includes(supplier.quote_id); const supplierEvidence = data.evidence.filter((record) => record.quote_id === supplier.quote_id); return <Fragment key={supplier.quote_id}><tr id={complianceAnchorId(supplier.quote_id)} tabIndex={-1}><td><strong>{supplierName}</strong><small>Revision {supplier.quote_version}</small></td><td><StateBadge status={admission} label={compactCheckStatusLabel(admission)} /></td><td><StateBadge status={rohs} label={compactCheckStatusLabel(rohs)} /></td><td><StateBadge status={supplier.status} label={compactComplianceStatusLabel(supplier.status)} /></td><td><StateBadge status={supplier.eligibility ?? 'UNVERIFIED'} label={compactComplianceStatusLabel(supplier.eligibility ?? 'UNVERIFIED')} /></td><td>
           {!readonly && errors.length > 0 && <small>Policy rules require administrator attention; adding evidence cannot currently remove the block.</small>}
           <button type="button" className="compliance-details-toggle" aria-expanded={expanded} aria-label={`${expanded ? 'Collapse' : 'Expand'} ${supplierName} Checks and Evidence`} onClick={() => {
             navigate({ pathname: location.pathname, hash: '' }, { replace: true })
             setExpandedQuotes((current) => expanded ? current.filter((quoteId) => quoteId !== supplier.quote_id) : [...current, supplier.quote_id])
-          }}>{expanded ? 'Collapse' : 'Expand'} checks and evidence ({supplier.checks.length + supplierEvidence.length})</button>
+          }}>{expanded ? 'Hide' : 'Details'} ({supplier.checks.length + supplierEvidence.length})</button>
         </td></tr>{expanded && <tr className="compliance-detail-row"><td colSpan={6}><SupplierCheckDetails supplier={supplier} clauses={clauses} evidence={supplierEvidence} taskId={taskId} linkedCheck={linkedCheck} readonly={readonly} onEdit={(control, record) => setTarget({ supplier, control, record, revision: data.task_revision, runAfterSave: true })} /></td></tr>}</Fragment>})}
       </tbody></table></div><TablePagination page={pagination.page} pageSize={pagination.pageSize} pageCount={pagination.pageCount} total={suppliers.length} onPageChange={(page) => { navigate({ pathname: location.pathname, hash: '' }, { replace: true }); pagination.setPage(page) }} />
     </section>}
@@ -408,8 +410,8 @@ export function CompliancePage() {
       const supplierName = item.supplier_name ?? supplier?.supplier_name ?? 'Supplier identity requires review'
       const record = item.quote_id ? currentEvidence(item.quote_id, 'AMOUNT_APPROVAL') : undefined
       const deferred = item.execution_stage === 'AFTER_SELECTION'
-      const outcome = item.approval_confirmed ? 'Approval record verified' : item.triggered === true ? (deferred ? 'Triggered after selection' : 'Approval requires review') : item.triggered === false ? 'Not triggered' : 'Awaiting check'
-      return <tr key={`${item.quote_id}:${item.execution_stage}:${item.threshold}:${item.action}:${index}`}><td><strong>{supplierName}</strong></td><td>{executionStageLabel(item.execution_stage)}</td><td>{item.amount && item.currency ? `${item.currency} ${item.amount}` : 'Amount pending confirmation'}{item.threshold && <small>Threshold: {item.currency ?? ''} {item.threshold}</small>}</td><td><StateBadge status={item.approval_confirmed ? 'PASS' : item.triggered === true ? 'REVIEW_REQUIRED' : item.triggered === false ? 'PASS' : 'NOT_EVALUATED'} label={outcome} />{item.triggered !== false && (item.reason_codes ?? []).map((code) => <small key={code}>{complianceReasonLabel(code)}</small>)}</td><td>{item.triggered ? item.action ?? 'Follow policy procedure' : '—'}{!readonly && errors.length === 0 && item.triggered === true && supplier && <button className="button button-secondary compliance-add" type="button" onClick={() => setTarget({ supplier, control: 'AMOUNT_APPROVAL', record, revision: data.task_revision, runAfterSave: true })}>{record ? 'Replace amount approval record' : 'Add amount approval record'}</button>}</td></tr>
+      const outcome = item.approval_confirmed ? 'Verified' : item.triggered === true ? (deferred ? 'Triggered' : 'Review') : item.triggered === false ? 'Clear' : 'Pending'
+      return <tr key={`${item.quote_id}:${item.execution_stage}:${item.threshold}:${item.action}:${index}`}><td><strong>{supplierName}</strong></td><td>{executionStageLabel(item.execution_stage)}</td><td>{item.amount && item.currency ? `${item.currency} ${item.amount}` : 'Amount pending confirmation'}{item.threshold && <small>Threshold: {item.currency ?? ''} {item.threshold}</small>}</td><td><StateBadge status={item.approval_confirmed ? 'PASS' : item.triggered === true ? 'REVIEW_REQUIRED' : item.triggered === false ? 'PASS' : 'NOT_EVALUATED'} label={outcome} />{item.triggered !== false && (item.reason_codes ?? []).map((code) => <small key={code}>{complianceReasonLabel(code)}</small>)}</td><td>{item.triggered ? item.action ?? 'Follow policy procedure' : '—'}{!readonly && errors.length === 0 && item.triggered === true && supplier && <button className="button button-secondary compliance-add" type="button" onClick={() => setTarget({ supplier, control: 'AMOUNT_APPROVAL', record, revision: data.task_revision, runAfterSave: true })}>{record ? 'Replace' : 'Add'}</button>}</td></tr>
     })}</tbody></table></div></section>}
     {!readonly && data.assessment && <Confirmation key={`${data.task_revision}:${data.stage.assessment_id}`} workspace={data} onRefresh={refresh} />}
   </div>

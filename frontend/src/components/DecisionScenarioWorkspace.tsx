@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ComplianceAssessmentDetails } from './ComplianceAssessmentDetails'
+import { EnglishDateInput } from './EnglishDateInput'
 import { OverlayPortal } from './OverlayPortal'
 import {
   api,
@@ -539,7 +540,7 @@ export function DecisionScenarioWorkspace({
     mutationFn: () => api.createDecisionConversation(
       task.task_id,
       task.task_revision,
-      `Decision Discussion ${new Date().toLocaleString('zh-CN')}`,
+      `Decision Discussion ${new Date().toLocaleString('en-SG')}`,
       createIdempotencyKey(),
     ),
     onSuccess: (created) => {
@@ -899,7 +900,7 @@ export function DecisionScenarioWorkspace({
                   <input type="number" min="0" step="0.01" value={budgetAmount} onChange={(event) => setBudgetAmount(event.target.value)} />
                 </label>
                 <label><span>Latest delivery date</span>
-                  <input type="date" value={deliveryDeadline} onChange={(event) => setDeliveryDeadline(event.target.value)} />
+                  <EnglishDateInput value={deliveryDeadline} onChange={setDeliveryDeadline} />
                 </label>
               </div>
               <label><span>Cost tolerance ({task.requirement.currency})</span>

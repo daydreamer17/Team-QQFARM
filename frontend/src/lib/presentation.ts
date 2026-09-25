@@ -34,6 +34,25 @@ const fields: Record<string, string> = {
   payment_terms: 'Payment terms', quote_date: 'Quotation Date', valid_until: 'Valid Until',
 }
 
+const quoteFieldGroups: Record<string, string> = {
+  identity: 'Identity',
+  specification: 'Specifications',
+  specifications: 'Specifications',
+  pricing: 'Pricing',
+  packaging: 'Packaging',
+  moq: 'MOQ',
+  fees: 'Fees',
+  delivery: 'Delivery',
+  commercial: 'Commercial',
+  '\u8eab\u4efd': 'Identity',
+  '\u89c4\u683c': 'Specifications',
+  '\u4ef7\u683c': 'Pricing',
+  '\u5305\u88c5': 'Packaging',
+  '\u8d39\u7528': 'Fees',
+  '\u4ea4\u671f': 'Delivery',
+  '\u5546\u52a1': 'Commercial',
+}
+
 const reasons: Record<string, string> = {
   BUDGET_EXCEEDED: 'The total cost exceeds the procurement budget.',
   CURRENCY_MISMATCH: 'The quotation currency does not match the procurement currency.',
@@ -83,9 +102,41 @@ export function quoteStatusLabel(value: string) { return quoteStatuses[value] ??
 export function summaryStatusLabel(value: string) { return summaryStatuses[value] ?? 'Processing' }
 export function dispositionLabel(value: string) { return dispositions[value] ?? 'Comparison updated' }
 export function fieldLabel(value: string) { return fields[value] ?? 'Related information' }
+export function quoteFieldGroupLabel(value: string, groupId?: string) {
+  const id = groupId?.trim().toLowerCase()
+  return (id ? quoteFieldGroups[id] : undefined) ?? quoteFieldGroups[value.trim()] ?? value
+}
+export function quoteRuleText(value: string) {
+  return /[\u3400-\u9fff]/.test(value)
+    ? 'Use only values explicitly supported by the source. Ambiguous information requires review.'
+    : value
+}
+export function quoteRelationMessage(kind: string, value: string) {
+  if (!/[\u3400-\u9fff]/.test(value)) return value
+  const messages: Record<string, string> = {
+    ALL_OR_NONE: 'Complete all related fields together, or leave all of them blank.',
+    MONEY_CURRENCY: 'All monetary amounts must use the quotation currency.',
+    FEE_STATUS_AMOUNT: 'The fee status and amount must be consistent.',
+    MOQ_PACKAGING: 'The MOQ unit must be consistent with the packaging method and units per pack.',
+    DATE_ORDER: 'The quotation date cannot be later than the validity end date.',
+  }
+  return messages[kind] ?? 'The related quotation fields are inconsistent and require review.'
+}
 export function controlLabel(value: string) { return controls[value] ?? 'Other policy requirement' }
 export function validationStatusLabel(value: string) { return validationStatuses[value] ?? 'Pending verification' }
 export function originLabel(value: string | null) { return value ? (origins[value] ?? 'System record') : 'Not recorded' }
+
+export function issueQuestionText(question: string, issueType: string) {
+  if (!/[\u3400-\u9fff]/.test(question)) return question
+  const fallbacks: Record<string, string> = {
+    CONFIRM_MISSING: 'Confirm whether the source document omits this value.',
+    SHIPPING_AMOUNT: 'Provide the confirmed shipping amount.',
+    POLICY_EVIDENCE_REVIEW: 'Review the policy evidence and record the outcome.',
+    BATCH_FIELD_REVIEW: 'Review and confirm the quotation fields in this batch.',
+    PAYMENT_INFORMATION: 'Confirm when the quoted payment term begins.',
+  }
+  return fallbacks[issueType] ?? 'Manual review was requested for this item.'
+}
 
 export function reasonText(reason: Pick<ResultReason, 'code' | 'message'>) {
   if (reasons[reason.code]) return reasons[reason.code]

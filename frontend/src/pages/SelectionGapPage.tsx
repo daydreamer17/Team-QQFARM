@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { type FormEvent, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, ApiClientError } from '../api/client'
+import { EnglishDateInput } from '../components/EnglishDateInput'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
 import { dispositionLabel, quoteStatusLabel, reasonText } from '../lib/presentation'
 
@@ -80,11 +81,11 @@ export function SelectionGapPage() {
       <form className="card simulation-form" onSubmit={submitSimulation}>
         <div><p className="eyebrow">What-if analysis</p><h2>Would the recommendation change if the budget or delivery deadline changed?</h2><p>Simulation results do not change the formal requirements or replace the compliance review.</p></div>
         <label className="field"><span>Assumed budget ({data.requirement.currency})</span><input inputMode="decimal" value={budget} onChange={(event) => { setBudget(event.target.value); simulation.reset() }} placeholder={data.requirement.budget_amount} /></label>
-        <label className="field"><span>Assumed delivery deadline</span><input type="date" value={deadline} onChange={(event) => { setDeadline(event.target.value); simulation.reset() }} /></label>
+        <label className="field"><span>Assumed delivery deadline</span><EnglishDateInput value={deadline} onChange={(value) => { setDeadline(value); simulation.reset() }} /></label>
         <button className="button button-submit" disabled={task.data.status === 'ABANDONED' || simulation.isPending || (!budget.trim() && !deadline)}>{simulation.isPending ? 'Simulating…' : 'Run simulation'}</button>
         {simulation.isError && <div className="form-error">{errorMessage(simulation.error)}</div>}
       </form>
-      {simulation.data && <section className="card simulation-result"><span className="status-pill status-pending">Simulation only</span><h2>{dispositionLabel(simulation.data.result.comparison.disposition)}</h2><p>Recommended candidates: {simulation.data.result.comparison.recommended_quote_ids.map(supplierName).join(', ') || 'None'}</p><small>This result will not be written to the formal recommendation, and the compliance review has not been rerun.</small></section>}
+      {simulation.data && <section className="card simulation-result"><span className="status-pill status-pending">Simulation</span><h2>{dispositionLabel(simulation.data.result.comparison.disposition)}</h2><p>Recommended candidates: {simulation.data.result.comparison.recommended_quote_ids.map(supplierName).join(', ') || 'None'}</p><small>This result will not be written to the formal recommendation, and the compliance review has not been rerun.</small></section>}
     </div>
   )
 }

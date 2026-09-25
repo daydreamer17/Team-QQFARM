@@ -73,7 +73,7 @@ function displayDate(value: string | null) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(date)
+  return new Intl.DateTimeFormat('en-SG', { dateStyle: 'medium' }).format(date)
 }
 
 function errorMessage(error: unknown) {
@@ -94,9 +94,9 @@ function errorMessage(error: unknown) {
 
 function statusLabel(status: string) {
   const labels: Record<string, string> = {
-    REVIEW_REQUIRED: 'Awaiting clause review',
-    READY_TO_PUBLISH: 'Automatic identification complete; awaiting publication',
-    PUBLISHING: 'Generating index',
+    REVIEW_REQUIRED: 'Review needed',
+    READY_TO_PUBLISH: 'Ready to publish',
+    PUBLISHING: 'Publishing',
     PUBLISHED: 'Published',
   }
   return labels[status] ?? status
@@ -106,6 +106,104 @@ function statusClass(status: string) {
   if (status === 'PUBLISHED') return 'status-ready'
   if (status === 'READY_TO_PUBLISH' || status === 'PUBLISHING') return 'status-pending'
   return 'status-muted'
+}
+
+const EXECUTION_STAGE_LABELS: Record<string, string> = {
+  BEFORE_RECOMMENDATION: 'Before recommendation',
+  BEFORE_PUBLICATION: 'Before report publication',
+  AFTER_SELECTION: 'After supplier selection',
+}
+
+const OPERATOR_LABELS: Record<string, string> = {
+  '>=': '≥',
+  GTE: '≥',
+  '>': '>',
+  GT: '>',
+  '<=': '≤',
+  LTE: '≤',
+  '<': '<',
+  LT: '<',
+}
+
+function parseRuleParameters(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+function controlLabel(controlCode: string) {
+  return CONTROL_CODE_OPTIONS.find((option) => option.value === controlCode)?.label
+    ?? 'Check type not selected'
+}
+
+function amountRuleIsComplete(parameters: Record<string, unknown>) {
+  if ('version' in parameters) return validateExecutableRule(parameters, 'AMOUNT_APPROVAL') === null
+  return /^[A-Z]{3}$/.test(String(parameters.currency ?? ''))
+    && /^\d+(\.\d+)?$/.test(String(parameters.threshold ?? ''))
+    && ['>', '>=', '<', '<='].includes(String(parameters.operator ?? ''))
+}
+
+function ruleExplanation(clause: EditableClause) {
+  const parameters = parseRuleParameters(clause.rule_parameters)
+  const stage = EXECUTION_STAGE_LABELS[String(parameters.execution_stage ?? 'BEFORE_RECOMMENDATION')]
+    ?? 'Configured execution stage'
+  if (clause.control_code === 'APPROVED_SUPPLIER') {
+    return {
+      summary: 'Match current eligibility evidence to the exact Supplier ID.',
+      detail: `The check runs ${stage.toLowerCase()}. Missing, expired or mismatched evidence is sent for human review.`,
+    }
+  }
+  if (clause.control_code === 'ROHS_COMPLIANCE') {
+    return {
+      summary: 'Match valid RoHS evidence to the supplier, manufacturer and part number.',
+      detail: `The check runs ${stage.toLowerCase()}. Missing evidence requires review; expired or mismatched evidence does not pass the default check.`,
+    }
+  }
+  if (clause.control_code === 'AMOUNT_APPROVAL') {
+    const currency = typeof parameters.currency === 'string' ? parameters.currency : ''
+    const threshold = typeof parameters.threshold === 'string' || typeof parameters.threshold === 'number'
+      ? String(parameters.threshold)
+      : ''
+    const operator = OPERATOR_LABELS[String(parameters.operator ?? '')] ?? ''
+    if (!amountRuleIsComplete(parameters) || !currency || !threshold || !operator) {
+      return {
+        summary: 'The approval threshold is incomplete.',
+        detail: 'Add only the missing currency, amount and comparison condition before publishing.',
+      }
+    }
+    return {
+      summary: `Confirmed total cost ${operator} ${currency} ${threshold} triggers amount approval.`,
+      detail: `The check runs ${stage.toLowerCase()}. A triggered rule records the required approval step; it does not approve the purchase automatically.`,
+    }
+  }
+  if (clause.control_code === 'INFORMATIONAL') {
+    return {
+      summary: 'Keep this clause as policy guidance and audit context.',
+      detail: 'This clause is searchable and citable, but it does not block or rank a supplier automatically.',
+    }
+  }
+  return {
+    summary: 'The system could not determine how to apply this clause.',
+    detail: 'Select a check type or keep the clause as informational guidance.',
+  }
+}
+
+function ruleDisplayStatus(source: PolicyDraftClause | undefined, clause: EditableClause) {
+  const status = source ? clauseStatus(source) : clause.control_code ? 'AUTO_ACCEPTED' : 'ADMIN_REVIEW'
+  if (clause.control_code === 'INFORMATIONAL') {
+    return { label: 'Reference only', className: 'is-reference' }
+  }
+  const parameters = parseRuleParameters(clause.rule_parameters)
+  if (status === 'AUTO_ACCEPTED'
+    && (clause.control_code !== 'AMOUNT_APPROVAL' || amountRuleIsComplete(parameters))) {
+    return { label: 'Ready', className: 'is-ready' }
+  }
+  return { label: 'Needs attention', className: 'is-attention' }
 }
 
 export function PolicyImportPage() {
@@ -122,8 +220,8 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
   const [revisionConflict, setRevisionConflict] = useState(false)
   const [lastReview, setLastReview] = useState<ReviewSubmission | null>(null)
   const [lastPublish, setLastPublish] = useState<PublishSubmission | null>(null)
-  const [showAdvanced, setShowAdvanced] = useState(true)
   const [openRuleSettings, setOpenRuleSettings] = useState<Record<string, boolean>>({})
+  const [editingClauses, setEditingClauses] = useState<Record<string, boolean>>({})
 
   const policy = useQuery({
     queryKey: ['policy-imports', policyImportId],
@@ -212,11 +310,17 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
     review.reset()
   }
 
+  function changeRuleParameter(index: number, key: string, value: unknown) {
+    const parameters = parseRuleParameters(clauses[index].rule_parameters)
+    changeClause(index, 'rule_parameters', JSON.stringify({ ...parameters, [key]: value }, null, 2))
+  }
+
   function addClause() {
+    const editorKey = `draft-${Date.now()}-${clauses.length}`
     setClauses((current) => [
       ...current,
       {
-        editor_key: `draft-${Date.now()}-${current.length}`,
+        editor_key: editorKey,
         clause_id: `CLAUSE-${String(current.length + 1).padStart(3, '0')}`,
         title: '',
         text: '',
@@ -228,6 +332,8 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
     setLocalError('')
     setLastReview(null)
     review.reset()
+    setEditingClauses((current) => ({ ...current, [editorKey]: true }))
+    setOpenRuleSettings((current) => ({ ...current, [editorKey]: true }))
   }
 
   function removeClause(index: number) {
@@ -279,14 +385,25 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
         setLocalError(`Clause ${index + 1} rule_parameters must be a JSON object.`)
         return null
       }
-      const ruleError = validateExecutableRule(parameters as Record<string, unknown>, clause.control_code)
+      const ruleParameters = parameters as Record<string, unknown>
+      if (clause.control_code === 'AMOUNT_APPROVAL' && !('version' in ruleParameters)) {
+        const currency = String(ruleParameters.currency ?? '')
+        const threshold = String(ruleParameters.threshold ?? '')
+        const operator = String(ruleParameters.operator ?? '')
+        if (!/^[A-Z]{3}$/.test(currency) || !/^\d+(\.\d+)?$/.test(threshold)
+          || !['>', '>=', '<', '<='].includes(operator)) {
+          setLocalError(`Clause ${index + 1}: enter a three-letter currency, numeric threshold and comparison condition.`)
+          return null
+        }
+      }
+      const ruleError = validateExecutableRule(ruleParameters, clause.control_code)
       if (ruleError) { setLocalError(`Clause ${index + 1}: ${ruleError}`); return null }
       parsed.push({
         clause_id: clause.clause_id.trim(),
         title: clause.title.trim(),
         text: clause.text.trim(),
         control_code: clause.control_code.trim().toUpperCase(),
-        rule_parameters: parameters as Record<string, unknown>,
+        rule_parameters: ruleParameters,
       })
     }
     return parsed
@@ -341,18 +458,22 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
   )
   const sourceClauses = data.clauses
   const unresolvedIndexes = new Set(
-    sourceClauses
-      .map((clause, index) => clauseStatus(clause) === 'AUTO_ACCEPTED' ? -1 : index)
+    clauses
+      .map((clause, index) => ruleDisplayStatus(sourceClauses[index], clause).className === 'is-attention' ? index : -1)
       .filter((index) => index >= 0),
   )
   const unresolvedCount = unresolvedIndexes.size
-  const recognizedCount = clauses.length - unresolvedCount
+  const recognizedCount = clauses.filter((clause) => Boolean(clause.control_code)).length
+  const referenceCount = clauses.filter((clause, index) =>
+    ruleDisplayStatus(sourceClauses[index], clause).className === 'is-reference'
+  ).length
+  const readyCount = Math.max(0, clauses.length - unresolvedCount - referenceCount)
 
   return (
     <div className="page-stack policy-review-page">
       <section className="page-heading policy-review-heading">
         <div>
-          <Link className="back-link" to="/resources">← Back to policy library</Link>
+          <Link className="back-link" to="/resources">← Policies</Link>
           <h1>{data.policy_set_id}</h1>
           <p>Reviewing: {data.original_filename}</p>
         </div>
@@ -371,7 +492,7 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
       {setFiles.length > 0 && (
         <section className="card policy-set-files">
           <div className="section-heading">
-            <div><h2>Documents in this version</h2><p>The system organises clauses automatically. Only unrecognised content requires manual confirmation.</p></div>
+            <div><h2>Documents</h2><p>Clauses are organised automatically; only unrecognised content needs review.</p></div>
             <span>{setFiles.filter((item) => item.status === 'READY_TO_PUBLISH' || item.status === 'PUBLISHED').length} / {setFiles.length} ready</span>
           </div>
           <div className="policy-set-file-list">
@@ -383,7 +504,7 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
             ))}
           </div>
           <details className="policy-source-details policy-source-inline">
-            <summary>View parsing results</summary>
+            <summary>Parsing results</summary>
             {data.extraction_metadata.page_count && <p>{data.extraction_metadata.page_count} pages</p>}
             <pre>{data.extracted_text}</pre>
           </details>
@@ -399,12 +520,12 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
 
       {!readonly && (
         <section className="card policy-published-summary">
-          <div><h2>{unresolvedCount === 0 ? 'This document has been processed automatically' : `${unresolvedCount} items still require attention`}</h2></div>
+          <div><h2>{unresolvedCount === 0 ? 'Automated policy rules are ready' : `${unresolvedCount} ${unresolvedCount === 1 ? 'rule needs' : 'rules need'} attention`}</h2></div>
           <p>
-            Identified the purpose of {recognizedCount} / {clauses.length} clauses.
+            The system understood {recognizedCount} / {clauses.length} clauses.
             {unresolvedCount === 0
-              ? ' Before automated checks can run, configure and manually confirm the executable rules in Advanced Review below.'
-              : ' Only the unidentified clauses below require attention; other content does not need to be reconfirmed.'}
+              ? ' Ready rules will use the displayed safe defaults when this policy is published; no additional setup is required.'
+              : ' Complete only the highlighted information below; recognised rules do not need to be entered again.'}
           </p>
         </section>
       )}
@@ -426,65 +547,118 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
             <button className="button button-secondary" type="button" onClick={() => {
               if (lastPublish) publish.mutate(lastPublish)
               else startPublish()
-            }}>Retry publication</button>
+            }}>Retry</button>
           </div>
         )}
         <div className="section-heading">
-          <div><h2>{showAdvanced ? 'Advanced Review' : 'Clauses requiring confirmation'}</h2></div>
-          <div className="policy-clause-actions">
-            <button className="button button-secondary" type="button" onClick={() => setShowAdvanced((current) => !current)}>
-              {showAdvanced ? 'Collapse advanced review' : `Expand advanced review (${clauses.length} ${clauses.length === 1 ? 'clause' : 'clauses'})`}
-            </button>
-            {!readonly && showAdvanced && <button className="button button-secondary" type="button" onClick={addClause}>+ Add clause</button>}
-          </div>
+          <div><h2>Policy rule review</h2><p>Review what the system will enforce. Open a row only when you need the source text or want to change the defaults.</p></div>
         </div>
-        <p className="section-helper">Clause classification does not create an executable rule. Use advanced review to configure evidence matching, validity handling and amount conditions; legacy parameters are not executed automatically.</p>
+        <div className="policy-rule-summary" aria-label="Policy rule status">
+          <span><strong>{readyCount}</strong> ready</span>
+          <span><strong>{unresolvedCount}</strong> need attention</span>
+          <span><strong>{referenceCount}</strong> reference only</span>
+        </div>
 
-        <div className="policy-clause-list">
-          {clauses.map((clause, index) => (!showAdvanced && !unresolvedIndexes.has(index) ? null : (
-            <article className="card policy-clause-card" key={clause.editor_key}>
-              <header>
-                <div><span>Clause {index + 1}</span><strong>{clause.title || 'Untitled clause'}</strong></div>
-                {!readonly && showAdvanced && (
-                  <div className="policy-clause-actions">
-                    <button type="button" disabled={index === 0} onClick={() => moveClause(index, -1)} aria-label="Move clause up">↑</button>
-                    <button type="button" disabled={index === clauses.length - 1} onClick={() => moveClause(index, 1)} aria-label="Move clause down">↓</button>
-                    <button type="button" onClick={() => removeClause(index)}>Delete</button>
-                  </div>
-                )}
-              </header>
-              <div className="policy-clause-grid">
-                <label className="field policy-field-wide"><span>Title</span><input required readOnly={readonly || !showAdvanced} value={clause.title} onChange={(event) => changeClause(index, 'title', event.target.value)} /></label>
-                <label className="field policy-field-wide"><span>Clause Text</span><textarea required readOnly={readonly || !showAdvanced} rows={5} value={clause.text} onChange={(event) => changeClause(index, 'text', event.target.value)} /></label>
-                {!showAdvanced && unresolvedIndexes.has(index) && <div className="policy-clause-needs-admin policy-field-wide">
-                  <strong>{clauseStatus(sourceClauses[index]) === 'UNSUPPORTED' ? 'Automated execution is not currently supported' : 'Administrator action required'}</strong>
-                  {(sourceClauses[index].classification?.reason_codes ?? ['UNRECOGNIZED_CONTROL']).map((reason) => <span key={reason}>{CLASSIFICATION_REASONS[reason] ?? reason}</span>)}
-                  {(sourceClauses[index].classification?.conflicts_with?.length ?? 0) > 0 && <span>Conflicts with: {sourceClauses[index].classification?.conflicts_with.join(', ')}</span>}
-                  <span>General users do not need to enter technical codes. A policy administrator should complete the advanced review.</span>
-                </div>}
-                {showAdvanced && <details
-                  className="policy-clause-rule-settings policy-field-wide"
-                  open={openRuleSettings[clause.editor_key] ?? true}
-                  onToggle={(event) => {
-                    const open = event.currentTarget.open
-                    setOpenRuleSettings((current) => current[clause.editor_key] === open
-                      ? current
-                      : { ...current, [clause.editor_key]: open })
-                  }}
-                >
-                  <summary>Check-rule settings{!clause.control_code ? ' (required before publication)' : ''}</summary>
-                  <div className="policy-clause-grid">
-                    <label className="field"><span>Clause ID</span><input required readOnly={readonly} value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>
-                    <label className="field"><span>Check Type</span><select required disabled={readonly} value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)}><option value="">Select a clause purpose</option>{CONTROL_CODE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
-                    <div className="policy-field-wide"><ExecutableRuleEditor controlCode={clause.control_code} value={clause.rule_parameters} onChange={(value) => changeClause(index, 'rule_parameters', value)} readonly={readonly} /></div>
-                    <details className="policy-field-wide"><summary>View raw rule parameters</summary><label className="field"><span>Advanced rule parameters <small>JSON</small></span><textarea required readOnly={readonly} rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label></details>
-                  </div>
-                </details>}
-              </div>
-            </article>
-          )))}
-          {!showAdvanced && unresolvedCount === 0 && <p className="policy-directory-state">This document has no clauses requiring manual action.</p>}
+        <div className="policy-rule-table" role="table" aria-label="Policy rules">
+          <div className="policy-rule-table-head" role="row">
+            <span role="columnheader">Clause</span>
+            <span role="columnheader">How the system will apply it</span>
+            <span role="columnheader">Status</span>
+            <span aria-hidden="true">Actions</span>
+          </div>
+          {clauses.map((clause, index) => {
+            const source = sourceClauses[index]
+            const unresolved = unresolvedIndexes.has(index)
+            const unsupported = Boolean(source && clauseStatus(source) === 'UNSUPPORTED')
+            const explanation = ruleExplanation(clause)
+            const displayStatus = ruleDisplayStatus(source, clause)
+            const parameters = parseRuleParameters(clause.rule_parameters)
+            const legacyAmountRule = clause.control_code === 'AMOUNT_APPROVAL' && !('version' in parameters)
+            const isEditing = editingClauses[clause.editor_key] === true
+            return (
+              <details
+                className={`policy-rule-row ${displayStatus.className}`}
+                key={clause.editor_key}
+                open={openRuleSettings[clause.editor_key] ?? unresolved}
+                onToggle={(event) => {
+                  const open = event.currentTarget.open
+                  setOpenRuleSettings((current) => current[clause.editor_key] === open
+                    ? current
+                    : { ...current, [clause.editor_key]: open })
+                }}
+              >
+                <summary>
+                  <span className="policy-rule-title"><strong>{clause.title || 'Untitled clause'}</strong><small>{controlLabel(clause.control_code)}</small></span>
+                  <span className="policy-rule-explanation">{explanation.summary}</span>
+                  <span className={`policy-rule-status ${displayStatus.className}`}>{displayStatus.label}</span>
+                  <span className="policy-rule-actions">
+                    <span className="policy-rule-details-label">View</span>
+                    {!readonly && <button type="button" aria-label={`${isEditing ? 'Finish editing' : 'Edit'} ${clause.title || 'untitled clause'}`} onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setEditingClauses((current) => ({ ...current, [clause.editor_key]: !isEditing }))
+                      if (!isEditing) setOpenRuleSettings((current) => ({ ...current, [clause.editor_key]: true }))
+                    }}>{isEditing ? 'Done' : 'Edit'}</button>}
+                  </span>
+                </summary>
+                <div className="policy-rule-row-body">
+                  <section>
+                    <h3>Source clause</h3>
+                    <blockquote>{clause.text}</blockquote>
+                    <small>Clause reference: {clause.clause_id}</small>
+                  </section>
+                  <section>
+                    <h3>Execution summary</h3>
+                    <p>{explanation.detail}</p>
+                    {unresolved && <div className="policy-clause-needs-admin">
+                      <strong>{source && clauseStatus(source) === 'UNSUPPORTED' ? 'Automatic execution is not supported' : 'Information required'}</strong>
+                      {(source?.classification?.reason_codes ?? ['UNRECOGNIZED_CONTROL']).map((reason) => <span key={reason}>{CLASSIFICATION_REASONS[reason] ?? reason}</span>)}
+                      {(source?.classification?.conflicts_with?.length ?? 0) > 0 && <span>Conflicts with: {source.classification?.conflicts_with.join(', ')}</span>}
+                    </div>}
+                  </section>
+
+                  {!readonly && (isEditing || unresolved) && <section className="policy-rule-edit-panel">
+                    <div className="policy-rule-edit-heading">
+                      <div><h3>{unresolved ? 'Complete this rule' : 'Edit clause'}</h3><p>Only change values when the system interpretation does not match the policy text.</p></div>
+                      {isEditing && <div className="policy-clause-actions">
+                        <button type="button" disabled={index === 0} onClick={() => moveClause(index, -1)} aria-label="Move clause up">↑</button>
+                        <button type="button" disabled={index === clauses.length - 1} onClick={() => moveClause(index, 1)} aria-label="Move clause down">↓</button>
+                        <button type="button" onClick={() => removeClause(index)}>Delete</button>
+                      </div>}
+                    </div>
+                    <div className="policy-clause-grid">
+                      {isEditing && <>
+                        <label className="field"><span>Title</span><input required value={clause.title} onChange={(event) => changeClause(index, 'title', event.target.value)} /></label>
+                        <label className="field"><span>Check Type</span><select required value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)}><option value="">Select a clause purpose</option>{CONTROL_CODE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>
+                        <label className="field policy-field-wide"><span>Clause Text</span><textarea required rows={4} value={clause.text} onChange={(event) => changeClause(index, 'text', event.target.value)} /></label>
+                      </>}
+                      {!isEditing && !clause.control_code && unsupported && <div className="policy-reference-action policy-field-wide">
+                        <div><strong>Keep the clause for reference?</strong><span>It will remain searchable and citable, but it will not produce an automatic pass or fail result.</span></div>
+                        <button className="button button-secondary" type="button" onClick={() => changeClause(index, 'control_code', 'INFORMATIONAL')}>Keep as reference only</button>
+                      </div>}
+                      {!isEditing && !clause.control_code && !unsupported && <label className="field policy-field-wide"><span>What should this clause check?</span><select required value={clause.control_code} onChange={(event) => changeClause(index, 'control_code', event.target.value)}><option value="">Select a check type</option>{CONTROL_CODE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>}
+                      {legacyAmountRule && <div className="policy-amount-rule-fields policy-field-wide">
+                        <label className="field"><span>Currency</span><input maxLength={3} value={String(parameters.currency ?? '')} placeholder="SGD" onChange={(event) => changeRuleParameter(index, 'currency', event.target.value.toUpperCase())} /></label>
+                        <label className="field"><span>Amount threshold</span><input inputMode="decimal" value={String(parameters.threshold ?? '')} placeholder="10000.00" onChange={(event) => changeRuleParameter(index, 'threshold', event.target.value)} /></label>
+                        <label className="field"><span>Trigger when total cost is</span><select value={String(parameters.operator ?? '>=')} onChange={(event) => changeRuleParameter(index, 'operator', event.target.value)}><option value=">=">Greater than or equal to</option><option value=">">Greater than</option><option value="<=">Less than or equal to</option><option value="<">Less than</option></select></label>
+                        <label className="field"><span>Check timing</span><select value={String(parameters.execution_stage ?? 'BEFORE_RECOMMENDATION')} onChange={(event) => changeRuleParameter(index, 'execution_stage', event.target.value)}>{Object.entries(EXECUTION_STAGE_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                      </div>}
+                      {isEditing && <details className="policy-clause-rule-settings policy-field-wide">
+                        <summary>Advanced execution settings</summary>
+                        <div className="policy-clause-grid">
+                          <div className="policy-field-wide"><ExecutableRuleEditor controlCode={clause.control_code} value={clause.rule_parameters} onChange={(value) => changeClause(index, 'rule_parameters', value)} readonly={readonly} /></div>
+                          <details className="policy-field-wide"><summary>Technical parameters</summary><label className="field"><span>Rule parameters <small>JSON</small></span><textarea required rows={4} spellCheck={false} value={clause.rule_parameters} onChange={(event) => changeClause(index, 'rule_parameters', event.target.value)} /></label></details>
+                          <label className="field policy-field-wide"><span>Clause ID</span><input required value={clause.clause_id} onChange={(event) => changeClause(index, 'clause_id', event.target.value)} /></label>
+                        </div>
+                      </details>}
+                    </div>
+                  </section>}
+                </div>
+              </details>
+            )
+          })}
         </div>
+        {!readonly && <div className="policy-add-clause-row"><button className="button button-secondary" type="button" onClick={addClause}>+ Add policy clause</button></div>}
 
         {(localError || review.isError || publish.isError) && (
           <div className="form-error compact-error" role="alert">
@@ -495,16 +669,16 @@ function PolicyImportEditor({ policyImportId }: { policyImportId: string }) {
         {!readonly && (
           <div className="policy-review-actions">
             {review.isError && lastReview && !revisionConflict && (
-              <button className="button button-secondary" type="button" onClick={() => review.mutate(lastReview)}>Retry the same save request</button>
+              <button className="button button-secondary" type="button" onClick={() => review.mutate(lastReview)}>Retry</button>
             )}
-            {showAdvanced && (unresolvedCount > 0 || dirty || data.status === 'REVIEW_REQUIRED') && <button className="button button-submit" type="submit" disabled={revisionConflict || review.isPending || publish.isPending}>
-              {review.isPending ? 'Saving…' : 'Save confirmed result'}
+            {(unresolvedCount > 0 || dirty || data.status === 'REVIEW_REQUIRED') && <button className="button button-submit" type="submit" disabled={revisionConflict || review.isPending || publish.isPending}>
+              {review.isPending ? 'Saving…' : 'Save'}
             </button>}
             <button className="button button-submit" type="button" disabled={data.status !== 'READY_TO_PUBLISH' || !allFilesReviewed || dirty || review.isPending || publish.isPending} onClick={startPublish}>
-              {publish.isPending ? 'Publishing policy…' : allFilesReviewed ? 'Confirm and publish this revision' : 'Resolve pending clauses first'}
+              {publish.isPending ? 'Publishing…' : 'Publish'}
             </button>
             {publish.isError && lastPublish && !revisionConflict && (
-              <button className="button button-secondary" type="button" onClick={() => publish.mutate(lastPublish)}>Retry the same publication request</button>
+              <button className="button button-secondary" type="button" onClick={() => publish.mutate(lastPublish)}>Retry</button>
             )}
           </div>
         )}

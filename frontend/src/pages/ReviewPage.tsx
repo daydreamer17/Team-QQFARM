@@ -200,7 +200,7 @@ function BusinessValueInput({
 
   if (allowedValues.length > 0) {
     return (
-      <select aria-label={`${label}Confirmed value`} value={value} onChange={(event) => onChange(event.target.value)}>
+      <select aria-label={`${label} value`} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">Select an option</option>
         {allowedValues.map((option) => (
           <option key={option} value={option}>{displayOption(option, definition?.field_name)}</option>
@@ -211,7 +211,7 @@ function BusinessValueInput({
 
   if (kind.includes('boolean')) {
     return (
-      <select aria-label={`${label}Confirmed value`} value={value} onChange={(event) => onChange(event.target.value)}>
+      <select aria-label={`${label} value`} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">Select an option</option>
         <option value="true">Yes</option>
         <option value="false">No</option>
@@ -222,7 +222,7 @@ function BusinessValueInput({
   return (
     <div className="review-business-value-control">
       <input
-        aria-label={`${label}Confirmed value`}
+        aria-label={`${label} value`}
         type="text"
         placeholder={kind.includes('date') ? 'YYYY-MM-DD' : undefined}
         inputMode={inputMode}
@@ -448,7 +448,7 @@ export function ReviewPage() {
         taskId={data.task_id}
         scenarioId={data.scenario_id}
         title={data.task_name}
-        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${pendingCount} fields require attention`}
+        subtitle={`${data.requirement.required_quantity} ${data.requirement.quantity_unit} · ${pendingCount} pending`}
         status={data.status}
         revision={data.task_revision}
         resultId={data.current_result_id}
@@ -461,14 +461,14 @@ export function ReviewPage() {
 
       <section className="card workspace-page-lead" aria-labelledby="review-overview-title">
         <div className="workspace-page-lead-copy">
-          <h2 id="review-overview-title">Action Items</h2>
-          <p>Review fields that affect the current decision. Only confirmed items will be included in the next recalculation.</p>
+          <h2 id="review-overview-title">Actions</h2>
+          <p>Review decision fields before recalculation.</p>
         </div>
         <dl className="review-overview-stats" aria-label="Review statistics">
-          <div><dt>Active quotation</dt><dd>{report.quotes.length}</dd></div>
-          <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>Fields requiring attention</dt><dd>{pendingCount}</dd></div>
-          {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>Pending limitation</dt><dd>{pendingLimitations.length}</dd></div>}
-          <div><dt>Recorded only</dt><dd>{recordOnly.length}</dd></div>
+          <div><dt>Quotations</dt><dd>{report.quotes.length}</dd></div>
+          <div className={pendingCount > 0 ? 'review-stat-pending' : 'review-stat-clear'}><dt>Pending</dt><dd>{pendingCount}</dd></div>
+          {pendingLimitations.length > 0 && <div className="review-stat-limitation"><dt>Limitations</dt><dd>{pendingLimitations.length}</dd></div>}
+          <div><dt>Recorded</dt><dd>{recordOnly.length}</dd></div>
         </dl>
       </section>
 
@@ -477,14 +477,14 @@ export function ReviewPage() {
         <div className="run-notice">Synchronising the latest review data…</div>
       )}
       {!report.review_pending && pendingCount === 0 && pendingLimitations.length === 0 && (
-        <section className="card audit-empty">No fields currently require additional information.</section>
+        <section className="card audit-empty">No pending fields.</section>
       )}
 
       {[false, true].map((excluded) => {
         const targets = actionable.filter((target) => excludedQuoteIds.has(target.quote_id) === excluded)
         if (!targets.length) return null
         return <section className="review-overview-group" key={String(excluded)} id={excluded ? 'excluded-review' : 'current-review'}>
-          <h3>{excluded ? 'Excluded suppliers · review before restoring' : 'Current comparison scope · fields requiring review'}</h3>
+          <h3>{excluded ? 'Excluded' : 'Current'}</h3>
           {excluded && <p className="muted">The following issues do not block the current recommendation. Saving the review will not automatically re-include the supplier; request inclusion again in the decision assistant after completing the review.</p>}
         <div className="review-problem-grid">
           {targets.map((target) => {
@@ -506,7 +506,7 @@ export function ReviewPage() {
                 <header>
                   <div><strong>{target.original_filename ?? 'Quotation Document'}</strong><span>{label}</span></div>
                   <span className={`status-pill ${isDeferred ? 'status-pending' : changed || isAdopted ? 'status-ready' : 'status-pending'}`}>
-                    {isDeferred ? 'Kept open for completion' : changed ? 'Revised; confirmation pending' : isAdopted ? 'Current value accepted' : 'Manual review required'}
+                    {isDeferred ? 'Pending' : changed ? 'Revised' : isAdopted ? 'Accepted' : 'Review'}
                   </span>
                 </header>
                 {group && group.problems.length > 1 && (
@@ -519,7 +519,7 @@ export function ReviewPage() {
                   </div>
                 )}
                 <label className="field review-business-value">
-                  <span>Confirmed value</span>
+                  <span>Value</span>
                   <BusinessValueInput
                     definition={definition}
                     label={label}
@@ -536,20 +536,20 @@ export function ReviewPage() {
                 <div className="review-card-actions">
                   {!changed && !isAdopted && !isDeferred && canAdopt && (
                     <button className="button button-secondary" type="button" onClick={() => setAdopted((current) => new Set([...current, stateKey]))}>
-                      Confirm current value
+                      Confirm
                     </button>
                   )}
                   {!isDeferred && (
                     <button className="button button-secondary" type="button" onClick={() => {
                       setDeferred((current) => new Set([...current, stateKey]))
                       setAdopted((current) => { const next = new Set(current); next.delete(stateKey); return next })
-                    }}>Keep pending for now</button>
+                    }}>Defer</button>
                   )}
                   {isDeferred && <button className="button button-secondary" type="button" onClick={() => setDeferred((current) => { const next = new Set(current); next.delete(stateKey); return next })}>Continue</button>}
                 </div>
                 {evidenceTexts.length > 0 && (
                   <details className="review-rule-details">
-                    <summary>View source quotation</summary>
+                    <summary>Source</summary>
                     {evidenceTexts.map((text) => <blockquote key={text}>{text}</blockquote>)}
                   </details>
                 )}
@@ -562,7 +562,7 @@ export function ReviewPage() {
 
       {manualBlockers.length > 0 && (
         <section className="card review-manual-blockers">
-          <h3>Additional information required</h3>
+          <h3>Missing information</h3>
           {manualBlockers.map((group) => {
             const problem = group.problems[0]
             const message = problem.resolution === 'ADDITIONAL_INFORMATION_REQUIRED'
@@ -577,7 +577,7 @@ export function ReviewPage() {
 
       {pendingLimitations.length > 0 && (
         <section className="card review-pending-limitations">
-          <h3>The system cannot complete the calculation, so the quotation remains pending.</h3>
+          <h3>Calculation pending</h3>
           {pendingLimitations.map((group) => {
             const problem = group.problems[0]
             const isBusinessDays = problem.codes.includes('DAY_BASIS_UNSUPPORTED')
@@ -595,7 +595,7 @@ export function ReviewPage() {
 
       {recordOnly.length > 0 && (
         <details className="card review-records">
-          <summary>View records that do not affect the current recommendation ({recordOnly.length})</summary>
+          <summary>Records ({recordOnly.length})</summary>
           <div>
             {recordOnly.map((group) => (
               <p key={group.key}>
@@ -612,10 +612,10 @@ export function ReviewPage() {
           {correction.isPending
             ? 'Submitting…'
             : waitingForReview
-              ? 'Waiting for quotation review to complete'
+              ? 'Waiting…'
               : !versionsAligned
-                ? 'Synchronising the latest data…'
-                : 'Save confirmation and recalculate'}
+                ? 'Synchronising…'
+                : 'Save & recalculate'}
         </button>
       )}
       {actionable.length > 0 && !complete && (

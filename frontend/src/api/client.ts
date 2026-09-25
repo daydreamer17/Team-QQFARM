@@ -55,6 +55,7 @@ import type {
   SupplierInformationResponse,
   ResultHistoryItem,
 } from './types'
+import { fieldLabel, quoteFieldGroupLabel, quoteRelationMessage, quoteRuleText } from '../lib/presentation'
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
@@ -146,6 +147,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return payload as T
+}
+
+function localizeQuoteFieldSchema(schema: QuoteFieldSchemaResponse): QuoteFieldSchemaResponse {
+  return {
+    ...schema,
+    groups: schema.groups?.map((group) => ({
+      ...group,
+      label: quoteFieldGroupLabel(group.label, group.group_id),
+    })),
+    fields: schema.fields.map((definition) => ({
+      ...definition,
+      label: fieldLabel(definition.field_name),
+      group_label: quoteFieldGroupLabel(definition.group_label, definition.group_id),
+      normalization_rule: quoteRuleText(definition.normalization_rule),
+    })),
+    relation_groups: schema.relation_groups.map((relation) => ({
+      ...relation,
+      message: quoteRelationMessage(relation.kind, relation.message),
+    })),
+  }
 }
 
 async function download(path: string): Promise<{ blob: Blob; filename: string }> {
@@ -297,8 +318,8 @@ export const api = {
     }),
   getTaskAudit: (taskId: string) =>
     request<TaskAuditResponse>(`/api/v1/tasks/${encodeURIComponent(taskId)}/revisions`),
-  getQuoteFieldSchema: () =>
-    request<QuoteFieldSchemaResponse>('/api/v1/quote-field-schema'),
+  getQuoteFieldSchema: async () =>
+    localizeQuoteFieldSchema(await request<QuoteFieldSchemaResponse>('/api/v1/quote-field-schema')),
   listQuoteDrafts: (taskId: string) =>
     request<QuoteDraftListResponse>(
       `/api/v1/tasks/${encodeURIComponent(taskId)}/quote-drafts`,

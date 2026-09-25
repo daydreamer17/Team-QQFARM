@@ -178,12 +178,12 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Historical frozen result')).toBeInTheDocument()
-    expect(screen.getByText('As of 2026-08-06')).toBeInTheDocument()
-    expect(screen.getByText('Synthetic demo data')).toBeInTheDocument()
+    const context = (await screen.findByText('Historical')).closest('.supplier-context')!
+    expect(within(context).getByText('2026-08-06')).toBeInTheDocument()
+    expect(within(context).getByText('Synthetic')).toBeInTheDocument()
     const overview = screen.getByLabelText('Supplier overview')
     expect(within(overview).getAllByText('2')).toHaveLength(2)
-    expect(within(overview).getByText('Identity matched')).toBeInTheDocument()
+    expect(within(overview).getByText('Matched')).toBeInTheDocument()
     expect(overview.closest('.supplier-context')).toBeInTheDocument()
     const chart = screen.getByRole('img', { name: 'Supplier historical on-time and rejected order-line rates' })
     expect(chart).toBeInTheDocument()
@@ -196,10 +196,10 @@ describe('SupplierInfoPage', () => {
     expect(screen.queryByText('Current第 7 版')).not.toBeInTheDocument()
     expect(screen.getByText('Historical result · Revision 7')).toBeInTheDocument()
 
-    const supplierList = screen.getByRole('heading', { name: 'Suppliers in this comparison' }).closest('article')!
-    expect(within(supplierList).getByText('SUP-024 · Feasible in this comparison')).toBeInTheDocument()
+    const supplierList = document.querySelector('.supplier-list-card')!
+    expect(within(supplierList).getByText('SUP-024 · Feasible')).toBeInTheDocument()
     await userEvent.click(within(supplierList).getByRole('button', { name: /Redwood Components/ }))
-    const detail = screen.getByText('SELECTED SUPPLIER').closest('section')!
+    const detail = screen.getByText('SELECTED').closest('section')!
     expect(within(detail).getByRole('heading', { name: 'Redwood Components' })).toBeInTheDocument()
     expect(within(detail).getByText('86.0%')).toBeInTheDocument()
     expect(within(detail).getByText('SGD 6900.00')).toBeInTheDocument()
@@ -223,7 +223,8 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    const supplierList = (await screen.findByRole('heading', { name: 'Suppliers in this comparison' })).closest('article')!
+    await screen.findByLabelText('Supplier overview')
+    const supplierList = document.querySelector('.supplier-list-card')!
     expect(within(supplierList).getAllByRole('button')).toHaveLength(2)
   })
 
@@ -251,10 +252,10 @@ describe('SupplierInfoPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Scope: 3 active − 1 excluded = 2 compared')).toBeInTheDocument()
+    expect(await screen.findByText('3 active · 1 excluded · 2 compared')).toBeInTheDocument()
     const overview = screen.getByLabelText('Supplier overview')
-    expect(within(overview).getByText('Compared quotations')).toBeInTheDocument()
-    expect(within(overview).getByText('Exclude supplier')).toBeInTheDocument()
+    expect(within(overview).getByText('Compared')).toBeInTheDocument()
+    expect(within(overview).getByText('Excluded')).toBeInTheDocument()
     expect(screen.getByText('Excludes SUP-030 under the current settings')).toBeInTheDocument()
   })
 })
