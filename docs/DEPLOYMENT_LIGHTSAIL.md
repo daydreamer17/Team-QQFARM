@@ -18,24 +18,30 @@ private; only the Nginx web entry point is exposed publicly.
    The script shows the exact region, image, RAM, and list price before asking
    for confirmation. It selects the least expensive active Linux plan with at
    least 4 GB RAM, creates an Ubuntu 24.04 instance in Singapore, attaches a
-   static IPv4 address, and opens only HTTP/HTTPS in addition to the default
-   SSH rule. Set `LIGHTSAIL_MIN_RAM_GB=8` when concurrent demo use warrants the
-   larger plan.
+   static IPv4 address, opens only HTTP/HTTPS in addition to the default SSH
+   rule, and bootstraps Docker and the repository without storing any secrets
+   in instance metadata. Set `LIGHTSAIL_MIN_RAM_GB=8` when concurrent demo use
+   warrants the larger plan.
 
 3. Restrict TCP 22 to team IP addresses when possible. Do not open 5432, 8000,
    or 5173.
 
 ## 2. Install Docker
 
-Connect with the Lightsail browser SSH client, clone the repository, and run
-the included installer. It configures Docker's official Ubuntu repository and
-installs Docker Engine, Buildx, and the Docker Compose plugin:
+Connect with the Lightsail browser SSH client and wait for the automatic host
+bootstrap to finish. It configures Docker's official Ubuntu repository,
+installs Docker Engine, Buildx, and the Docker Compose plugin, and clones this
+repository to `/opt/Team-QQFARM`:
 
 ```bash
-git clone https://github.com/daydreamer17/Team-QQFARM.git
-cd Team-QQFARM
-sudo ./deploy/install-docker-ubuntu.sh
+sudo cloud-init status --wait
+test -f /var/lib/qqfarm-bootstrap.complete
+cd /opt/Team-QQFARM
 ```
+
+If the completion marker is missing, inspect
+`/var/log/qqfarm-bootstrap.log`. The installer can be rerun safely with
+`sudo ./deploy/install-docker-ubuntu.sh` after correcting the reported issue.
 
 Add the login user to the Docker group only if the team accepts the privilege
 implications. Otherwise prefix the remaining Docker commands with `sudo`.

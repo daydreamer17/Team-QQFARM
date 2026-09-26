@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 export AWS_PAGER=""
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 region="${AWS_REGION:-ap-southeast-1}"
 instance_name="${LIGHTSAIL_INSTANCE_NAME:-qqfarm-prod}"
 static_ip_name="${LIGHTSAIL_STATIC_IP_NAME:-qqfarm-prod-ip}"
@@ -70,6 +71,7 @@ else
     --availability-zone "${availability_zone}" \
     --blueprint-id "${blueprint_id}" \
     --bundle-id "${bundle_id}" \
+    --user-data "file://${script_dir}/lightsail-user-data.sh" \
     --tags key=Project,value=Team-QQFARM key=TeamCode,value=PZ2MLTO0 \
     --output json >/dev/null
 fi
@@ -146,4 +148,5 @@ static_ip="$(
 
 echo "Lightsail infrastructure is ready."
 echo "Static IP: ${static_ip}"
+echo "The instance is installing Docker and cloning the repository in the background."
 echo "Next: connect with the Lightsail browser SSH client and follow docs/DEPLOYMENT_LIGHTSAIL.md."
