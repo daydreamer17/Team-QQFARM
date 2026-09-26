@@ -7,13 +7,23 @@ private; only the Nginx web entry point is exposed publicly.
 ## 1. Create the instance
 
 1. Enter the NUS-ISS AWS sandbox and obtain an approved Hackathon Lease.
-2. Create a Linux/Unix Ubuntu 24.04 Lightsail instance in Singapore when the
-   sandbox permits that region.
-3. Use at least 4 GB RAM. Use 8 GB when building the OCR image on the instance
-   or when concurrent demo users are expected.
-4. Attach a static IPv4 address before sharing the deployment URL.
-5. Allow inbound TCP 80 and 443. Restrict TCP 22 to team IP addresses when
-   possible. Do not open 5432, 8000, or 5173.
+2. Open AWS CloudShell, clone this repository, and run the provisioning script:
+
+   ```bash
+   git clone https://github.com/daydreamer17/Team-QQFARM.git
+   cd Team-QQFARM
+   ./deploy/lightsail-provision.sh
+   ```
+
+   The script shows the exact region, image, RAM, and list price before asking
+   for confirmation. It selects the least expensive active Linux plan with at
+   least 4 GB RAM, creates an Ubuntu 24.04 instance in Singapore, attaches a
+   static IPv4 address, and opens only HTTP/HTTPS in addition to the default
+   SSH rule. Set `LIGHTSAIL_MIN_RAM_GB=8` when concurrent demo use warrants the
+   larger plan.
+
+3. Restrict TCP 22 to team IP addresses when possible. Do not open 5432, 8000,
+   or 5173.
 
 ## 2. Install Docker
 
