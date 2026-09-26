@@ -23,7 +23,7 @@ from typing import Callable
 import certifi
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from supplier_comparison.model_json import load_single_model_json_object
+from supplier_comparison.model_json import load_model_json, load_single_model_json_object
 
 from .contracts import (
     AdapterEnvironment,
@@ -792,6 +792,29 @@ def _decode_openai_response(response_body: bytes, *, expected_tool_name: str | N
     message = choice["message"]
     if expected_tool_name is not None:
         calls = message.get("tool_calls")
+        if calls is None or calls == []:
+            # The organizer sometimes ignores forced tool_choice and emits the
+            # very same wire payload as a single JSON fence. Accept only that
+            # complete document, never search prose or choose among candidates.
+            if choice.get("finish_reason") not in {"stop", "end_turn"}:
+                raise ValueError("missing tool with incomplete completion")
+            fallback = message.get("content")
+            if not isinstance(fallback, str):
+                raise ValueError("missing structured output")
+            payload = load_model_json(fallback)
+            if not isinstance(payload, dict) or "candidates" not in payload:
+                raise ValueError("missing candidates object")
+            content = _expand_quote_tool_arguments(json.dumps(payload))
+            usage = envelope.get("usage") or {}
+            return DecodedModelResponse(
+                content=content,
+                provider_request_id=envelope.get("id"),
+                finish_reason=choice.get("finish_reason"),
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                reasoning_tokens=(usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+                total_tokens=usage.get("total_tokens"),
+            )
         if not isinstance(calls, list) or len(calls) != 1:
             raise ValueError("expected exactly one structured output tool call")
         call = calls[0]

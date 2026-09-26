@@ -75,7 +75,7 @@ def main() -> None:
         "requested_model": adapter.config.model_id,
         "returned_model": envelope.get("model"),
         "validation": validation,
-        "output_channel": "tool_arguments" if expected_tool else "message_content",
+        "output_channel": "tool_arguments" if expected_tool and envelope["choices"][0]["message"].get("tool_calls") else "message_content",
         "message_keys": sorted(envelope["choices"][0]["message"]),
         "prompt_bytes": len(prompt.encode("utf-8")),
         "content_bytes": len(content.encode("utf-8")),

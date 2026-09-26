@@ -185,11 +185,37 @@ def _tool_envelope(body: bytes) -> bytes:
     return json.dumps(envelope).encode()
 
 
-@pytest.mark.parametrize("calls", [None, [], [{}, {}], [{}], [None], [{"type": "function", "function": {"name": "other", "arguments": "{}"}}]])
-def test_organizer_rejects_missing_ambiguous_or_wrong_tools(calls):
+@pytest.mark.parametrize("calls", [[{}, {}], [{}], [None], [{"type": "function", "function": {"name": "other", "arguments": "{}"}}]])
+def test_organizer_rejects_ambiguous_or_wrong_tools(calls):
     envelope = {"choices": [{"message": {
         "content": '{"candidates":[]}', "tool_calls": calls,
     }, "finish_reason": "stop"}]}
+    with pytest.raises(ValueError):
+        _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
+
+
+@pytest.mark.parametrize("calls", [None, []])
+@pytest.mark.parametrize("fenced", [False, True])
+def test_organizer_accepts_single_complete_json_when_gateway_omits_tool(calls, fenced):
+    content = '{"candidates":[{"f":"unit_price","v":"6.20"}]}'
+    if fenced:
+        content = '```json\n' + content + '\n```'
+    envelope = {"choices": [{"message": {"content": content, "tool_calls": calls}, "finish_reason": "stop"}]}
+    decoded = _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
+    assert json.loads(decoded.content) == {"candidates": [{"field_name": "unit_price", "normalized_value": "6.20"}]}
+
+
+@pytest.mark.parametrize("content,finish", [
+    ('{"candidates":[]} {"candidates":[]}', 'stop'),
+    ('Draft: {"candidates":[]}', 'stop'),
+    ('```json\n{"candidates":[]}\n```\n```json\n{"candidates":[]}\n```', 'stop'),
+    ('{"candidates":[]}', 'length'),
+    ('{"candidates":[]}', 'tool_calls'),
+    ('{"candidates":[]}', None),
+    ('{}', 'stop'),
+])
+def test_organizer_content_fallback_rejects_ambiguity_prose_or_truncation(content, finish):
+    envelope = {"choices": [{"message": {"content": content}, "finish_reason": finish}]}
     with pytest.raises(ValueError):
         _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
 
@@ -252,8 +278,9 @@ def test_organizer_request_honors_configured_output_token_limit(quote_dictionary
     assert set(properties) == {"f", "r", "v", "u", "s", "ids"}
 
 
+@pytest.mark.parametrize("use_tool", [True, False])
 def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
-    quote_dictionary,
+    quote_dictionary, use_tool,
 ) -> None:
     requests = []
 
@@ -281,7 +308,8 @@ def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
             }],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
         }
-        return FakeResponse(_tool_envelope(json.dumps(envelope).encode()))
+        raw = json.dumps(envelope).encode()
+        return FakeResponse(_tool_envelope(raw) if use_tool else raw)
 
     parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
     config = _config(max_attempts=2).model_copy(update={
