@@ -149,14 +149,22 @@ class RequirementModelConfig:
             base_url=base_url,
             api_key_env=os.getenv("SUPPLIER_REQUIREMENT_MODEL_API_KEY_ENV")
             or os.getenv("SUPPLIER_MODEL_API_KEY_ENV", "QQFARM_SILICONFLOW_API_KEY"),
-            timeout_seconds=float(os.getenv("SUPPLIER_REQUIREMENT_MODEL_TIMEOUT_SECONDS", "60")),
+            timeout_seconds=float(
+                os.getenv("SUPPLIER_REQUIREMENT_MODEL_TIMEOUT_SECONDS")
+                or os.getenv("SUPPLIER_MODEL_TIMEOUT_SECONDS", "60")
+            ),
             max_attempts=max(
-                1,
-                min(2, int(os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_ATTEMPTS", "2"))),
+                1, min(2, int(
+                    os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_ATTEMPTS")
+                    or os.getenv("SUPPLIER_MODEL_MAX_ATTEMPTS", "2")
+                )),
             ),
             max_tokens=max(
                 256,
-                min(4096, int(os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_TOKENS", "1024"))),
+                min(8192, int(
+                    os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_TOKENS")
+                    or os.getenv("SUPPLIER_MODEL_MAX_TOKENS", "4096")
+                )),
             ),
         )
 
@@ -330,7 +338,7 @@ def _validate_requirement_candidates(
     source_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        decoded = load_model_json(content)
+        decoded = _load_requirement_json(content)
         body = RequirementCandidatesOutput.model_validate(
             _normalize_requirement_candidates_payload(decoded)
         )
@@ -398,6 +406,35 @@ def _validate_requirement_candidates(
         })
         seen.add(field)
     return candidates
+
+
+def _load_requirement_json(content: str) -> Any:
+    """Load strict JSON, or one grounded JSON object inside gateway prose.
+
+    The organiser gateway can preserve an Anthropic reasoning preamble even
+    when the OpenAI-compatible ``response_format`` asks for JSON only. Accept
+    exactly one object carrying ``candidates`` and reject ambiguous/multiple
+    objects. The extracted object still passes the strict schema, allowlist and
+    source-grounding checks in ``_validate_requirement_candidates``.
+    """
+
+    try:
+        return load_model_json(content)
+    except json.JSONDecodeError as strict_error:
+        decoder = json.JSONDecoder()
+        matches: list[Any] = []
+        for index, character in enumerate(content):
+            if character != "{":
+                continue
+            try:
+                candidate, _end = decoder.raw_decode(content, index)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) and "candidates" in candidate:
+                matches.append(candidate)
+        if len(matches) == 1:
+            return matches[0]
+        raise strict_error
 
 
 def _normalize_requirement_candidates_payload(payload: Any) -> dict[str, Any]:

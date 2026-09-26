@@ -200,6 +200,70 @@ def test_requirement_candidates_accept_organiser_gateway_completion_variants(
     assert result["candidates"][0]["normalized_value"] == 1000
 
 
+def test_requirement_candidates_accept_one_json_object_after_gateway_reasoning(
+    monkeypatch,
+) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Required quantity: 1000 pieces",
+        }]
+    }
+    body = {"candidates": [{
+        "field_name": "required_quantity",
+        "raw_value": "1000",
+        "normalized_value": 1000,
+        "source_ids": ["requirement:line:1"],
+    }]}
+    payload = {
+        "choices": [{
+            "finish_reason": "end_turn",
+            "message": {
+                "content": "<think>Validate each source.</think>\n" + json.dumps(body),
+            },
+        }]
+    }
+    monkeypatch.setattr(
+        intake,
+        "_post_json",
+        lambda *args, **kwargs: (payload, 1),
+    )
+
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert result["candidates"][0]["normalized_value"] == 1000
+
+
+def test_requirement_model_config_inherits_base_runtime_limits(monkeypatch) -> None:
+    monkeypatch.setenv("SUPPLIER_MODEL_MODEL_ID", "gateway-model")
+    monkeypatch.setenv("SUPPLIER_MODEL_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("SUPPLIER_MODEL_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("SUPPLIER_MODEL_MAX_ATTEMPTS", "2")
+    monkeypatch.setenv("SUPPLIER_MODEL_MAX_TOKENS", "8192")
+    for name in (
+        "SUPPLIER_REQUIREMENT_MODEL_MODEL_ID",
+        "SUPPLIER_REQUIREMENT_MODEL_BASE_URL",
+        "SUPPLIER_REQUIREMENT_MODEL_TIMEOUT_SECONDS",
+        "SUPPLIER_REQUIREMENT_MODEL_MAX_ATTEMPTS",
+        "SUPPLIER_REQUIREMENT_MODEL_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    config = RequirementModelConfig.from_env()
+
+    assert config is not None
+    assert config.timeout_seconds == 180
+    assert config.max_attempts == 2
+    assert config.max_tokens == 8192
+
+
 def test_requirement_candidates_normalize_model_scalar_and_enum_variants(monkeypatch) -> None:
     parsed = {
         "sources": [
