@@ -194,6 +194,7 @@ Refer to [.env.example](.env.example) for all defaults and descriptions.
 | [WORKFLOW.en.md](docs/WORKFLOW.en.md) | User workflow from policy preparation to procurement summary |
 | [DATA.en.md](docs/DATA.en.md) | Data layout, Demo4, fixtures, reference answers, and evaluation isolation |
 | [LOCAL_ENVIRONMENT.en.md](docs/LOCAL_ENVIRONMENT.en.md) | Installation, startup, environment variables, and troubleshooting |
+| [DEPLOYMENT_LIGHTSAIL.md](docs/DEPLOYMENT_LIGHTSAIL.md) | Production deployment on the NUS-ISS Amazon Lightsail environment |
 | [TESTING.en.md](docs/TESTING.en.md) | Automated tests, manual end-to-end workflow, and delivery acceptance |
 | [data/README.md](data/README.md) | Data-directory maintenance entry point |
 | [scripts/dev/README.md](scripts/dev/README.md) | One-command startup script reference |

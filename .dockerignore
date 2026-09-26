@@ -2,8 +2,10 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 .venv
 .venv-ocr
+**/node_modules
 .pytest_cache
 .local-memory
 evaluation/results/local
