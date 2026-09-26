@@ -230,6 +230,7 @@ def _call_conversation_model(
             choice = payload["choices"][0]
             message = choice["message"]
             calls = message.get("tool_calls")
+            legacy_call = message.get("function_call")
             if calls:
                 if not isinstance(calls, list) or len(calls) != 1:
                     raise ValueError("expected one output tool")
@@ -240,6 +241,12 @@ def _call_conversation_model(
                     raise ValueError("unexpected output tool")
                 content = call["function"]["arguments"]
                 if choice.get("finish_reason") in {"tool_calls", "tool_use"}:
+                    choice["finish_reason"] = "stop"
+            elif legacy_call:
+                if not isinstance(legacy_call, dict) or legacy_call.get("name") != tool_name:
+                    raise ValueError("unexpected legacy output tool")
+                content = legacy_call.get("arguments")
+                if choice.get("finish_reason") == "function_call":
                     choice["finish_reason"] = "stop"
             else:
                 if choice.get("finish_reason") not in {"stop", "end_turn"}:
@@ -252,26 +259,71 @@ def _call_conversation_model(
                         if isinstance(block, dict)
                         and block.get("type") not in {"thinking", "redacted_thinking"}
                     ]
-                    if len(material_blocks) != 1:
-                        raise ValueError("expected one output block")
-                    block = material_blocks[0]
-                    if block.get("type") in {"tool_use", "function"}:
+                    tool_blocks = [
+                        block
+                        for block in material_blocks
+                        if block.get("type") in {"tool_use", "function"}
+                    ]
+                    if tool_blocks:
+                        if len(tool_blocks) != 1:
+                            raise ValueError("expected one output tool block")
+                        block = tool_blocks[0]
                         if block.get("name") != tool_name:
                             raise ValueError("unexpected output tool")
                         content = block.get("input", block.get("arguments"))
-                    elif block.get("type") in {"text", "output_text"}:
+                    elif len(material_blocks) == 1 and material_blocks[0].get("type") in {"text", "output_text"}:
+                        block = material_blocks[0]
                         content = block.get("text")
                     else:
-                        raise ValueError("unexpected output block")
+                        raise ValueError("expected one output block")
             if isinstance(content, dict):
                 content = json.dumps(content, ensure_ascii=False)
             if not isinstance(content, str) or not isinstance(load_model_json(content), dict):
                 raise ValueError("expected one JSON object")
             message["content"] = content
         except (ValueError, KeyError, TypeError, IndexError) as exc:
-            raise ModelClientError("decision gateway response invalid", attempts=attempts,
+            shape = _organizer_response_shape(payload)
+            raise ModelClientError(f"decision gateway response invalid ({shape})", attempts=attempts,
                                    error_code="conversation_response_invalid") from exc
     return payload, attempts
+
+
+def _organizer_response_shape(payload: object) -> str:
+    """Describe an invalid gateway envelope without logging generated content."""
+
+    if not isinstance(payload, dict):
+        return f"payload={type(payload).__name__}"
+    choices = payload.get("choices")
+    if not isinstance(choices, list):
+        return f"choices={type(choices).__name__}"
+    if len(choices) != 1 or not isinstance(choices[0], dict):
+        return f"choices=list[{len(choices)}]"
+    choice = choices[0]
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return f"finish={choice.get('finish_reason')!r},message={type(message).__name__}"
+    calls = message.get("tool_calls")
+    content = message.get("content")
+    parts = [
+        f"finish={choice.get('finish_reason')!r}",
+        f"message_keys={','.join(sorted(str(key) for key in message))}",
+        f"tool_calls={type(calls).__name__}",
+        f"content={type(content).__name__}",
+    ]
+    if isinstance(calls, list):
+        parts.append(f"tool_call_count={len(calls)}")
+        if len(calls) == 1 and isinstance(calls[0], dict):
+            function = calls[0].get("function")
+            parts.append(f"tool_type={calls[0].get('type')!r}")
+            if isinstance(function, dict):
+                parts.append(f"arguments={type(function.get('arguments')).__name__}")
+    if isinstance(content, list):
+        block_types = [
+            str(block.get("type")) if isinstance(block, dict) else type(block).__name__
+            for block in content
+        ]
+        parts.append(f"content_blocks={','.join(block_types)}")
+    return ";".join(parts)[:700]
 
 
 def _bedrock_converse(

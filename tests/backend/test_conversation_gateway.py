@@ -55,6 +55,37 @@ def test_anthropic_tool_use_block_is_normalized(monkeypatch):
     (result, _), _body = request(monkeypatch, choice)
     assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
 
+def test_anthropic_tool_use_block_wins_over_explanatory_text(monkeypatch):
+    choice = {
+        'finish_reason': 'end_turn',
+        'message': {
+            'content': [
+                {'type': 'text', 'text': 'Submitting the structured result.'},
+                {
+                    'type': 'tool_use',
+                    'name': 'submit_decision_response',
+                    'input': {'route': 'EXPLAIN'},
+                },
+            ]
+        },
+    }
+    (result, _), _body = request(monkeypatch, choice)
+    assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
+
+def test_legacy_function_call_is_normalized(monkeypatch):
+    choice = {
+        'finish_reason': 'function_call',
+        'message': {
+            'function_call': {
+                'name': 'submit_decision_response',
+                'arguments': {'route': 'EXPLAIN'},
+            }
+        },
+    }
+    (result, _), _body = request(monkeypatch, choice)
+    assert result['choices'][0]['finish_reason'] == 'stop'
+    assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
+
 def test_single_text_content_block_is_normalized(monkeypatch):
     choice = {
         'finish_reason': 'end_turn',
@@ -76,8 +107,10 @@ def test_single_text_content_block_is_normalized(monkeypatch):
     ({'content': '{}'}, 'length'),
 ])
 def test_ambiguous_or_incomplete_output_rejected(monkeypatch, message, finish):
-    with pytest.raises(ModelClientError):
+    with pytest.raises(ModelClientError) as raised:
         request(monkeypatch, {'finish_reason': finish, 'message': message})
+    assert "finish=" in str(raised.value)
+    assert "message_keys=" in str(raised.value)
 
 def test_local_protocol_unchanged(monkeypatch):
     _, body = request(monkeypatch, {'finish_reason': 'stop', 'message': {'content': '{}'}}, config=replace(CONFIG, environment='LOCAL'))
