@@ -66,9 +66,9 @@ class ModelExtractionPayload(BaseModel):
 class SparseModelFieldSelection(BaseModel):
     """Simple gateway wire shape; strict status shapes are validated locally.
 
-    The organiser's gateway reliably supports flat JSON schemas but can return
-    empty content for composed ``oneOf``/``discriminator`` schemas. The loose
-    wire types here only affect generation. ``ModelExtractionPayload`` remains
+    This minimizes schema complexity without assuming that a gateway enforces
+    structured output. The loose wire types only affect generation.
+    ``ModelExtractionPayload`` remains
     the authority boundary and rejects every invalid value after decoding.
     """
 

@@ -85,10 +85,17 @@ compose=(
 "${compose[@]}" restart web
 "${compose[@]}" ps
 
+web_binding="$("${compose[@]}" port web 80)"
+web_binding="${web_binding%%$'\n'*}"
+web_port="${web_binding##*:}"
+if [[ ! "${web_port}" =~ ^[0-9]+$ ]]; then
+  echo "Cannot determine published web port." >&2
+  exit 1
+fi
+ready_url="http://127.0.0.1:${web_port}/health/ready?require_worker=true"
 ready=false
 for _ in {1..30}; do
-  if curl --fail --silent \
-    'http://127.0.0.1/health/ready?require_worker=true' >/dev/null; then
+  if curl --fail --silent --max-time 10 "${ready_url}" >/dev/null; then
     ready=true
     break
   fi
@@ -101,8 +108,7 @@ if [[ "${ready}" != true ]]; then
   exit 1
 fi
 
-curl --fail --silent --show-error \
-  'http://127.0.0.1/health/ready?require_worker=true'
+curl --fail --silent --show-error --max-time 10 "${ready_url}"
 
 echo
 echo "QuoteWise is ready. Open http://<LIGHTSAIL_STATIC_IP>/ in a browser."

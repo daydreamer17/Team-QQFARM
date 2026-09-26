@@ -38,9 +38,9 @@ class ExplanationConfig(FrozenModel):
     def from_env(cls):
         prefix = "SUPPLIER_EXPLANATION_"
         return cls(
-            model_id=os.getenv(prefix + "MODEL_ID", os.getenv("SUPPLIER_MODEL_MODEL_ID", "")),
-            base_url=os.getenv(prefix + "BASE_URL", os.getenv("SUPPLIER_MODEL_BASE_URL", "https://api.siliconflow.cn/v1")),
-            api_key_env=os.getenv(prefix + "API_KEY_ENV", os.getenv("SUPPLIER_MODEL_API_KEY_ENV", "QQFARM_SILICONFLOW_API_KEY")),
+            model_id=os.getenv(prefix + "MODEL_ID") or os.getenv("SUPPLIER_MODEL_MODEL_ID", ""),
+            base_url=os.getenv(prefix + "BASE_URL") or os.getenv("SUPPLIER_MODEL_BASE_URL", "https://api.siliconflow.cn/v1"),
+            api_key_env=os.getenv(prefix + "API_KEY_ENV") or os.getenv("SUPPLIER_MODEL_API_KEY_ENV", "QQFARM_SILICONFLOW_API_KEY"),
             timeout_seconds=float(os.getenv(prefix + "TIMEOUT_SECONDS", "60")),
             max_attempts=int(os.getenv(prefix + "MAX_ATTEMPTS", "2")),
             max_tokens=int(os.getenv(prefix + "MAX_TOKENS", "4096")),

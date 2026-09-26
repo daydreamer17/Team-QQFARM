@@ -288,9 +288,8 @@ class DecisionIntentModelConfig:
         if not model_id or not base_url:
             return None
         return cls(
-            provider=os.getenv(
-                "SUPPLIER_DECISION_INTENT_MODEL_PROVIDER",
-                os.getenv("SUPPLIER_MODEL_PROVIDER", "openai-compatible"),
+            provider=os.getenv("SUPPLIER_DECISION_INTENT_MODEL_PROVIDER") or os.getenv(
+                "SUPPLIER_MODEL_PROVIDER", "openai-compatible"
             ),
             model_id=model_id,
             base_url=base_url,

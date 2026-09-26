@@ -532,6 +532,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
             structure_started = time.perf_counter()
             try:
+                from supplier_comparison.model_json import model_response_is_complete
+
+                if not model_response_is_complete(decoded.finish_reason):
+                    raise ValueError("model response is incomplete")
                 sparse_payload = SparseModelExtractionPayload.model_validate(
                     _normalize_sparse_model_payload(
                         load_single_model_json_object(
@@ -815,10 +819,8 @@ def _body_diagnostics(body: bytes) -> dict[str, str | int]:
 
 
 def _effective_max_tokens(config: OpenAICompatibleConfig) -> int:
-    """Keep organiser-gateway quote output within its proven response budget."""
+    """Honor the operator's configured budget for every environment."""
 
-    if config.environment == AdapterEnvironment.ORGANIZER:
-        return min(config.max_tokens, 4096)
     return config.max_tokens
 
 

@@ -1,5 +1,11 @@
 # Lightsail Production Deployment
 
+For a non-mutating runtime/configuration report and one synthetic gateway
+request, run `bash deploy/lightsail-diagnose.sh` from the repository. This handles
+Docker's sudo requirement automatically. It does not rebuild or restart services.
+See [the deployment alignment audit](deployment-alignment-audit.md) for checked
+differences and outstanding live-provider verification.
+
 This runbook deploys QuoteWise as a single-host Docker Compose application on
 an Ubuntu Amazon Lightsail instance. PostgreSQL and the FastAPI port remain
 private; only the Nginx web entry point is exposed publicly.

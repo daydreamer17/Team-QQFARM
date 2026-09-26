@@ -148,9 +148,8 @@ class ConversationModelConfig:
         model_id = os.getenv("SUPPLIER_CONVERSATION_MODEL_MODEL_ID") or os.getenv(
             "SUPPLIER_MODEL_MODEL_ID"
         )
-        provider = os.getenv(
-            "SUPPLIER_CONVERSATION_MODEL_PROVIDER",
-            os.getenv("SUPPLIER_MODEL_PROVIDER", "openai-compatible"),
+        provider = os.getenv("SUPPLIER_CONVERSATION_MODEL_PROVIDER") or os.getenv(
+            "SUPPLIER_MODEL_PROVIDER", "openai-compatible"
         )
         bedrock = provider.casefold() in {"aws-bedrock", "bedrock", "bedrock-converse"}
         base_url = os.getenv("SUPPLIER_CONVERSATION_MODEL_BASE_URL") or os.getenv(

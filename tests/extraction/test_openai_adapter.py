@@ -157,7 +157,21 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     ]
 
 
-def test_organizer_request_uses_proven_output_token_limit(quote_dictionary) -> None:
+@pytest.mark.parametrize("finish_reason", ["length", "max_tokens", "content_filter"])
+def test_rejects_incomplete_response_even_when_json_is_valid(quote_dictionary, finish_reason) -> None:
+    envelope = json.loads(_valid_response(quote_dictionary))
+    envelope["choices"][0]["finish_reason"] = finish_reason
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    adapter = OpenAICompatibleAdapter(
+        _config(max_attempts=1),
+        opener=lambda request, timeout: FakeResponse(json.dumps(envelope).encode()),
+    )
+    with pytest.raises(AdapterError) as raised:
+        adapter.extract(parsed, quote_dictionary, ModelCallBudget(graph_run_id="TRUNCATED"), "TRUNCATED")
+    assert raised.value.code == "model_output_schema_invalid"
+
+
+def test_organizer_request_honors_configured_output_token_limit(quote_dictionary) -> None:
     captured = {}
 
     def opener(request, timeout):
@@ -177,7 +191,7 @@ def test_organizer_request_uses_proven_output_token_limit(quote_dictionary) -> N
         "EXTRACT-ORGANIZER-LIMIT",
     )
 
-    assert captured["max_tokens"] == 4096
+    assert captured["max_tokens"] == 8192
 
 
 def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
