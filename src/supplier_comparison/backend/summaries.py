@@ -16,7 +16,7 @@ from supplier_comparison.model_json import load_model_json, model_response_is_co
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
-SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.1"
+SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.2"
 
 
 class SummarySectionOutput(BaseModel):
@@ -130,8 +130,11 @@ def generate_summary_narrative(
         choice = payload["choices"][0]
         if not model_response_is_complete(choice.get("finish_reason")):
             raise ValueError("truncated")
+        document = load_model_json(choice["message"]["content"])
+        if isinstance(document, dict):
+            document = _normalize_summary_sections(document)
         output = SummaryNarrativeOutput.model_validate(
-            load_model_json(choice["message"]["content"])
+            document
         )
         texts = [output.title, output.overview, output.disclaimer]
         for section in output.sections:
@@ -209,11 +212,40 @@ def generate_summary_narrative(
     return output.model_dump(mode="json"), attempts
 
 
+def summary_config_for_remaining_calls(
+    config: SummaryModelConfig, remaining_calls: int
+) -> SummaryModelConfig:
+    if remaining_calls < 1:
+        raise ValueError("summary_call_budget_exhausted")
+    return replace(config, max_attempts=min(config.max_attempts, remaining_calls))
+
+
+def _normalize_summary_sections(document: dict[str, Any]) -> dict[str, Any]:
+    """Normalize harmless section-shape drift without inventing new facts."""
+
+    normalized = dict(document)
+    sections = normalized.get("sections")
+    if isinstance(sections, dict):
+        normalized["sections"] = [sections]
+    elif sections in (None, []):
+        overview = normalized.get("overview")
+        if isinstance(overview, str) and overview.strip():
+            normalized["sections"] = [{
+                "heading": "决策概览",
+                "text": overview,
+                "reference_ids": [],
+            }]
+    return normalized
+
+
 def _summary_validation_detail(exc: Exception) -> str:
     """Return bounded, non-sensitive detail suitable for a repair prompt and logs."""
 
     if isinstance(exc, ValidationError):
-        fields = [".".join(str(part) for part in error["loc"]) for error in exc.errors()]
+        fields = [
+            f"{'.'.join(str(part) for part in error['loc'])}:{error['type']}"
+            for error in exc.errors()
+        ]
         return ("schema: " + ", ".join(fields))[:500]
     detail = str(exc).strip() or type(exc).__name__
     return detail[:500]

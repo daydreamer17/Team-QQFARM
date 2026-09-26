@@ -23,7 +23,11 @@ from supplier_comparison.backend.intake import (
     parse_requirement_document,
     safe_filename_extension,
 )
-from supplier_comparison.backend.summaries import SummaryModelConfig, generate_summary_narrative
+from supplier_comparison.backend.summaries import (
+    SummaryModelConfig,
+    generate_summary_narrative,
+    summary_config_for_remaining_calls,
+)
 from supplier_comparison.rag.clients import ModelClientError
 
 
@@ -1249,6 +1253,47 @@ def test_summary_narrative_repairs_one_invalid_model_response(monkeypatch) -> No
     assert len(calls) == 2
     repair_request = json.loads(calls[1][0][1]["messages"][-1]["content"])
     assert repair_request["validation_error"] == "language"
+
+
+@pytest.mark.parametrize("sections", [None, [], {
+    "heading": "制度优先",
+    "text": "制度结论优先于价格差异。",
+    "reference_ids": ["RESULT:result-1"],
+}])
+def test_summary_narrative_normalizes_safe_section_shape_drift(monkeypatch, sections) -> None:
+    value = {
+        "title": "采购摘要",
+        "overview": "当前结果已完成核查。",
+        "sections": sections,
+        "disclaimer": "本摘要不构成采购审批。",
+    }
+    monkeypatch.setattr(
+        summaries, "_post_json", lambda *args, **kwargs: (_model_payload(value), 1)
+    )
+    narrative, attempts = generate_summary_narrative(
+        {"references": ["RESULT:result-1"]},
+        SummaryModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert len(narrative["sections"]) == 1
+    if sections in (None, []):
+        assert narrative["sections"][0] == {
+            "heading": "决策概览",
+            "text": value["overview"],
+            "reference_ids": [],
+        }
+
+
+def test_summary_model_attempts_are_limited_by_remaining_report_budget() -> None:
+    config = SummaryModelConfig(
+        "fixed-test", "https://example.invalid/v1", "UNUSED", max_attempts=2
+    )
+
+    assert summary_config_for_remaining_calls(config, 1).max_attempts == 1
+    assert summary_config_for_remaining_calls(config, 3).max_attempts == 2
+    with pytest.raises(ValueError, match="summary_call_budget_exhausted"):
+        summary_config_for_remaining_calls(config, 0)
 
 
 def test_summary_model_context_excludes_low_level_document_evidence(monkeypatch) -> None:

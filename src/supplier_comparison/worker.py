@@ -23,7 +23,11 @@ from .backend.worker_health import write_worker_heartbeat
 from .backend.investigation import AgentConfig, AgentLimits, InvestigationRunner, LiveInvestigationPlanner
 from .backend.decision_investigation import DecisionInvestigationTools
 from .backend.intake import RequirementModelConfig, extract_requirement_candidates, parse_requirement_document
-from .backend.summaries import SummaryModelConfig, generate_summary_narrative
+from .backend.summaries import (
+    SummaryModelConfig,
+    generate_summary_narrative,
+    summary_config_for_remaining_calls,
+)
 from .extraction.dictionary import QuoteDictionary
 from .extraction.errors import ExtractionError
 from .rag.clients import (
@@ -89,6 +93,9 @@ def run_job(job_id: str) -> dict:
             config = SummaryModelConfig.from_env()
             if config is None:
                 raise ModelClientError("summary model is not configured", attempts=0, error_code="summary_model_unconfigured")
+            config = summary_config_for_remaining_calls(
+                config, context["max_calls"] - calls_used
+            )
             narrative, attempts = generate_summary_narrative(context["facts"], config)
             calls_used += attempts
             return service.complete_summary_job(job_id, narrative=narrative, calls_used=calls_used)
