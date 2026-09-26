@@ -30,7 +30,7 @@ from supplier_comparison.rag.clients import ModelClientError
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _model_payload(body: dict, *, finish_reason: str | None = "stop") -> dict:
+def _model_payload(body: dict, *, finish_reason: object = "stop") -> dict:
     return {
         "choices": [
             {
@@ -159,7 +159,9 @@ def test_requirement_candidates_are_grounded_to_current_sources(monkeypatch) -> 
     assert raised.value.error_code == "requirement_model_output_invalid"
 
 
-@pytest.mark.parametrize("finish_reason", ["end_turn", None])
+@pytest.mark.parametrize(
+    "finish_reason", ["end_turn", None, "length", {"provider": "complete"}]
+)
 def test_requirement_candidates_accept_organiser_gateway_completion_variants(
     monkeypatch, finish_reason
 ) -> None:

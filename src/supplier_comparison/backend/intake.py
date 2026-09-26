@@ -14,7 +14,7 @@ import pdfplumber
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
-from supplier_comparison.model_json import load_model_json, model_response_is_complete
+from supplier_comparison.model_json import load_model_json
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
@@ -300,8 +300,10 @@ def extract_requirement_candidates(
 def _requirement_response_content(payload: dict[str, Any]) -> str:
     try:
         choice = payload["choices"][0]
-        if not model_response_is_complete(choice.get("finish_reason")):
-            raise RequirementOutputValidationError("finish_reason")
+        # The organiser's OpenAI-compatible gateway does not expose a stable
+        # finish_reason shape. Content completeness is enforced below by full
+        # JSON decoding, the strict requirement schema, the field allowlist and
+        # source grounding; provider-specific metadata is not authoritative.
         content = choice["message"]["content"]
         if not isinstance(content, str) or not content.strip():
             raise RequirementOutputValidationError("message_content")

@@ -376,7 +376,7 @@ def test_invalid_provider_envelope_is_not_retried(quote_dictionary) -> None:
     assert budget.calls_used == 1
 
 
-def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(quote_dictionary) -> None:
+def test_schema_failure_keeps_provider_metadata_after_bounded_attempts(quote_dictionary) -> None:
     invalid_payload = {
         "candidates": [
             {
@@ -413,7 +413,7 @@ def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(qu
         context_for("b"),
     )
     budget = ModelCallBudget(graph_run_id="GRAPH-SCHEMA-FAIL")
-    adapter = OpenAICompatibleAdapter(_config(max_attempts=3), opener=opener, sleeper=lambda _: None)
+    adapter = OpenAICompatibleAdapter(_config(max_attempts=1), opener=opener, sleeper=lambda _: None)
     with pytest.raises(AdapterError) as raised:
         adapter.extract(parsed, quote_dictionary, budget, "EXTRACT-SCHEMA-FAIL")
 
@@ -431,3 +431,58 @@ def test_schema_failure_keeps_provider_metadata_and_raw_content_without_retry(qu
     assert "raw_model_content" not in raised.value.details
     assert raised.value.details["model_content_length_bytes"] == len(raw_content.encode())
     assert budget.calls_used == 1
+
+
+def test_schema_failure_is_repaired_once_with_bounded_validation_feedback(
+    quote_dictionary,
+) -> None:
+    invalid_content = json.dumps({
+        "candidates": [{
+            "field_name": "currency",
+            "raw_value": "S$",
+            "normalized_value": None,
+            "unit": None,
+            "validation_status": "EXTRACTED",
+            "source_refs": [{"source_id": "S001", "quoted_text": "S$"}],
+        }]
+    })
+    invalid_envelope = {
+        "id": "request-repair-1",
+        "choices": [{
+            "message": {"content": invalid_content},
+            "finish_reason": "stop",
+        }],
+        "usage": {},
+    }
+    responses = iter((
+        FakeResponse(json.dumps(invalid_envelope).encode()),
+        FakeResponse(_valid_response(quote_dictionary)),
+    ))
+    requests: list[dict] = []
+
+    def opener(request, timeout):
+        del timeout
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return next(responses)
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    budget = ModelCallBudget(graph_run_id="GRAPH-SCHEMA-REPAIR")
+    result = OpenAICompatibleAdapter(
+        _config(max_attempts=2), opener=opener, sleeper=lambda _: None
+    ).extract(
+        parsed,
+        quote_dictionary,
+        budget,
+        "EXTRACT-SCHEMA-REPAIR",
+    )
+
+    assert result.run.status.value == "SUCCEEDED"
+    assert result.run.attempts == 2
+    assert result.run.attempt_records[0].outcome.value == "RETRYABLE_FAILURE"
+    assert result.run.attempt_records[1].outcome.value == "SUCCEEDED"
+    repair = json.loads(requests[1]["messages"][1]["content"])
+    assert repair["task"] == "Repair the previous extraction response."
+    assert repair["previous_response"] == invalid_content
+    assert repair["validation_errors"]
+    assert len(requests) == 2
+    assert budget.calls_used == 2
