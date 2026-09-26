@@ -1216,6 +1216,41 @@ def test_summary_narrative_requires_chinese_and_known_references(monkeypatch) ->
         )
 
 
+def test_summary_narrative_repairs_one_invalid_model_response(monkeypatch) -> None:
+    facts = {"references": ["RESULT:result-1"], "formal_recommendation_allowed": False}
+    invalid = {
+        "title": "Procurement summary",
+        "overview": "当前结果需要复核。",
+        "sections": [
+            {
+                "heading": "当前结论",
+                "text": "请先完成复核。",
+                "reference_ids": ["RESULT:result-1"],
+            }
+        ],
+        "disclaimer": "本摘要不构成采购审批。",
+    }
+    repaired = dict(invalid, title="采购摘要")
+    calls = []
+
+    def fake_post(*args, **kwargs):
+        calls.append((args, kwargs))
+        body = invalid if len(calls) == 1 else repaired
+        return _model_payload(body), 1
+
+    monkeypatch.setattr(summaries, "_post_json", fake_post)
+    narrative, attempts = generate_summary_narrative(
+        facts,
+        SummaryModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 2
+    assert narrative == repaired
+    assert len(calls) == 2
+    repair_request = json.loads(calls[1][0][1]["messages"][-1]["content"])
+    assert repair_request["validation_error"] == "language"
+
+
 def test_summary_model_context_excludes_low_level_document_evidence(monkeypatch) -> None:
     captured = {}
     facts = {

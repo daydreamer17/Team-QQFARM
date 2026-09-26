@@ -6,10 +6,10 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
 from supplier_comparison.model_json import load_model_json, model_response_is_complete
@@ -86,35 +86,47 @@ def generate_summary_narrative(
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(model_facts, ensure_ascii=False)},
     ]
-    if config.environment.upper() == "ORGANIZER":
-        from .conversations import ConversationModelConfig, _call_conversation_model
-        payload, attempts = _call_conversation_model(
-            ConversationModelConfig(
-                provider="openai-compatible", model_id=config.model_id,
-                base_url=config.base_url, api_key_env=config.api_key_env,
-                timeout_seconds=config.timeout_seconds, max_attempts=config.max_attempts,
-                environment=config.environment,
-            ), messages, opener=trusted_urlopen, sleeper=time.sleep,
-            output_schema=SummaryNarrativeOutput.model_json_schema(),
-        )
-    else:
-        payload, attempts = _post_json(
-            config.base_url.rstrip("/") + "/chat/completions",
+
+    def request(
+        request_messages: list[dict[str, str]], attempt_budget: int
+    ) -> tuple[dict[str, Any], int]:
+        request_config = replace(config, max_attempts=attempt_budget)
+        if request_config.environment.upper() == "ORGANIZER":
+            from .conversations import ConversationModelConfig, _call_conversation_model
+
+            return _call_conversation_model(
+                ConversationModelConfig(
+                    provider="openai-compatible",
+                    model_id=request_config.model_id,
+                    base_url=request_config.base_url,
+                    api_key_env=request_config.api_key_env,
+                    timeout_seconds=request_config.timeout_seconds,
+                    max_attempts=request_config.max_attempts,
+                    environment=request_config.environment,
+                ),
+                request_messages,
+                opener=trusted_urlopen,
+                sleeper=time.sleep,
+                output_schema=SummaryNarrativeOutput.model_json_schema(),
+            )
+        return _post_json(
+            request_config.base_url.rstrip("/") + "/chat/completions",
             {
-                "model": config.model_id,
+                "model": request_config.model_id,
                 "temperature": 0,
                 "enable_thinking": False,
                 "max_tokens": 4096,
                 "response_format": {"type": "json_object"},
-                "messages": messages,
+                "messages": request_messages,
             },
-            api_key_env=config.api_key_env,
-            timeout_seconds=config.timeout_seconds,
-            max_attempts=config.max_attempts,
+            api_key_env=request_config.api_key_env,
+            timeout_seconds=request_config.timeout_seconds,
+            max_attempts=request_config.max_attempts,
             opener=trusted_urlopen,
             sleeper=time.sleep,
         )
-    try:
+
+    def validate(payload: dict[str, Any]) -> SummaryNarrativeOutput:
         choice = payload["choices"][0]
         if not model_response_is_complete(choice.get("finish_reason")):
             raise ValueError("truncated")
@@ -129,13 +141,82 @@ def generate_summary_narrative(
             texts.extend([section.heading, section.text])
         if any(not re.search(r"[\u4e00-\u9fff]", text) for text in texts):
             raise ValueError("language")
-    except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        return output
+
+    validation_errors = (
+        KeyError,
+        IndexError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        ValidationError,
+    )
+    payload, attempts = request(messages, config.max_attempts)
+    try:
+        output = validate(payload)
+    except validation_errors as first_error:
+        detail = _summary_validation_detail(first_error)
+        if attempts < config.max_attempts:
+            raw_content = ""
+            try:
+                raw_content = str(payload["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError):
+                pass
+            repair_messages = messages + [
+                {"role": "assistant", "content": raw_content[:12_000]},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "repair_request": (
+                                "Correct the preceding response to match the summary contract. "
+                                "Return the required JSON object only."
+                            ),
+                            "validation_error": detail,
+                            "requirements": [
+                                "Use non-empty Chinese text for title, overview, every section heading and text, and disclaimer.",
+                                "Keep at least one section.",
+                                "Use only reference IDs present in the supplied facts.",
+                                "Do not add fields outside the supplied schema.",
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ]
+            try:
+                repaired_payload, repair_attempts = request(
+                    repair_messages, config.max_attempts - attempts
+                )
+            except ModelClientError as exc:
+                raise ModelClientError(
+                    str(exc),
+                    attempts=attempts + exc.attempts,
+                    error_code=exc.error_code,
+                ) from exc
+            attempts += repair_attempts
+            try:
+                output = validate(repaired_payload)
+            except validation_errors as repair_error:
+                detail = _summary_validation_detail(repair_error)
+            else:
+                return output.model_dump(mode="json"), attempts
         raise ModelClientError(
-            "summary model response failed validation",
+            f"summary model response failed validation: {detail}",
             attempts=attempts,
             error_code="summary_model_output_invalid",
-        ) from exc
+        ) from first_error
     return output.model_dump(mode="json"), attempts
+
+
+def _summary_validation_detail(exc: Exception) -> str:
+    """Return bounded, non-sensitive detail suitable for a repair prompt and logs."""
+
+    if isinstance(exc, ValidationError):
+        fields = [".".join(str(part) for part in error["loc"]) for error in exc.errors()]
+        return ("schema: " + ", ".join(fields))[:500]
+    detail = str(exc).strip() or type(exc).__name__
+    return detail[:500]
 
 
 def _canonical_reference_ids(
