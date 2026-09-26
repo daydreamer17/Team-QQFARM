@@ -12,6 +12,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
+from supplier_comparison.model_json import load_model_json
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.rules import RequirementChanges, DecisionPreferences
 
@@ -229,7 +230,9 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         choice = payload["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("intent response truncated")
-        intent = ConversationIntent.model_validate_json(choice["message"]["content"])
+        intent = ConversationIntent.model_validate(
+            load_model_json(choice["message"]["content"])
+        )
         if intent.changes is not None:
             unknown = set(intent.changes.excluded_supplier_ids or []) - set(context.get("available_supplier_ids", []))
             if unknown:
@@ -358,8 +361,8 @@ def parse_decision_intent(
         choice = payload["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("truncated")
-        output = DecisionIntentModelOutput.model_validate_json(
-            choice["message"]["content"]
+        output = DecisionIntentModelOutput.model_validate(
+            load_model_json(choice["message"]["content"])
         )
         available = set(context.get("available_supplier_ids", []))
         requested = set(output.changes.excluded_supplier_ids or ())

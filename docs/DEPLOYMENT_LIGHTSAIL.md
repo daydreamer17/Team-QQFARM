@@ -62,6 +62,9 @@ Edit `.env.production` on the server. Replace every `replace-with-*` value.
 The organiser LLM key belongs in `LLM_GATEWAY_API_KEY`; it is not an AWS login
 credential. Keep the existing SiliconFlow key for embeddings and reranking
 unless the organiser gateway documents compatible endpoints for both.
+Keep the organiser model base URL ending in `/v1`; the application appends
+`/chat/completions`. The gateway can wrap structured JSON in a Markdown fence,
+which the application accepts before applying its normal strict schema checks.
 
 ## 4. Validate and start
 

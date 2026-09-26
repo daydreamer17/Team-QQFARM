@@ -12,11 +12,12 @@ from typing import Any, Callable, Literal, Protocol
 
 from pydantic import Field, model_validator
 
+from supplier_comparison.model_json import load_model_json
 from supplier_comparison.rag.clients import ModelClientError, _post_json
-
-from .response_language import language_name, response_language
 from supplier_comparison.rag.explanation import ExplanationConfig
 from supplier_comparison.rules.contracts import FrozenModel
+
+from .response_language import language_name, response_language
 
 
 INVESTIGATION_VERSION = "investigation/1.0.0"
@@ -242,7 +243,7 @@ class LiveInvestigationPlanner:
             choice = payload["choices"][0]
             if choice.get("finish_reason") != "stop":
                 raise ValueError("incomplete agent response")
-            result = AgentChoice.model_validate(json.loads(choice["message"]["content"]))
+            result = AgentChoice.model_validate(load_model_json(choice["message"]["content"]))
             record["status"] = "OK"
             return result
         except ModelClientError as exc:

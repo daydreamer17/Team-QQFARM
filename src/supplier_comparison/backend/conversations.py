@@ -14,6 +14,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
+from supplier_comparison.model_json import load_model_json
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.rules import RequirementChanges
 
@@ -304,7 +305,7 @@ def _validated_turn(
     choice = payload["choices"][0]
     if choice.get("finish_reason") != "stop":
         raise ValueError("response was truncated")
-    output = normalize_conversation_turn(json.loads(choice["message"]["content"]))
+    output = normalize_conversation_turn(load_model_json(choice["message"]["content"]))
     expected_language = conversation_response_language(context)
     if not response_matches_language(output.assistant_text, expected_language):
         raise ValueError(

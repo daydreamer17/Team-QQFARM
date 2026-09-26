@@ -13,8 +13,9 @@ from typing import Any
 import pdfplumber
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.extraction.adapters import trusted_urlopen
+from supplier_comparison.model_json import load_model_json
+from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
 REQUIREMENT_PROMPT_VERSION = "requirement-intake/1.1.0"
@@ -309,7 +310,7 @@ def _validate_requirement_candidates(
     source_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        body = RequirementCandidatesOutput.model_validate_json(content)
+        body = RequirementCandidatesOutput.model_validate(load_model_json(content))
     except (ValidationError, json.JSONDecodeError) as exc:
         raise RequirementOutputValidationError("schema") from exc
     seen: set[str] = set()

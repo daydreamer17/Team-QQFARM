@@ -11,8 +11,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.extraction.adapters import trusted_urlopen
+from supplier_comparison.model_json import load_model_json
+from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
 SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.0"
@@ -102,7 +103,9 @@ def generate_summary_narrative(
         choice = payload["choices"][0]
         if choice.get("finish_reason") != "stop":
             raise ValueError("truncated")
-        output = SummaryNarrativeOutput.model_validate_json(choice["message"]["content"])
+        output = SummaryNarrativeOutput.model_validate(
+            load_model_json(choice["message"]["content"])
+        )
         texts = [output.title, output.overview, output.disclaimer]
         for section in output.sections:
             section.reference_ids = _canonical_reference_ids(

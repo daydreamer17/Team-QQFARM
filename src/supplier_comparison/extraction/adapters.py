@@ -23,6 +23,8 @@ from typing import Callable
 import certifi
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from supplier_comparison.model_json import load_model_json
+
 from .contracts import (
     AdapterEnvironment,
     AdapterOutputMode,
@@ -509,8 +511,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
             structure_started = time.perf_counter()
             try:
-                model_payload = ModelExtractionPayload.model_validate_json(decoded.content)
-            except ValidationError as exc:
+                model_payload = ModelExtractionPayload.model_validate(
+                    load_model_json(decoded.content)
+                )
+            except (ValidationError, ValueError, TypeError) as exc:
                 current_structure_ms = _elapsed_ms(structure_started)
                 structure_validation_ms += current_structure_ms
                 diagnostics = _text_diagnostics("model_content", decoded.content)
