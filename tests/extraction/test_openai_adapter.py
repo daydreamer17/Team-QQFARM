@@ -6,6 +6,8 @@ import urllib.error
 import pytest
 
 from supplier_comparison.extraction.adapters import (
+    QUOTE_OUTPUT_TOOL,
+    _decode_openai_response,
     ModelCallBudget,
     OpenAICompatibleAdapter,
     OpenAICompatibleConfig,
@@ -171,13 +173,63 @@ def test_rejects_incomplete_response_even_when_json_is_valid(quote_dictionary, f
     assert raised.value.code == "model_output_schema_invalid"
 
 
+def _tool_envelope(body: bytes) -> bytes:
+    envelope = json.loads(body)
+    message = envelope["choices"][0]["message"]
+    arguments = message["content"]
+    message["content"] = 'draft A {"candidates":[]} draft B {"candidates":[]}'
+    message["tool_calls"] = [{"type": "function", "function": {
+        "name": QUOTE_OUTPUT_TOOL, "arguments": arguments,
+    }}]
+    envelope["choices"][0]["finish_reason"] = "tool_calls"
+    return json.dumps(envelope).encode()
+
+
+@pytest.mark.parametrize("calls", [None, [], [{}, {}], [{}], [None], [{"type": "function", "function": {"name": "other", "arguments": "{}"}}]])
+def test_organizer_rejects_missing_ambiguous_or_wrong_tools(calls):
+    envelope = {"choices": [{"message": {
+        "content": '{"candidates":[]}', "tool_calls": calls,
+    }, "finish_reason": "stop"}]}
+    with pytest.raises(ValueError):
+        _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
+
+
+def test_organizer_reads_tool_arguments_not_concatenated_drafts(quote_dictionary):
+    raw = _tool_envelope(_valid_response(quote_dictionary))
+    decoded = _decode_openai_response(raw, expected_tool_name=QUOTE_OUTPUT_TOOL)
+    assert json.loads(decoded.content) == json.loads(json.loads(_valid_response(quote_dictionary))["choices"][0]["message"]["content"])
+    assert decoded.finish_reason == "tool_calls"
+
+
+def test_compact_tool_keys_expand_without_changing_values():
+    arguments = {"candidates": [{"f": "unit_price", "r": "SGD 6.20", "v": "6.20", "u": None, "s": "EXTRACTED", "ids": ["S013"]}]}
+    envelope = {"choices": [{"message": {"tool_calls": [{"type": "function", "function": {"name": QUOTE_OUTPUT_TOOL, "arguments": json.dumps(arguments)}}]}, "finish_reason": "tool_calls"}]}
+    decoded = _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
+    assert json.loads(decoded.content) == {"candidates": [{"field_name": "unit_price", "raw_value": "SGD 6.20", "normalized_value": "6.20", "unit": None, "validation_status": "EXTRACTED", "source_ids": ["S013"]}]}
+    arguments["candidates"][0]["field_name"] = "currency"
+    envelope["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps(arguments)
+    with pytest.raises(ValueError, match="duplicate"):
+        _decode_openai_response(json.dumps(envelope).encode(), expected_tool_name=QUOTE_OUTPUT_TOOL)
+
+
+def test_organizer_rejects_truncated_tool_arguments_even_if_valid_json(quote_dictionary):
+    envelope = json.loads(_tool_envelope(_valid_response(quote_dictionary)))
+    envelope["choices"][0]["finish_reason"] = "length"
+    config = _config(max_attempts=1).model_copy(update={"environment": AdapterEnvironment.ORGANIZER})
+    adapter = OpenAICompatibleAdapter(config, opener=lambda request, timeout: FakeResponse(json.dumps(envelope).encode()))
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    with pytest.raises(AdapterError) as exc:
+        adapter.extract(parsed, quote_dictionary, ModelCallBudget(graph_run_id="TOOL-LENGTH"), "TOOL-LENGTH")
+    assert exc.value.code == "model_output_schema_invalid"
+
+
 def test_organizer_request_honors_configured_output_token_limit(quote_dictionary) -> None:
     captured = {}
 
     def opener(request, timeout):
         del timeout
         captured.update(json.loads(request.data.decode("utf-8")))
-        return FakeResponse(_valid_response(quote_dictionary))
+        return FakeResponse(_tool_envelope(_valid_response(quote_dictionary)))
 
     parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
     config = _config(max_attempts=1).model_copy(update={
@@ -192,6 +244,12 @@ def test_organizer_request_honors_configured_output_token_limit(quote_dictionary
     )
 
     assert captured["max_tokens"] == 8192
+    assert captured["tool_choice"]["function"]["name"] == QUOTE_OUTPUT_TOOL
+    assert captured["parallel_tool_calls"] is False
+    assert "response_format" not in captured
+    assert "enable_thinking" not in captured
+    properties = captured["tools"][0]["function"]["parameters"]["$defs"]["SparseModelFieldSelection"]["properties"]
+    assert set(properties) == {"f", "r", "v", "u", "s", "ids"}
 
 
 def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
@@ -223,7 +281,7 @@ def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
             }],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
         }
-        return FakeResponse(json.dumps(envelope).encode())
+        return FakeResponse(_tool_envelope(json.dumps(envelope).encode()))
 
     parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
     config = _config(max_attempts=2).model_copy(update={
@@ -392,7 +450,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/2.5.0"
+    assert result.run.prompt_version == "quote-extraction/2.6.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]

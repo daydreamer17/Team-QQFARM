@@ -64,5 +64,28 @@ database records or retry the gateway call. The checkout report can be compared
 with running container reports to detect stale code/configuration. Validation
 does not yet establish the full evidence-grounding or user workflow outcome.
 
-Production diagnosis remains incomplete until this output is available. Browser
-terminal control failed in this session and direct SSH had no accepted key.
+## Live gateway diagnosis and fix
+
+After the user downloaded the instance's SSH key, direct SSH access succeeded.
+The synthetic diagnostic returned 12 concatenated `candidates` objects in one
+`message.content`, with differing fields/values. The same behavior reproduced
+with `json_object` and streaming (one content delta containing the whole repeated
+output). This establishes the immediate parser failure, not the gateway's
+internal implementation or the model's general intelligence.
+
+A forced `submit_quote_candidates` tool call returned one explicit arguments
+object. Larger canonical-key arguments returned `{}` with 1024 completion tokens
+in two runs. Compact wire keys (`f/r/v/u/s/ids`) reduced the price-group response
+to 434 completion tokens and passed. The code expands names only: field values,
+units, validation status and evidence IDs are unchanged. Normal JSON-schema
+requests remain in use for LOCAL providers; ORGANIZER quote extraction uses
+the verified forced-tool format.
+
+Ambiguous/missing/wrong tools, malformed JSON, explicit truncation, duplicate
+alias/canonical keys and unsupported evidence remain rejected. Draft prose is
+never selected or merged into results. The tool is an output schema, not an
+executable external action.
+
+The complete Great Wall synthetic PDF passed all four groups and evidence
+grounding in four calls without retries (completion tokens: 337, 434, 555, 333).
+Production upload validation is the next acceptance check after image rebuild.

@@ -41,7 +41,9 @@ from .errors import AdapterError, ModelCallBudgetExceeded, classify_failure_code
 from .model_payload import ModelExtractionPayload, SparseModelExtractionPayload
 
 
-PROMPT_VERSION = "quote-extraction/2.5.0"
+PROMPT_VERSION = "quote-extraction/2.6.0"
+QUOTE_OUTPUT_TOOL = "submit_quote_candidates"
+QUOTE_TOOL_KEYS = {"f": "field_name", "r": "raw_value", "v": "normalized_value", "u": "unit", "s": "validation_status", "ids": "source_ids"}
 
 
 def trusted_urlopen(request: urllib.request.Request, *, timeout: float):
@@ -502,7 +504,10 @@ class OpenAICompatibleAdapter(ModelAdapter):
 
             decode_started = time.perf_counter()
             try:
-                decoded = _decode_openai_response(http_response.body)
+                decoded = _decode_openai_response(
+                    http_response.body,
+                    expected_tool_name=(QUOTE_OUTPUT_TOOL if self.config.environment == AdapterEnvironment.ORGANIZER else None),
+                )
             except (json.JSONDecodeError, KeyError, IndexError, TypeError, ValueError) as exc:
                 current_decode_ms = _elapsed_ms(decode_started)
                 decode_ms += current_decode_ms
@@ -534,14 +539,17 @@ class OpenAICompatibleAdapter(ModelAdapter):
             try:
                 from supplier_comparison.model_json import model_response_is_complete
 
-                if not model_response_is_complete(decoded.finish_reason):
+                tool_finished = (
+                    self.config.environment == AdapterEnvironment.ORGANIZER
+                    and decoded.finish_reason in {"tool_calls", "tool_use"}
+                )
+                if not tool_finished and not model_response_is_complete(decoded.finish_reason):
                     raise ValueError("model response is incomplete")
                 sparse_payload = SparseModelExtractionPayload.model_validate(
                     _normalize_sparse_model_payload(
-                        load_single_model_json_object(
-                            decoded.content,
-                            required_key="candidates",
-                        )
+                        json.loads(decoded.content)
+                        if self.config.environment == AdapterEnvironment.ORGANIZER
+                        else load_single_model_json_object(decoded.content, required_key="candidates")
                     )
                 )
                 model_payload = _complete_sparse_model_payload(sparse_payload, dictionary)
@@ -721,6 +729,35 @@ class OpenAICompatibleAdapter(ModelAdapter):
                 },
             },
         }
+        if self.config.environment == AdapterEnvironment.ORGANIZER:
+            # The gateway may concatenate several draft answers in content.
+            # Its forced tool-call arguments provide a single explicit result.
+            schema = body.pop("response_format")["json_schema"]["schema"]
+            selection = schema["$defs"]["SparseModelFieldSelection"]
+            compact_keys = {value: key for key, value in QUOTE_TOOL_KEYS.items()}
+            selection["properties"] = {compact_keys[key]: value for key, value in selection["properties"].items()}
+            selection["required"] = [compact_keys[key] for key in selection["required"]]
+            body.pop("enable_thinking", None)  # SiliconFlow-specific extension
+            body["stream"] = False
+            body["tools"] = [{"type": "function", "function": {
+                "name": QUOTE_OUTPUT_TOOL,
+                "description": "Submit the extracted supplier quotation fields once.",
+                "parameters": schema,
+            }}]
+            body["tool_choice"] = {"type": "function", "function": {"name": QUOTE_OUTPUT_TOOL}}
+            body["parallel_tool_calls"] = False
+            body["messages"][0]["content"] = body["messages"][0]["content"].replace(
+                "Return JSON only.",
+                "Submit the result exactly once through submit_quote_candidates; do not put the result in prose.",
+            )
+            body["messages"][0]["content"] += (
+                " Use compact candidate keys: f=field_name, r=raw_value, v=normalized_value, "
+                "u=unit, s=validation_status, ids=source_ids. Return compact single-line JSON arguments."
+            )
+            body["messages"][1]["content"] = body["messages"][1]["content"].replace(
+                "Each candidate has field_name, raw_value, normalized_value, unit, validation_status, source_ids.",
+                "Each candidate has compact keys f, r, v, u, s, ids as defined by the output tool.",
+            )
         headers = {"Content-Type": "application/json"}
         if self.config.api_key_env:
             api_key = os.getenv(self.config.api_key_env)
@@ -747,10 +784,27 @@ class OpenAICompatibleAdapter(ModelAdapter):
             )
 
 
-def _decode_openai_response(response_body: bytes) -> DecodedModelResponse:
+def _decode_openai_response(response_body: bytes, *, expected_tool_name: str | None = None) -> DecodedModelResponse:
     envelope = json.loads(response_body.decode("utf-8"))
+    if expected_tool_name is not None and len(envelope["choices"]) != 1:
+        raise ValueError("expected exactly one completion choice")
     choice = envelope["choices"][0]
-    content = choice["message"]["content"]
+    message = choice["message"]
+    if expected_tool_name is not None:
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list) or len(calls) != 1:
+            raise ValueError("expected exactly one structured output tool call")
+        call = calls[0]
+        if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+            raise ValueError("invalid structured output tool call")
+        if call.get("type") != "function" or call["function"].get("name") != expected_tool_name:
+            raise ValueError("unexpected structured output tool")
+        content = call["function"]["arguments"]
+        if not isinstance(content, str):
+            raise TypeError("tool arguments must be a JSON string")
+        content = _expand_quote_tool_arguments(content)
+    else:
+        content = message["content"]
     if not isinstance(content, str):
         raise TypeError("OpenAI-compatible message content must be a JSON string")
     usage = envelope.get("usage") or {}
@@ -764,6 +818,22 @@ def _decode_openai_response(response_body: bytes) -> DecodedModelResponse:
         reasoning_tokens=completion_details.get("reasoning_tokens"),
         total_tokens=usage.get("total_tokens"),
     )
+
+
+def _expand_quote_tool_arguments(content: str) -> str:
+    """Expand wire key names only; never select among answers or infer values."""
+    payload = json.loads(content)
+    if isinstance(payload, dict) and isinstance(payload.get("candidates"), list):
+        expanded = []
+        for row in payload["candidates"]:
+            if isinstance(row, dict):
+                mapped = {QUOTE_TOOL_KEYS.get(key, key): value for key, value in row.items()}
+                if len(mapped) != len(row):
+                    raise ValueError("duplicate compact and canonical field keys")
+                row = mapped
+            expanded.append(row)
+        payload["candidates"] = expanded
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
 
 def _elapsed_ms(started: float) -> float:

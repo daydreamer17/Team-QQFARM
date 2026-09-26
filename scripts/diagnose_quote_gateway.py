@@ -20,6 +20,7 @@ from supplier_comparison.extraction.adapters import (
     _source_handle_map,
     _normalize_sparse_model_payload,
     _complete_sparse_model_payload,
+    QUOTE_OUTPUT_TOOL,
 )
 from supplier_comparison.extraction.contracts import DocumentContext
 from supplier_comparison.extraction.dictionary import QuoteDictionary
@@ -53,10 +54,12 @@ def main() -> None:
     adapter = OpenAICompatibleAdapter(OpenAICompatibleConfig.from_env())
     response = adapter._request(prompt, tuple(handles))
     envelope = json.loads(response.body)
-    decoded = _decode_openai_response(response.body)
+    expected_tool = QUOTE_OUTPUT_TOOL if adapter.config.environment.value == "ORGANIZER" else None
+    decoded = _decode_openai_response(response.body, expected_tool_name=expected_tool)
     content = decoded.content
     try:
-        if not model_response_is_complete(decoded.finish_reason):
+        tool_finished = expected_tool is not None and decoded.finish_reason in {"tool_calls", "tool_use"}
+        if not tool_finished and not model_response_is_complete(decoded.finish_reason):
             raise ValueError("incomplete response")
         payload = _normalize_sparse_model_payload(load_single_model_json_object(content, required_key="candidates"))
         _complete_sparse_model_payload(SparseModelExtractionPayload.model_validate(payload), group)
@@ -72,6 +75,7 @@ def main() -> None:
         "requested_model": adapter.config.model_id,
         "returned_model": envelope.get("model"),
         "validation": validation,
+        "output_channel": "tool_arguments" if expected_tool else "message_content",
         "message_keys": sorted(envelope["choices"][0]["message"]),
         "prompt_bytes": len(prompt.encode("utf-8")),
         "content_bytes": len(content.encode("utf-8")),
