@@ -17,13 +17,14 @@ private; only the Nginx web entry point is exposed publicly.
 
 ## 2. Install Docker
 
-Connect with the Lightsail browser SSH client and install Docker Engine,
-Buildx, and the Docker Compose plugin using Docker's official Ubuntu guide.
-Verify the installation:
+Connect with the Lightsail browser SSH client, clone the repository, and run
+the included installer. It configures Docker's official Ubuntu repository and
+installs Docker Engine, Buildx, and the Docker Compose plugin:
 
 ```bash
-sudo docker run --rm hello-world
-sudo docker compose version
+git clone https://github.com/daydreamer17/Team-QQFARM.git
+cd Team-QQFARM
+sudo ./deploy/install-docker-ubuntu.sh
 ```
 
 Add the login user to the Docker group only if the team accepts the privilege
@@ -31,11 +32,14 @@ implications. Otherwise prefix the remaining Docker commands with `sudo`.
 
 ## 3. Clone and configure
 
+Run `./deploy/lightsail-deploy.sh` once. On its first run it creates a private
+`.env.production` file and generates the PostgreSQL password when OpenSSL is
+available. The script stops before starting services so that secrets can be
+added safely.
+
 ```bash
-git clone https://github.com/daydreamer17/Team-QQFARM.git
-cd Team-QQFARM
-cp .env.production.example .env.production
-chmod 600 .env.production
+./deploy/lightsail-deploy.sh
+nano .env.production
 ```
 
 Edit `.env.production` on the server. Replace every `replace-with-*` value.
@@ -46,17 +50,7 @@ unless the organiser gateway documents compatible endpoints for both.
 ## 4. Validate and start
 
 ```bash
-docker compose \
-  --env-file .env.production \
-  -f compose.yaml \
-  -f compose.prod.yaml \
-  config --quiet
-
-docker compose \
-  --env-file .env.production \
-  -f compose.yaml \
-  -f compose.prod.yaml \
-  up -d --build
+./deploy/lightsail-deploy.sh
 ```
 
 The first build downloads the Python, OCR, Node, Nginx, and PostgreSQL images
@@ -87,12 +81,7 @@ compliance checks, comparison, the AI assistant, and report export.
 ## 6. Update
 
 ```bash
-git pull --ff-only
-docker compose \
-  --env-file .env.production \
-  -f compose.yaml \
-  -f compose.prod.yaml \
-  up -d --build
+./deploy/lightsail-deploy.sh --pull
 ```
 
 Do not use `docker compose down -v`; `-v` deletes the PostgreSQL and uploaded
