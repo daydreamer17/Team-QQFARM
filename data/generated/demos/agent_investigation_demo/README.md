@@ -1,5 +1,5 @@
-# Agent 调查验收场景
+# Agent Investigation Acceptance Scenarios
 
-本目录不复制报价二进制文件，而是以带哈希的 manifest 复用 `full_flow_demo4` 的合成输入。运行时 manifest 只描述场景和输入；预期工具路线保存在 `evaluation/reference/agent_investigation_demo/cases.json`，不得提供给 Agent。
+This directory does not duplicate quotation binaries. Instead, its hash-backed manifest reuses synthetic inputs from `full_flow_demo4`. The runtime manifest describes only scenarios and inputs. Expected tool routes are stored in `evaluation/reference/agent_investigation_demo/cases.json` and must not be exposed to the Agent.
 
-报价型场景按 manifest 的 `requirement`、`base_quotes` 和 `variant_quote` 分别新建任务；用户请求型场景先用四份主报价完成比较，再从“智能调查”页面选择目标。制度故障和输入失效属于受控状态注入，不应伪造成制度正文或报价内容。
+For quotation scenarios, create separate tasks using the manifest's `requirement`, `base_quotes`, and `variant_quote`. For user-request scenarios, first complete a comparison with the four primary quotations, then select a target from the Investigation page. Policy failures and invalid inputs are controlled state injections and must not be fabricated as policy or quotation content.

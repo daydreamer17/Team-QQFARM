@@ -1,13 +1,13 @@
-# 制度检查材料（全部为合成演示资料）
+# Compliance Review Evidence (Synthetic Demonstration Materials Only)
 
-`initial/` 用于第一轮核验；每家各有一份供应商准入记录和一份 RoHS 声明。请逐份查看原文，在制度检查页选择对应供应商和控制项，按 `entry_guide.json` 录入并上传同一文件。
+Use `initial/` for the first review round. Each supplier has one supplier-admission record and one RoHS declaration. Review each source file, select the corresponding supplier and control on the Compliance Review page, enter the values from `entry_guide.json`, and upload the same file.
 
-第一轮刻意包含四种状态：完整有效、料号错配、明确不通过、已过期。不要把文件名或本 README 当成证明，实际核对 TXT 原文后再勾选“已核对覆盖范围”。
+The first round intentionally includes four states: complete and valid, part-number mismatch, explicitly non-compliant, and expired. Do not treat filenames or this README as evidence. Verify the TXT source before selecting the confirmation that the evidence scope has been reviewed.
 
-`corrections/` 用于第二轮。必须通过页面的“替换材料”操作替换对应旧记录，不能把新旧两份同时当成当前有效材料，否则应被识别为冲突或保留历史版本。
+Use `corrections/` for the second round. Replace the corresponding earlier record through the page's Replace Evidence action. Do not treat both the old and new files as currently valid; otherwise, the system should identify a conflict or retain the earlier file as a historical version.
 
-`paired_scenarios/` 提供完整的 24 份材料矩阵：4 家供应商 × 供应商准入、RoHS、金额审批 × 合规/不合规。每个供应商目录中包含 6 份可自动解析的 Markdown 文件。测试单个异常时，只上传对应文件；测试替换闭环时，先上传 `non-compliant` 文件，再用同类 `compliant` 文件执行“替换材料”。
+`paired_scenarios/` provides a complete matrix of 24 evidence files: four suppliers × supplier admission, RoHS, and amount approval × compliant/non-compliant. Each supplier directory contains six automatically parsable Markdown files. To test one exception, upload only the corresponding file. To test the replacement loop, upload the `non-compliant` file first, then use the matching `compliant` file with Replace Evidence.
 
-金额审批规则只在中选报价总成本达到 SGD 7,000 时触发；未触发供应商的 amount 文件用于解析和边界测试，不代表业务上必须预先上传。
+The amount-approval rule is triggered only when the selected quotation's total cost reaches SGD 7,000. Amount files for suppliers below the threshold are used for parsing and boundary tests; they do not mean that the business process requires evidence to be uploaded in advance.
 
-这些文件只用于演示证据核验和版本追踪，不是真实证书，不证明任何真实供应商或产品合规，也不构成采购审批。
+These files are used only to demonstrate evidence review and version tracking. They are not real certificates, do not establish the compliance of any real supplier or product, and do not constitute procurement approval.

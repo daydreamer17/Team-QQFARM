@@ -1,11 +1,11 @@
 # Extraction fixtures
 
-这里存放仍由自动化测试使用的最小解析夹具，而不是可交付给用户逐步上传的演示数据。
+This directory contains minimal extraction fixtures still used by automated tests. It does not contain demonstration data intended for step-by-step user upload.
 
-- `canonical-quotes/`：固定 CSV 与基础 PDF 报价。
-- `requirements/`：采购需求解析样本。
-- `pdf-boundaries/`：空白、损坏、加密、页数限制、来源稳定性等边界样本。
-- `pdf-layout/`：多页、重复字段、内部冲突和非规则版式。
-- `hybrid-csv/`：已登记与语义表头 CSV。
-- `ocr/`：扫描件识别边界样本。
-- `full-flow-demo4-layout-holdout/`：Demo4 的版式留出样本；一旦据此调试，应转为开发夹具。
+- `canonical-quotes/`: Fixed CSV files and basic PDF quotations.
+- `requirements/`: Procurement-requirement extraction samples.
+- `pdf-boundaries/`: Boundary samples covering blank, corrupted, encrypted, page-limit, and source-stability cases.
+- `pdf-layout/`: Multi-page documents, repeated fields, internal conflicts, and irregular layouts.
+- `hybrid-csv/`: Registered and semantic-header CSV files.
+- `ocr/`: Scanned-document recognition boundary samples.
+- `full-flow-demo4-layout-holdout/`: Demo4 layout holdout samples. Once used for debugging, move them into the development fixtures.

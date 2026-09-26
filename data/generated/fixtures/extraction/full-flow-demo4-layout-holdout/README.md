@@ -1,4 +1,4 @@
 # full_flow_demo4 layout holdout
 
-两份同事实、不同版式的合成报价，替换对应主报价，不可与其重复上传。未用于开发模型调优。
-只检查文件可读与版面不等于模型泛化通过；一旦根据提取结果改提示词或规则，这些样本必须转入开发集。
+Two synthetic quotations contain the same facts in different layouts. Replace the corresponding primary quotation; do not upload both together. These samples have not been used for model-development tuning.
+Checking only that the files are readable and visually correct does not demonstrate model generalisation. If extraction results from these samples are used to modify prompts or rules, move the samples into the development set.

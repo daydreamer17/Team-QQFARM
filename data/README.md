@@ -1,23 +1,23 @@
-# Data 目录
+# Data Directory
 
-交付版本只保留当前运行、演示和回归测试仍会使用的数据。不要再以 `quote_V1`、`quote_V2` 之类的版本号创建整套数据；新样本应按用途放入稳定目录。
+The delivery retains only data used by the current runtime, demonstrations, and regression tests. Do not create complete dataset copies with names such as `quote_V1` or `quote_V2`; place new samples in stable directories according to their purpose.
 
-## 目录职责
+## Directory responsibilities
 
-- `contracts/`：字段契约、Schema 和接口约束。
-- `policies/`：可发布的采购制度及已审核条款。
-- `examples/policy_rag/`：Policy RAG 的最小输入示例。
-- `source/`：上游原始采购数据、许可证和来源说明。
-- `generated/demos/`：可由用户按 README 完整走通的当前演示包。
-- `generated/fixtures/extraction/`：解析器边界、版式、OCR、CSV 等专项测试夹具，不作为用户演示数据。
-- `generated/fixtures/compliance/`：制度核验材料和闭环专项夹具。
-- `generated/supplier_history/`：由原始采购数据确定性生成的供应商历史快照。
+- `contracts/`: Field contracts, schemas, and interface constraints.
+- `policies/`: Publishable procurement policies and reviewed clauses.
+- `examples/policy_rag/`: Minimal input examples for Policy RAG.
+- `source/`: Upstream procurement data, licences, and source notes.
+- `generated/demos/`: Current demonstration packages that users can complete by following their README files.
+- `generated/fixtures/extraction/`: Specialised fixtures for parser boundaries, layouts, OCR, CSV, and related tests. These are not user demonstration data.
+- `generated/fixtures/compliance/`: Compliance review materials and closed-loop test fixtures.
+- `generated/supplier_history/`: Supplier history snapshots generated deterministically from source procurement data.
 
-## 当前入口
+## Current entry points
 
-- 完整流程：`generated/demos/full_flow_demo4/`
-- 调查 Agent：`generated/demos/agent_investigation_demo/`
-- 完整流程生成器：`generate_full_flow_demo4.py`
-- 调查 Agent 生成器：`generate_agent_investigation_demo.py`
+- Full workflow: `generated/demos/full_flow_demo4/`
+- Investigation Agent: `generated/demos/agent_investigation_demo/`
+- Full-workflow generator: `generate_full_flow_demo4.py`
+- Investigation Agent generator: `generate_agent_investigation_demo.py`
 
-`generated/fixtures/` 下的内容只用于自动化测试。不要把参考答案或留出集挂载到运行时 Agent 可访问的位置。
+Content under `generated/fixtures/` is for automated testing only. Do not mount reference answers or holdout sets where the runtime Agent can access them.

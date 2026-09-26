@@ -1,6 +1,6 @@
 # Compliance fixtures
 
-- `closure-demo/`：最小制度核验闭环输入。
-- `material-regression/`：供应商准入、RoHS 和金额审批材料的正反例与版本回归集。
+- `closure-demo/`: Minimal inputs for the closed-loop compliance review.
+- `material-regression/`: Compliant and non-compliant supplier-admission, RoHS, and amount-approval evidence for version regression tests.
 
-这些材料是合成测试数据，仅用于验证确定性制度执行，不代表真实供应商资质。
+These materials are synthetic test data used only to validate deterministic policy enforcement. They do not represent real supplier qualifications.
