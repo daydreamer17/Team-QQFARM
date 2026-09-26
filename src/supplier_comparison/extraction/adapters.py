@@ -900,12 +900,10 @@ def _source_handle_map(parsed_input: ParsedInput) -> dict[str, EvidenceSource]:
 
 def _model_response_schema(allowed_source_handles: tuple[str, ...]) -> dict:
     schema = SparseModelExtractionPayload.model_json_schema()
-    for definition_name in (
-        "ExtractedModelFieldSelection",
-        "ConflictModelFieldSelection",
-    ):
-        source_id_schema = schema["$defs"][definition_name]["properties"]["source_ids"]["items"]
-        source_id_schema["enum"] = list(allowed_source_handles)
+    schema.pop("description", None)
+    schema["$defs"]["SparseModelFieldSelection"].pop("description", None)
+    source_id_schema = schema["$defs"]["SparseModelFieldSelection"]["properties"]["source_ids"]["items"]
+    source_id_schema["enum"] = list(allowed_source_handles)
     return schema
 
 

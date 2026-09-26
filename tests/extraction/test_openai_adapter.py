@@ -131,12 +131,12 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     )
     assert captured["enable_thinking"] is False
     assert captured["max_tokens"] == 4096
-    extracted_schema = captured["response_format"]["json_schema"]["schema"]["$defs"][
-        "ExtractedModelFieldSelection"
-    ]
-    assert "null" not in {
-        choice["type"] for choice in extracted_schema["properties"]["normalized_value"]["anyOf"]
+    response_schema = captured["response_format"]["json_schema"]["schema"]
+    selection_schema = response_schema["$defs"]["SparseModelFieldSelection"]
+    assert response_schema["properties"]["candidates"]["items"] == {
+        "$ref": "#/$defs/SparseModelFieldSelection"
     }
+    assert set(selection_schema["required"]) == set(selection_schema["properties"])
     prompt = json.loads(captured["messages"][1]["content"])
     assert {example["field_name"] for example in prompt["normalization_examples"]} == {
         "currency",
@@ -395,7 +395,7 @@ def test_real_adapter_grounds_allowed_source_handle_to_authoritative_text(
     assert result.model_payload_before_grounding is not None
     assert result.model_payload_before_grounding.candidates[0].source_refs[0].source_id == "S001"
     allowed = captured["response_format"]["json_schema"]["schema"]["$defs"][
-        "ExtractedModelFieldSelection"
+        "SparseModelFieldSelection"
     ]["properties"]["source_ids"]["items"]["enum"]
     assert allowed == [f"S{index:03d}" for index in range(1, len(parsed.sources) + 1)]
 
@@ -535,7 +535,7 @@ def test_schema_failure_keeps_provider_metadata_after_bounded_attempts(quote_dic
     assert run["total_tokens"] == 133
     assert "raw_model_content" not in raised.value.details
     assert raised.value.details["model_content_length_bytes"] == len(raw_content.encode())
-    assert "candidates.0.EXTRACTED.normalized_value" in str(raised.value)
+    assert ".EXTRACTED.normalized_value" in str(raised.value)
     assert "S$" not in str(raised.value)
     assert budget.calls_used == 1
 

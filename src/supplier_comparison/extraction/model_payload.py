@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
@@ -63,37 +63,28 @@ class ModelExtractionPayload(BaseModel):
     candidates: tuple[ModelFieldCandidate, ...]
 
 
-class _ModelFieldSelectionBase(BaseModel):
-    """Compact provider-facing shape; authoritative citations are bound later."""
+class SparseModelFieldSelection(BaseModel):
+    """Simple gateway wire shape; strict status shapes are validated locally.
 
-    model_config = ConfigDict(extra="forbid")
+    The organiser's gateway reliably supports flat JSON schemas but can return
+    empty content for composed ``oneOf``/``discriminator`` schemas. The loose
+    wire types here only affect generation. ``ModelExtractionPayload`` remains
+    the authority boundary and rejects every invalid value after decoding.
+    """
 
-    field_name: NonEmptyStrictString
-    unit: StrictStr | None
-    source_ids: NonEmptySourceIds
+    model_config = ConfigDict(extra="ignore")
 
-
-class ExtractedModelFieldSelection(_ModelFieldSelectionBase):
-    raw_value: NonEmptyStrictString
-    normalized_value: NormalizedModelScalar
-    validation_status: Literal["EXTRACTED"]
-
-
-class ConflictModelFieldSelection(_ModelFieldSelectionBase):
-    raw_value: NonEmptyStrictString
-    normalized_value: NormalizedModelScalar | None
-    validation_status: Literal["CONFLICT"]
-
-
-ModelFieldSelection = Annotated[
-    ExtractedModelFieldSelection | ConflictModelFieldSelection,
-    Field(discriminator="validation_status"),
-]
+    field_name: str = Field(min_length=1)
+    raw_value: str = Field(min_length=1)
+    normalized_value: Any
+    unit: Any
+    validation_status: str = Field(min_length=1)
+    source_ids: list[str] = Field(min_length=1)
 
 
 class SparseModelExtractionPayload(BaseModel):
     """Only document-supported fields returned by a real model provider."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
-    candidates: tuple[ModelFieldSelection, ...]
+    candidates: list[SparseModelFieldSelection]
