@@ -123,9 +123,10 @@ class RequirementCandidatesOutput(BaseModel):
 class RequirementOutputValidationError(ValueError):
     """Non-sensitive reason used for one bounded structure-repair attempt."""
 
-    def __init__(self, reason_code: str):
-        super().__init__(reason_code)
+    def __init__(self, reason_code: str, *, detail: str | None = None):
+        super().__init__(reason_code if detail is None else f"{reason_code}: {detail}")
         self.reason_code = reason_code
+        self.detail = detail
 
 
 @dataclass(frozen=True)
@@ -289,7 +290,7 @@ def extract_requirement_candidates(
     raise ModelClientError(
         "requirement model response failed validation"
         + (
-            f" ({last_validation_error.reason_code})"
+            f" ({last_validation_error})"
             if last_validation_error is not None else ""
         ),
         attempts=total_attempts,
@@ -333,8 +334,24 @@ def _validate_requirement_candidates(
         body = RequirementCandidatesOutput.model_validate(
             _normalize_requirement_candidates_payload(decoded)
         )
-    except (ValidationError, json.JSONDecodeError) as exc:
-        raise RequirementOutputValidationError("schema") from exc
+    except json.JSONDecodeError as exc:
+        raise RequirementOutputValidationError(
+            "schema",
+            detail=f"json_invalid@{exc.lineno}:{exc.colno}",
+        ) from exc
+    except ValidationError as exc:
+        # Report only schema paths and Pydantic error types. Provider values,
+        # document text and credentials must never enter logs or the API error.
+        safe_errors = []
+        for error in exc.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )[:8]:
+            location = ".".join(str(item) for item in error["loc"]) or "root"
+            safe_errors.append(f"{location}={error['type']}")
+        detail = ",".join(safe_errors) or "validation_error"
+        raise RequirementOutputValidationError("schema", detail=detail) from exc
     seen: set[str] = set()
     candidates: list[dict[str, Any]] = []
     for row in body.candidates:

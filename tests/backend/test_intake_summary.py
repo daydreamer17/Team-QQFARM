@@ -433,6 +433,8 @@ def test_requirement_candidates_reject_active_value_without_raw_source(monkeypat
 
     assert raised.value.error_code == "requirement_model_output_invalid"
     assert raised.value.attempts == 2
+    assert "candidates.0.raw_value=value_error" in str(raised.value)
+    assert "1000" not in str(raised.value)
 
 
 def test_requirement_candidates_ignore_provider_extras_and_drop_invalid_field(monkeypatch) -> None:
