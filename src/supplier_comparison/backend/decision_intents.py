@@ -225,7 +225,7 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
     payload, attempts = _call_conversation_model(config, [
         {"role": "system", "content": system},
         {"role": "user", "content": json.dumps(minimal_context, ensure_ascii=False)},
-    ], opener=opener, sleeper=sleeper)
+    ], opener=opener, sleeper=sleeper, output_schema=ConversationIntent.model_json_schema())
     try:
         choice = payload["choices"][0]
         if not model_response_is_complete(choice.get("finish_reason")):

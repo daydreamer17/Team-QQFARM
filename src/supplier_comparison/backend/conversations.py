@@ -142,6 +142,7 @@ class ConversationModelConfig:
     timeout_seconds: float = 60
     max_attempts: int = 2
     region: str | None = None
+    environment: str = "LOCAL"
 
     @classmethod
     def from_env(cls) -> "ConversationModelConfig | None":
@@ -172,6 +173,7 @@ class ConversationModelConfig:
             region=os.getenv("SUPPLIER_CONVERSATION_MODEL_AWS_REGION")
             or os.getenv("AWS_REGION")
             or os.getenv("AWS_DEFAULT_REGION"),
+            environment=os.getenv("SUPPLIER_MODEL_ENVIRONMENT", "LOCAL"),
         )
 
 
@@ -195,18 +197,61 @@ def _call_conversation_model(
     *,
     opener: Callable[..., object],
     sleeper: Callable[[float], None],
+    output_schema: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], int]:
     if config.provider.casefold() in {"aws-bedrock", "bedrock", "bedrock-converse"}:
         return _bedrock_converse(config, messages, sleeper=sleeper)
-    return _post_json(
+    body = _conversation_request_body(config, messages)
+    organizer = config.environment.upper() == "ORGANIZER"
+    tool_name = "submit_decision_response"
+    if organizer:
+        body.pop("response_format", None)
+        body.pop("enable_thinking", None)
+        body["tools"] = [{"type": "function", "function": {
+            "name": tool_name,
+            "description": "Submit one structured decision response.",
+            "parameters": output_schema or ConversationTurnOutput.model_json_schema(),
+        }}]
+        body["tool_choice"] = {"type": "function", "function": {"name": tool_name}}
+        body["parallel_tool_calls"] = False
+    payload, attempts = _post_json(
         config.base_url.rstrip("/") + "/chat/completions",
-        _conversation_request_body(config, messages),
+        body,
         api_key_env=config.api_key_env,
         timeout_seconds=config.timeout_seconds,
         max_attempts=config.max_attempts,
         opener=opener,
         sleeper=sleeper,
     )
+    if organizer:
+        # Exactly one expected tool, or one complete JSON content document.
+        # Never choose among multiple answers. Schema/grounding checks remain.
+        try:
+            choice = payload["choices"][0]
+            message = choice["message"]
+            calls = message.get("tool_calls")
+            if calls:
+                if not isinstance(calls, list) or len(calls) != 1:
+                    raise ValueError("expected one output tool")
+                call = calls[0]
+                if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
+                    raise ValueError("invalid output tool")
+                if call.get("type") != "function" or call["function"]["name"] != tool_name:
+                    raise ValueError("unexpected output tool")
+                content = call["function"]["arguments"]
+                if choice.get("finish_reason") in {"tool_calls", "tool_use"}:
+                    choice["finish_reason"] = "stop"
+            else:
+                if choice.get("finish_reason") not in {"stop", "end_turn"}:
+                    raise ValueError("missing completed output")
+                content = message.get("content")
+            if not isinstance(content, str) or not isinstance(load_model_json(content), dict):
+                raise ValueError("expected one JSON object")
+            message["content"] = content
+        except (ValueError, KeyError, TypeError, IndexError) as exc:
+            raise ModelClientError("decision gateway response invalid", attempts=attempts,
+                                   error_code="conversation_response_invalid") from exc
+    return payload, attempts
 
 
 def _bedrock_converse(
