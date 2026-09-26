@@ -59,6 +59,27 @@ import { fieldLabel, quoteFieldGroupLabel, quoteRelationMessage, quoteRuleText }
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
+function clientUuid(): string {
+  const webCrypto = globalThis.crypto
+  if (typeof webCrypto?.randomUUID === 'function') return webCrypto.randomUUID()
+
+  // randomUUID is restricted to secure contexts in browsers, while
+  // getRandomValues remains available on plain HTTP. Keep the deployed
+  // Lightsail IP usable without weakening UUID uniqueness.
+  const bytes = new Uint8Array(16)
+  if (typeof webCrypto?.getRandomValues === 'function') {
+    webCrypto.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export class ApiClientError extends Error {
   readonly status: number
   readonly code: string
@@ -112,7 +133,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         Accept: 'application/json',
-        'X-Request-ID': crypto.randomUUID(),
+        'X-Request-ID': clientUuid(),
         ...init?.headers,
       },
     })
@@ -175,7 +196,7 @@ async function download(path: string): Promise<{ blob: Blob; filename: string }>
     response = await fetch(`${apiBaseUrl}${path}`, {
       headers: {
         Accept: 'application/octet-stream',
-        'X-Request-ID': crypto.randomUUID(),
+        'X-Request-ID': clientUuid(),
       },
     })
   } catch {
@@ -216,7 +237,7 @@ async function download(path: string): Promise<{ blob: Blob; filename: string }>
 }
 
 export function createIdempotencyKey() {
-  return crypto.randomUUID()
+  return clientUuid()
 }
 
 export function documentContentUrl(taskId: string, documentId: string, disposition: 'inline' | 'attachment' = 'inline') {
