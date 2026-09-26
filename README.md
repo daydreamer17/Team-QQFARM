@@ -14,6 +14,21 @@ QuoteWise is a supplier quotation review and decision-support system for procure
 
 The system provides analysis and recommendations only. It does not approve purchases, sign contracts, place orders, or make payments on behalf of users. All suppliers, materials, quotations, and procurement records in this repository are synthetic demonstration data.
 
+## Current validation snapshot
+
+The following evidence was rerun on 26 September 2026 against the current checkout:
+
+| Evidence | Result | What it validates |
+| --- | --- | --- |
+| Full Python regression | 1,082 passed, 0 failed, 62 skipped | Deterministic backend, rules, extraction, RAG, data, and deployment contracts. |
+| Frontend checks | 126 tests passed; lint passed; production build passed | User-interface behavior and deployable frontend assets. |
+| Focused judging-readiness suites | 162 passed, 0 failed/errors, 9 skipped | Agent grounding, policy/RAG/rule boundaries, and prompt-injection handling. |
+| Opt-in live-model benchmark | 16/16 cases passed in one recorded run | Real-model workflow completion, factual/citation validation, and unchanged official state. |
+
+The public Lightsail demonstration at <http://47.131.76.216/> returned HTTP 200 at the time of this update. The deployed stack includes Nginx, the React frontend, FastAPI, an asynchronous Worker, and PostgreSQL/pgvector.
+
+See [Judging Readiness](docs/JUDGING_READINESS.en.md) for metric definitions and reproduction commands, and [Production E2E evidence](docs/production-e2e-demo4.md) for the demonstrated workflow and release checks.
+
 ## Core capabilities
 
 - **Procurement requirement management**: Upload PDF, TXT, or Markdown files, review the extracted content, and confirm it. Incomplete requirement drafts can be restored.
@@ -136,7 +151,7 @@ npm run lint
 npm run build
 ```
 
-The default test suite mainly uses fixed model outputs and synthetic fixtures. Passing it demonstrates code-contract and deterministic-logic correctness, not successful connectivity to live external model services. Live model, agent, and PostgreSQL recovery tests require their respective environment switches; see [TESTING.md](docs/TESTING.en.md).
+The default test suite mainly uses fixed model outputs and synthetic fixtures. Passing it demonstrates code-contract and deterministic-logic correctness, not successful connectivity to live external model services. Live model, agent, and PostgreSQL recovery tests require their respective environment switches; see [TESTING.en.md](docs/TESTING.en.md).
 
 ## Repository structure
 
@@ -197,6 +212,7 @@ Refer to [.env.example](.env.example) for all defaults and descriptions.
 | [DEPLOYMENT_LIGHTSAIL.md](docs/DEPLOYMENT_LIGHTSAIL.md) | Production deployment on the NUS-ISS Amazon Lightsail environment |
 | [TESTING.en.md](docs/TESTING.en.md) | Automated tests, manual end-to-end workflow, and delivery acceptance |
 | [JUDGING_READINESS.en.md](docs/JUDGING_READINESS.en.md) | Rubric mapping, Agent loop, risk matrix, and reproducible evaluation entry point |
+| [production-e2e-demo4.md](docs/production-e2e-demo4.md) | Lightsail Demo4 acceptance record, fixes, browser evidence, and release checks |
 | [data/README.md](data/README.md) | Data-directory maintenance entry point |
 | [scripts/dev/README.md](scripts/dev/README.md) | One-command startup script reference |
 | [docs/i18n/](docs/i18n/) | Chinese-English terminology, UI copy, status, and report language dictionary |
