@@ -268,7 +268,7 @@ def test_requirement_candidates_repair_invalid_structure_once(monkeypatch) -> No
         },
     }
     assert "unknown_source" in requests[1]["messages"][-1]["content"]
-    assert result["prompt_version"] == "requirement-intake/1.1.0"
+    assert result["prompt_version"] == "requirement-intake/1.2.0"
     assert result["candidates"][0]["raw_value"] == "false"
     assert result["candidates"][0]["normalized_value"] is False
 
@@ -312,6 +312,50 @@ def test_requirement_candidates_omit_unknown_null_placeholders(monkeypatch) -> N
 
     assert attempts == 1
     assert [row["field_name"] for row in result["candidates"]] == ["manufacturer"]
+
+
+def test_requirement_candidates_ignore_provider_extras_and_drop_invalid_field(monkeypatch) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Purchase 100 ergonomic office chairs",
+        }]
+    }
+    captured: dict = {}
+
+    def fake_post(_url, body, **_kwargs):
+        captured.update(body)
+        return _model_payload({
+            "provider_metadata": {"request_id": "ignored"},
+            "candidates": [
+                {
+                    "field_name": "required_quantity",
+                    "raw_value": "100",
+                    "normalized_value": 100,
+                    "source_ids": ["requirement:line:1"],
+                    "confidence": 0.99,
+                },
+                {
+                    "field_name": "base_unit",
+                    "raw_value": "ergonomic office chairs",
+                    "normalized_value": "ergonomic office chairs",
+                    "source_ids": ["requirement:line:1"],
+                },
+            ],
+        }), 1
+
+    monkeypatch.setattr(intake, "_post_json", fake_post)
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert captured["max_tokens"] == 1024
+    assert [row["field_name"] for row in result["candidates"]] == ["required_quantity"]
 
 
 def test_decision_intent_parser_accepts_only_bounded_changes(monkeypatch) -> None:

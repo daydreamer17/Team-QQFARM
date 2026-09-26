@@ -18,7 +18,7 @@ from supplier_comparison.model_json import load_model_json
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
-REQUIREMENT_PROMPT_VERSION = "requirement-intake/1.1.0"
+REQUIREMENT_PROMPT_VERSION = "requirement-intake/1.2.0"
 REQUIREMENT_FIELDS = {
     "manufacturer", "manufacturer_part_number", "package", "revision", "condition",
     "allow_substitutes", "base_unit", "required_quantity", "quantity_unit",
@@ -90,7 +90,10 @@ _CANONICAL_VALUES = {
 class RequirementCandidateOutput(BaseModel):
     """Provider-independent structured output for one extracted field."""
 
-    model_config = ConfigDict(extra="forbid")
+    # Some OpenAI-compatible gateways append provider metadata even when they
+    # accept a strict response schema. Unknown fields are deliberately ignored:
+    # only the explicitly modelled fields below can reach the application.
+    model_config = ConfigDict(extra="ignore")
 
     field_name: str = Field(min_length=1)
     raw_value: str = Field(min_length=1)
@@ -112,7 +115,7 @@ class RequirementCandidateOutput(BaseModel):
 class RequirementCandidatesOutput(BaseModel):
     """The only model response shape accepted by the intake adapter."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     candidates: list[RequirementCandidateOutput]
 
@@ -132,6 +135,7 @@ class RequirementModelConfig:
     api_key_env: str
     timeout_seconds: float = 60
     max_attempts: int = 2
+    max_tokens: int = 1024
 
     @classmethod
     def from_env(cls) -> "RequirementModelConfig | None":
@@ -148,6 +152,10 @@ class RequirementModelConfig:
             max_attempts=max(
                 1,
                 min(2, int(os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_ATTEMPTS", "2"))),
+            ),
+            max_tokens=max(
+                256,
+                min(4096, int(os.getenv("SUPPLIER_REQUIREMENT_MODEL_MAX_TOKENS", "1024"))),
             ),
         )
 
@@ -204,6 +212,8 @@ def extract_requirement_candidates(
         "Omit absent or unknown fields completely; never emit null placeholders. raw_value must be a JSON string. "
         "Money must be a decimal string without a currency symbol, dates YYYY-MM-DD, quantities integers, and "
         "booleans true/false. Normalize 'not allowed' to false and 'before tax' to EXCLUDED. "
+        "For base_unit and quantity_unit, emit normalized_value 'piece' only when the source uses piece, pieces, "
+        "unit, units, pc, pcs, each, or a countable item noun; never copy a product description as a unit. "
         "Ranking values must be one of LOWEST_CONFIRMED_TOTAL_COST, FASTEST_CONFIRMED_DELIVERY, "
         "LONGEST_CONFIRMED_PAYMENT_TERM, HIGHEST_SUPPLIER_PERFORMANCE, "
         "HIGHEST_HISTORICAL_ON_TIME_RATE, LOWEST_HISTORICAL_REJECTED_LINE_RATE. "
@@ -226,7 +236,7 @@ def extract_requirement_candidates(
                     "model": config.model_id,
                     "temperature": 0,
                     "enable_thinking": False,
-                    "max_tokens": 4096,
+                    "max_tokens": config.max_tokens,
                     "response_format": {
                         "type": "json_schema",
                         "json_schema": {
@@ -344,8 +354,12 @@ def _validate_requirement_candidates(
             continue
         try:
             normalized = _normalize_requirement_value(field, row.normalized_value)
-        except ValueError as exc:
-            raise RequirementOutputValidationError(f"invalid_value:{field}") from exc
+        except ValueError:
+            # Fail closed per field. A provider-specific spelling or invented
+            # enum must not invalidate other grounded candidates from the same
+            # document; the unsupported candidate is simply left for review.
+            seen.add(field)
+            continue
         candidates.append({
             "field_name": field,
             "raw_value": raw,
