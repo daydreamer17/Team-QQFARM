@@ -30,11 +30,11 @@ from supplier_comparison.rag.clients import ModelClientError
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _model_payload(body: dict) -> dict:
+def _model_payload(body: dict, *, finish_reason: str | None = "stop") -> dict:
     return {
         "choices": [
             {
-                "finish_reason": "stop",
+                "finish_reason": finish_reason,
                 "message": {"content": json.dumps(body, ensure_ascii=False)},
             }
         ]
@@ -157,6 +157,45 @@ def test_requirement_candidates_are_grounded_to_current_sources(monkeypatch) -> 
             RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
         )
     assert raised.value.error_code == "requirement_model_output_invalid"
+
+
+@pytest.mark.parametrize("finish_reason", ["end_turn", None])
+def test_requirement_candidates_accept_organiser_gateway_completion_variants(
+    monkeypatch, finish_reason
+) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Required quantity: 1000 pieces",
+        }]
+    }
+    monkeypatch.setattr(
+        intake,
+        "_post_json",
+        lambda *args, **kwargs: (
+            _model_payload(
+                {"candidates": [{
+                    "field_name": "required_quantity",
+                    "raw_value": "1000",
+                    "normalized_value": 1000,
+                    "source_ids": ["requirement:line:1"],
+                }]},
+                finish_reason=finish_reason,
+            ),
+            1,
+        ),
+    )
+
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert result["candidates"][0]["normalized_value"] == 1000
 
 
 def test_requirement_candidates_normalize_model_scalar_and_enum_variants(monkeypatch) -> None:

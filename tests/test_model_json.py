@@ -4,11 +4,23 @@ import json
 
 import pytest
 
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_model_json, model_response_is_complete
 
 
 def test_load_model_json_accepts_plain_json() -> None:
     assert load_model_json(' {"ok": true} ') == {"ok": True}
+
+
+@pytest.mark.parametrize("finish_reason", [None, "stop", "end_turn"])
+def test_model_response_completion_accepts_gateway_variants(finish_reason) -> None:
+    assert model_response_is_complete(finish_reason)
+
+
+@pytest.mark.parametrize(
+    "finish_reason", ["length", "max_tokens", "content_filter", "tool_calls"]
+)
+def test_model_response_completion_rejects_incomplete_outputs(finish_reason) -> None:
+    assert not model_response_is_complete(finish_reason)
 
 
 @pytest.mark.parametrize("language", ["json", "JSON", ""])

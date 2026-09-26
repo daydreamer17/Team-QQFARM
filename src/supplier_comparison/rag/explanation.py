@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from pydantic import Field, model_validator
 
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_model_json, model_response_is_complete
 
 from .contracts import FrozenModel, ExplanationClaim, PolicyCitation, PolicyExplanation, RetrievalResult, RetrievalStatus
 from .clients import ModelClientError, _post_json
@@ -122,7 +122,7 @@ class LiveExplanationClient:
                                    if k in {"prompt_tokens", "completion_tokens", "total_tokens"}
                                    and isinstance(v, int) and v >= 0}
             choice = payload["choices"][0]
-            if choice.get("finish_reason") != "stop":
+            if not model_response_is_complete(choice.get("finish_reason")):
                 raise ValueError("incomplete model output")
             parsed = load_model_json(choice["message"]["content"])
             if set(parsed) != {"claims"} or not isinstance(parsed["claims"], list) or not 1 <= len(parsed["claims"]) <= 12:

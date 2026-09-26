@@ -12,7 +12,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_model_json, model_response_is_complete
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
@@ -101,7 +101,7 @@ def generate_summary_narrative(
     )
     try:
         choice = payload["choices"][0]
-        if choice.get("finish_reason") != "stop":
+        if not model_response_is_complete(choice.get("finish_reason")):
             raise ValueError("truncated")
         output = SummaryNarrativeOutput.model_validate(
             load_model_json(choice["message"]["content"])

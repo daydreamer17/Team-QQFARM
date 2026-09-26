@@ -12,7 +12,7 @@ from typing import Any, Callable, Literal, Protocol
 
 from pydantic import Field, model_validator
 
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_model_json, model_response_is_complete
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 from supplier_comparison.rag.explanation import ExplanationConfig
 from supplier_comparison.rules.contracts import FrozenModel
@@ -241,7 +241,7 @@ class LiveInvestigationPlanner:
                                    if key in {"prompt_tokens", "completion_tokens", "total_tokens"}
                                    and type(value) is int and value >= 0}
             choice = payload["choices"][0]
-            if choice.get("finish_reason") != "stop":
+            if not model_response_is_complete(choice.get("finish_reason")):
                 raise ValueError("incomplete agent response")
             result = AgentChoice.model_validate(load_model_json(choice["message"]["content"]))
             record["status"] = "OK"

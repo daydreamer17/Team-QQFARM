@@ -26,3 +26,15 @@ def load_model_json(content: str) -> Any:
     if match is not None:
         candidate = match.group("body")
     return json.loads(candidate)
+
+
+def model_response_is_complete(finish_reason: object) -> bool:
+    """Accept complete OpenAI and Anthropic-compatible gateway responses.
+
+    Some OpenAI-compatible gateways preserve Anthropic's ``end_turn`` value,
+    while others omit ``finish_reason`` after successfully returning a complete
+    JSON document. Schema and JSON validation still reject partial content;
+    explicit truncation or safety/tool termination reasons remain failures.
+    """
+
+    return finish_reason in {None, "stop", "end_turn"}
