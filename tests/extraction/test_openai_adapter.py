@@ -180,6 +180,69 @@ def test_organizer_request_uses_proven_output_token_limit(quote_dictionary) -> N
     assert captured["max_tokens"] == 4096
 
 
+def test_organizer_extracts_related_field_groups_and_reassembles_one_quote(
+    quote_dictionary,
+) -> None:
+    requests = []
+
+    def opener(request, timeout):
+        del timeout
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append(body)
+        prompt = json.loads(body["messages"][1]["content"])
+        field_names = {field["field_name"] for field in prompt["field_contract"]}
+        candidates = []
+        if "supplier_name" in field_names:
+            candidates.append({
+                "field_name": "supplier_name",
+                "raw_value": "Great Wall Components",
+                "normalized_value": "Great Wall Components",
+                "unit": None,
+                "validation_status": "EXTRACTED",
+                "source_ids": ["S001"],
+            })
+        envelope = {
+            "id": f"request-batch-{len(requests)}",
+            "choices": [{
+                "message": {"content": json.dumps({"candidates": candidates})},
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150},
+        }
+        return FakeResponse(json.dumps(envelope).encode())
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    config = _config(max_attempts=2).model_copy(update={
+        "environment": AdapterEnvironment.ORGANIZER,
+    })
+    result = OpenAICompatibleAdapter(config, opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-ORGANIZER-BATCH"),
+        "EXTRACT-ORGANIZER-BATCH",
+    )
+
+    assert len(requests) == 4
+    assert all(len(body["messages"][1]["content"]) < 9_000 for body in requests)
+    requested = [
+        field["field_name"]
+        for body in requests
+        for field in json.loads(body["messages"][1]["content"])["field_contract"]
+    ]
+    assert set(requested) == {field.field_name for field in quote_dictionary.extractable_fields}
+    assert len(requested) == len(set(requested))
+    assert len(result.payload.candidates) == 30
+    assert result.payload.candidates[0].field_name == "supplier_name"
+    assert result.payload.candidates[0].validation_status == "EXTRACTED"
+    assert result.payload.candidates[0].source_refs[0].source_id == parsed.sources[0].source_id
+    assert all(candidate.validation_status == "MISSING" for candidate in result.payload.candidates[1:])
+    assert result.run.calls_before == 0
+    assert result.run.calls_after == 4
+    assert result.run.attempts == 4
+    assert result.run.prompt_tokens == 400
+    assert [record.call_number for record in result.run.attempt_records] == [1, 2, 3, 4]
+
+
 def test_adapter_accepts_one_json_object_after_gateway_reasoning(quote_dictionary) -> None:
     envelope = json.loads(_valid_response(quote_dictionary))
     content = envelope["choices"][0]["message"]["content"]
@@ -315,7 +378,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/2.4.0"
+    assert result.run.prompt_version == "quote-extraction/2.5.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
