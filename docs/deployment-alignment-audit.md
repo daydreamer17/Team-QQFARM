@@ -89,3 +89,24 @@ executable external action.
 The complete Great Wall synthetic PDF passed all four groups and evidence
 grounding in four calls without retries (completion tokens: 337, 434, 555, 333).
 Production upload validation is the next acceptance check after image rebuild.
+
+### Production acceptance result — not yet resolved
+
+Commit `f51dcad` was deployed successfully; API, database and web health checks
+passed. The final backend regression run was **1050 passed, 62 skipped**.
+
+A real browser upload of the same synthetic PDF created
+`draft_da91f230374841d99597b8c1658c6fb9`. It **failed** after four model calls with
+`model_response_invalid` (invalid chat-completions envelope). Four calls alone
+do not identify the failing group because group attempts share the budget.
+The uploaded document hash matches earlier tests. The deployed adapter and
+isolated probe adapter have identical SHA-256 hashes; runtime nonsecret model
+configuration matches the intended organizer settings.
+
+A subsequent single delivery/payment/date-group request returned one valid
+forced tool call and decoded successfully. This does not prove that group caused
+the failed upload, nor does it establish reliable end-to-end behavior. Production
+failure artifacts were not enabled, so the exact rejected response is unavailable.
+Next investigation must capture a restricted failure artifact (without exposing
+credentials) and classify the actual malformed envelope before changing parsing
+or retry behavior. Do not report the production upload issue as fixed.
