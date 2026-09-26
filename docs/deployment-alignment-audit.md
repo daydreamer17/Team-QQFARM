@@ -110,3 +110,30 @@ failure artifacts were not enabled, so the exact rejected response is unavailabl
 Next investigation must capture a restricted failure artifact (without exposing
 credentials) and classify the actual malformed envelope before changing parsing
 or retry behavior. Do not report the production upload issue as fixed.
+
+### Follow-up: captured missing-tool response
+
+With a new user-approved maximum of 20 model calls, the first controlled call
+reproduced the rejection: the gateway omitted `tool_calls` despite forced
+`tool_choice`, and returned one complete fenced JSON object in `message.content`
+with `finish_reason=stop`. Its compact-key candidates were otherwise valid.
+
+Commit `dd45be4` accepts this observed transport variation only when there are
+no tool calls and the finish reason is `stop` or `end_turn`. It decodes the entire
+plain/fenced JSON document, expands key names, and applies the existing schema
+and source-grounding checks. It never searches prose or chooses among multiple
+answers. Wrong/multiple tools still fail even if content contains valid JSON.
+
+An isolated full extraction passed in five calls, including one bounded retry
+and one actual content-only response. Regression suite: **1060 passed, 62
+skipped**, with two existing enum warnings. Calls used before production upload:
+**6/20**. The revised service was deployed successfully with readiness passing.
+
+Production browser acceptance then **passed**: uploading the same PDF created
+`draft_14b50b0a0bd44045b514c644d146b173`, status `REVIEW_REQUIRED`, 30 fields,
+`error_message=null`, and four calls without retries. The browser displayed the
+review form with 27 identified fields and two absent fields. One actionable
+business-validation item remains: supplier name includes `(SUP-029)` and must
+be separated from its ID. No automatic human confirmation or formal submission
+was performed. This verifies upload-to-review, not the remaining compliance,
+analysis or summary workflow. Total paid model calls in this follow-up: **10/20**.
