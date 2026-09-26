@@ -80,15 +80,29 @@ compose=(
 
 "${compose[@]}" config --quiet
 "${compose[@]}" up -d --build --wait --wait-timeout 600
+# Nginx resolves the Compose service name when it starts. If only the API is
+# recreated, the long-running web container can retain the API's old address.
+"${compose[@]}" restart web
 "${compose[@]}" ps
 
-if ! curl --fail --silent --show-error \
-  'http://127.0.0.1/health/ready?require_worker=true'; then
+ready=false
+for _ in {1..30}; do
+  if curl --fail --silent \
+    'http://127.0.0.1/health/ready?require_worker=true' >/dev/null; then
+    ready=true
+    break
+  fi
+  sleep 2
+done
+if [[ "${ready}" != true ]]; then
   echo >&2
   echo "Readiness check failed. Recent service logs:" >&2
   "${compose[@]}" logs --tail=100 api worker web >&2
   exit 1
 fi
+
+curl --fail --silent --show-error \
+  'http://127.0.0.1/health/ready?require_worker=true'
 
 echo
 echo "QuoteWise is ready. Open http://<LIGHTSAIL_STATIC_IP>/ in a browser."
