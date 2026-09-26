@@ -49,3 +49,23 @@ def test_local_protocol_unchanged(monkeypatch):
     _, body = request(monkeypatch, {'finish_reason': 'stop', 'message': {'content': '{}'}}, config=replace(CONFIG, environment='LOCAL'))
     assert body['response_format'] == {'type': 'json_object'}
     assert 'tools' not in body
+
+def test_summary_organizer_uses_structured_schema_and_still_validates_refs(monkeypatch):
+    from supplier_comparison.backend import summaries, conversations
+    value = {'title': '采购摘要', 'overview': '请先核实待确认事项。',
+             'sections': [{'heading': '风险', 'text': '请核实。', 'reference_ids': ['RESULT:1']}],
+             'disclaimer': '不构成采购审批。'}
+    seen = []
+    def call(config, messages, **kwargs):
+        seen.append((config, kwargs['output_schema']))
+        return {'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(value)}}]}, 1
+    monkeypatch.setattr(conversations, '_call_conversation_model', call)
+    config = summaries.SummaryModelConfig('model', 'https://invalid.test', 'UNUSED', environment='ORGANIZER')
+    facts = {'references': ['RESULT:1'], 'formal_recommendation_allowed': False}
+    result, _ = summaries.generate_summary_narrative(facts, config)
+    assert result == value
+    assert seen[0][0].environment == 'ORGANIZER'
+    assert 'sections' in seen[0][1]['properties']
+    value['sections'][0]['reference_ids'] = ['INVENTED:1']
+    with pytest.raises(ModelClientError):
+        summaries.generate_summary_narrative(facts, config)

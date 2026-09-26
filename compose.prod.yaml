@@ -13,6 +13,7 @@ services:
 
   api:
     environment:
+      SUPPLIER_SUMMARY_MODEL_TIMEOUT_SECONDS: ${SUPPLIER_SUMMARY_MODEL_TIMEOUT_SECONDS:-180}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
       LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:?LLM_GATEWAY_API_KEY is required}
       SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-openai-compatible}
@@ -27,6 +28,7 @@ services:
 
   worker:
     environment:
+      SUPPLIER_SUMMARY_MODEL_TIMEOUT_SECONDS: ${SUPPLIER_SUMMARY_MODEL_TIMEOUT_SECONDS:-180}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-supplier_app}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-supplier_comparison}
       LLM_GATEWAY_API_KEY: ${LLM_GATEWAY_API_KEY:?LLM_GATEWAY_API_KEY is required}
       SUPPLIER_MODEL_PROVIDER: ${SUPPLIER_MODEL_PROVIDER:-openai-compatible}

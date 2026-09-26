@@ -45,6 +45,7 @@ class SummaryModelConfig:
     api_key_env: str
     timeout_seconds: float = 60
     max_attempts: int = 2
+    environment: str = "LOCAL"
 
     @classmethod
     def from_env(cls) -> "SummaryModelConfig | None":
@@ -59,6 +60,7 @@ class SummaryModelConfig:
             or os.getenv("SUPPLIER_MODEL_API_KEY_ENV", "QQFARM_SILICONFLOW_API_KEY"),
             timeout_seconds=float(os.getenv("SUPPLIER_SUMMARY_MODEL_TIMEOUT_SECONDS", "60")),
             max_attempts=min(2, int(os.getenv("SUPPLIER_SUMMARY_MODEL_MAX_ATTEMPTS", "2"))),
+            environment=os.getenv("SUPPLIER_MODEL_ENVIRONMENT", "LOCAL"),
         )
 
 
@@ -80,25 +82,38 @@ def generate_summary_narrative(
         "Return JSON only with keys title, overview, sections, disclaimer. sections is a non-empty list of "
         "{heading,text,reference_ids}; every reference ID must be supplied. If formal recommendation is not allowed, say so clearly."
     )
-    payload, attempts = _post_json(
-        config.base_url.rstrip("/") + "/chat/completions",
-        {
-            "model": config.model_id,
-            "temperature": 0,
-            "enable_thinking": False,
-            "max_tokens": 4096,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": json.dumps(model_facts, ensure_ascii=False)},
-            ],
-        },
-        api_key_env=config.api_key_env,
-        timeout_seconds=config.timeout_seconds,
-        max_attempts=config.max_attempts,
-        opener=trusted_urlopen,
-        sleeper=time.sleep,
-    )
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(model_facts, ensure_ascii=False)},
+    ]
+    if config.environment.upper() == "ORGANIZER":
+        from .conversations import ConversationModelConfig, _call_conversation_model
+        payload, attempts = _call_conversation_model(
+            ConversationModelConfig(
+                provider="openai-compatible", model_id=config.model_id,
+                base_url=config.base_url, api_key_env=config.api_key_env,
+                timeout_seconds=config.timeout_seconds, max_attempts=config.max_attempts,
+                environment=config.environment,
+            ), messages, opener=trusted_urlopen, sleeper=time.sleep,
+            output_schema=SummaryNarrativeOutput.model_json_schema(),
+        )
+    else:
+        payload, attempts = _post_json(
+            config.base_url.rstrip("/") + "/chat/completions",
+            {
+                "model": config.model_id,
+                "temperature": 0,
+                "enable_thinking": False,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"},
+                "messages": messages,
+            },
+            api_key_env=config.api_key_env,
+            timeout_seconds=config.timeout_seconds,
+            max_attempts=config.max_attempts,
+            opener=trusted_urlopen,
+            sleeper=time.sleep,
+        )
     try:
         choice = payload["choices"][0]
         if not model_response_is_complete(choice.get("finish_reason")):
