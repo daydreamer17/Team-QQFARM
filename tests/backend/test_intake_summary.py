@@ -355,6 +355,86 @@ def test_requirement_candidates_omit_unknown_null_placeholders(monkeypatch) -> N
     assert [row["field_name"] for row in result["candidates"]] == ["manufacturer"]
 
 
+def test_requirement_candidates_omit_empty_provider_placeholders(monkeypatch) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Manufacturer: QQ Demo Components",
+        }]
+    }
+    monkeypatch.setattr(
+        intake,
+        "_post_json",
+        lambda *args, **kwargs: (
+            _model_payload({"candidates": [
+                {
+                    "field_name": "manufacturer",
+                    "raw_value": "QQ Demo Components",
+                    "normalized_value": "QQ Demo Components",
+                    "source_ids": "requirement:line:1",
+                },
+                {
+                    "field_name": "planned_order_date",
+                    "raw_value": None,
+                    "normalized_value": None,
+                    "source_ids": [],
+                },
+                {
+                    "field_name": "delivery_deadline",
+                    "raw_value": "not specified",
+                    "normalized_value": None,
+                    "source_ids": None,
+                },
+            ]}),
+            1,
+        ),
+    )
+
+    result, attempts = extract_requirement_candidates(
+        parsed,
+        RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+    )
+
+    assert attempts == 1
+    assert [row["field_name"] for row in result["candidates"]] == ["manufacturer"]
+    assert result["candidates"][0]["source_refs"][0]["source_id"] == "requirement:line:1"
+
+
+def test_requirement_candidates_reject_active_value_without_raw_source(monkeypatch) -> None:
+    parsed = {
+        "sources": [{
+            "source_id": "requirement:line:1",
+            "kind": "TEXT_LINE",
+            "line_number": 1,
+            "page_number": None,
+            "raw_text": "Required quantity: 1000 pieces",
+        }]
+    }
+    invalid = _model_payload({"candidates": [{
+        "field_name": "required_quantity",
+        "raw_value": None,
+        "normalized_value": 1000,
+        "source_ids": "requirement:line:1",
+    }]})
+    monkeypatch.setattr(
+        intake,
+        "_post_json",
+        lambda *args, **kwargs: (invalid, 1),
+    )
+
+    with pytest.raises(ModelClientError) as raised:
+        extract_requirement_candidates(
+            parsed,
+            RequirementModelConfig("fixed-test", "https://example.invalid/v1", "UNUSED"),
+        )
+
+    assert raised.value.error_code == "requirement_model_output_invalid"
+    assert raised.value.attempts == 2
+
+
 def test_requirement_candidates_ignore_provider_extras_and_drop_invalid_field(monkeypatch) -> None:
     parsed = {
         "sources": [{

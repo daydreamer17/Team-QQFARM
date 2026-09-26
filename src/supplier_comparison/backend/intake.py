@@ -329,7 +329,10 @@ def _validate_requirement_candidates(
     source_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        body = RequirementCandidatesOutput.model_validate(load_model_json(content))
+        decoded = load_model_json(content)
+        body = RequirementCandidatesOutput.model_validate(
+            _normalize_requirement_candidates_payload(decoded)
+        )
     except (ValidationError, json.JSONDecodeError) as exc:
         raise RequirementOutputValidationError("schema") from exc
     seen: set[str] = set()
@@ -378,6 +381,51 @@ def _validate_requirement_candidates(
         })
         seen.add(field)
     return candidates
+
+
+def _normalize_requirement_candidates_payload(payload: Any) -> dict[str, Any]:
+    """Normalize narrow JSON-mode variations before strict validation.
+
+    Some OpenAI-compatible gateways ignore parts of ``response_format`` and
+    either emit a scalar ``source_ids`` value or enumerate absent fields with
+    null placeholders. A null placeholder carries no procurement fact and is
+    safe to omit. Candidates that claim a value remain subject to the strict
+    Pydantic schema, field allowlist and exact source grounding below.
+    """
+
+    if not isinstance(payload, dict) or not isinstance(payload.get("candidates"), list):
+        return payload
+
+    normalized_rows: list[Any] = []
+    for row in payload["candidates"]:
+        if not isinstance(row, dict):
+            normalized_rows.append(row)
+            continue
+
+        field = row.get("field_name")
+        raw = row.get("raw_value")
+        value = row.get("normalized_value")
+        source_ids = row.get("source_ids")
+
+        # Providers sometimes enumerate the complete allowed-field schema.
+        # Drop only genuinely empty unknown placeholders. An explicit
+        # secondary preference of "none" remains a grounded, reviewable fact.
+        if value is None and field != "secondary_preference" and (
+            raw is None
+            or (isinstance(raw, str) and raw.strip().lower() in {
+                "", "null", "not specified", "not applicable", "unknown",
+            })
+        ):
+            continue
+
+        normalized_row = dict(row)
+        if isinstance(source_ids, str):
+            normalized_row["source_ids"] = [source_ids]
+        normalized_rows.append(normalized_row)
+
+    normalized_payload = dict(payload)
+    normalized_payload["candidates"] = normalized_rows
+    return normalized_payload
 
 
 def _normalize_requirement_value(field: str, value: Any) -> Any:
