@@ -30,6 +30,36 @@ def test_organizer_output_tool_preserves_schema(monkeypatch):
     assert 'response_format' not in body and 'enable_thinking' not in body
     assert body['tools'][0]['function']['parameters']['properties'] == {'route': {'type': 'string'}}
 
+def test_organizer_output_tool_inlines_local_schema_definitions(monkeypatch):
+    schema = {
+        'type': 'object',
+        'properties': {'sections': {'type': 'array', 'items': {'$ref': '#/$defs/Section'}}},
+        '$defs': {
+            'Section': {
+                'type': 'object',
+                'properties': {'heading': {'type': 'string'}},
+                'required': ['heading'],
+            }
+        },
+    }
+    monkeypatch.setenv('TEST_GATEWAY_KEY', 'synthetic')
+    bodies = []
+    def opener(req, **kwargs):
+        bodies.append(json.loads(req.data))
+        return io.BytesIO(json.dumps({
+            'choices': [{
+                'finish_reason': 'tool_calls',
+                'message': {'tool_calls': [tool(arguments='{"sections":[]}')]}},
+            ]
+        }).encode())
+
+    _call_conversation_model(
+        CONFIG, [], opener=opener, sleeper=lambda _: None, output_schema=schema,
+    )
+    parameters = bodies[0]['tools'][0]['function']['parameters']
+    assert '$defs' not in parameters
+    assert parameters['properties']['sections']['items'] == schema['$defs']['Section']
+
 def test_single_fenced_content_is_accepted(monkeypatch):
     request(monkeypatch, {'finish_reason': 'end_turn', 'message': {'content': '```json\n{"route":"EXPLAIN"}\n```'}})
 

@@ -205,12 +205,15 @@ def _call_conversation_model(
     organizer = config.environment.upper() == "ORGANIZER"
     tool_name = "submit_decision_response"
     if organizer:
+        tool_schema = _inline_local_schema_refs(
+            output_schema or ConversationTurnOutput.model_json_schema()
+        )
         body.pop("response_format", None)
         body.pop("enable_thinking", None)
         body["tools"] = [{"type": "function", "function": {
             "name": tool_name,
             "description": "Submit one structured decision response.",
-            "parameters": output_schema or ConversationTurnOutput.model_json_schema(),
+            "parameters": tool_schema,
         }}]
         body["tool_choice"] = {"type": "function", "function": {"name": tool_name}}
         body["parallel_tool_calls"] = False
@@ -286,6 +289,41 @@ def _call_conversation_model(
             raise ModelClientError(f"decision gateway response invalid ({shape})", attempts=attempts,
                                    error_code="conversation_response_invalid") from exc
     return payload, attempts
+
+
+def _inline_local_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
+    """Inline Pydantic's local $defs references for limited tool-schema gateways."""
+
+    definitions = schema.get("$defs", {})
+
+    def resolve(value: Any, stack: tuple[str, ...] = ()) -> Any:
+        if isinstance(value, list):
+            return [resolve(item, stack) for item in value]
+        if not isinstance(value, dict):
+            return value
+        reference = value.get("$ref")
+        if isinstance(reference, str) and reference.startswith("#/$defs/"):
+            name = reference.removeprefix("#/$defs/")
+            target = definitions.get(name)
+            if not isinstance(target, dict) or name in stack:
+                raise ValueError("unsupported recursive tool schema")
+            resolved = resolve(target, stack + (name,))
+            siblings = {
+                key: resolve(item, stack)
+                for key, item in value.items()
+                if key != "$ref"
+            }
+            return {**resolved, **siblings}
+        return {
+            key: resolve(item, stack)
+            for key, item in value.items()
+            if key != "$defs"
+        }
+
+    resolved = resolve(schema)
+    if not isinstance(resolved, dict):
+        raise ValueError("tool schema must be an object")
+    return resolved
 
 
 def _organizer_response_shape(payload: object) -> str:
