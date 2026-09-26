@@ -171,21 +171,22 @@ def test_v7_unruled_two_column_rows_have_atomic_cells_and_contexts() -> None:
     assert source_by_text["Synthetic Meridian Supplier 01 Ltd."].kind == SourceKind.PDF_TABLE_CELL
 
 
-def test_prompt_exposes_context_members_but_context_id_is_not_citable(quote_dictionary) -> None:
+def test_prompt_exposes_compact_context_source_handles(quote_dictionary) -> None:
     parsed = PdfQuoteParser().parse(_v5_path("a"), _v5_context("a"))
     handles = _source_handle_map(parsed)
     prompt = json.loads(_build_prompt(parsed, quote_dictionary, handles))
     freight_group = next(
         group
         for group in prompt["context_groups"]
-        if [member["text"] for member in group["members"]]
-        == ["FREIGHT CHARGE", "SGD 120.00 per order"]
+        if group["source_ids"] == [
+            next(handle for handle, source in handles.items() if source.raw_text == "FREIGHT CHARGE"),
+            next(handle for handle, source in handles.items() if source.raw_text == "SGD 120.00 per order"),
+        ]
     )
 
     assert freight_group["purpose"] == "FIELD_AND_VALUE"
-    assert all(member["source_id"] in handles for member in freight_group["members"])
-    assert freight_group["context_group_id"] not in handles
-    assert "reading context only" in freight_group["citation_rule"]
+    assert all(source_id in handles for source_id in freight_group["source_ids"])
+    assert set(freight_group) == {"purpose", "page_number", "source_ids"}
 
 
 def test_value_cell_can_use_its_structural_header_without_weakening_evidence(

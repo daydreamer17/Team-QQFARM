@@ -157,6 +157,29 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     ]
 
 
+def test_organizer_request_uses_proven_output_token_limit(quote_dictionary) -> None:
+    captured = {}
+
+    def opener(request, timeout):
+        del timeout
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(_valid_response(quote_dictionary))
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    config = _config(max_attempts=1).model_copy(update={
+        "environment": AdapterEnvironment.ORGANIZER,
+        "max_tokens": 8192,
+    })
+    OpenAICompatibleAdapter(config, opener=opener).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-ORGANIZER-LIMIT"),
+        "EXTRACT-ORGANIZER-LIMIT",
+    )
+
+    assert captured["max_tokens"] == 4096
+
+
 def test_adapter_accepts_one_json_object_after_gateway_reasoning(quote_dictionary) -> None:
     envelope = json.loads(_valid_response(quote_dictionary))
     content = envelope["choices"][0]["message"]["content"]
@@ -292,7 +315,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/2.3.0"
+    assert result.run.prompt_version == "quote-extraction/2.4.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
@@ -326,7 +349,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert tray_price_example["outputs"]["price_basis_unit"]["normalized_value"] == "piece"
 
 
-def test_pdf_prompt_includes_page_and_block_location_metadata(quote_dictionary) -> None:
+def test_pdf_prompt_includes_compact_page_location_metadata(quote_dictionary) -> None:
     captured = {}
 
     def opener(request, timeout):
@@ -345,10 +368,12 @@ def test_pdf_prompt_includes_page_and_block_location_metadata(quote_dictionary) 
     prompt = json.loads(captured["messages"][1]["content"])
     first_source = prompt["sources"][0]
 
+    assert len(captured["messages"][1]["content"]) < 18_000
     assert first_source["source_id"] == "S001"
     assert first_source["kind"] == "PDF_TEXT_BLOCK"
     assert first_source["page_number"] >= 1
-    assert first_source["block_id"]
+    assert "block_id" not in first_source
+    assert "coordinate_space" not in first_source
     assert "row_number" not in first_source
     assert "column_name" not in first_source
 
