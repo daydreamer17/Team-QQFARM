@@ -19,7 +19,7 @@ from supplier_comparison.rules import RequirementChanges, DecisionPreferences
 
 DECISION_INTENT_PROMPT_VERSION = "decision-intent/2.0.0"
 
-CONVERSATION_INTENT_VERSION = "conversation-intent/1.2.1"
+CONVERSATION_INTENT_VERSION = "conversation-intent/1.2.2"
 
 
 class ConversationIntent(BaseModel):
@@ -202,6 +202,9 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         "CLARIFY requires clarification EXACT_DELIVERY_DAY (exact-day delivery, not a deadline), COST_LIMIT "
         "(vague affordable/not too expensive without a numeric limit), or CHANGE_DETAILS (ambiguous change or identity). "
         "UNSUPPORTED means approval, ordering, payment, modifying quotation facts, or unsupported ranking weights. "
+        "Communication ADVICE is EXPLAIN: 'What should we communicate to an unselected supplier?' asks for "
+        "talking points based on the frozen result, not for actual contact. Drafting suggested wording is allowed. "
+        "Actually sending a message, contacting a supplier, or committing a purchase is UNSUPPORTED. "
         "Other routes have changes=null; only CLARIFY has a non-null clarification. "
         "At most TWO ranking criteria are supported. If the user requests three or more, route CLARIFY "
         "with CHANGE_DETAILS; never silently omit their third criterion. "

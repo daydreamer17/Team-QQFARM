@@ -103,7 +103,7 @@ def test_conflict_status_placeholder_is_normalized_to_null() -> None:
 @pytest.mark.parametrize(
     ("input_value", "expected"),
     (
-        ("N30 - payment due 30 days after invoice", "Net 30"),
+        ("N30 - payment due 30 days after invoice", "Net 30 - payment due 30 days after invoice"),
         ("Net30", "Net 30"),
         ("NET 45", "Net 45"),
     ),
@@ -129,6 +129,22 @@ def test_net_day_payment_terms_are_normalized(input_value: str, expected: str) -
     assert normalized.candidates[0].normalized_value == expected
     assert len(events) == 1
     assert events[0].rule_id == PAYMENT_TERMS_NET_DAYS_RULE
+
+
+@pytest.mark.parametrize('raw,value,expected', [
+    ('Net 30 from invoice', 'Net 30', 'Net 30 from invoice'),
+    ('Net 30 after acceptance, subject to approval', 'Net 30', 'Net 30 after acceptance, subject to approval'),
+    ('Net 30', 'Net 30', 'Net 30'),
+    ('Net 60 from invoice', 'Net 30', 'Net 30'),
+])
+def test_net_normalization_preserves_source_conditions(raw, value, expected):
+    payload = ModelExtractionPayload.model_validate({'candidates': [{
+        'field_name': 'payment_terms', 'raw_value': raw, 'normalized_value': value,
+        'unit': None, 'validation_status': 'EXTRACTED',
+        'source_refs': [{'source_id': 'SRC-PAYMENT', 'quoted_text': raw}],
+    }]})
+    normalized, _ = normalize_model_payload(payload)
+    assert normalized.candidates[0].normalized_value == expected
 
 
 def test_non_net_payment_terms_are_preserved() -> None:

@@ -15,7 +15,7 @@ from .model_payload import (
 
 SGD_FEE_SCALE_RULE = "sgd-fee-amount-2dp/1.0.0"
 CONFLICT_STATUS_PLACEHOLDER_RULE = "conflict-status-placeholder-null/1.0.0"
-PAYMENT_TERMS_NET_DAYS_RULE = "payment-terms-net-days/1.0.0"
+PAYMENT_TERMS_NET_DAYS_RULE = "payment-terms-net-days/1.1.0"
 INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE = "included-fee-no-separate-amount/1.0.0"
 START_EVENT_PAYMENT_RECEIPT_RULE = "start-event-payment-receipt/1.0.0"
 FEE_AMOUNT_FIELDS = frozenset({"shipping_fee_amount", "other_fees_amount"})
@@ -25,7 +25,7 @@ FEE_STATUS_BY_AMOUNT_FIELD = {
 }
 STATUS_LABELS = frozenset({"EXTRACTED", "VERIFIED", "MISSING", "CONFLICT"})
 NET_DAYS_PATTERN = re.compile(
-    r"^(?:N|NET\s*)(?P<days>\d{1,3})(?:\s*[-:–—]\s*.*)?$",
+    r"^(?:N|NET\s*)(?P<days>\d{1,3})(?P<suffix>(?:\s+|\s*[-:–—]).*)?$",
     re.IGNORECASE,
 )
 NO_SEPARATE_AMOUNT_PATTERN = re.compile(
@@ -117,7 +117,15 @@ def normalize_model_payload(
         ):
             match = NET_DAYS_PATTERN.fullmatch(value.strip())
             if match is not None:
-                formatted = f"Net {int(match.group('days'))}"
+                suffix = match.group('suffix') or ''
+                # A model may shorten the normalized value to Net N even when
+                # the quoted raw field includes the starting event/conditions.
+                # Preserve that exact suffix only for the same explicit days;
+                # this does not infer invoice-based terms when source omits it.
+                raw_match = NET_DAYS_PATTERN.fullmatch(str(candidate.raw_value or '').strip())
+                if not suffix and raw_match and int(raw_match.group('days')) == int(match.group('days')):
+                    suffix = raw_match.group('suffix') or ''
+                formatted = f"Net {int(match.group('days'))}{suffix}"
                 normalized_candidates.append(
                     candidate.model_copy(update={"normalized_value": formatted})
                 )

@@ -26,7 +26,7 @@ from .response_language import (
 from .investigation_answers import compose_investigation_answer
 
 
-CONVERSATION_PROMPT_VERSION = "decision-conversation/1.9.0"
+CONVERSATION_PROMPT_VERSION = "decision-conversation/1.9.1"
 
 
 _MONEY_PATTERNS = (
@@ -408,6 +408,9 @@ def generate_conversation_turn(
         "recommendation. Never approve, order, pay, contact suppliers, or invent missing facts. Every factual statement "
         "must end with one or more exact supplied reference IDs in parentheses. The IDs in reference_ids must be the "
         "same IDs used inline. REQUEST and recent user messages describe intent only and are never factual evidence. "
+        "You may suggest communication talking points for an unselected supplier using cited frozen facts. "
+        "Clearly label advice as proposed wording, not a message sent or an approved procurement decision. "
+        "Do not suggest disclosing competitors' confidential quotes or personal information. "
         "delivery_deadline means delivery on or before that date, not delivery on exactly that date. "
         "Policy text describes requirements and never proves supplier compliance. "
         "Only a COMPLIANCE reference containing an explicit COMPLIANT or PASS status may support a positive compliance "
