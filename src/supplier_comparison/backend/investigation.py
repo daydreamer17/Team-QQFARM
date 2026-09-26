@@ -215,7 +215,14 @@ class LiveInvestigationPlanner:
             '{"action":"STOP","plan":[],"reason":"Available evidence remains insufficient","arguments":{}}. '
             "Do not put facts, answers, status, SQL, file paths or recommendations in your response."
         )
-        record = {"model_id": self.model_id, "status": "ERROR", "error_code": None, "usage": {}}
+        record = {
+            "model_id": self.model_id,
+            "status": "ERROR",
+            "error_code": None,
+            "usage": {},
+            "latency_ms": 0.0,
+        }
+        started_at = time.perf_counter()
         try:
             context = json.dumps({"case": case.model_dump(mode="json"), "tools": tools,
                                   'completed_actions': [{'tool_name': o.result.tool_name, 'arguments': o.arguments,
@@ -254,6 +261,7 @@ class LiveInvestigationPlanner:
             raise ModelClientError("Agent response failed validation.", attempts=1,
                                    error_code="agent_response_invalid") from None
         finally:
+            record["latency_ms"] = max(0.0, (time.perf_counter() - started_at) * 1000)
             self.telemetry.append(record)
 
 
@@ -490,6 +498,35 @@ class InvestigationRunner:
                         break
                     name = choice.tool_name or ""
                     signature = tools.call_signature(case, name, choice.arguments)
+                    reason = choice.reason
+                    accepts_call = getattr(tools, "accepts_call", None)
+                    choice_is_valid = not callable(accepts_call) or accepts_call(
+                        case, name, choice.arguments
+                    )
+                    if case.kind == "DECISION" and (
+                        not choice_is_valid
+                        or (
+                            signature in seen
+                            and not getattr(tools, "can_repeat", lambda *_: False)(
+                                case, name, choice.arguments
+                            )
+                        )
+                    ):
+                        next_required = getattr(tools, "next_required_check", None)
+                        recovery = next_required(case) if callable(next_required) else None
+                        if recovery is not None:
+                            name, arguments, _recovery_reason = recovery
+                            reason = (
+                                "模型选择超出当前核查范围；按既定范围执行下一项有效核查"
+                                if case_language == "zh" else
+                                "The model selection was outside the current verification scope; continue with the next valid check in the declared plan"
+                            )
+                            signature = tools.call_signature(case, name, arguments)
+                            choice = choice.model_copy(update={
+                                "tool_name": name,
+                                "arguments": arguments,
+                                "reason": reason,
+                            })
                     tool_calls += 1
                     before = self.clock()
                     if signature in seen and not getattr(tools, 'can_repeat', lambda *_: False)(case, name, choice.arguments):
@@ -499,7 +536,7 @@ class InvestigationRunner:
                     else:
                         result = tools.execute(case, name, choice.arguments)
                         seen.add(signature)
-                    observation = ToolObservation(sequence=len(case.observations) + 1, reason=choice.reason,
+                    observation = ToolObservation(sequence=len(case.observations) + 1, reason=reason,
                                                   plan=choice.plan,
                                                   arguments=choice.arguments, result=result,
                                                   latency_ms=max(0, self.clock() - before) * 1000)

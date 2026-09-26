@@ -189,6 +189,21 @@ curl -fsS http://127.0.0.1:8000/health/worker
 
 ## 6. 评测脚本
 
+评审就绪报告（Agent、引用、制度/RAG 和提示注入护栏）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_judging_readiness.py
+```
+
+付费真实模型评测（默认关闭，不进入 CI）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_live_model.py --confirm-paid --repeats 3
+```
+
+该评测在固定的四供应商 Demo4 任务上运行 14 个调查问题和 2 个条件试算，汇总成功率、P50/P95、Token、回复依据校验和正式状态不变性。未提供 `--confirm-paid` 时不会调用模型。
+脚本默认加载仓库根目录的 `.env`；可使用 `--env-file <path>` 指定其他配置文件。
+
 Demo4 离线评测入口：
 
 ```bash

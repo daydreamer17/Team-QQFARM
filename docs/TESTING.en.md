@@ -189,6 +189,21 @@ Also run these general regressions:
 
 ## 6. Evaluation scripts
 
+Judging-readiness report for Agent, grounding, policy/RAG, and prompt-injection guardrails:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_judging_readiness.py
+```
+
+Paid live-model evaluation (disabled by default and excluded from CI):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_live_model.py --confirm-paid --repeats 3
+```
+
+This benchmark runs 14 investigation questions and two what-if simulations over the fixed four-supplier Demo4 task. It reports success rate, P50/P95 latency, token usage, grounding validation, and official-state immutability. It makes no model call without `--confirm-paid`.
+The script loads the repository-root `.env` by default; use `--env-file <path>` to select another environment file.
+
 Demo4 offline evaluation:
 
 ```bash

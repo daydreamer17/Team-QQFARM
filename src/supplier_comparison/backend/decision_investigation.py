@@ -139,6 +139,7 @@ class DecisionInvestigationTools:
         asks_quote_source = any(token in lowered for token in (
             "核对报价", "报价原文", "报价内容", "原始文件", "原文件", "source quotation",
             "source quote", "original quotation", "original quote", "source document",
+            "quotation content", "quote content", "original file",
         ))
         asks_history = any(token in lowered for token in (
             "历史", "准时率", "拒收", "供应商表现", "供应商记录", "履约风险", "评级",
@@ -146,7 +147,8 @@ class DecisionInvestigationTools:
         ))
         asks_policy = any(token in lowered for token in (
             "制度", "合规", "审批", "证明", "材料", "规则", "准入", "过期", "不匹配", "补传", "人工确认",
-            "policy", "compliance", "approval", "evidence", "rohs", "eligibility", "expired", "mismatch", "manual confirmation",
+            "policy", "compliance", "approval", "rohs", "eligibility", "expired", "mismatch",
+            "manual confirmation", "human confirmation",
         )) or any(token in lowered for token in (
             "未被推荐", "没被推荐", "没有被推荐", "不能推荐", "not recommended", "not selected", "cannot be recommended",
         ))
@@ -155,7 +157,7 @@ class DecisionInvestigationTools:
         ))
         asks_gaps = any(token in lowered for token in (
             "缺失", "过期", "不匹配", "无法确认", "补传", "人工确认",
-            "missing", "expired", "mismatch", "cannot confirm", "manual confirmation",
+            "missing", "expired", "mismatch", "cannot confirm", "manual confirmation", "human confirmation",
         ))
         asks_delta = any(token in lowered for token in (
             "贵多少", "便宜多少", "早多少", "晚多少", "差多少", "溢价",
@@ -450,7 +452,10 @@ class DecisionInvestigationTools:
         if plan.get("analysis_goal") == "GAP_REVIEW" and not mentioned:
             return [str(row["quote_id"]) for row in self.rows.values()]
         if candidates and question and any(
-            token in question for token in ("当前推荐", "推荐报价", "推荐供应商")
+            token in question for token in (
+                "当前推荐", "推荐报价", "推荐供应商",
+                "current recommendation", "recommended quote", "recommended supplier",
+            )
         ) and not any(str(row.get("supplier_name") or "").casefold() in question for row in self.rows.values()):
             return candidates[:1]
 
@@ -701,8 +706,12 @@ class DecisionInvestigationTools:
                 "available_quote_ids": history_remaining,
                 "guidance": f"The current primary criterion requires review of: {', '.join(plan.get('evidence_topics') or [])}.",
             }
-        if ("inspect_policy_evidence" not in used
-                and bool(self.result["input_snapshot"] and self.result["input_snapshot"].get("policy_set_version"))):
+        policy_bound = bool(
+            self.result["input_snapshot"]
+            and self.result["input_snapshot"].get("policy_set_version")
+        )
+        policy_requested = bool(plan.get("requires_policy_evidence"))
+        if "inspect_policy_evidence" not in used and (policy_requested or policy_bound):
             result["inspect_policy_evidence"] = self.schemas["inspect_policy_evidence"]
         candidates_set = set(candidates)
         quote_complete = not plan.get("requires_quote_evidence") or candidates_set <= self._checked_quote_ids(case, "inspect_quote_evidence")
@@ -723,6 +732,33 @@ class DecisionInvestigationTools:
         if name == "inspect_quote_evidence" and isinstance(normalized, dict):
             normalized = {"quote_id": normalized.get("quote_id")}
         return content_hash([name, normalized])
+
+    def accepts_call(self, case: InvestigationCase, name: str, arguments: dict) -> bool:
+        """Validate a model-selected call against the server's current scope.
+
+        The model may only choose among the schemas and quote IDs offered for
+        this exact observation state. Invalid choices are planning errors, not
+        tool executions; the runner can safely replace them with the next
+        server-planned check without recording a misleading denied tool call.
+        """
+
+        available = self.available_schemas(case)
+        schema = available.get(name)
+        if schema is None:
+            return False
+        try:
+            parsed = DECISION_TOOLS[name][0].model_validate(arguments)
+        except (KeyError, ValidationError):
+            return False
+        quote_id = getattr(parsed, "quote_id", None)
+        available_quote_ids = schema.get("available_quote_ids") or []
+        if available_quote_ids and quote_id not in available_quote_ids:
+            return False
+        preferred_focus = schema.get("preferred_focus")
+        selected_focus = getattr(parsed, "focus", None)
+        if preferred_focus and selected_focus not in {preferred_focus, "ALL"}:
+            return False
+        return True
 
     def execute(self, case: InvestigationCase, name: str, arguments: dict) -> ToolResult:
         common = dict(tool_name=name, task_id=self.task_id, task_revision=self.task_revision,
@@ -829,6 +865,18 @@ class DecisionInvestigationTools:
             return ToolResult(**common, status="OK" if supplier and supplier.get("history_snapshot") else "NOT_FOUND", data=data)
 
         if name == "inspect_policy_evidence":
+            policy_snapshot = self.result.get("input_snapshot") or {}
+            if not policy_snapshot.get("policy_set_version"):
+                return ToolResult(**common, status="NOT_FOUND", data={
+                    "reason_code": "POLICY_NOT_BOUND",
+                    "retrievals": [],
+                    "compliance": {
+                        "recommendation_scope": None,
+                        "requires_human_review": True,
+                        "counts": {},
+                        "assessments": [],
+                    },
+                })
             compliance = self.result["policy_compliance"]
             candidate_quote_ids = set(self._candidate_quote_ids(case))
             assessments = [
@@ -866,14 +914,30 @@ class DecisionInvestigationTools:
         observations = [o for o in case.observations if o.result.status in {"OK", "NOT_FOUND"}]
         if not any(o.result.tool_name == "compare_alternatives" for o in observations) or not any(
             o.result.tool_name in {"inspect_quote_evidence", "inspect_supplier_history", "inspect_policy_evidence"}
-            and o.result.status == "OK"
+            and o.result.status in {"OK", "NOT_FOUND"}
             for o in observations
         ):
             return ToolResult(**common, status="DENIED", error_code="investigation_incomplete")
         unresolved: list[dict[str, Any]] = []
         seen_unresolved: set[tuple[str, str, str]] = set()
         for observation in observations:
-            if observation.result.tool_name == "inspect_policy_evidence":
+            if (
+                observation.result.tool_name == "inspect_policy_evidence"
+                and observation.result.status == "NOT_FOUND"
+            ):
+                key = ("", "POLICY", str(observation.result.data.get("reason_code") or "NOT_FOUND"))
+                if key not in seen_unresolved:
+                    seen_unresolved.add(key)
+                    unresolved.append({
+                        "type": "POLICY_EVIDENCE_NOT_FOUND",
+                        "reason_code": observation.result.data.get("reason_code"),
+                        "action": (
+                            "先为当前任务绑定并发布适用制度，再重新分析"
+                            if language == "zh" else
+                            "Bind and publish the applicable policy for this task, then analyse again"
+                        ),
+                    })
+            elif observation.result.tool_name == "inspect_policy_evidence":
                 for assessment in (observation.result.data.get("compliance") or {}).get("assessments", []):
                     for check in assessment.get("checks", []):
                         if check.get("status") not in {"REVIEW_REQUIRED", "MISSING", "CONFLICT"}:

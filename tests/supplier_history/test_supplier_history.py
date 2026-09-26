@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import random
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -79,6 +80,25 @@ def test_bundled_mcu9_history_matches_reviewed_aggregates(tmp_path: Path) -> Non
         by_id["SUP-029"].rejected_lines.numerator,
         by_id["SUP-029"].overall_grade,
     ) == (71, 4, 9, "D")
+
+
+def test_bundled_source_hash_is_stable_across_lf_and_crlf_checkouts(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "purchase_orders.csv"
+    lf_bytes = SOURCE.read_bytes().replace(b"\r\n", b"\n")
+    source.write_bytes(lf_bytes.replace(b"\n", b"\r\n"))
+
+    _content, manifest_path, _content_hash, _manifest_hash = generate_supplier_history(
+        source,
+        tmp_path / "history",
+        dataset_version="crlf-checkout",
+        generated_at=GENERATED_AT,
+        as_of_date=AS_OF,
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["source_sha256"] == hashlib.sha256(lf_bytes).hexdigest()
 
 
 def test_canonical_dataset_is_independent_of_input_order(tmp_path: Path) -> None:

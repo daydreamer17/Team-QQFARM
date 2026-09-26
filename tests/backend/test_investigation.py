@@ -222,6 +222,7 @@ def test_live_transport_schema_and_failure_validation_without_network(tmp_path, 
     assert context['response_schema'] == AgentChoice.model_json_schema()
     assert context['case']['goal'] == case.goal
     assert planner.telemetry[0]["usage"] == {"total_tokens": 100}
+    assert planner.telemetry[0]["latency_ms"] >= 0
     assert "secret-key" not in json.dumps(requests)
 
     def malformed(_request, *, timeout):

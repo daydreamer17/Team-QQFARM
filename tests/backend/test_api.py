@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import os
+import time
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -1740,6 +1743,206 @@ def test_decision_agent_uses_explicit_question_scope_before_primary_ranking(batc
     assert policy_plan["requires_quote_evidence"] is False
     assert policy_plan["requires_supplier_history"] is False
 
+    english_policy_case = tools.requested_case(
+        request_id="policy-only-en",
+        question=(
+            "Verify the policy clauses and supplier evidence supporting the current "
+            "recommendation, and distinguish the policy requirements from the actual "
+            "compliance conclusion."
+        ),
+    )
+    english_policy_plan = english_policy_case.known_facts["ranking_investigation_plan"]
+    assert english_policy_plan["requires_policy_evidence"] is True
+    assert english_policy_plan["requires_quote_evidence"] is False
+    assert english_policy_plan["requires_supplier_history"] is False
+
+    recommended_case = tools.requested_case(
+        request_id="recommended-delivery-history-en",
+        question=(
+            "Verify the recommended supplier's quoted delivery evidence and historical "
+            "on-time performance, and clearly identify any evidence gaps."
+        ),
+    )
+    assert recommended_case.known_facts["ranking_investigation_plan"]["requires_policy_evidence"] is False
+    assert tools._candidate_quote_ids(recommended_case) == [
+        str(tools.result["result"]["recommended_quote_ids"][0])
+    ]
+
+    conflict_case = tools.requested_case(
+        request_id="cross-source-conflict-en",
+        question=(
+            "Find any conflicts among quotation content, supplier records, and "
+            "compliance evidence, and determine which source should be trusted."
+        ),
+    )
+    conflict_plan = conflict_case.known_facts["ranking_investigation_plan"]
+    assert conflict_plan["requires_quote_evidence"] is True
+    assert conflict_plan["requires_supplier_history"] is True
+    assert conflict_plan["requires_policy_evidence"] is True
+
+    consistency_case = tools.requested_case(
+        request_id="recommendation-consistency-en",
+        question=(
+            "Check whether the current recommendation rationale contains any "
+            "contradictions. If you find an anomaly, continue checking the original "
+            "files and policy rules."
+        ),
+    )
+    consistency_plan = consistency_case.known_facts["ranking_investigation_plan"]
+    assert consistency_plan["requires_quote_evidence"] is True
+    assert consistency_plan["requires_supplier_history"] is False
+    assert consistency_plan["requires_policy_evidence"] is True
+
+    unresolved_case = tools.requested_case(
+        request_id="unresolved-gaps-en",
+        question=(
+            "Which issues cannot be confirmed with the available tools? List the "
+            "documents that must be uploaded or the items that require human confirmation."
+        ),
+    )
+    unresolved_plan = unresolved_case.known_facts["ranking_investigation_plan"]
+    assert unresolved_plan["analysis_goal"] == "GAP_REVIEW"
+    assert unresolved_plan["requires_quote_evidence"] is False
+    assert unresolved_plan["requires_supplier_history"] is False
+    assert unresolved_plan["requires_policy_evidence"] is True
+
+
+def test_decision_agent_recovers_invalid_model_calls_and_converges(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-invalid-call-recovery",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    tools.result["input_snapshot"]["policy_set_version"] = "benchmark-policy-v1"
+    case = tools.prepare_case(tools.requested_case(
+        request_id="policy-invalid-call-recovery",
+        question=(
+            "Verify the policy clauses and supplier evidence supporting the current "
+            "recommendation, and distinguish the policy requirements from the actual "
+            "compliance conclusion."
+        ),
+    ))
+    planner = ScriptedPlanner([
+        call("inspect_policy_evidence", {"quote_id": "model-invented-id"}),
+    ])
+
+    completed = InvestigationRunner(planner).run((case,), tools, tools.save)[0]
+
+    assert completed.status == "RESOLVED"
+    assert completed.stop_reason == "REQUEST_COMPLETED"
+    assert completed.model_calls == 1
+    assert [observation.result.tool_name for observation in completed.observations] == [
+        "read_decision_overview",
+        "compare_alternatives",
+        "inspect_policy_evidence",
+        "compile_decision_brief",
+    ]
+    assert all(
+        observation.result.status in {"OK", "NOT_FOUND"}
+        for observation in completed.observations
+    )
+    assert completed.observations[2].arguments == {}
+
+
+def test_decision_agent_reports_missing_policy_binding_without_failing(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-policy-not-bound",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    case = tools.prepare_case(tools.requested_case(
+        request_id="policy-not-bound",
+        question=(
+            "Verify the policy clauses and supplier evidence supporting the current "
+            "recommendation, and distinguish the policy requirements from the actual "
+            "compliance conclusion."
+        ),
+    ))
+
+    completed = InvestigationRunner(ScriptedPlanner([
+        call("inspect_policy_evidence"),
+    ])).run((case,), tools, tools.save)[0]
+
+    assert completed.status == "RESOLVED"
+    assert [observation.result.tool_name for observation in completed.observations] == [
+        "read_decision_overview",
+        "compare_alternatives",
+        "inspect_policy_evidence",
+        "compile_decision_brief",
+    ]
+    assert completed.observations[2].result.status == "NOT_FOUND"
+    assert completed.observations[2].result.data["reason_code"] == "POLICY_NOT_BOUND"
+    brief = completed.observations[-1].result.data
+    assert brief["requires_follow_up"] is True
+    assert brief["unresolved_items"] == [{
+        "type": "POLICY_EVIDENCE_NOT_FOUND",
+        "reason_code": "POLICY_NOT_BOUND",
+        "action": "Bind and publish the applicable policy for this task, then analyse again",
+    }]
+
+
+def test_decision_agent_recovers_wrong_focus_and_duplicate_selection(batch_review):
+    _http, service, task, runner, _review, body = batch_review
+    updated = service.correct_fields(
+        task_id=task["task_id"], corrections=body["corrections"],
+        expected_task_revision=body["expected_task_revision"],
+        idempotency_key="decision-investigation-focus-recovery",
+    )
+    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    current = service.get_task(task["task_id"])
+    context = service.requested_investigation_context(
+        task["task_id"], expected_task_revision=current["task_revision"], quote_id=None,
+    )
+    tools = DecisionInvestigationTools(service, task_id=task["task_id"], context=context)
+    case = tools.prepare_case(tools.requested_case(
+        request_id="delivery-focus-recovery",
+        question=(
+            "Verify the recommended supplier's quoted delivery evidence and historical "
+            "on-time performance, and clearly identify any evidence gaps."
+        ),
+    ))
+    recommended = str(tools.result["result"]["recommended_quote_ids"][0])
+    planner = ScriptedPlanner([
+        call("inspect_quote_evidence", {"quote_id": recommended, "focus": "COST"}),
+        call("inspect_quote_evidence", {"quote_id": recommended, "focus": "DELIVERY"}),
+    ])
+
+    completed = InvestigationRunner(planner).run((case,), tools, tools.save)[0]
+
+    assert completed.status == "RESOLVED"
+    assert completed.stop_reason == "REQUEST_COMPLETED"
+    assert completed.model_calls == 2
+    assert [observation.result.tool_name for observation in completed.observations] == [
+        "read_decision_overview",
+        "compare_alternatives",
+        "inspect_quote_evidence",
+        "inspect_supplier_history",
+        "compile_decision_brief",
+    ]
+    assert completed.observations[2].arguments == {
+        "quote_id": recommended,
+        "focus": "DELIVERY",
+    }
+    assert completed.observations[3].arguments == {"quote_id": recommended}
+    assert all(
+        observation.result.status in {"OK", "NOT_FOUND"}
+        for observation in completed.observations
+    )
+
 
 @pytest.mark.skipif(__import__('os').getenv('RUN_AGENT_LIVE_TESTS') != '1',
                     reason='set RUN_AGENT_LIVE_TESTS=1 for live decision Agent acceptance')
@@ -1850,6 +2053,491 @@ def test_live_chatbot_investigation_runs_tools_and_returns_grounded_answer(batch
     events = service.decision_conversation_events(task['task_id'], conversation_id)
     assert any(row['event_type'] == 'assistant.tool' for row in events)
     assert service.get_task(task['task_id']) == before
+
+
+@pytest.fixture
+def live_demo4_review(client):
+    """Frozen four-supplier task used only by the paid live-model benchmark."""
+    import hashlib
+    from uuid import uuid4
+
+    from sqlalchemy import select
+
+    from supplier_comparison.backend.compliance_evidence_parser import (
+        parse_compliance_evidence,
+    )
+    from supplier_comparison.backend.workflow import DefaultQuoteProcessor
+    from supplier_comparison.rag.contracts import (
+        PolicyCitation,
+        RetrievalResult,
+        RetrievalStatus,
+    )
+    from supplier_comparison.rag.models import (
+        PolicyClause,
+        PolicyDocument,
+        PolicyIndex,
+        PolicySet,
+    )
+    from tests.backend.test_full_flow_demo4_dataset import (
+        DATA as DEMO4_DATA,
+        EVALUATED_AT as DEMO4_EVALUATED_AT,
+        upload_and_review,
+    )
+
+    _http, service = client
+    metadata = json.loads(
+        (DEMO4_DATA / "policy/electronics_sg/upload_metadata.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    reviewed_clauses = json.loads(
+        (DEMO4_DATA / "policy/electronics_sg/reviewed_clauses.json").read_text(
+            encoding="utf-8"
+        )
+    )["clauses"]
+    policy_text = (
+        DEMO4_DATA / "policy/electronics_sg/policy.txt"
+    ).read_text(encoding="utf-8")
+    set_record_id = "live-demo4-policy-set"
+    document_record_id = "live-demo4-policy-document"
+    index_version = "live-demo4-policy-index"
+    with service.session_factory.begin() as session:
+        session.add(PolicySet(
+            policy_set_record_id=set_record_id,
+            policy_set_id=metadata["policy_set_id"],
+            policy_set_version=metadata["policy_set_version"],
+            schema_version="1.0.0",
+            manifest_sha256=hashlib.sha256(policy_text.encode()).hexdigest(),
+            manifest_path="synthetic:full-flow-demo4",
+            status="PUBLISHED",
+            published_at=DEMO4_EVALUATED_AT,
+        ))
+        session.flush()
+        session.add(PolicyDocument(
+            policy_document_record_id=document_record_id,
+            policy_set_record_id=set_record_id,
+            policy_id=metadata["policy_id"],
+            document_id=metadata["document_id"],
+            document_version=metadata["document_version"],
+            title=metadata["title"],
+            source_path="synthetic:full-flow-demo4/policy.txt",
+            content_sha256=hashlib.sha256(policy_text.encode()).hexdigest(),
+            effective_from=datetime.fromisoformat(
+                metadata["effective_from"].replace("Z", "+00:00")
+            ),
+            effective_to=None,
+            categories=metadata["categories"],
+            regions=metadata["regions"],
+        ))
+        session.add(PolicyIndex(
+            policy_index_version=index_version,
+            policy_set_record_id=set_record_id,
+            collection_sha256=hashlib.sha256(
+                json.dumps(reviewed_clauses, sort_keys=True).encode()
+            ).hexdigest(),
+            provider="fixed-live-benchmark",
+            embedding_model="fixed-live-benchmark",
+            embedding_dimension=1024,
+            preprocessing_version="live-benchmark/1.0",
+            status="PUBLISHED",
+            published_at=DEMO4_EVALUATED_AT,
+        ))
+        session.flush()
+        for clause in reviewed_clauses:
+            clause_text = clause["text"]
+            session.add(PolicyClause(
+                policy_clause_record_id="live-" + clause["clause_id"],
+                policy_set_record_id=set_record_id,
+                policy_document_record_id=document_record_id,
+                clause_id=clause["clause_id"],
+                section=clause["title"],
+                text=clause_text,
+                normalized_text=clause_text.casefold(),
+                content_sha256=hashlib.sha256(clause_text.encode()).hexdigest(),
+                control_code=clause["control_code"],
+                rule_parameters=clause["rule_parameters"],
+            ))
+
+    class Demo4PolicyRetriever:
+        def retrieve(self, request):
+            retrieval_id = "RET-" + uuid4().hex
+            citations = []
+            with service.session_factory() as session:
+                for rank, control_code in enumerate(request.required_control_codes, start=1):
+                    clause = session.scalar(select(PolicyClause).where(
+                        PolicyClause.policy_set_record_id == set_record_id,
+                        PolicyClause.control_code == control_code,
+                    ))
+                    assert clause is not None
+                    citations.append(PolicyCitation(
+                        citation_id=f"CIT-{uuid4().hex}",
+                        retrieval_id=retrieval_id,
+                        policy_set_version=metadata["policy_set_version"],
+                        policy_id=metadata["policy_id"],
+                        document_id=metadata["document_id"],
+                        document_version=metadata["document_version"],
+                        clause_id=clause.clause_id,
+                        section=clause.section,
+                        text=clause.text,
+                        content_sha256=clause.content_sha256,
+                        control_code=control_code,
+                        bm25_rank=rank,
+                        bm25_score=1.0,
+                        vector_rank=rank,
+                        vector_score=1.0,
+                        fusion_rank=rank,
+                        fusion_score=1.0,
+                        rerank_rank=rank,
+                        rerank_score=1.0,
+                    ))
+            return RetrievalResult(
+                retrieval_id=retrieval_id,
+                status=RetrievalStatus.OK,
+                policy_set_version=request.policy_set_version,
+                policy_index_version=request.policy_index_version,
+                embedding_model="fixed-live-benchmark",
+                rerank_model="fixed-live-benchmark",
+                filters={"category": request.category, "region": request.region},
+                covered_control_codes=list(request.required_control_codes),
+                missing_control_codes=[],
+                citations=citations,
+                candidates=[],
+                latency_ms={"total": 0.0},
+                attempts={"embedding": 0, "rerank": 0},
+            )
+
+    requirement_payload = json.loads(
+        (DEMO4_DATA / "requirement/confirmed_requirement.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    requirement_payload["ranking_preference"] = "FASTEST_CONFIRMED_DELIVERY"
+    task = service.create_task(
+        ProcurementRequirement.model_validate(requirement_payload),
+        idempotency_key="live-demo4-create",
+        scenario_id="MCU-TRADEOFF-004",
+        policy_set_version=metadata["policy_set_version"],
+        policy_index_version=index_version,
+        policy_category="Electronics",
+        policy_region="SG",
+    )
+    for path in sorted((DEMO4_DATA / "quotes/csv").glob("*.csv")):
+        task = service.get_task(task["task_id"])
+        draft, reviewed = upload_and_review(service, task, path)
+        assert reviewed["submission_ready"], reviewed["review_errors"]
+        service.submit_quote_draft(
+            task["task_id"],
+            draft["quote_draft_id"],
+            expected_task_revision=service.get_task(task["task_id"])["task_revision"],
+            expected_draft_revision=reviewed["draft_revision"],
+            idempotency_key=f"live-demo4-submit-{path.stem}",
+        )
+    current = service.get_task(task["task_id"])
+    started = service.start_run(
+        task["task_id"],
+        expected_task_revision=current["task_revision"],
+        idempotency_key="live-demo4-run",
+        provider="fixed",
+        model_id="fixed-output",
+        environment="FIXED_TEST",
+        prompt_version="quote-extraction/2.2.0",
+    )
+    runner = WorkflowRunner(
+        service,
+        processor=DefaultQuoteProcessor(service.quote_dictionary),
+        policy_retriever=Demo4PolicyRetriever(),
+        checkpointer=InMemorySaver(),
+        dictionary_path=DICTIONARY_PATH,
+        evaluated_at=DEMO4_EVALUATED_AT,
+    )
+    paused = runner.run_job(started["job_id"])
+    assert paused["status"] == "WAITING_INPUT"
+
+    quote_ids = {
+        item["supplier_id"]: item["quote_id"]
+        for item in service.list_quotes(task["task_id"])["items"]
+    }
+    evidence_root = DEMO4_DATA / "compliance_evidence/paired_scenarios"
+    for supplier_dir in sorted(path for path in evidence_root.iterdir() if path.is_dir()):
+        supplier_id = "-".join(supplier_dir.name.split("-", 2)[:2])
+        for evidence_path in sorted(supplier_dir.glob("*-compliant.md")):
+            control_code = (
+                "APPROVED_SUPPLIER" if evidence_path.name.startswith("supplier-") else
+                "ROHS_COMPLIANCE" if evidence_path.name.startswith("rohs-") else
+                "AMOUNT_APPROVAL"
+            )
+            parsed = parse_compliance_evidence(
+                evidence_path.read_bytes(),
+                filename=evidence_path.name,
+                media_type="text/markdown",
+                control_code=control_code,
+            )
+            assert parsed["status"] == "FOUND", (evidence_path, parsed)
+            facts = {
+                **parsed["facts"],
+                "quote_id": quote_ids[supplier_id],
+                "control_code": control_code,
+                "coverage_confirmed": True,
+            }
+            with evidence_path.open("rb") as stream:
+                service.save_compliance_evidence(
+                    task["task_id"],
+                    expected_task_revision=service.get_task(task["task_id"])["task_revision"],
+                    facts=facts,
+                    idempotency_key=f"live-demo4-evidence-{supplier_id}-{control_code}",
+                    file=stream,
+                    filename=evidence_path.name,
+                    run_after_save=False,
+                )
+
+    compliance = service.start_compliance(
+        task["task_id"],
+        expected_task_revision=service.get_task(task["task_id"])["task_revision"],
+        idempotency_key="live-demo4-compliance",
+    )
+    outcome = runner.run_job(compliance["job_id"])
+    if outcome["status"] == "WAITING_INPUT":
+        workspace = service.compliance_workspace(task["task_id"])
+        assert workspace["stage"]["can_confirm"], workspace
+        confirmation = service.confirm_compliance(
+            task["task_id"],
+            expected_task_revision=workspace["task_revision"],
+            expected_assessment_id=workspace["assessment"]["assessment_id"],
+            acknowledged_missing_item_ids=workspace["assessment"]["missing_item_ids"],
+            idempotency_key="live-demo4-confirm-compliance",
+        )
+        outcome = runner.run_job(confirmation["job_id"])
+    assert outcome["status"] == "SUCCEEDED", outcome
+    ready = service.get_task(task["task_id"])
+    assert ready["current_result_id"]
+    result = service.get_result(task["task_id"], ready["current_result_id"])["result"]
+    suppliers_by_quote = {value: key for key, value in quote_ids.items()}
+    assert [suppliers_by_quote[item] for item in result["recommended_quote_ids"]] == ["SUP-023"]
+    return _http, service, ready, runner
+
+
+LIVE_MODEL_BENCHMARK_CASES = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "evaluation/reference/live_model_benchmark_cases.json"
+    ).read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_LIVE_MODEL_BENCHMARK") != "1",
+    reason="Set RUN_LIVE_MODEL_BENCHMARK=1 via scripts/evaluate_live_model.py for paid evaluation",
+)
+@pytest.mark.parametrize("benchmark_case", LIVE_MODEL_BENCHMARK_CASES, ids=lambda row: row["id"])
+def test_live_model_benchmark_records_grounded_end_to_end_metrics(
+    live_demo4_review,
+    benchmark_case,
+    monkeypatch,
+):
+    """Paid opt-in: full conversation path over an isolated reviewed task.
+
+    The maintained evaluator supplies the output path. Records contain metrics
+    and validation outcomes only; provider response text and credentials are
+    deliberately excluded.
+    """
+    from supplier_comparison import worker
+    from supplier_comparison.backend import conversations
+    from supplier_comparison.backend.conversations import ConversationModelConfig
+    from supplier_comparison.backend.investigation import AgentConfig, LiveInvestigationPlanner
+
+    output = os.getenv("LIVE_MODEL_BENCHMARK_RECORDS_PATH")
+    assert output, "Use scripts/evaluate_live_model.py to provide an isolated metrics sink."
+    conversation_config = ConversationModelConfig.from_env()
+    agent_config = AgentConfig.from_env()
+    assert conversation_config is not None, "Configure the conversation model before paid evaluation."
+    assert agent_config.model_id and os.getenv(agent_config.api_key_env), (
+        "Configure the Agent model and its API key before paid evaluation."
+    )
+
+    _http, service, task, _runner = live_demo4_review
+    before = service.get_task(task["task_id"])
+
+    conversation_calls: list[dict] = []
+    planners: list[LiveInvestigationPlanner] = []
+    real_call = conversations._call_conversation_model
+
+    def observed_call(*args, **kwargs):
+        started = time.perf_counter()
+        call_record = {
+            "kind": "conversation",
+            "model_id": conversation_config.model_id,
+            "status": "ERROR",
+            "error_code": None,
+            "usage": {},
+        }
+        try:
+            payload, attempts = real_call(*args, **kwargs)
+            usage = payload.get("usage", {})
+            if isinstance(usage, dict):
+                call_record["usage"] = {
+                    key: value for key, value in usage.items()
+                    if key in {"prompt_tokens", "completion_tokens", "total_tokens"}
+                    and type(value) is int and value >= 0
+                }
+            call_record.update(status="OK", attempts=attempts)
+            return payload, attempts
+        except Exception as exc:
+            call_record["error_code"] = getattr(exc, "error_code", type(exc).__name__)
+            raise
+        finally:
+            call_record["latency_ms"] = max(0.0, (time.perf_counter() - started) * 1000)
+            conversation_calls.append(call_record)
+
+    class CapturingPlanner(LiveInvestigationPlanner):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            planners.append(self)
+
+    monkeypatch.setattr(conversations, "_call_conversation_model", observed_call)
+    monkeypatch.setattr(worker, "LiveInvestigationPlanner", CapturingPlanner)
+
+    run_index = int(os.getenv("LIVE_MODEL_BENCHMARK_RUN_INDEX", "1"))
+    record = {
+        "case_id": benchmark_case["id"],
+        "run_index": run_index,
+        "expected_route": benchmark_case["expected_route"],
+        "status": "FAILED",
+        "model_id": agent_config.model_id,
+        "provider": conversation_config.provider,
+        "facts_and_citations_valid": False,
+        "official_state_unchanged": False,
+        "required_tools_present": False,
+    }
+    started = time.perf_counter()
+    try:
+        conversation = service.create_decision_conversation(
+            task["task_id"], expected_task_revision=before["task_revision"],
+            title=f"Live benchmark {benchmark_case['id']}",
+            idempotency_key=f"live-benchmark-conversation-{run_index}-{benchmark_case['id']}",
+        )
+        sent = service.send_decision_conversation_message(
+            task["task_id"], conversation["conversation_id"],
+            expected_task_revision=before["task_revision"],
+            content=benchmark_case["question"],
+            idempotency_key=f"live-benchmark-message-{run_index}-{benchmark_case['id']}",
+        )
+        completed = worker._run_decision_conversation_job(service, sent["job"]["job_id"])
+        message = completed["message"]
+        investigation_refs = [
+            reference for reference in message["reference_ids"]
+            if reference.startswith("INVESTIGATION:")
+        ]
+        simulation_refs = [
+            reference for reference in message["reference_ids"]
+            if reference.startswith("SIMULATION:")
+        ]
+        matching = [
+            item for item in service.list_investigations(task["task_id"])
+            if "INVESTIGATION:" + item["artifact_id"] in investigation_refs
+        ]
+        tool_names = [
+            observation["result"]["tool_name"]
+            for item in matching
+            for observation in item["observations"]
+        ]
+        tool_statuses = [
+            observation["result"]["status"]
+            for item in matching
+            for observation in item["observations"]
+        ]
+        tool_results = [
+            {
+                "tool_name": observation["result"]["tool_name"],
+                "status": observation["result"]["status"],
+                "error_code": observation["result"].get("error_code"),
+                "quote_id": observation["arguments"].get("quote_id"),
+                "focus": observation["arguments"].get("focus"),
+            }
+            for item in matching
+            for observation in item["observations"]
+        ]
+        required = set(benchmark_case["required_tools"])
+        expected_route = benchmark_case["expected_route"]
+        preview = None
+        if len(simulation_refs) == 1:
+            preview = service.artifact_payload(simulation_refs[0].split(":", 1)[1])
+        if expected_route == "INVESTIGATE":
+            facts_and_citations_valid = bool(
+                completed["job_status"] == "SUCCEEDED"
+                and message["content"]
+                and len(investigation_refs) == 1
+                and not simulation_refs
+                and matching
+            )
+            required_tools_present = required <= set(tool_names)
+        else:
+            expected_change_fields = set(benchmark_case["expected_change_fields"])
+            proposed_change_fields = set((message.get("proposed_changes") or {}).keys())
+            facts_and_citations_valid = bool(
+                completed["job_status"] == "SUCCEEDED"
+                and message["content"]
+                and len(simulation_refs) == 1
+                and not investigation_refs
+                and preview
+                and preview.get("source") == "DETERMINISTIC_SIMULATION"
+                and preview.get("base_result_id") == before["current_result_id"]
+                and preview.get("base_task_revision") == before["task_revision"]
+                and set((preview.get("changes") or {}).keys()) == expected_change_fields
+                and proposed_change_fields == expected_change_fields
+            )
+            required_tools_present = True
+        official_state_unchanged = service.get_task(task["task_id"]) == before
+        safe_tool_results = all(status in {"OK", "NOT_FOUND"} for status in tool_statuses)
+        record.update(
+            status="PASSED" if (
+                facts_and_citations_valid and official_state_unchanged
+                and required_tools_present and safe_tool_results
+            ) else "FAILED",
+            facts_and_citations_valid=facts_and_citations_valid,
+            official_state_unchanged=official_state_unchanged,
+            required_tools_present=required_tools_present,
+            safe_tool_results=safe_tool_results,
+            reference_count=len(message["reference_ids"]),
+            actual_route=(
+                "INVESTIGATE" if investigation_refs else
+                "SIMULATE" if simulation_refs else "OTHER"
+            ),
+            proposed_change_fields=sorted((message.get("proposed_changes") or {}).keys()),
+            investigation_statuses=[item["status"] for item in matching],
+            tool_names=tool_names,
+            tool_results=tool_results,
+            attempts=message["attempts"],
+        )
+        assert record["status"] == "PASSED", record
+    except Exception as exc:
+        record["error_code"] = getattr(exc, "error_code", getattr(exc, "code", type(exc).__name__))
+        raise
+    finally:
+        agent_calls = [
+            {"kind": "agent", **telemetry}
+            for planner in planners
+            for telemetry in planner.telemetry
+        ]
+        provider_calls = conversation_calls + agent_calls
+        record["end_to_end_latency_ms"] = max(0.0, (time.perf_counter() - started) * 1000)
+        record["provider_calls"] = provider_calls
+        record["model_call_count"] = len(provider_calls)
+        usage = {key: 0 for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
+        coverage = 0
+        for call_record in provider_calls:
+            call_usage = call_record.get("usage") or {}
+            if call_usage:
+                coverage += 1
+            for key in usage:
+                value = call_usage.get(key)
+                if type(value) is int:
+                    usage[key] += value
+        record["usage"] = usage
+        record["token_usage_call_coverage"] = coverage
+        sink = Path(output)
+        sink.parent.mkdir(parents=True, exist_ok=True)
+        with sink.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def test_batch_corrections_respect_foreign_key_insert_order(fk_batch_review):

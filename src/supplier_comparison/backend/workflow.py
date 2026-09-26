@@ -479,8 +479,12 @@ class WorkflowRunner:
             "evaluated_at": state.get("evaluated_at") or self.evaluated_at.isoformat(),
         }
 
-    @staticmethod
-    def _route_compliance_start(state: WorkflowState) -> str:
+    def _route_compliance_start(self, state: WorkflowState) -> str:
+        context = self.service.workflow_context(state["graph_run_id"])
+        if context.get("workflow_contract_version") != WORKFLOW_VERSION:
+            # Legacy runs predate the explicit evidence-preparation checkpoint
+            # and must retain their original policy-retrieval behavior.
+            return "requested"
         return "requested" if state.get("compliance_requested") else "prepare_evidence"
 
     @staticmethod

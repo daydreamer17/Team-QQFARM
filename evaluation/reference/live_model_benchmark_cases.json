@@ -1,0 +1,105 @@
+{
+  "schema_version": "live-model-benchmark/1.0.0",
+  "dataset_id": "quotewise-live-model-en-16-v1",
+  "fixture": "full-flow-demo4 four-supplier reviewed comparison",
+  "cases": [
+    {
+      "id": "en-recommendation-full-review",
+      "question": "Why is Schwarzwald Circuits recommended? Verify its quotation, delivery, historical performance, and policy requirements before answering.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_supplier_history", "inspect_policy_evidence"]
+    },
+    {
+      "id": "en-lowest-not-recommended",
+      "question": "Great Wall Components has the lowest price but was not recommended. What is the main reason? Verify the evidence before answering.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_policy_evidence"]
+    },
+    {
+      "id": "en-recommended-delivery-reliability",
+      "question": "Is Schwarzwald Circuits' arrival date reliable? Check the original quotation and historical on-time rate, and continue investigating if you find an anomaly.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_supplier_history"]
+    },
+    {
+      "id": "en-fastest-pair",
+      "question": "If earliest arrival is the priority, which two suppliers are most worth comparing? Verify their delivery evidence and historical fulfilment performance.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_supplier_history"]
+    },
+    {
+      "id": "en-lowest-total-cost",
+      "question": "Does Great Wall Components really have the lowest total cost? Check unit price, quantity, shipping, tax, and other fees.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence"]
+    },
+    {
+      "id": "en-price-premium-tradeoff",
+      "question": "How much more expensive is Schwarzwald Circuits than the lowest quotation? Does the premium buy faster delivery or lower fulfilment risk?",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_supplier_history"]
+    },
+    {
+      "id": "en-best-supplier-history",
+      "question": "Which supplier has the best historical performance? Judge using rating, on-time rate, and rejected-line rate.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_supplier_history"]
+    },
+    {
+      "id": "en-recommended-history-risks",
+      "question": "Does the currently recommended supplier have any adverse historical information? If so, explain whether it changes the recommendation.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_supplier_history"]
+    },
+    {
+      "id": "en-recommended-policy-compliance",
+      "question": "Does the currently recommended supplier satisfy supplier eligibility, RoHS, and amount-approval requirements? Cite the applicable rules and submitted evidence.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_policy_evidence"]
+    },
+    {
+      "id": "en-policy-exclusions",
+      "question": "Which suppliers cannot be recommended because they failed policy review? For each one, identify the missing or violated requirement.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_policy_evidence"]
+    },
+    {
+      "id": "en-cross-source-conflicts",
+      "question": "Find any conflicts among quotation content, supplier records, and compliance evidence, and determine which source should be trusted.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_supplier_history", "inspect_policy_evidence"]
+    },
+    {
+      "id": "en-recommendation-consistency",
+      "question": "Check whether the current recommendation rationale contains any contradictions. If you find an anomaly, continue checking the original files and policy rules.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_quote_evidence", "inspect_policy_evidence"]
+    },
+    {
+      "id": "en-evidence-defects",
+      "question": "Which suppliers have missing or expired evidence, or evidence with a mismatched supplier ID? Explain how each issue affects recommendation eligibility.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_policy_evidence"]
+    },
+    {
+      "id": "en-unresolved-gaps",
+      "question": "Which issues cannot be confirmed with the available tools? List the documents that must be uploaded or the items that require human confirmation.",
+      "expected_route": "INVESTIGATE",
+      "required_tools": ["inspect_policy_evidence"]
+    },
+    {
+      "id": "en-simulate-budget-6800",
+      "question": "If the budget were reduced to SGD 6,800, how would the current recommendation change? Simulate only and do not modify the official requirement.",
+      "expected_route": "SIMULATE",
+      "required_tools": [],
+      "expected_change_fields": ["budget_amount"]
+    },
+    {
+      "id": "en-simulate-deadline-2026-11-09",
+      "question": "If delivery were required by 2026-11-09, which suppliers would remain eligible, and would the policy conclusions change? Simulate only and do not modify the official requirement.",
+      "expected_route": "SIMULATE",
+      "required_tools": [],
+      "expected_change_fields": ["delivery_deadline"]
+    }
+  ]
+}

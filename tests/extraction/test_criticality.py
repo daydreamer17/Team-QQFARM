@@ -25,6 +25,11 @@ def _batch(quote_dictionary, alias: str, row_number: int):
     )
 
 
+def _repository_text_sha256(path) -> str:
+    """Hash repository text independently of the checkout line endings."""
+    return sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def test_c_policy_partitions_the_30_extractable_fields(quote_dictionary) -> None:
     assert len(ALWAYS_CRITICAL_FIELDS) == 16
     assert len(CONDITIONAL_CRITICAL_FIELDS) == 11
@@ -42,9 +47,9 @@ def test_criticality_policy_sources_have_not_drifted() -> None:
     criticality_source = DATA_ROOT / "contracts" / "EXTRACTION_REVIEW_FIELD_CRITICALITY.md"
     quote_dictionary_source = DATA_ROOT / "contracts" / "quote_data_field.csv"
 
-    assert sha256(criticality_source.read_bytes()).hexdigest() == CRITICALITY_SOURCE_SHA256
+    assert _repository_text_sha256(criticality_source) == CRITICALITY_SOURCE_SHA256
     assert (
-        sha256(quote_dictionary_source.read_bytes()).hexdigest()
+        _repository_text_sha256(quote_dictionary_source)
         == QUOTE_DICTIONARY_SOURCE_SHA256
     )
 

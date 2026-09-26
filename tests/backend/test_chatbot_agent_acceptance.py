@@ -9,6 +9,41 @@ from supplier_comparison.backend.conversations import ConversationModelConfig
 from supplier_comparison.backend.decision_intents import route_conversation_intent
 
 
+def test_live_model_benchmark_catalog_is_fixed_and_auditable():
+    path = Path(__file__).resolve().parents[2] / "evaluation/reference/live_model_benchmark_cases.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    cases = payload["cases"]
+
+    assert payload["schema_version"] == "live-model-benchmark/1.0.0"
+    assert payload["dataset_id"] == "quotewise-live-model-en-16-v1"
+    assert len(cases) == 16
+    assert len({case["id"] for case in cases}) == len(cases)
+    assert len({case["question"] for case in cases}) == len(cases)
+    assert all(case["expected_route"] in {"INVESTIGATE", "SIMULATE"} for case in cases)
+    assert sum(case["expected_route"] == "INVESTIGATE" for case in cases) == 14
+    assert sum(case["expected_route"] == "SIMULATE" for case in cases) == 2
+    assert all(
+        bool(case["required_tools"]) == (case["expected_route"] == "INVESTIGATE")
+        for case in cases
+    )
+    assert all(
+        case.get("expected_change_fields") == [
+            "budget_amount" if case["id"].endswith("budget-6800") else "delivery_deadline"
+        ]
+        for case in cases if case["expected_route"] == "SIMULATE"
+    )
+    assert all(case["id"].startswith("en-") for case in cases)
+    assert all(
+        not any("\u4e00" <= character <= "\u9fff" for character in case["question"])
+        for case in cases
+    )
+    assert all(
+        set(case["required_tools"])
+        <= {"inspect_quote_evidence", "inspect_supplier_history", "inspect_policy_evidence"}
+        for case in cases
+    )
+
+
 def test_chatbot_agent_acceptance_catalog_is_complete_and_balanced():
     path = Path(__file__).resolve().parents[2] / "evaluation/reference/chatbot_agent_questions.json"
     payload = json.loads(path.read_text(encoding="utf-8"))

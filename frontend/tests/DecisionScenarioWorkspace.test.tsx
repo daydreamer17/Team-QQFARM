@@ -273,7 +273,7 @@ describe('DecisionScenarioWorkspace', () => {
     act(() => handlers['assistant.stage'](new MessageEvent('assistant.stage', {
       data: JSON.stringify({ reply_to_message_id: 'message-1', stage: 'simulation' }),
     })))
-    expect(await screen.findByText('Running a deterministic simulation with the new conditions; the official result will not change')).toBeInTheDocument()
+    expect(await screen.findByText('正在按新条件进行确定性模拟；正式结果不会改变')).toBeInTheDocument()
     act(() => handlers['assistant.tool'](new MessageEvent('assistant.tool', {
       data: JSON.stringify({
         reply_to_message_id: 'message-1',
@@ -282,7 +282,7 @@ describe('DecisionScenarioWorkspace', () => {
         reason: '核对最低价Source Quotation',
       }),
     })))
-    expect(await screen.findByText('Review quotation evidence: Completed; 核对最低价Source Quotation')).toBeInTheDocument()
+    expect(await screen.findByText('核对报价原文: 已完成; 核对最低价Source Quotation')).toBeInTheDocument()
     queryClient.clear()
   })
 
@@ -352,10 +352,10 @@ describe('DecisionScenarioWorkspace', () => {
       <DecisionScenarioWorkspace task={task} result={result} compact />
     </MemoryRouter></QueryClientProvider>)
 
-    expect(await screen.findByText('Failed')).toBeInTheDocument()
+    expect(await screen.findByText('生成失败')).toBeInTheDocument()
     expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument()
     expect(screen.queryByText('FAILED')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Regenerate' }))
+    await user.click(screen.getByRole('button', { name: '重新生成' }))
     await waitFor(() => expect(api.sendDecisionMessage).toHaveBeenCalledWith(
       'task-1', 'conversation-1', 6, '为什么没有选择最低价？', expect.any(String),
     ))

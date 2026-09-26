@@ -196,6 +196,7 @@ Team-QQFARM/
 | [LOCAL_ENVIRONMENT.md](docs/LOCAL_ENVIRONMENT.md) | 安装、启动、环境变量和常见故障 |
 | [DEPLOYMENT_LIGHTSAIL.md](docs/DEPLOYMENT_LIGHTSAIL.md) | 在 NUS-ISS Amazon Lightsail 环境进行生产部署 |
 | [TESTING.md](docs/TESTING.md) | 自动化测试、人工全流程和交付验收 |
+| [JUDGING_READINESS.md](docs/JUDGING_READINESS.md) | 评审标准映射、Agent 推理循环、风险矩阵和评估入口 |
 | [data/README.md](data/README.md) | 数据目录的维护入口 |
 | [scripts/dev/README.md](scripts/dev/README.md) | 一键启动脚本说明 |
 | [docs/i18n/](docs/i18n/) | 中英术语、界面文案、状态和报告表达字典 |

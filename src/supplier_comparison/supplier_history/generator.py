@@ -53,6 +53,18 @@ class SupplierHistoryGenerationError(ValueError):
     pass
 
 
+def _canonical_source_bytes(source_bytes: bytes) -> bytes:
+    """Return the repository-authoritative byte form across Git checkouts.
+
+    Git may materialize text files with CRLF on Windows even though the
+    authoritative upstream CSV and its documented digest use LF.  Normalize
+    only line endings before validating and recording the source digest; CSV
+    parsing still reads the checked-out file normally.
+    """
+
+    return source_bytes.replace(b"\r\n", b"\n")
+
+
 def _parse_date(value: str, *, row_number: int, field: str) -> date:
     try:
         return date.fromisoformat(value.strip())
@@ -195,7 +207,7 @@ def generate_supplier_history(
 
     if generated_at.tzinfo is None or generated_at.utcoffset() is None:
         raise SupplierHistoryGenerationError("generated_at must be timezone-aware")
-    source_bytes = source_path.read_bytes()
+    source_bytes = _canonical_source_bytes(source_path.read_bytes())
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     if require_bundled_source and source_sha256 != EXPECTED_SOURCE_SHA256:
         raise SupplierHistoryGenerationError("source SHA-256 does not match bundled authority")
