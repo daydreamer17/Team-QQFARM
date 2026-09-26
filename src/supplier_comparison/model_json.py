@@ -31,10 +31,24 @@ def load_model_json(content: str) -> Any:
 def model_response_is_complete(finish_reason: object) -> bool:
     """Accept complete OpenAI and Anthropic-compatible gateway responses.
 
-    Some OpenAI-compatible gateways preserve Anthropic's ``end_turn`` value,
-    while others omit ``finish_reason`` after successfully returning a complete
-    JSON document. Schema and JSON validation still reject partial content;
-    explicit truncation or safety/tool termination reasons remain failures.
+    OpenAI-compatible gateways do not use one portable success value: observed
+    responses include OpenAI's ``stop``, Anthropic's ``end_turn`` and
+    provider-specific completion labels. Schema and JSON validation still
+    reject partial content, so only explicit truncation, safety or tool-call
+    termination reasons need to be rejected here.
     """
 
-    return finish_reason in {None, "stop", "end_turn"}
+    if finish_reason is None:
+        return True
+    if not isinstance(finish_reason, str):
+        return False
+    return finish_reason.lower() not in {
+        "length",
+        "max_tokens",
+        "content_filter",
+        "tool_calls",
+        "function_call",
+        "tool_use",
+        "pause_turn",
+        "refusal",
+    }
