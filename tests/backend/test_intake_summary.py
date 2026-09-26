@@ -259,6 +259,14 @@ def test_requirement_candidates_repair_invalid_structure_once(monkeypatch) -> No
 
     assert attempts == 2
     assert len(requests) == 2
+    assert requests[0]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "requirement_candidates",
+            "strict": True,
+            "schema": intake.RequirementCandidatesOutput.model_json_schema(),
+        },
+    }
     assert "unknown_source" in requests[1]["messages"][-1]["content"]
     assert result["prompt_version"] == "requirement-intake/1.1.0"
     assert result["candidates"][0]["raw_value"] == "false"

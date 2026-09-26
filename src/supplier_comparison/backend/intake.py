@@ -227,7 +227,14 @@ def extract_requirement_candidates(
                     "temperature": 0,
                     "enable_thinking": False,
                     "max_tokens": 4096,
-                    "response_format": {"type": "json_object"},
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "requirement_candidates",
+                            "strict": True,
+                            "schema": RequirementCandidatesOutput.model_json_schema(),
+                        },
+                    },
                     "messages": messages,
                 },
                 api_key_env=config.api_key_env,
