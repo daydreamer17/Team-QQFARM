@@ -157,6 +157,31 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     ]
 
 
+def test_adapter_accepts_one_json_object_after_gateway_reasoning(quote_dictionary) -> None:
+    envelope = json.loads(_valid_response(quote_dictionary))
+    content = envelope["choices"][0]["message"]["content"]
+    envelope["choices"][0]["message"]["content"] = (
+        "<think>Validate every source handle.</think>\n" + content
+    )
+
+    def opener(request, timeout):
+        del request, timeout
+        return FakeResponse(json.dumps(envelope).encode())
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    result = OpenAICompatibleAdapter(
+        _config(max_attempts=1), opener=opener, sleeper=lambda _: None
+    ).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-GATEWAY-PROSE"),
+        "EXTRACT-GATEWAY-PROSE",
+    )
+
+    assert result.run.status.value == "SUCCEEDED"
+    assert result.run.attempts == 1
+
+
 def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -> None:
     captured = {}
 
@@ -430,6 +455,8 @@ def test_schema_failure_keeps_provider_metadata_after_bounded_attempts(quote_dic
     assert run["total_tokens"] == 133
     assert "raw_model_content" not in raised.value.details
     assert raised.value.details["model_content_length_bytes"] == len(raw_content.encode())
+    assert "candidates.0.EXTRACTED.normalized_value" in str(raised.value)
+    assert "S$" not in str(raised.value)
     assert budget.calls_used == 1
 
 

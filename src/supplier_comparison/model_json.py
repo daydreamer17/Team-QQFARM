@@ -28,6 +28,34 @@ def load_model_json(content: str) -> Any:
     return json.loads(candidate)
 
 
+def load_single_model_json_object(content: str, *, required_key: str) -> Any:
+    """Decode strict JSON or one required object inside gateway prose.
+
+    Some OpenAI-compatible gateways preserve a reasoning preamble despite a
+    JSON response format. The fallback accepts exactly one object containing
+    ``required_key``. Callers must still validate that object against their
+    strict schema and grounding rules.
+    """
+
+    try:
+        return load_model_json(content)
+    except json.JSONDecodeError as strict_error:
+        decoder = json.JSONDecoder()
+        matches: list[Any] = []
+        for index, character in enumerate(content):
+            if character != "{":
+                continue
+            try:
+                candidate, _end = decoder.raw_decode(content, index)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) and required_key in candidate:
+                matches.append(candidate)
+        if len(matches) == 1:
+            return matches[0]
+        raise strict_error
+
+
 def model_response_is_complete(finish_reason: object) -> bool:
     """Accept complete OpenAI and Anthropic-compatible gateway responses.
 

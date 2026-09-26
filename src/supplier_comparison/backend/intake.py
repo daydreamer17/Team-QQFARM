@@ -14,7 +14,7 @@ import pdfplumber
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from supplier_comparison.extraction.adapters import trusted_urlopen
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_single_model_json_object
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
@@ -338,7 +338,7 @@ def _validate_requirement_candidates(
     source_by_id: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        decoded = _load_requirement_json(content)
+        decoded = load_single_model_json_object(content, required_key="candidates")
         body = RequirementCandidatesOutput.model_validate(
             _normalize_requirement_candidates_payload(decoded)
         )
@@ -406,35 +406,6 @@ def _validate_requirement_candidates(
         })
         seen.add(field)
     return candidates
-
-
-def _load_requirement_json(content: str) -> Any:
-    """Load strict JSON, or one grounded JSON object inside gateway prose.
-
-    The organiser gateway can preserve an Anthropic reasoning preamble even
-    when the OpenAI-compatible ``response_format`` asks for JSON only. Accept
-    exactly one object carrying ``candidates`` and reject ambiguous/multiple
-    objects. The extracted object still passes the strict schema, allowlist and
-    source-grounding checks in ``_validate_requirement_candidates``.
-    """
-
-    try:
-        return load_model_json(content)
-    except json.JSONDecodeError as strict_error:
-        decoder = json.JSONDecoder()
-        matches: list[Any] = []
-        for index, character in enumerate(content):
-            if character != "{":
-                continue
-            try:
-                candidate, _end = decoder.raw_decode(content, index)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(candidate, dict) and "candidates" in candidate:
-                matches.append(candidate)
-        if len(matches) == 1:
-            return matches[0]
-        raise strict_error
 
 
 def _normalize_requirement_candidates_payload(payload: Any) -> dict[str, Any]:

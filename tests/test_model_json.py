@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from supplier_comparison.model_json import load_model_json, model_response_is_complete
+from supplier_comparison.model_json import (
+    load_model_json,
+    load_single_model_json_object,
+    model_response_is_complete,
+)
 
 
 def test_load_model_json_accepts_plain_json() -> None:
@@ -54,3 +58,16 @@ def test_load_model_json_accepts_one_complete_json_fence(language: str) -> None:
 def test_load_model_json_rejects_prose_or_non_json_fences(content: str) -> None:
     with pytest.raises(json.JSONDecodeError):
         load_model_json(content)
+
+
+def test_load_single_model_json_object_accepts_one_object_after_reasoning() -> None:
+    content = '<think>Check the source.</think>\n{"candidates":[]}'
+    assert load_single_model_json_object(content, required_key="candidates") == {
+        "candidates": []
+    }
+
+
+def test_load_single_model_json_object_rejects_ambiguous_objects() -> None:
+    content = '{"candidates":[]}\n{"candidates":[]}'
+    with pytest.raises(json.JSONDecodeError):
+        load_single_model_json_object(content, required_key="candidates")

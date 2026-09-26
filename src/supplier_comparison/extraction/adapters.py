@@ -23,7 +23,7 @@ from typing import Callable
 import certifi
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from supplier_comparison.model_json import load_model_json
+from supplier_comparison.model_json import load_single_model_json_object
 
 from .contracts import (
     AdapterEnvironment,
@@ -512,13 +512,17 @@ class OpenAICompatibleAdapter(ModelAdapter):
             structure_started = time.perf_counter()
             try:
                 model_payload = ModelExtractionPayload.model_validate(
-                    load_model_json(decoded.content)
+                    load_single_model_json_object(
+                        decoded.content,
+                        required_key="candidates",
+                    )
                 )
             except (ValidationError, ValueError, TypeError) as exc:
                 current_structure_ms = _elapsed_ms(structure_started)
                 structure_validation_ms += current_structure_ms
                 diagnostics = _text_diagnostics("model_content", decoded.content)
-                errors.append(f"model_output_schema_invalid:type={type(exc).__name__}")
+                schema_detail = _safe_schema_failure_detail(exc)
+                errors.append(f"model_output_schema_invalid:{schema_detail}")
                 can_retry = attempt < self.config.max_attempts
                 attempt_records.append(
                     ModelAttemptRecord(
@@ -548,7 +552,8 @@ class OpenAICompatibleAdapter(ModelAdapter):
                     continue
                 raise_failure(
                     "model_output_schema_invalid",
-                    "model output failed the extraction schema after bounded repair",
+                    "model output failed the extraction schema after bounded repair "
+                    f"({schema_detail})",
                     decoded=decoded,
                     trace_id=http_response.trace_id,
                     provider_body=http_response.body,
@@ -936,6 +941,24 @@ def _build_schema_repair_prompt(
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def _safe_schema_failure_detail(error: Exception) -> str:
+    """Return bounded schema diagnostics without provider or document text."""
+
+    if isinstance(error, json.JSONDecodeError):
+        return f"json_invalid@{error.lineno}:{error.colno}"
+    if isinstance(error, ValidationError):
+        items = []
+        for issue in error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )[:12]:
+            location = ".".join(str(part) for part in issue.get("loc", ())) or "root"
+            items.append(f"{location}={issue.get('type', 'validation_error')}")
+        return ",".join(items) or "validation_error"
+    return type(error).__name__
 
 
 def _ground_source_references(
