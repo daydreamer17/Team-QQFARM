@@ -7890,6 +7890,12 @@ class BackendService(ComplianceMixin):
             Document.quote_version == Quote.current_version,
         )).all()
         for document in documents:
+            if session.scalar(select(DocumentExecution.document_execution_id).where(
+                DocumentExecution.graph_run_id == graph_run_id,
+                DocumentExecution.document_id == document.document_id,
+                DocumentExecution.batch_artifact_id.is_not(None),
+            )) is not None:
+                continue
             # Prefer the most recent reviewed workflow batch, which may contain
             # centralized human corrections made after the original submission.
             prior = session.scalar(select(DocumentExecution).join(

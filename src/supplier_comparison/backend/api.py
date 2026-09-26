@@ -606,6 +606,10 @@ def create_app(
             task_id,
             expected_task_revision=body.expected_task_revision,
             idempotency_key=idempotency_key,
+            provider=settings.supplier_model_provider,
+            model_id=settings.supplier_model_model_id,
+            environment=settings.supplier_model_environment,
+            prompt_version=settings.supplier_prompt_version,
         )
 
     @app.post("/api/v1/tasks", status_code=201)

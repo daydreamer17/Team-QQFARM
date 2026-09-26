@@ -295,6 +295,52 @@ def test_initial_draft_requires_full_human_review_before_formal_submit(
     assert len(service.list_quotes(task["task_id"])["items"]) == 1
 
 
+@pytest.mark.parametrize('stale_execution', [False, True])
+def test_first_compliance_run_reuses_submitted_human_corrections(service, tmp_path, stale_execution):
+    from sqlalchemy import select
+    from supplier_comparison.backend.models import DocumentExecution, GraphRun
+
+    task, draft, current = _processed_canonical_draft(service, tmp_path, key="compliance-reuse")
+    with service.session_factory() as session:
+        original_batch_id = session.get(QuoteDraft, draft['quote_draft_id']).batch_artifact_id
+    reviewed = _review_all_fields(service, task, draft, current, key="compliance-review",
+        overrides={"supplier_name": {"action": "SET_VALUE", "raw_value": "Reviewed Supplier",
+            "normalized_value": "Reviewed Supplier", "unit": None, "reason": "Checked original name"}})
+    service.submit_quote_draft(task['task_id'], draft['quote_draft_id'], expected_task_revision=1,
+        expected_draft_revision=reviewed['draft_revision'], idempotency_key='compliance-submit')
+    # Evidence preparation creates a graph without model metadata or executions.
+    with service.session_factory.begin() as session:
+        from supplier_comparison.backend.models import Task
+        stored_task = session.get(Task, task['task_id'])
+        old_graph = service._compliance_preparation_graph(session, stored_task, None)
+        if stale_execution:
+            stored_draft = session.get(QuoteDraft, draft['quote_draft_id'])
+            session.add(DocumentExecution(document_execution_id='old-incorrect-extraction',
+                graph_run_id=old_graph.graph_run_id, document_id=stored_draft.proposed_document_id,
+                batch_artifact_id=original_batch_id, status='REVIEWED', calls_used=4, max_calls=8))
+    config = dict(provider='fixed', model_id='fixed-output', environment='FIXED_TEST',
+                  prompt_version='quote-extraction/1.0.0')
+    started = service.start_compliance(task['task_id'], expected_task_revision=2,
+        idempotency_key='compliance-start', **config)
+    with service.session_factory() as session:
+        stored = session.get(QuoteDraft, draft['quote_draft_id'])
+        execution = session.scalar(select(DocumentExecution).where(
+            DocumentExecution.graph_run_id == started['graph_run_id']))
+        assert execution is not None
+        assert execution.batch_artifact_id == stored.batch_artifact_id
+        batch = session.get(WorkflowArtifact, execution.batch_artifact_id)
+        assert next(c for c in batch.payload['candidates'] if c['field_name']=='supplier_name')['normalized_value'] == 'Reviewed Supplier'
+        graph = session.get(GraphRun, started['graph_run_id'])
+        assert all(getattr(graph,k)==v for k,v in config.items())
+    assert service.correction_event_payloads_for_batch(execution.batch_artifact_id)
+    # Seeding again must not duplicate an already-carried execution.
+    with service.session_factory.begin() as session:
+        service._seed_submitted_extractions(session, task_id=task['task_id'],
+            graph_run_id=started['graph_run_id'], **config)
+        assert len(session.scalars(select(DocumentExecution).where(
+            DocumentExecution.graph_run_id==started['graph_run_id'])).all()) == 1
+
+
 def test_replacement_creates_new_version_and_deactivation_preserves_history(
     service: BackendService,
     tmp_path: Path,

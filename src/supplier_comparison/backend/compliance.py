@@ -314,7 +314,7 @@ class ComplianceMixin:
         # Public ID is the immutable artifact ID, not a separately addressable record.
         return artifact['artifact_id']
 
-    def _compliance_new_run(self, session, task, previous):
+    def _compliance_new_run(self, session, task, previous, **model_config):
         from .service import new_id, content_hash
         graph_id, job_id = new_id('graph'), new_id('job')
         graph = GraphRun(graph_run_id=graph_id, task_id=task.task_id, thread_id=graph_id,
@@ -322,6 +322,9 @@ class ComplianceMixin:
             history_binding_id=previous.history_binding_id if previous else None,
             provider=previous.provider if previous else None, model_id=previous.model_id if previous else None,
             environment=previous.environment if previous else None, prompt_version=previous.prompt_version if previous else None)
+        for key, value in model_config.items():
+            if value is not None:
+                setattr(graph, key, value)
         session.add(graph)
         session.flush()
         if previous:
@@ -337,10 +340,19 @@ class ComplianceMixin:
                     artifact_type='CARRIED_PAYMENT_SUPPLEMENTS', payload=supplements, content_sha256=content_hash(supplements),
                     graph_run_id=graph_id))
             for old in session.scalars(select(DocumentExecution).where(DocumentExecution.graph_run_id == previous.graph_run_id)).all():
+                if not old.batch_artifact_id or any(getattr(previous, key) != getattr(graph, key)
+                       for key in ('provider', 'model_id', 'environment', 'prompt_version')):
+                    continue
                 session.add(DocumentExecution(document_execution_id=new_id('docexec'), graph_run_id=graph_id,
                     document_id=old.document_id, max_calls=old.max_calls, calls_used=old.calls_used,
                     batch_artifact_id=old.batch_artifact_id, review_artifact_id=old.review_artifact_id,
                     status=old.status))
+        session.flush()
+        self._seed_submitted_extractions(
+            session, task_id=task.task_id, graph_run_id=graph_id,
+            provider=graph.provider, model_id=graph.model_id,
+            environment=graph.environment, prompt_version=graph.prompt_version,
+        )
         session.add(Job(job_id=job_id, task_id=task.task_id, graph_run_id=graph_id, job_type='COMPLIANCE_START',
             status='PENDING', task_revision=task.current_revision, history_binding_id=graph.history_binding_id))
         task.current_graph_run_id, task.status = graph_id, 'QUEUED'
@@ -370,7 +382,8 @@ class ComplianceMixin:
         task.workflow_contract_version = WORKFLOW_VERSION
         return graph
 
-    def start_compliance(self, task_id, *, expected_task_revision, idempotency_key):
+    def start_compliance(self, task_id, *, expected_task_revision, idempotency_key,
+                         provider=None, model_id=None, environment=None, prompt_version=None):
         """Start the explicit compliance stage while carrying reviewed quote facts."""
         from .service import ConflictError, content_hash
         request = {'task_id': task_id, 'revision': expected_task_revision}
@@ -390,7 +403,8 @@ class ComplianceMixin:
             if current is not None and current.status in {'PENDING', 'RUNNING'}:
                 raise ConflictError('graph_run_active', 'The task already has an active graph run.')
             previous = self._supersede_current_graph(session, task)
-            response = self._compliance_new_run(session, task, previous)
+            response = self._compliance_new_run(session, task, previous,
+                provider=provider, model_id=model_id, environment=environment, prompt_version=prompt_version)
             self._save_idempotent(
                 session, operation=operation, key=idempotency_key,
                 request_sha256=request_sha, response_status=202, response=response,
