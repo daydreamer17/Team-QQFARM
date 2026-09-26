@@ -663,6 +663,55 @@ describe('frontend and backend version consistency', () => {
     expect(await screen.findByText(/Complete the policy evidence and review/)).toBeInTheDocument()
   })
 
+  test('exhausted failed summary can generate the current prompt version', async () => {
+    vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
+    const result = makeHistoricalResult()
+    result.result_id = 'result-current'
+    result.task_revision = 6
+    result.is_current = true
+    vi.spyOn(api, 'getResult').mockResolvedValue(result)
+    const failedSummary = {
+      summary_id: 'summary-old',
+      task_id: 'task-1',
+      task_revision: 6,
+      result_id: 'result-current',
+      status: 'FAILED' as const,
+      is_current: true,
+      input_sha256: 'abc',
+      facts: {
+        requirement: currentRequirement,
+        policy_binding: null,
+        recommended_quote_ids: [],
+        references: {},
+      },
+      narrative: null,
+      provider: 'fixed',
+      model_id: 'fixed',
+      environment: 'TEST',
+      prompt_version: 'procurement-summary/1.2.0',
+      calls_used: 4,
+      max_calls: 4,
+      error_code: 'summary_model_output_invalid',
+      error_message: 'summary model response failed validation',
+      job: null,
+      created_at: '2026-09-12T00:00:00Z',
+      updated_at: '2026-09-12T00:00:00Z',
+    }
+    vi.spyOn(api, 'listSummaries').mockResolvedValue({
+      task_id: 'task-1', task_revision: 6, items: [failedSummary],
+    })
+    const create = vi.spyOn(api, 'createSummary').mockResolvedValue(failedSummary)
+
+    renderRoute('/tasks/task-1/summary', '/tasks/:taskId/summary', <SummaryPage />)
+
+    const button = await screen.findByRole('button', { name: 'Generate current version' })
+    expect(screen.queryByRole('button', { name: 'Retry generation' })).not.toBeInTheDocument()
+    await userEvent.click(button)
+    await waitFor(() => expect(create).toHaveBeenCalledWith(
+      'task-1', 6, 'result-current', expect.any(String),
+    ))
+  })
+
   test('requirement update invalidates all task caches before navigation', async () => {
     vi.spyOn(api, 'getTask').mockResolvedValue(makeTask())
     vi.spyOn(api, 'updateRequirement').mockResolvedValue({

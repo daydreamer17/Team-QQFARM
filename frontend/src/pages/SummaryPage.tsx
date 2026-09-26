@@ -247,10 +247,13 @@ export function SummaryPage() {
 
   const data = task.data
   const current = displayedSummary
+  const retryBudgetExhausted = Boolean(
+    current?.status === 'FAILED' && current.calls_used >= current.max_calls,
+  )
   const mayGenerate = Boolean(
     data.current_result_id
     && data.status !== 'ABANDONED'
-    && (!current || !current.is_current),
+    && (!current || !current.is_current || retryBudgetExhausted),
   )
   const suppliers = result.data?.result.supplier_results ?? []
   const reportRequirement = current?.facts.requirement
@@ -371,13 +374,18 @@ export function SummaryPage() {
               type="button"
               disabled={generate.isPending}
               onClick={() => generate.mutate()}
-            >{generate.isPending ? 'Creating…' : 'Generate'}</button>
+            >{generate.isPending
+                ? 'Creating…'
+                : retryBudgetExhausted ? 'Generate current version' : 'Generate'}</button>
           )}
-          {current?.status === 'FAILED' && current.is_current && data.status !== 'ABANDONED' && (
+          {current?.status === 'FAILED'
+            && current.is_current
+            && !retryBudgetExhausted
+            && data.status !== 'ABANDONED' && (
             <button
               className="button button-secondary"
               type="button"
-              disabled={retry.isPending || current.calls_used >= current.max_calls}
+              disabled={retry.isPending}
               onClick={() => retry.mutate(current.summary_id)}
             >Retry generation</button>
           )}
