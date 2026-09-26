@@ -33,10 +33,44 @@ def test_organizer_output_tool_preserves_schema(monkeypatch):
 def test_single_fenced_content_is_accepted(monkeypatch):
     request(monkeypatch, {'finish_reason': 'end_turn', 'message': {'content': '```json\n{"route":"EXPLAIN"}\n```'}})
 
+def test_object_tool_arguments_are_normalized(monkeypatch):
+    choice = {
+        'finish_reason': 'tool_calls',
+        'message': {'tool_calls': [tool(arguments={'route': 'EXPLAIN'})]},
+    }
+    (result, _), _body = request(monkeypatch, choice)
+    assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
+
+def test_anthropic_tool_use_block_is_normalized(monkeypatch):
+    choice = {
+        'finish_reason': 'end_turn',
+        'message': {
+            'content': [{
+                'type': 'tool_use',
+                'name': 'submit_decision_response',
+                'input': {'route': 'EXPLAIN'},
+            }]
+        },
+    }
+    (result, _), _body = request(monkeypatch, choice)
+    assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
+
+def test_single_text_content_block_is_normalized(monkeypatch):
+    choice = {
+        'finish_reason': 'end_turn',
+        'message': {'content': [{'type': 'text', 'text': '{"route":"EXPLAIN"}'}]},
+    }
+    (result, _), _body = request(monkeypatch, choice)
+    assert json.loads(result['choices'][0]['message']['content']) == {'route': 'EXPLAIN'}
+
 @pytest.mark.parametrize('message,finish', [
     ({'tool_calls': [tool('wrong')]}, 'tool_calls'),
     ({'tool_calls': [tool(), tool()]}, 'tool_calls'),
     ({'tool_calls': [tool(arguments='{}{}')]}, 'tool_calls'),
+    ({'content': [
+        {'type': 'text', 'text': '{"route":"EXPLAIN"}'},
+        {'type': 'text', 'text': '{"route":"SIMULATE"}'},
+    ]}, 'end_turn'),
     ({'content': '{}{}'}, 'stop'),
     ({'content': 'prose {}'}, 'stop'),
     ({'content': '{}'}, 'length'),

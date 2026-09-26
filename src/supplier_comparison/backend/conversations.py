@@ -236,7 +236,7 @@ def _call_conversation_model(
                 call = calls[0]
                 if not isinstance(call, dict) or not isinstance(call.get("function"), dict):
                     raise ValueError("invalid output tool")
-                if call.get("type") != "function" or call["function"]["name"] != tool_name:
+                if call.get("type") not in (None, "function") or call["function"]["name"] != tool_name:
                     raise ValueError("unexpected output tool")
                 content = call["function"]["arguments"]
                 if choice.get("finish_reason") in {"tool_calls", "tool_use"}:
@@ -245,6 +245,26 @@ def _call_conversation_model(
                 if choice.get("finish_reason") not in {"stop", "end_turn"}:
                     raise ValueError("missing completed output")
                 content = message.get("content")
+                if isinstance(content, list):
+                    material_blocks = [
+                        block
+                        for block in content
+                        if isinstance(block, dict)
+                        and block.get("type") not in {"thinking", "redacted_thinking"}
+                    ]
+                    if len(material_blocks) != 1:
+                        raise ValueError("expected one output block")
+                    block = material_blocks[0]
+                    if block.get("type") in {"tool_use", "function"}:
+                        if block.get("name") != tool_name:
+                            raise ValueError("unexpected output tool")
+                        content = block.get("input", block.get("arguments"))
+                    elif block.get("type") in {"text", "output_text"}:
+                        content = block.get("text")
+                    else:
+                        raise ValueError("unexpected output block")
+            if isinstance(content, dict):
+                content = json.dumps(content, ensure_ascii=False)
             if not isinstance(content, str) or not isinstance(load_model_json(content), dict):
                 raise ValueError("expected one JSON object")
             message["content"] = content

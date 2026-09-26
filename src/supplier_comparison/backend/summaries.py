@@ -16,7 +16,7 @@ from supplier_comparison.model_json import load_model_json, model_response_is_co
 from supplier_comparison.rag.clients import ModelClientError, _post_json
 
 
-SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.0"
+SUMMARY_PROMPT_VERSION = "procurement-summary/1.2.1"
 
 
 class SummarySectionOutput(BaseModel):
