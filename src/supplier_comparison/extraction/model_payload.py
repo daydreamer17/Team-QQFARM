@@ -13,6 +13,7 @@ NonEmptyStrictString = Annotated[StrictStr, Field(min_length=1)]
 NormalizedModelScalar = StrictStr | StrictInt | StrictBool
 NonEmptySourceRefs = Annotated[tuple[SourceCitation, ...], Field(min_length=1)]
 EmptySourceRefs = Annotated[tuple[SourceCitation, ...], Field(max_length=0)]
+NonEmptySourceIds = Annotated[tuple[NonEmptyStrictString, ...], Field(min_length=1)]
 
 
 class _ModelFieldCandidateBase(BaseModel):
@@ -60,3 +61,39 @@ class ModelExtractionPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidates: tuple[ModelFieldCandidate, ...]
+
+
+class _ModelFieldSelectionBase(BaseModel):
+    """Compact provider-facing shape; authoritative citations are bound later."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_name: NonEmptyStrictString
+    unit: StrictStr | None
+    source_ids: NonEmptySourceIds
+
+
+class ExtractedModelFieldSelection(_ModelFieldSelectionBase):
+    raw_value: NonEmptyStrictString
+    normalized_value: NormalizedModelScalar
+    validation_status: Literal["EXTRACTED"]
+
+
+class ConflictModelFieldSelection(_ModelFieldSelectionBase):
+    raw_value: NonEmptyStrictString
+    normalized_value: NormalizedModelScalar | None
+    validation_status: Literal["CONFLICT"]
+
+
+ModelFieldSelection = Annotated[
+    ExtractedModelFieldSelection | ConflictModelFieldSelection,
+    Field(discriminator="validation_status"),
+]
+
+
+class SparseModelExtractionPayload(BaseModel):
+    """Only document-supported fields returned by a real model provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidates: tuple[ModelFieldSelection, ...]

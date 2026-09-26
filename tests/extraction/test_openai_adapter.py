@@ -132,7 +132,7 @@ def test_request_disables_thinking_and_sets_output_limit(quote_dictionary) -> No
     assert captured["enable_thinking"] is False
     assert captured["max_tokens"] == 4096
     extracted_schema = captured["response_format"]["json_schema"]["schema"]["$defs"][
-        "ExtractedModelFieldCandidate"
+        "ExtractedModelFieldSelection"
     ]
     assert "null" not in {
         choice["type"] for choice in extracted_schema["properties"]["normalized_value"]["anyOf"]
@@ -182,6 +182,86 @@ def test_adapter_accepts_one_json_object_after_gateway_reasoning(quote_dictionar
     assert result.run.attempts == 1
 
 
+def test_adapter_completes_sparse_provider_output_with_missing_candidates(
+    quote_dictionary,
+) -> None:
+    payload = {
+        "candidates": [{
+            "field_name": "currency",
+            "raw_value": "S$",
+            "normalized_value": "SGD",
+            "unit": None,
+            "validation_status": "EXTRACTED",
+            "source_ids": ["S001"],
+        }]
+    }
+    envelope = {
+        "id": "request-sparse-1",
+        "choices": [{"message": {"content": json.dumps(payload)}, "finish_reason": "stop"}],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del request, timeout
+        return FakeResponse(json.dumps(envelope).encode())
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    result = OpenAICompatibleAdapter(
+        _config(max_attempts=1), opener=opener, sleeper=lambda _: None
+    ).extract(
+        parsed,
+        quote_dictionary,
+        ModelCallBudget(graph_run_id="GRAPH-SPARSE"),
+        "EXTRACT-SPARSE",
+    )
+
+    assert len(result.payload.candidates) == len(quote_dictionary.extractable_fields)
+    by_name = {candidate.field_name: candidate for candidate in result.payload.candidates}
+    assert by_name["currency"].validation_status == "EXTRACTED"
+    assert by_name["currency"].normalized_value == "SGD"
+    assert by_name["currency"].source_refs[0].source_id == parsed.sources[0].source_id
+    omitted = [candidate for candidate in result.payload.candidates if candidate.field_name != "currency"]
+    assert omitted
+    assert all(candidate.validation_status == "MISSING" for candidate in omitted)
+    assert all(candidate.raw_value is None and not candidate.source_refs for candidate in omitted)
+
+
+def test_adapter_rejects_duplicate_sparse_fields(quote_dictionary) -> None:
+    candidate = {
+        "field_name": "currency",
+        "raw_value": "S$",
+        "normalized_value": "SGD",
+        "unit": None,
+        "validation_status": "EXTRACTED",
+        "source_ids": ["S001"],
+    }
+    envelope = {
+        "id": "request-sparse-duplicate-1",
+        "choices": [{
+            "message": {"content": json.dumps({"candidates": [candidate, candidate]})},
+            "finish_reason": "stop",
+        }],
+        "usage": {},
+    }
+
+    def opener(request, timeout):
+        del request, timeout
+        return FakeResponse(json.dumps(envelope).encode())
+
+    parsed = PdfQuoteParser().parse(quote_path("b"), context_for("b"))
+    with pytest.raises(AdapterError) as raised:
+        OpenAICompatibleAdapter(
+            _config(max_attempts=1), opener=opener, sleeper=lambda _: None
+        ).extract(
+            parsed,
+            quote_dictionary,
+            ModelCallBudget(graph_run_id="GRAPH-SPARSE-DUPLICATE"),
+            "EXTRACT-SPARSE-DUPLICATE",
+        )
+
+    assert raised.value.code == "model_output_schema_invalid"
+
+
 def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -> None:
     captured = {}
 
@@ -212,7 +292,7 @@ def test_profiled_csv_prompt_includes_cell_location_metadata(quote_dictionary) -
     assert price_source["text"] == "6.80"
     assert "page_number" not in price_source
     assert "block_id" not in price_source
-    assert result.run.prompt_version == "quote-extraction/2.2.0"
+    assert result.run.prompt_version == "quote-extraction/2.3.0"
     boundaries = prompt["field_specific_boundaries"]
     assert "other fees" in boundaries["shipping_vs_other_fees"]
     assert "INCLUDED" in boundaries["fee_status_vs_separate_amount"]
@@ -315,8 +395,8 @@ def test_real_adapter_grounds_allowed_source_handle_to_authoritative_text(
     assert result.model_payload_before_grounding is not None
     assert result.model_payload_before_grounding.candidates[0].source_refs[0].source_id == "S001"
     allowed = captured["response_format"]["json_schema"]["schema"]["$defs"][
-        "SourceCitation"
-    ]["properties"]["source_id"]["enum"]
+        "ExtractedModelFieldSelection"
+    ]["properties"]["source_ids"]["items"]["enum"]
     assert allowed == [f"S{index:03d}" for index in range(1, len(parsed.sources) + 1)]
 
 
