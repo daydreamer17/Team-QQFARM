@@ -167,7 +167,7 @@ def test_explain_plan_cli_records_success_or_fail_closed(tmp_path, monkeypatch, 
     bundle = orchestrator.retrieve(context())
     bundle_file, facts_file, output = tmp_path / "bundle.json", tmp_path / "facts.json", tmp_path / "output.json"
     bundle_file.write_text(bundle.model_dump_json(), encoding="utf-8")
-    facts_file.write_text(json.dumps({"currency": "SGD", "total_cost": "7000.00"}), encoding="utf-8")
+    facts_file.write_text(json.dumps({"currency": "SGD", "total_cost": "6500.00"}), encoding="utf-8")
     monkeypatch.setattr(cli, "load_reviewed_catalog", lambda *a, **k: orchestrator.manifest)
     monkeypatch.setenv("SUPPLIER_EXPLANATION_MODEL_ID", "test-model")
     class Client:
@@ -181,7 +181,7 @@ def test_explain_plan_cli_records_success_or_fail_closed(tmp_path, monkeypatch, 
                 "evidence_quotes": {c.citation_id: c.text}} for c in citations])
     monkeypatch.setattr(cli, "LiveExplanationClient", lambda _: Client())
     args = ["explain-plan", "--bundle", str(bundle_file), "--facts", str(facts_file),
-            "--manifest", "data/policies/electronics-components/v2/manifest.json", "--output", str(output)]
+            "--manifest", "data/policies/compliance-closure-demo/v2/manifest.json", "--output", str(output)]
     assert cli.main(args) == int(fail)
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report["status"] == ("ERROR" if fail else "OK")

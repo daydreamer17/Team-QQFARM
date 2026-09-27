@@ -420,19 +420,19 @@ def compliance_evidence_files(out: Path) -> None:
 
     guide["paired_scenarios"] = sorted(pair_items, key=lambda item: str(item["file"]))
     write_json(out / "compliance_evidence/entry_guide.json", guide)
-    write_text(out / "compliance_evidence/README.md", """# 制度检查材料（全部为合成演示资料）
+    write_text(out / "compliance_evidence/README.md", """# Compliance Review Evidence (Synthetic Demonstration Materials Only)
 
-`initial/` 用于第一轮核验；每家各有一份供应商准入记录和一份 RoHS 声明。请逐份查看原文，在制度检查页选择对应供应商和控制项，按 `entry_guide.json` 录入并上传同一文件。
+Use `initial/` for the first review round. Each supplier has one supplier-admission record and one RoHS declaration. Review each source file, select the corresponding supplier and control on the Compliance Review page, enter the values from `entry_guide.json`, and upload the same file.
 
-第一轮刻意包含四种状态：完整有效、料号错配、明确不通过、已过期。不要把文件名或本 README 当成证明，实际核对 TXT 原文后再勾选“已核对覆盖范围”。
+The first round intentionally includes four states: complete and valid, part-number mismatch, explicitly non-compliant, and expired. Do not treat filenames or this README as evidence. Verify the TXT source before selecting the confirmation that the evidence scope has been reviewed.
 
-`corrections/` 用于第二轮。必须通过页面的“替换材料”操作替换对应旧记录，不能把新旧两份同时当成当前有效材料，否则应被识别为冲突或保留历史版本。
+Use `corrections/` for the second round. Replace the corresponding earlier record through the page's Replace Evidence action. Do not treat both the old and new files as currently valid; otherwise, the system should identify a conflict or retain the earlier file as a historical version.
 
-`paired_scenarios/` 提供完整的 24 份材料矩阵：4 家供应商 × 供应商准入、RoHS、金额审批 × 合规/不合规。每个供应商目录中包含 6 份可自动解析的 Markdown 文件。测试单个异常时，只上传对应文件；测试替换闭环时，先上传 `non-compliant` 文件，再用同类 `compliant` 文件执行“替换材料”。
+`paired_scenarios/` provides a complete matrix of 24 evidence files: four suppliers × supplier admission, RoHS, and amount approval × compliant/non-compliant. Each supplier directory contains six automatically parsable Markdown files. To test one exception, upload only the corresponding file. To test the replacement loop, upload the `non-compliant` file first, then use the matching `compliant` file with Replace Evidence.
 
-金额审批规则只在中选报价总成本达到 SGD 7,000 时触发；未触发供应商的 amount 文件用于解析和边界测试，不代表业务上必须预先上传。
+The amount-approval rule is triggered only when the selected quotation's total cost reaches SGD 7,000. Amount files for suppliers below the threshold are used for parsing and boundary tests; they do not mean that the business process requires evidence to be uploaded in advance.
 
-这些文件只用于演示证据核验和版本追踪，不是真实证书，不证明任何真实供应商或产品合规，也不构成采购审批。
+These files are used only to demonstrate evidence review and version tracking. They are not real certificates, do not establish the compliance of any real supplier or product, and do not constitute procurement approval.
 """)
 
 
@@ -479,34 +479,34 @@ def generate(out: Path = OUT, holdout: Path = HOLDOUT) -> None:
     compliance_evidence_files(out)
     write_text(out / "README.md", """# full_flow_demo4
 
-全新 MCU 商业取舍开发测试包，所有报价和制度材料均为合成数据。不是 demo3 的复制品。
+An independent MCU commercial trade-off development and test package. All quotations and policy materials are synthetic. This package is not a copy of demo3.
 
-## 开始
+## Getting started
 
-1. 上传并发布 `policy/electronics_sg/`；按 `upload_metadata.json` 和 `reviewed_clauses.json` 完成人工核对。
-2. 创建新任务时绑定刚发布的 Electronics/SG 制度，上传 `requirement/procurement_requirement.txt`（PDF/MD 等价），核对 `confirmed_requirement.json`。若只回归旧的无制度基线，才创建不绑定制度的独立任务。
-3. 上传 `quotes/pdf/` 四份 PDF，或 `quotes/csv/` 四份 CSV；两套不要混传。供应商 ID 使用 manifest 所列值。
-4. 核对全部字段并正式提交四份报价。PDF 路径含真实模型提取；固定 CSV 不需要模型。
-5. 进入制度检查，可按原流程先上传 `compliance_evidence/initial/` 的八份材料，再使用 `corrections/` 的三份材料执行“替换材料”；需要测试任一供应商、任一证明类型的正反案例时，使用 `compliance_evidence/paired_scenarios/` 下对应的 24 份材料。确认制度检查后再进入决策比较。
-6. 每个 `variants/` 用例使用新任务，只替换指定供应商的一份报价，其余三家沿用主场景，不要把全部变体一起上传。
-7. 历史数据可绑定现有 `synthetic-mcu9-supplier-performance / 2026-08-06-v1`，不要新增虚构评级。`policy/unrelated_office_eu/` 是范围隔离反例，不要绑定到 SG 电子采购。
+1. Upload and publish `policy/electronics_sg/`. Complete the human review using `upload_metadata.json` and `reviewed_clauses.json`.
+2. When creating a task, bind the newly published Electronics/SG policy and upload `requirement/procurement_requirement.txt` (the PDF and Markdown versions are equivalent). Verify the result against `confirmed_requirement.json`. Create a separate task without a policy only when regressing the legacy no-policy baseline.
+3. Upload either the four PDFs in `quotes/pdf/` or the four CSV files in `quotes/csv/`. Do not mix the two sets. Use the supplier IDs listed in the manifest.
+4. Review every field and formally submit all four quotations. The PDF path uses live model extraction; the fixed CSV path does not require a model.
+5. Open Compliance Review. For the original workflow, upload the eight files in `compliance_evidence/initial/`, then use the three files in `corrections/` with the Replace Evidence action. To test compliant and non-compliant evidence for any supplier and evidence type, use the corresponding 24 files under `compliance_evidence/paired_scenarios/`. Confirm the compliance review before proceeding to decision comparison.
+6. Use a new task for each `variants/` case. Replace only the specified supplier's quotation and retain the other three primary quotations. Do not upload all variants together.
+7. Historical data may be bound to the existing `synthetic-mcu9-supplier-performance / 2026-08-06-v1` snapshot. Do not add fabricated ratings. `policy/unrelated_office_eu/` is a scope-isolation negative example and must not be bound to an SG electronics procurement task.
 
-制度材料的录入值见 `compliance_evidence/entry_guide.json`；它只是人工录入辅助，不替代阅读原文。完整步骤见仓库 `docs/TESTING.md`，预期结果位于 `evaluation/reference/full_flow_demo4/`；这些离线验收资料禁止上传给运行时 Agent。
+Values for entering policy evidence are listed in `compliance_evidence/entry_guide.json`. This file assists manual entry but does not replace reading the source documents. See `docs/TESTING.en.md` for the complete workflow. Expected results are stored under `evaluation/reference/full_flow_demo4/`; these offline acceptance materials must not be uploaded to the runtime Agent.
 
-## 数据边界
+## Data boundaries
 
-固定评估时间：2026-11-02，报价有效至 2026-11-30。以后重测若过期，另建有独立预期的版本，不自动使用今天改变结果。
-保留原 MCU 标识、单商品采购和六指标主/次排序，不测试新器件选型或替代兼容性。
-自然语言只解释制度与偏好；金额、硬约束、证据匹配和状态由确定性代码计算，材料事实由人工确认。
-本目录不含参考推荐、人工补充答案或模型评测输出。
+- Fixed evaluation date: 2 November 2026. Quotations remain valid through 30 November 2026. If a future rerun falls outside this period, create a separately versioned dataset with independent expectations instead of allowing the current date to change the result automatically.
+- Preserve the original MCU identifier, single-item procurement scope, and primary/secondary ordering across six metrics. This package does not test new component selection or substitute compatibility.
+- Natural language explains policies and preferences only. Deterministic code calculates monetary values, hard constraints, evidence matching, and states; humans confirm evidence facts.
+- This directory contains no reference recommendation, manually supplied answer, or model evaluation output.
 
-## 再生成
+## Regeneration
 
 ```bash
 PYTHONPATH=src .venv/bin/python data/generate_full_flow_demo4.py
 ```
 
-脚本只重建本数据包及其独立留出版式，不触碰 demo1/2/3、数据库或其他代码。生成器不导入参考答案或计算引擎。
+The script rebuilds only this dataset and its independent layout holdout. It does not modify demo1/2/3, the database, or other code. The generator does not import reference answers or the calculation engine.
 """)
     write_json(out / "manifest.json", {"dataset_id": "full_flow_demo4", "schema_version": "1.2.0",
         "scenario_id": SCENARIO, "is_synthetic": True, "runtime_safe": True, "primary_quote_limit": 4,
@@ -520,7 +520,7 @@ PYTHONPATH=src .venv/bin/python data/generate_full_flow_demo4.py
     # Holdout uses a separate layout family; do not include in development tuning.
     for key in ("great_wall", "sterling"):
         quote_pdf(holdout / f"{key}_schedule.pdf", base_row(key), layout="holdout")
-    write_text(holdout / "README.md", "# full_flow_demo4 layout holdout\n\n两份同事实、不同版式的合成报价，替换对应主报价，不可与其重复上传。未用于开发模型调优。\n只检查文件可读与版面不等于模型泛化通过；一旦根据提取结果改提示词或规则，这些样本必须转入开发集。\n")
+    write_text(holdout / "README.md", "# full_flow_demo4 layout holdout\n\nTwo synthetic quotations contain the same facts in different layouts. Replace the corresponding primary quotation; do not upload both together. These samples have not been used for model-development tuning.\nChecking only that the files are readable and visually correct does not demonstrate model generalisation. If extraction results from these samples are used to modify prompts or rules, move the samples into the development set.\n")
     write_json(holdout / "manifest.json", {"dataset_id": "full_flow_demo4-layout-holdout", "split": "holdout",
         "is_synthetic": True, "model_evaluation_status": "NOT_RUN", "files": inventory(holdout)})
 

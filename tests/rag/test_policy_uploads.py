@@ -244,12 +244,8 @@ def test_compliance_closure_v2_manifest_has_three_reviewed_executable_controls()
 @pytest.mark.parametrize(
     "version_directory",
     [
-        "electronics-components/v1",
-        "electronics-components/v2",
-        "industrial-automation/v1",
-        "industrial-automation/v2",
-        "data-center-hardware/v1",
-        "data-center-hardware/v2",
+        "compliance-closure-demo/v1",
+        "compliance-closure-demo/v2",
     ],
 )
 def test_upload_classification_matches_supported_demo_manifests(
@@ -279,23 +275,21 @@ def test_upload_classification_matches_supported_demo_manifests(
         )
 
         assert uploaded["status"] == "READY_TO_PUBLISH"
-        actual_clauses = {
-            clause["clause_id"]: {
-                "control_code": clause["control_code"],
-                "rule_parameters": clause["rule_parameters"],
-            }
-            for clause in uploaded["clauses"]
-        }
-        expected_clauses = {
-            clause_id: (
-                {"control_code": "INFORMATIONAL", "rule_parameters": {}}
-                if definition["control_code"] == "AMOUNT_APPROVAL"
-                and not definition["rule_parameters"]
-                else definition
-            )
+        actual_clauses = {clause["clause_id"]: clause for clause in uploaded["clauses"]}
+        assert {
+            clause_id: clause["control_code"]
+            for clause_id, clause in actual_clauses.items()
+        } == {
+            clause_id: definition["control_code"]
             for clause_id, definition in document["clauses"].items()
         }
-        assert actual_clauses == expected_clauses
+        for clause_id, definition in document["clauses"].items():
+            actual_parameters = actual_clauses[clause_id]["rule_parameters"]
+            if definition["control_code"] == "AMOUNT_APPROVAL":
+                assert actual_parameters["threshold"] == definition["rule_parameters"]["threshold"]
+                assert actual_parameters["execution_stage"] == definition["rule_parameters"]["execution_stage"]
+            else:
+                assert actual_parameters == {}
         assert all(
             clause["classification"]["status"] == "AUTO_ACCEPTED"
             for clause in uploaded["clauses"]

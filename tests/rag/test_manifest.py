@@ -99,35 +99,25 @@ def test_manifest_rejects_level_two_sections_without_stable_clause_id(
         load_policy_manifest(path, allowed_root=root)
 
 
-@pytest.mark.parametrize(
-    ("policy_family", "expected_policy_set_id"),
-    [
-        ("electronics-components", "electronics-components-procurement"),
-        ("industrial-automation", "industrial-automation-procurement"),
-        ("data-center-hardware", "data-center-hardware-procurement"),
-    ],
-)
-def test_repository_policy_families_have_two_complex_immutable_versions(
-    policy_family: str, expected_policy_set_id: str
-) -> None:
+def test_repository_policy_catalog_has_two_reviewed_immutable_versions() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     policy_root = repo_root / "data" / "policies"
     versions = [
         load_policy_manifest(
-            policy_root / policy_family / version / "manifest.json",
+            policy_root / "compliance-closure-demo" / version / "manifest.json",
             allowed_root=policy_root,
         )
         for version in ("v1", "v2")
     ]
 
-    assert {loaded.policy_set_id for loaded in versions} == {expected_policy_set_id}
+    assert {loaded.policy_set_id for loaded in versions} == {"compliance-closure-demo"}
     assert versions[0].policy_set_version != versions[1].policy_set_version
     assert versions[0].content_sha256 != versions[1].content_sha256
     assert [len(loaded.documents) for loaded in versions] == [3, 3]
     assert [
         sum(len(document.clauses) for document in loaded.documents)
         for loaded in versions
-    ] == [15, 18]
+    ] == [3, 3]
     assert all(
         {
             clause.control_code
@@ -147,10 +137,9 @@ def test_repository_policy_families_have_two_complex_immutable_versions(
 
 def test_policy_directory_contains_supported_families_and_reviewed_demo() -> None:
     policy_root = Path(__file__).resolve().parents[2] / "data" / "policies"
-    assert {path.name for path in policy_root.iterdir() if path.is_dir()} == {
-        "electronics-components",
-        "industrial-automation",
-        "data-center-hardware",
+    assert {
+        path.parent.parent.name for path in policy_root.glob("*/*/manifest.json")
+    } == {
         "compliance-closure-demo",
     }
 

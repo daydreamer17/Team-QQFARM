@@ -14,7 +14,7 @@ CASES = [
     {
         "case_id": "missing-freight-source-check",
         "kind": "DOCUMENT",
-        "description": "运费状态和金额缺失，需要核对原文及当前有效的人工确认记录。",
+        "description": "Freight status and amount are missing; inspect the source and any current human-confirmed record.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
             "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
@@ -27,7 +27,7 @@ CASES = [
     {
         "case_id": "conflicting-price-evidence",
         "kind": "DOCUMENT",
-        "description": "同一报价包含冲突价格，Agent 必须保留冲突并转人工，不能自行挑选金额。",
+        "description": "One quotation contains conflicting prices; the Agent must retain the conflict and escalate instead of choosing an amount.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
             "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -40,7 +40,7 @@ CASES = [
     {
         "case_id": "confirmed-record-reuse",
         "kind": "WORKFLOW_STATE",
-        "description": "先人工确认缺失运费，再对同一文件重新调查，验证当前有效确认记录的复用边界。",
+        "description": "Confirm missing freight manually, then reinvestigate the same file to verify reuse boundaries for current confirmed records.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [],
         "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
@@ -49,7 +49,7 @@ CASES = [
     {
         "case_id": "selection-gap-and-draft",
         "kind": "USER_REQUEST",
-        "description": "用户要求分析未入选原因并形成未发送的供应商澄清草稿。",
+        "description": "The user asks for non-selection analysis and an unsent supplier clarification draft.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
             "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -62,7 +62,7 @@ CASES = [
     {
         "case_id": "authorized-requirement-simulation",
         "kind": "USER_REQUEST",
-        "description": "用户明确授权预算或交期假设，Agent 只能试算，不能修改正式需求。",
+        "description": "The user explicitly authorises a budget or delivery hypothesis; the Agent may simulate it but cannot modify the official requirement.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [
             "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -76,22 +76,22 @@ CASES = [
     {
         "case_id": "policy-transient-recovery",
         "kind": "CONTROLLED_FAULT",
-        "description": "制度检索发生一次明确的临时传输错误，允许同版本有限重试。",
-        "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+        "description": "Policy retrieval encounters one explicit transient transport error and may retry within the same version and bounded budget.",
+        "policy_manifest": "data/policies/compliance-closure-demo/v2/manifest.json",
         "interaction": "POLICY_TRANSPORT_TRANSIENT_ONCE",
     },
     {
         "case_id": "policy-terminal-problem",
         "kind": "CONTROLLED_FAULT",
-        "description": "分别注入制度缺失和制度冲突；两种情况都必须转管理员，禁止盲目重试。",
-        "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+        "description": "Inject missing-policy and conflicting-policy results; both must escalate to an administrator without blind retries.",
+        "policy_manifest": "data/policies/compliance-closure-demo/v2/manifest.json",
         "interaction": "POLICY_NO_EVIDENCE_OR_CONFLICT",
         "variants": ["NO_EVIDENCE", "CONFLICT"],
     },
     {
         "case_id": "stale-input-stop",
         "kind": "WORKFLOW_STATE",
-        "description": "调查期间上传新报价版本，旧输入立即失效，Agent 不得继续使用旧观察。",
+        "description": "Upload a new quotation version during investigation; the old input becomes stale and the Agent must stop using earlier observations.",
         "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
         "base_quotes": [],
         "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
@@ -186,7 +186,7 @@ def main() -> None:
         "case_count": len(cases),
         "cases": cases,
         "negative_control": {
-            "description": "完整、无冲突的主报价不应创建自动调查 Case。",
+            "description": "A complete, conflict-free primary quotation must not create an automatic investigation case.",
             "quotes": [
                 "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
                 "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
@@ -204,13 +204,14 @@ def main() -> None:
         encoding="utf-8",
     )
     (OUTPUT / "README.md").write_text(
-        "# Agent 调查验收场景\n\n"
-        "本目录不复制报价二进制文件，而是以带哈希的 manifest 复用 `full_flow_demo4` 的合成输入。"
-        "运行时 manifest 只描述场景和输入；预期工具路线保存在 "
-        "`evaluation/reference/agent_investigation_demo/cases.json`，不得提供给 Agent。\n\n"
-        "报价型场景按 manifest 的 `requirement`、`base_quotes` 和 `variant_quote` 分别新建任务；"
-        "用户请求型场景先用四份主报价完成比较，再从“智能调查”页面选择目标。"
-        "制度故障和输入失效属于受控状态注入，不应伪造成制度正文或报价内容。\n",
+        "# Agent Investigation Acceptance Scenarios\n\n"
+        "This directory does not duplicate quotation binaries. Its hash-backed manifest reuses synthetic inputs from "
+        "`full_flow_demo4`. The runtime manifest describes only scenarios and inputs; expected tool routes are stored in "
+        "`evaluation/reference/agent_investigation_demo/cases.json` and must not be exposed to the Agent.\n\n"
+        "For quotation scenarios, create separate tasks using the manifest's `requirement`, `base_quotes`, and "
+        "`variant_quote`. For user-request scenarios, first complete a comparison with the four primary quotations, then "
+        "select a target from the Investigation page. Policy failures and invalid inputs are controlled state injections "
+        "and must not be fabricated as policy or quotation content.\n",
         encoding="utf-8",
     )
 

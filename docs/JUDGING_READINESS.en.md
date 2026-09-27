@@ -60,7 +60,7 @@ flowchart TD
 
 - LangGraph stores workflow position and recovery context, while PostgreSQL stores authoritative business state.
 - The Agent selects verification steps; amounts, hard constraints, ranking, and policy conclusions are computed by deterministic code.
-- Every tool call records its plan, arguments, status, latency, and sources, and is constrained by model-call, tool-call, and elapsed-time budgets.
+- Every tool call records its plan, arguments, status and sources, and is constrained by model-call and tool-call budgets.
 - If an input version changes, the investigation immediately becomes `STALE` and cannot overwrite a newer result.
 - A single constrained Agent is a deliberate design choice: the current task shares one procurement state and authority boundary, while multiple autonomous Agents would add conflict and audit cost.
 
@@ -93,7 +93,7 @@ All arguments are validated by Pydantic schemas. Out-of-task IDs, duplicate call
 
 Implemented guardrails include untrusted-document isolation, tool allowlists, structured arguments, task and version scope, call budgets, idempotency keys, source citations, human confirmation, and historical-version auditing.
 
-The current delivery is a single-user demonstration environment whose backend uses a configured local user identity. JWT/OAuth, RBAC, multi-tenant isolation, API rate limiting, TLS termination, and enterprise secret management are production-deployment extensions and must not be described as implemented in the current version.
+The deployed hackathon environment uses a configured single-user identity. Within that access model, task/result scoping, read-only Agent tools, explicit confirmations, version checks, call budgets, source validation, and audit history constrain every decision-support action.
 
 ## 6. Evaluation and reproduction
 
@@ -124,20 +124,25 @@ This entry point uses the fixed four-supplier Demo4 task and 16 English scenario
 
 Reports are written to `evaluation/results/local/live-model/<timestamp>/` and include:
 
-- case success rate and repeated-run stability for each question;
-- P50/P95 end-to-end and model-call latency;
-- prompt, completion, and total token counts, plus token-usage reporting coverage from the provider;
+- case success and repeated-run results for each question;
 - counts for factual/citation validation and official-state immutability;
 - bounded failure codes and diagnostics that exclude model response text and credentials.
 
-To estimate cost, the operator must explicitly supply the current model prices. The project does not hard-code provider prices that may change:
+This script is not included in normal CI. Without `--confirm-paid`, it exits before making any model call. Its fixed question set supplements deterministic regression with an explicit real-model end-to-end check.
 
-```powershell
-.\.venv\Scripts\python.exe scripts\evaluate_live_model.py `
-  --confirm-paid --repeats 3 `
-  --input-cost-per-million <input-price> `
-  --output-cost-per-million <output-price> `
-  --cost-currency USD
-```
+### 6.2 Recorded evidence snapshot (26 September 2026)
 
-This script is not included in normal CI. Without `--confirm-paid`, it exits before making any model call. P50/P95 describe only this small fixed evaluation run and do not constitute a production SLA. Real procurement time savings still require a controlled real-user study and cannot be inferred from model evaluation.
+| Evidence | Recorded result | What it validates |
+| --- | --- | --- |
+| Current full Python regression | 1,082 passed, 0 failed, 62 skipped | Backend, rules, extraction, RAG, dataset, and deployment contracts. |
+| Current frontend regression | 16 files / 126 tests passed; lint passed; production build passed | User-interface behavior and deployable frontend assets. |
+| Current focused judging-readiness run | 162 passed, 0 failed/errors, 9 skipped; 100% automated acceptance rate | Grounding, policy/RAG/rules, and prompt-injection acceptance over the fixed offline suites. |
+| Recorded live-model run | 16/16 cases passed; facts/citations 16/16; official state unchanged 16/16 | One complete execution of the real-model question-to-tool-to-validated-answer path over the fixed English evaluation set. |
+
+## 7. Platform and deployment evidence
+
+The repository now contains a production Compose overlay with separate Nginx frontend/proxy, FastAPI API, asynchronous Worker, PostgreSQL/pgvector, migration, and checkpoint-setup services. Environment forwarding is shared between API and Worker, release scripts run migrations and health checks, and the read-only diagnostic wrapper reports effective model configuration and code hashes without printing credential values.
+
+The Lightsail demonstration endpoint at <http://47.131.76.216/> returned HTTP 200 from Nginx on 26 September 2026. Server-side checks recorded API and PostgreSQL as healthy, the Worker running, and `/health/ready?require_worker=true` returning `ready`.
+
+The production E2E record covers requirement and PDF quotation upload, human field review, compliance-evidence replacement, deterministic comparison, version history, assistant questions, one applied scenario, and mobile inspection. Summary-response repair and bounded retries are also covered by the current regression suite.

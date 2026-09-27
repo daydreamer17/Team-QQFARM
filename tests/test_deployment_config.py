@@ -14,6 +14,19 @@ from supplier_comparison.rag.explanation import ExplanationConfig
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _posix_shell() -> str | None:
+    """Return a usable POSIX shell, avoiding the Windows WSL launcher stub."""
+    if os.name == "nt":
+        for candidate in (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git/bin/bash.exe",
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git/usr/bin/bash.exe",
+        ):
+            if candidate.is_file():
+                return str(candidate)
+        return None
+    return shutil.which("bash")
+
+
 @pytest.mark.parametrize("factory,prefix", [
     (ConversationModelConfig, "SUPPLIER_CONVERSATION_MODEL_"),
     (DecisionIntentModelConfig, "SUPPLIER_DECISION_INTENT_MODEL_"),
@@ -90,6 +103,9 @@ def test_runtime_report_never_prints_credential_values(monkeypatch):
 
 
 def test_diagnostic_wrapper_falls_back_to_sudo_without_restarting(tmp_path):
+    shell = _posix_shell()
+    if shell is None:
+        pytest.skip("A POSIX shell is required to exercise the deployment wrapper")
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     log = tmp_path / "commands"
@@ -101,7 +117,7 @@ def test_diagnostic_wrapper_falls_back_to_sudo_without_restarting(tmp_path):
     sudo.chmod(0o755)
     env = dict(os.environ, PATH=str(fake_bin) + os.pathsep + os.environ["PATH"],
                DIAGNOSTIC_TEST_LOG=str(log))
-    subprocess.run(["bash", "deploy/lightsail-diagnose.sh"], cwd=ROOT, env=env,
+    subprocess.run([shell, "deploy/lightsail-diagnose.sh"], cwd=ROOT, env=env,
                    check=True, text=True, capture_output=True)
     commands = log.read_text().splitlines()
     assert commands[0] == "docker info"

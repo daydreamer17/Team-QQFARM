@@ -7,7 +7,7 @@
     {
       "case_id": "missing-freight-source-check",
       "kind": "DOCUMENT",
-      "description": "运费状态和金额缺失，需要核对原文及当前有效的人工确认记录。",
+      "description": "Freight status and amount are missing; inspect the source and any current human-confirmed record.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [
         "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",
@@ -47,7 +47,7 @@
     {
       "case_id": "conflicting-price-evidence",
       "kind": "DOCUMENT",
-      "description": "同一报价包含冲突价格，Agent 必须保留冲突并转人工，不能自行挑选金额。",
+      "description": "One quotation contains conflicting prices; the Agent must retain the conflict and escalate instead of choosing an amount.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [
         "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -87,7 +87,7 @@
     {
       "case_id": "confirmed-record-reuse",
       "kind": "WORKFLOW_STATE",
-      "description": "先人工确认缺失运费，再对同一文件重新调查，验证当前有效确认记录的复用边界。",
+      "description": "Confirm missing freight manually, then reinvestigate the same file to verify reuse boundaries for current confirmed records.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [],
       "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
@@ -108,7 +108,7 @@
     {
       "case_id": "selection-gap-and-draft",
       "kind": "USER_REQUEST",
-      "description": "用户要求分析未入选原因并形成未发送的供应商澄清草稿。",
+      "description": "The user asks for non-selection analysis and an unsent supplier clarification draft.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [
         "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -148,7 +148,7 @@
     {
       "case_id": "authorized-requirement-simulation",
       "kind": "USER_REQUEST",
-      "description": "用户明确授权预算或交期假设，Agent 只能试算，不能修改正式需求。",
+      "description": "The user explicitly authorises a budget or delivery hypothesis; the Agent may simulate it but cannot modify the official requirement.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [
         "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
@@ -191,22 +191,22 @@
     {
       "case_id": "policy-transient-recovery",
       "kind": "CONTROLLED_FAULT",
-      "description": "制度检索发生一次明确的临时传输错误，允许同版本有限重试。",
-      "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+      "description": "Policy retrieval encounters one explicit transient transport error and may retry within the same version and bounded budget.",
+      "policy_manifest": "data/policies/compliance-closure-demo/v2/manifest.json",
       "interaction": "POLICY_TRANSPORT_TRANSIENT_ONCE",
       "files": [
         {
-          "path": "data/policies/electronics-components/v2/manifest.json",
-          "sha256": "4ce26f70f665c1392d227eb60fb156f1ec0051e4a385092c320710d78ed9b749",
-          "size_bytes": 2855
+          "path": "data/policies/compliance-closure-demo/v2/manifest.json",
+          "sha256": "9503a476025e4e3ab8ce65e0da239b02cd05a6fa4449893d08aed9c05f5cd555",
+          "size_bytes": 3600
         }
       ]
     },
     {
       "case_id": "policy-terminal-problem",
       "kind": "CONTROLLED_FAULT",
-      "description": "分别注入制度缺失和制度冲突；两种情况都必须转管理员，禁止盲目重试。",
-      "policy_manifest": "data/policies/electronics-components/v2/manifest.json",
+      "description": "Inject missing-policy and conflicting-policy results; both must escalate to an administrator without blind retries.",
+      "policy_manifest": "data/policies/compliance-closure-demo/v2/manifest.json",
       "interaction": "POLICY_NO_EVIDENCE_OR_CONFLICT",
       "variants": [
         "NO_EVIDENCE",
@@ -214,16 +214,16 @@
       ],
       "files": [
         {
-          "path": "data/policies/electronics-components/v2/manifest.json",
-          "sha256": "4ce26f70f665c1392d227eb60fb156f1ec0051e4a385092c320710d78ed9b749",
-          "size_bytes": 2855
+          "path": "data/policies/compliance-closure-demo/v2/manifest.json",
+          "sha256": "9503a476025e4e3ab8ce65e0da239b02cd05a6fa4449893d08aed9c05f5cd555",
+          "size_bytes": 3600
         }
       ]
     },
     {
       "case_id": "stale-input-stop",
       "kind": "WORKFLOW_STATE",
-      "description": "调查期间上传新报价版本，旧输入立即失效，Agent 不得继续使用旧观察。",
+      "description": "Upload a new quotation version during investigation; the old input becomes stale and the Agent must stop using earlier observations.",
       "requirement": "data/generated/demos/full_flow_demo4/requirement/procurement_requirement.txt",
       "base_quotes": [],
       "variant_quote": "data/generated/demos/full_flow_demo4/variants/missing_freight/great_wall_quote.pdf",
@@ -243,7 +243,7 @@
     }
   ],
   "negative_control": {
-    "description": "完整、无冲突的主报价不应创建自动调查 Case。",
+    "description": "A complete, conflict-free primary quotation must not create an automatic investigation case.",
     "quotes": [
       "data/generated/demos/full_flow_demo4/quotes/pdf/great_wall_quote.pdf",
       "data/generated/demos/full_flow_demo4/quotes/pdf/redwood_quote.pdf",

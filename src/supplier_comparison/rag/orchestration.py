@@ -16,8 +16,8 @@ from pydantic import Field, model_validator
 from .contracts import FrozenModel, PolicyRetriever, RetrievalRequest, RetrievalResult, RetrievalStatus
 from .manifest import LoadedPolicyManifest, load_policy_manifest
 
-REVIEWED_POLICY_VERSION = "2026.07.1"
-REVIEWED_MANIFEST_SHA256 = "c509e72538c92e02ba21a4807730fa29ade156d185ebef4b9a8aebd9afbed342"
+REVIEWED_POLICY_VERSION = "compliance-closure-demo-2026.09.2"
+REVIEWED_MANIFEST_SHA256 = "88cca6932e6e87c843b4bd052378fa8328b8ff0be3b5bc333618db03e66401fd"
 
 
 class PlanningContext(FrozenModel):
@@ -129,7 +129,7 @@ class PolicyOrchestrator:
         threshold = thresholds[0] if len(thresholds) == 1 else {}
         if (
             threshold.get("currency") != context.currency
-            or threshold.get("operator") != ">="
+            or threshold.get("operator") not in {">=", "GTE"}
         ):
             reasons.append("APPROVAL_PARAMETER_INVALID")
         try:

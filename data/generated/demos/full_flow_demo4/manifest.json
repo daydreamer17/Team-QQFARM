@@ -127,13 +127,13 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "8ef1611e46d35294dc7f53e14976277bb7e6cde0be72ec88bf5331cda2cb6973",
-      "size_bytes": 2511
+      "sha256": "9247e2056ea83c9ca08bb2a0b36ef98687800ca5041beac696297d661f7fbfdc",
+      "size_bytes": 3305
     },
     {
       "path": "compliance_evidence/README.md",
-      "sha256": "9655076aab8f1ab8a9d6d2912332f366a47f93899b09fea8cae54fd4dfeb24d2",
-      "size_bytes": 1414
+      "sha256": "c1c1151235b2968d55d23c94acbcd64f647c7711bf6c7493375bcf505e6b84b4",
+      "size_bytes": 1859
     },
     {
       "path": "compliance_evidence/corrections/admission_SUP-023_reinstated.txt",
