@@ -1,10 +1,26 @@
 <div align="center">
 
+<img src="docs/readme-assets/quotewise-icon.png" alt="QuoteWise owl project icon" width="96" height="96">
+
 # QuoteWise
 
 **Supplier Comparison and Procurement Decision Workspace**
 
-English · [简体中文](README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
+
+<p>
+  <a href="https://www.youtube.com/watch?v=rG1C7q5EeT0"><img src="docs/readme-assets/watch-demo.svg" alt="Watch the project demo on YouTube" height="36"></a>
+  <a href="http://47.131.76.216/"><img src="docs/readme-assets/live-demo.svg" alt="Open the live demo" height="36"></a>
+  <a href="#documentation"><img src="docs/readme-assets/documentation.svg" alt="Browse the documentation" height="36"></a>
+</p>
+
+<a href="https://www.youtube.com/watch?v=rG1C7q5EeT0">
+  <img src="docs/readme-assets/demo-cover.png" alt="Go beyond the lowest bid. Watch the QuoteWise project demo." width="100%">
+</a>
+
+**Your quotes. Your evidence. One clear decision.**
+
+[Product tour](#product-tour) · [Quick start](#quick-start) · [Architecture](#repository-structure) · [Tests](#automated-tests)
 
 </div>
 
@@ -13,6 +29,42 @@ English · [简体中文](README.zh-CN.md)
 QuoteWise is a supplier quotation review and decision-support system for procurement teams. It brings procurement requirements, supplier quotations, procurement policies, supplier evidence, and historical performance into one traceable workflow, helping users review extracted fields, perform compliance checks, compare suppliers, run what-if scenarios, consult an AI assistant, and produce procurement summaries.
 
 The system provides analysis and recommendations only. It does not approve purchases, sign contracts, place orders, or make payments on behalf of users. All suppliers, materials, quotations, and procurement records in this repository are synthetic demonstration data.
+
+
+## Product tour
+
+| 🔎 Check the evidence | ⚖️ Compare the trade-offs | 💬 Explain the decision |
+| --- | --- | --- |
+| Review quotation fields, policy clauses, and supplier documents in one evidence trail. | See cost, delivery, hard constraints, and supplier history together. | Explore recommendations with citations and what-if scenarios, with people in control. |
+
+### Supplier comparison workspace
+
+<a href="docs/readme-assets/workspace.jpg"><img src="docs/readme-assets/workspace.jpg" alt="QuoteWise supplier comparison: total cost, delivery dates, payment terms, historical performance, and source quotations" width="100%"></a>
+
+*Actual frontend using synthetic demonstration data. Click any screenshot to enlarge it.*
+
+<details>
+<summary><strong>Explore compliance, the AI assistant, and procurement summaries</strong></summary>
+
+<table>
+  <tr>
+    <th width="33%">Compliance checks</th>
+    <th width="33%">AI decision assistant</th>
+    <th width="33%">Procurement summary</th>
+  </tr>
+  <tr>
+    <td><a href="docs/readme-assets/compliance.jpg"><img src="docs/readme-assets/compliance.jpg" alt="Supplier eligibility and RoHS check statuses" width="100%"></a></td>
+    <td><a href="docs/readme-assets/assistant.jpg"><img src="docs/readme-assets/assistant.jpg" alt="An AI answer with source citations and investigation steps" width="100%"></a></td>
+    <td><a href="docs/readme-assets/summary.jpg"><img src="docs/readme-assets/summary.jpg" alt="Procurement summary with cost charts, delivery comparisons, and analysis" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td>Track verified evidence and outstanding checks.</td>
+    <td>Follow citations and understand recommendation risks.</td>
+    <td>Export a report of trade-offs and suggested next steps.</td>
+  </tr>
+</table>
+
+</details>
 
 ## Current validation snapshot
 
@@ -49,6 +101,14 @@ flowchart LR
     C --> D[Compare suppliers and simulate scenarios]
     D --> S[Generate and export procurement summary]
     S --> A[Version history and audit]
+    classDef sky fill:#E7F2F8,stroke:#517B91,color:#102A43
+    classDef sage fill:#E8F3E8,stroke:#5B8871,color:#102A43
+    classDef gold fill:#FFF0BA,stroke:#AA8745,color:#102A43
+    classDef lilac fill:#EFEAF7,stroke:#8E7BA4,color:#102A43
+    class P,R,Q sky
+    class C sage
+    class D gold
+    class S,A lilac
 ```
 
 Compliance verification sits between quotation review and supplier comparison. RAG retrieves the applicable policy clauses and citations, while deterministic rules combine those clauses with quotation facts and confirmed supplier evidence to produce a verification status. Retrieving a relevant clause alone does not mean that a supplier is compliant.
@@ -170,6 +230,29 @@ Team-QQFARM/
 
 The runtime uses a modular monolith architecture. The React frontend calls FastAPI; the API writes long-running work to a persistent job queue; the worker performs extraction, model calls, and workflow progression; PostgreSQL stores authoritative business state; and file storage preserves immutable originals and extraction artifacts.
 
+<p align="center"><img src="docs/readme-assets/tech-stack.svg" alt="React + TypeScript · FastAPI · LangGraph · PostgreSQL + pgvector" width="628"></p>
+
+```mermaid
+flowchart TB
+    UI["React + TypeScript · Procurement workspace"] --> API["FastAPI · Requests and revision checks"]
+    API --> JOBS["Persistent job queue"]
+    JOBS --> WORKER["Worker + LangGraph · Workflow execution"]
+    API --> DB[("PostgreSQL + pgvector
+Business facts and policy index")]
+    WORKER --> DB
+    WORKER --> MODEL["LLM / Embedding / Rerank
+Understanding, retrieval, explanation"]
+    WORKER --> FILES["File storage · Originals and parsed artifacts"]
+    classDef sky fill:#E7F2F8,stroke:#517B91,color:#102A43
+    classDef sage fill:#E8F3E8,stroke:#5B8871,color:#102A43
+    classDef gold fill:#FFF0BA,stroke:#AA8745,color:#102A43
+    classDef lilac fill:#EFEAF7,stroke:#8E7BA4,color:#102A43
+    class UI,API sky
+    class JOBS,WORKER sage
+    class DB,FILES gold
+    class MODEL lilac
+```
+
 See [system architecture](docs/ARCHITECTURE.en.md) for technical details.
 
 ## Key design principles
@@ -230,3 +313,14 @@ Refer to [.env.example](.env.example) for all defaults and descriptions.
 | The frontend still shows an old page | Current Git branch, Vite working directory, and browser cache |
 
 Do not use `docker compose down -v` as a routine stop command because it deletes the PostgreSQL data volume. Use `scripts/dev/stop.sh` or the corresponding PowerShell script instead.
+
+---
+
+<div align="center">
+
+**🦉 QuoteWise · Team QQFARM**
+
+Your quotes. Your evidence. One clear decision.<br>
+[Watch the demo](https://www.youtube.com/watch?v=rG1C7q5EeT0) · [Try it live](http://47.131.76.216/) · [Back to top](#quotewise)
+
+</div>

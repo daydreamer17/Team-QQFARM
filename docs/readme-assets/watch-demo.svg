@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="179" height="36" viewBox="0 0 179 36" role="img" aria-label="Watch on YouTube">
+  <title>Watch on YouTube</title>
+  <rect x=".5" y=".5" width="178" height="35" rx="12" fill="#FFF0BA" stroke="#9BB8BA"/>
+  <g stroke="#102A43" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="21" cy="18" r="10" fill="#102A43"/><path d="M18 13 L26 18 L18 23 Z" fill="#FFF0BA" stroke="none"/></g>
+  <text x="39" y="23" font-family="Verdana,DejaVu Sans,sans-serif" font-size="12" font-weight="700" fill="#102A43">Watch on YouTube</text>
+</svg>

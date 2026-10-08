@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="151" height="36" viewBox="0 0 151 36" role="img" aria-label="Try live demo">
+  <title>Try live demo</title>
+  <rect x=".5" y=".5" width="150" height="35" rx="12" fill="#E8F3E8" stroke="#9BB8BA"/>
+  <g stroke="#102A43" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="10" y="10" width="20" height="15" rx="3" fill="none"/><path d="M16 29h8M20 25v4M11 15h18" fill="none"/></g>
+  <text x="39" y="23" font-family="Verdana,DejaVu Sans,sans-serif" font-size="12" font-weight="700" fill="#102A43">Try live demo</text>
+</svg>

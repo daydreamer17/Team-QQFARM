@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="165" height="36" viewBox="0 0 165 36" role="img" aria-label="Documentation">
+  <title>Documentation</title>
+  <rect x=".5" y=".5" width="164" height="35" rx="12" fill="#E7F2F8" stroke="#9BB8BA"/>
+  <g stroke="#102A43" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10 10h7l4 3 4-3h7v16h-7l-4 3-4-3h-7zM21 13v16" fill="none"/></g>
+  <text x="39" y="23" font-family="Verdana,DejaVu Sans,sans-serif" font-size="12" font-weight="700" fill="#102A43">Documentation</text>
+</svg>

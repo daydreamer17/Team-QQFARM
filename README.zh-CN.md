@@ -1,10 +1,26 @@
 <div align="center">
 
+<img src="docs/readme-assets/quotewise-icon.png" alt="QuoteWise 猫头鹰项目图标" width="96" height="96">
+
 # QuoteWise
 
 **供应商比选与采购决策工作区**
 
-[English](README.md) · 简体中文
+[English](README.md) · **简体中文**
+
+<p>
+  <a href="https://www.youtube.com/watch?v=rG1C7q5EeT0"><img src="docs/readme-assets/watch-demo.svg" alt="在 YouTube 观看项目演示" height="36"></a>
+  <a href="http://47.131.76.216/"><img src="docs/readme-assets/live-demo.svg" alt="打开在线演示" height="36"></a>
+  <a href="#文档索引"><img src="docs/readme-assets/documentation.svg" alt="查看项目文档" height="36"></a>
+</p>
+
+<a href="https://www.youtube.com/watch?v=rG1C7q5EeT0">
+  <img src="docs/readme-assets/demo-cover.png" alt="不止于最低报价。点击观看 QuoteWise 项目演示。" width="100%">
+</a>
+
+**报价有依据，取舍有解释，决策更清晰。**
+
+[产品一览](#产品一览) · [快速开始](#快速开始) · [系统结构](#系统结构) · [自动化测试](#自动化测试)
 
 </div>
 
@@ -13,6 +29,42 @@
 QuoteWise 是一个面向采购人员的供应商报价审核与决策辅助系统。它把采购需求、供应商报价、采购制度、供应商证明材料和历史表现整理为一条可追溯的工作流，帮助用户完成字段核对、制度检查、供应商比较、情景试算、AI 问答和采购总结。
 
 系统只提供分析和建议，不代替采购人员作出批准、签约、下单或付款决定。仓库中的供应商、物料、报价和采购记录均为合成演示数据。
+
+
+## 产品一览
+
+| 🔎 看清证据 | ⚖️ 比较取舍 | 💬 解释决策 |
+| --- | --- | --- |
+| 把报价字段、制度条款与供应商材料放在同一条证据链上核对。 | 综合成本、交期、硬约束和历史表现，查看供应商之间的差异。 | 结合引用与情景试算理解推荐原因，并保留人工确认。 |
+
+### 供应商比较工作区
+
+<a href="docs/readme-assets/workspace.jpg"><img src="docs/readme-assets/workspace.jpg" alt="QuoteWise 供应商比较页面：总成本、预计交期、付款条件、历史表现和源报价" width="100%"></a>
+
+*真实前端界面，使用合成演示数据。点击图片可查看大图。*
+
+<details>
+<summary><strong>展开查看：制度检查、AI 决策助手与采购总结</strong></summary>
+
+<table>
+  <tr>
+    <th width="33%">制度检查</th>
+    <th width="33%">AI 决策助手</th>
+    <th width="33%">采购总结</th>
+  </tr>
+  <tr>
+    <td><a href="docs/readme-assets/compliance.jpg"><img src="docs/readme-assets/compliance.jpg" alt="供应商资格和 RoHS 检查状态" width="100%"></a></td>
+    <td><a href="docs/readme-assets/assistant.jpg"><img src="docs/readme-assets/assistant.jpg" alt="带来源引用与调查步骤的 AI 回答" width="100%"></a></td>
+    <td><a href="docs/readme-assets/summary.jpg"><img src="docs/readme-assets/summary.jpg" alt="采购总结中的成本图表、交期对比和分析说明" width="100%"></a></td>
+  </tr>
+  <tr>
+    <td>逐项查看已验证和待补充的材料。</td>
+    <td>追溯引用，理解推荐依据与风险。</td>
+    <td>把报价取舍与行动建议整理成可导出的报告。</td>
+  </tr>
+</table>
+
+</details>
 
 ## 核心能力
 
@@ -34,6 +86,14 @@ flowchart LR
     C --> D[决策比较与情景试算]
     D --> S[采购总结与导出]
     S --> A[版本与审计]
+    classDef sky fill:#E7F2F8,stroke:#517B91,color:#102A43
+    classDef sage fill:#E8F3E8,stroke:#5B8871,color:#102A43
+    classDef gold fill:#FFF0BA,stroke:#AA8745,color:#102A43
+    classDef lilac fill:#EFEAF7,stroke:#8E7BA4,color:#102A43
+    class P,R,Q sky
+    class C sage
+    class D gold
+    class S,A lilac
 ```
 
 制度检查位于报价审核与决策比较之间。RAG 负责找到适用制度条款和引用，确定性规则负责结合报价事实与已确认材料给出检查状态；“检索到条款”本身不等于供应商已经合规。
@@ -155,6 +215,29 @@ Team-QQFARM/
 
 运行时采用模块化单体架构：React 前端调用 FastAPI；API 将长任务写入持久化作业队列；Worker 完成解析、模型调用和工作流推进；PostgreSQL 保存权威业务状态，文件存储保存不可覆盖的原件和解析产物。
 
+<p align="center"><img src="docs/readme-assets/tech-stack.svg" alt="React + TypeScript · FastAPI · LangGraph · PostgreSQL + pgvector" width="628"></p>
+
+```mermaid
+flowchart TB
+    UI["React + TypeScript · 采购工作区"] --> API["FastAPI · 请求与版本校验"]
+    API --> JOBS["持久化作业队列"]
+    JOBS --> WORKER["Worker + LangGraph · 工作流执行"]
+    API --> DB[("PostgreSQL + pgvector
+业务事实与制度索引")]
+    WORKER --> DB
+    WORKER --> MODEL["LLM / Embedding / Rerank
+文档理解、检索与解释"]
+    WORKER --> FILES["文件存储 · 原件与解析产物"]
+    classDef sky fill:#E7F2F8,stroke:#517B91,color:#102A43
+    classDef sage fill:#E8F3E8,stroke:#5B8871,color:#102A43
+    classDef gold fill:#FFF0BA,stroke:#AA8745,color:#102A43
+    classDef lilac fill:#EFEAF7,stroke:#8E7BA4,color:#102A43
+    class UI,API sky
+    class JOBS,WORKER sage
+    class DB,FILES gold
+    class MODEL lilac
+```
+
 更多技术细节见 [系统架构](docs/ARCHITECTURE.md)。
 
 ## 关键设计原则
@@ -214,3 +297,14 @@ Team-QQFARM/
 | 前端还是旧页面 | 当前 Git 分支、Vite 工作目录和浏览器缓存 |
 
 请勿使用 `docker compose down -v` 作为普通停止命令；该命令会删除 PostgreSQL 数据卷。正常停止请使用 `scripts/dev/stop.sh` 或对应的 PowerShell 脚本。
+
+---
+
+<div align="center">
+
+**🦉 QuoteWise · Team QQFARM**
+
+报价有依据，取舍有解释，决策更清晰。<br>
+[观看演示](https://www.youtube.com/watch?v=rG1C7q5EeT0) · [在线体验](http://47.131.76.216/) · [回到顶部](#quotewise)
+
+</div>
