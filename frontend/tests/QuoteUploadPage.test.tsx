@@ -30,7 +30,8 @@ const task = {
 } as unknown as TaskDetail
 
 
-function renderPage() {
+function renderPage(taskDetail: TaskDetail = task) {
+  vi.mocked(api.getTask).mockResolvedValue(taskDetail)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
@@ -86,5 +87,25 @@ describe('QuoteUploadPage supplier identification', () => {
     await user.upload(file, new File(['supplier_name\nExample\n'], 'two.csv', { type: 'text/csv' }))
     await screen.findByText('No clear supplier ID was found in the file. Enter it manually.')
     expect(supplier).toHaveValue('')
+  })
+
+  test('shows Continue after quotation review is complete for an active task', async () => {
+    renderPage({
+      ...task,
+      progress: { ...task.progress, quote_review_completed: true },
+    })
+
+    expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument()
+  })
+
+  test('does not show Continue for an abandoned task', async () => {
+    renderPage({
+      ...task,
+      status: 'ABANDONED',
+      progress: { ...task.progress, quote_review_completed: true },
+    })
+
+    expect(await screen.findByText('This task has been abandoned')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument()
   })
 })

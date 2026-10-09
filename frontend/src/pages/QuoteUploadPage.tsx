@@ -255,7 +255,6 @@ export function QuoteUploadPage() {
       <section className="card run-notice"><strong>This task has been abandoned</strong><p>Quotations cannot be uploaded, corrected or submitted. Historical files remain available for preview and download.</p></section>
       <section>{quoteHistory.isPending ? <div className="card empty-upload-list">Loading quotation history…</div> : submittedQuoteTable(true)}</section>
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
-      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? 'Opening…' : 'Continue'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
     </div>
   }
 
@@ -318,6 +317,7 @@ export function QuoteUploadPage() {
           : quoteHistory.isError ? <div className="card empty-upload-list">Unable to load quotation history.</div>
             : submittedQuoteTable()}
       </section>
+      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? 'Opening…' : 'Continue'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   )
