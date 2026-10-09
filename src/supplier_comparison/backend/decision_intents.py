@@ -138,6 +138,16 @@ def _requests_two_delivery_candidates(message: str) -> bool:
     return asks_two and asks_compare and asks_delivery
 
 
+def _requests_closest_alternative(message: str) -> bool:
+    """Recognise the common read-only challenger comparison without a model call."""
+
+    return bool(re.search(
+        r"\bclosest\s+alternative\b|\bnext[-\s]?best\s+(?:alternative|supplier|quotation|quote)\b",
+        message,
+        re.IGNORECASE,
+    ))
+
+
 def route_conversation_intent(context: dict[str, Any], config: Any, *,
                               opener: Callable[..., object] = trusted_urlopen,
                               sleeper: Callable[[float], None] = time.sleep,
@@ -160,6 +170,8 @@ def route_conversation_intent(context: dict[str, Any], config: Any, *,
         return ConversationIntent(route="SIMULATE", changes=changes), 0
     if _requests_evidence_investigation(latest):
         return ConversationIntent(route="INVESTIGATE"), 0
+    if _requests_closest_alternative(latest):
+        return ConversationIntent(route="EXPLAIN"), 0
     if _requests_two_delivery_candidates(latest):
         return ConversationIntent(route="EXPLAIN"), 0
     if re.search(

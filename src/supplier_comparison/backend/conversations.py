@@ -967,7 +967,12 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
     language = conversation_response_language(context)
     wants_cost = bool(re.search(r"成本|价格|总价|便宜|最低|最好|cost|price|cheapest|lowest", question, re.IGNORECASE))
     wants_delivery = bool(re.search(r"交期|交付|到货|最快|最早|最好|delivery|arrival|fastest|earliest", question, re.IGNORECASE))
-    wants_choice = bool(re.search(r"推荐|第一|未选|没选|为什么|差异|比较|recommend|first|why|difference|compare", question, re.IGNORECASE))
+    wants_choice = bool(re.search(
+        r"推荐|第一|未选|没选|为什么|差异|比较|"
+        r"recommend|first|why|difference|compare|alternative|trade[-\s]?off",
+        question,
+        re.IGNORECASE,
+    ))
     if not (wants_cost or wants_delivery or wants_choice):
         return None
 
@@ -1000,6 +1005,96 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
     earliest_date = min(str(row["estimated_arrival_date"]) for row in rows)
     cheapest = [row for row in rows if Decimal(str(row["total_cost"])) == lowest_cost]
     fastest = [row for row in rows if str(row["estimated_arrival_date"]) == earliest_date]
+
+    wants_closest_alternative = bool(re.search(
+        r"\bclosest\s+alternative\b|\bnext[-\s]?best\s+(?:alternative|supplier|quotation|quote)\b",
+        question,
+        re.IGNORECASE,
+    ))
+    if wants_closest_alternative and recommended:
+        preferences = context.get("current_decision_preferences") or {}
+        primary = str(preferences.get("primary_criterion") or "")
+        recommended_ids = {str(row.get("quote_id")) for row in recommended}
+        ranked_ids = [
+            str(quote_id)
+            for group in comparison.get("ranked_quote_ids", [])
+            for quote_id in (group if isinstance(group, (list, tuple)) else [group])
+        ]
+        alternatives = [
+            by_quote[quote_id]
+            for quote_id in ranked_ids
+            if quote_id in by_quote and quote_id not in recommended_ids
+        ]
+        if not alternatives:
+            alternatives = [
+                row for row in rows
+                if str(row.get("quote_id")) not in recommended_ids
+            ]
+            if primary == "LOWEST_CONFIRMED_TOTAL_COST":
+                alternatives.sort(key=lambda row: (
+                    Decimal(str(row["total_cost"])),
+                    str(row["estimated_arrival_date"]),
+                    str(row.get("supplier_name") or row.get("quote_id")),
+                ))
+            else:
+                alternatives.sort(key=lambda row: (
+                    str(row["estimated_arrival_date"]),
+                    Decimal(str(row["total_cost"])),
+                    str(row.get("supplier_name") or row.get("quote_id")),
+                ))
+        if alternatives:
+            current = recommended[0]
+            alternative = alternatives[0]
+            current_name = str(current.get("supplier_name") or current.get("quote_id"))
+            alternative_name = str(alternative.get("supplier_name") or alternative.get("quote_id"))
+            current_cost = Decimal(str(current["total_cost"]))
+            alternative_cost = Decimal(str(alternative["total_cost"]))
+            current_date = date.fromisoformat(str(current["estimated_arrival_date"]))
+            alternative_date = date.fromisoformat(str(alternative["estimated_arrival_date"]))
+            day_delta = (alternative_date - current_date).days
+            timing = (
+                f"{abs(day_delta)} days later" if day_delta > 0 else
+                f"{abs(day_delta)} days earlier" if day_delta < 0 else
+                "on the same day"
+            )
+            text = (
+                f"The closest alternative is {alternative_name}: it arrives on "
+                f"{alternative_date.isoformat()} and has a confirmed total cost of "
+                f"SGD {alternative_cost:,.2f} ({result_reference}); "
+                f"The current recommendation, {current_name}, arrives on "
+                f"{current_date.isoformat()} and has a confirmed total cost of "
+                f"SGD {current_cost:,.2f} ({result_reference}); "
+                f"Choosing {alternative_name} would therefore mean delivery {timing} "
+                f"than {current_name} ({result_reference});"
+            )
+            reference_ids = [result_reference]
+            threshold_item = next((
+                (reference_id, requirement)
+                for reference_id, payload in references.items()
+                if reference_id.startswith("COMPLIANCE:") and isinstance(payload, dict)
+                for requirement in payload.get("amount_requirements", [])
+                if isinstance(requirement, dict) and requirement.get("threshold") is not None
+            ), None)
+            if threshold_item is not None:
+                compliance_reference, amount_requirement = threshold_item
+                threshold = Decimal(str(amount_requirement["threshold"]))
+                if alternative_cost >= threshold:
+                    currency = str(amount_requirement.get("currency") or "SGD")
+                    text += (
+                        f" It also reaches the {currency} {threshold:,.2f} amount-approval threshold "
+                        f"({result_reference}, {compliance_reference}); "
+                        "Choosing it would require separate approval before ordering, and the recommendation itself does not grant that approval "
+                        f"({compliance_reference})."
+                    )
+                    reference_ids.append(compliance_reference)
+            if text.endswith(";"):
+                text = text[:-1] + "."
+            return {
+                "assistant_text": text,
+                "reference_ids": reference_ids,
+                "changes": None,
+                "clarification": None,
+            }
 
     wants_all_costs = bool(
         wants_cost

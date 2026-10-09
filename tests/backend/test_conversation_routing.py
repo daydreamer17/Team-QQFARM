@@ -951,6 +951,48 @@ def test_all_supplier_arrivals_deadline_and_fastest_are_answered_completely(monk
     conversations.validate_conversation_turn(turn, ctx)
 
 
+def test_closest_alternative_uses_frozen_ranking_and_tradeoff_without_models(monkeypatch):
+    monkeypatch.setattr(
+        conversations,
+        "_call_conversation_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("closest-alternative explanation must not need a model")
+        ),
+    )
+    question = (
+        "Which supplier is the closest alternative to Schwarzwald Circuits, "
+        "and what trade-off would we make by choosing it?"
+    )
+    ctx = comparison_context(question)
+    result = ctx['frozen_references']['RESULT:comparison-1']
+    result['supplier_results'].extend([
+        {'quote_id': 'q-sterling', 'supplier_name': 'Sterling Components', 'status': 'FEASIBLE',
+         'total_cost': '7100.00', 'estimated_arrival_date': '2026-11-09'},
+        {'quote_id': 'q-redwood', 'supplier_name': 'Redwood Components', 'status': 'FEASIBLE',
+         'total_cost': '6700.00', 'estimated_arrival_date': '2026-11-10'},
+    ])
+    result['ranked_quote_ids'] = [['q-fast'], ['q-sterling'], ['q-redwood'], ['q-cheap']]
+    compliance_id = 'COMPLIANCE:comparison-1'
+    ctx['frozen_references'][compliance_id] = {'amount_requirements': [{
+        'quote_id': 'q-sterling', 'currency': 'SGD', 'threshold': '7000.00',
+    }]}
+    ctx['allowed_reference_ids'].append(compliance_id)
+
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+
+    assert calls == 0
+    for expected in (
+        'The closest alternative is Sterling Components',
+        'arrives on 2026-11-09 and has a confirmed total cost of SGD 7,100.00',
+        'Schwarzwald Circuits, arrives on 2026-11-07 and has a confirmed total cost of SGD 6,900.00',
+        'delivery 2 days later than Schwarzwald Circuits',
+        'reaches the SGD 7,000.00 amount-approval threshold',
+        'recommendation itself does not grant that approval',
+    ):
+        assert expected in turn['assistant_text']
+    conversations.validate_conversation_turn(turn, ctx)
+
+
 @pytest.mark.parametrize("question", [
     "如果优先最早到货，哪两份报价最值得重点比较？",
     "If the priority is the earliest arrival, which two quotes should be compared most closely?",
