@@ -105,7 +105,8 @@ def _requests_evidence_investigation(message: str) -> bool:
         r"(?:verify|check|audit|investigate|trace|cite|review)[^\n]{0,140}"
         r"(?:basis|evidence|source|original|quotation|quote|delivery|arrival|history|performance|policy|rule|requirement|"
         r"record|conflict|missing|expired|mismatch|cost|fee|tax|compliance|approval|risk)|"
-        r"(?:source\s+(?:quotation|document)|historical\s+(?:performance|record|on-time\s+rate)|rejection\s+rate|"
+        r"(?:source\s+(?:quotation|document)|historical\s+(?:performance|record|grade|on-time\s+rate)|"
+        r"on[-\s]?time\s+rate|reject(?:ed)?(?:[-\s]line)?\s+rate|compliance[-\s]?evidence\s+status|"
         r"fulfilment\s+risk|supplier\s+eligibility|amount\s+approval|supporting\s+evidence|policy\s+check|"
         r"evidence\s+(?:conflict|missing|expired|mismatch)|cannot\s+be\s+confirmed\s+with\s+(?:the\s+)?(?:available|current)\s+tools)|"
         r"(?:missing|expired|mismatched)[^\n]{0,32}(?:evidence|supplier\s+ids?)",

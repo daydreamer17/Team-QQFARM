@@ -99,6 +99,7 @@ def test_more_than_two_requested_criteria_are_not_silently_dropped(monkeypatch, 
     "请核对 Great Wall 的落地成本构成，不要只看汇总价格。",
     "Audit the two earliest offers against source lead times and supplier performance records.",
     "Audit the recommended vendor's eligibility, RoHS coverage, and approval-threshold evidence.",
+    "Compare each supplier's historical grade, on-time rate, rejected-line rate, and current compliance-evidence status.",
 ])
 def test_bilingual_procurement_evidence_questions_route_without_model(monkeypatch, prompt):
     monkeypatch.setattr(
