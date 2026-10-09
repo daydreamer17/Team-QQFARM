@@ -47,10 +47,10 @@ class ConversationIntent(BaseModel):
 
 
 def _explicit_scenario_change(message: str) -> RequirementChanges | None:
-    """Parse only unambiguous budget/deadline what-if requests.
+    """Parse unambiguous, supported what-if controls.
 
-    These two common scenario controls should not depend on a model merely to
-    identify a number already supplied by the user.  All recommendation and
+    Common scenario controls should not depend on a model merely to identify
+    an explicit value already supplied by the user. All recommendation and
     compliance consequences are still calculated by the deterministic engine.
     """
 
@@ -77,6 +77,17 @@ def _explicit_scenario_change(message: str) -> RequirementChanges | None:
             patch["delivery_deadline"] = (
                 f"{int(deadline.group(1)):04d}-{int(deadline.group(2)):02d}-{int(deadline.group(3)):02d}"
             )
+    if re.search(
+        r"(?:最高|最佳).{0,16}(?:综合)?供应商表现.{0,20}(?:首要|主要|第一|排序|指标)|"
+        r"(?:首要|主要|第一|排序|指标).{0,20}(?:最高|最佳).{0,16}(?:综合)?供应商表现|"
+        r"\bhighest\s+(?:overall\s+)?supplier\s+performance\b.{0,32}"
+        r"\b(?:primary|criterion|ranking)\b|"
+        r"\b(?:primary|criterion|ranking)\b.{0,32}"
+        r"\bhighest\s+(?:overall\s+)?supplier\s+performance\b",
+        message,
+        re.IGNORECASE,
+    ):
+        patch["primary_criterion"] = "HIGHEST_SUPPLIER_PERFORMANCE"
     return RequirementChanges.model_validate(patch) if patch else None
 
 

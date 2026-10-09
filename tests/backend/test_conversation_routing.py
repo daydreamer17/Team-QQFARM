@@ -186,28 +186,38 @@ def test_general_investigation_renderer_uses_intent_and_fictional_supplier_evide
     assert turn["reference_ids"] == [reference]
 
 
-def test_english_current_supplier_compliance_answer_is_scoped_and_localized():
+def test_english_current_supplier_requirement_fit_is_explicit_and_scoped():
     reference = "INVESTIGATION:current-compliance"
+    requirement_reference = "REQUIREMENT:current-compliance"
     context_data = {
         "result_id": "result-current-compliance",
         "recent_messages": [{
             "role": "USER",
-            "content": "Does the current recommended supplier satisfy eligibility, RoHS, and amount approval requirements?",
+            "content": (
+                "Does the current recommendation satisfy the budget, delivery deadline, "
+                "supplier eligibility, and RoHS requirements?"
+            ),
         }],
-        "allowed_reference_ids": [reference],
-        "frozen_references": {},
+        "allowed_reference_ids": [reference, requirement_reference],
+        "frozen_references": {requirement_reference: {"requirement": {
+            "budget_amount": "8000.00",
+            "currency": "SGD",
+            "delivery_deadline": "2026-11-15",
+        }}},
     }
     observations = [{"result": {
         "tool_name": "read_decision_overview",
         "status": "OK",
         "data": {
             "recommended_quote_ids": ["q-current"],
+            "ranking_preference": "FASTEST_CONFIRMED_DELIVERY",
             "investigation_plan": {
-                "analysis_goal": "COMPLIANCE_REVIEW",
-                "dimensions": ["COMPLIANCE"],
+                "analysis_goal": "RECOMMENDATION_EXPLANATION",
+                "dimensions": ["COST", "DELIVERY", "COMPLIANCE"],
             },
             "suppliers": [
-                {"quote_id": "q-current", "supplier_name": "Current Parts"},
+                {"quote_id": "q-current", "supplier_name": "Current Parts",
+                 "total_cost": "6900.00", "estimated_arrival_date": "2026-11-07"},
                 {"quote_id": "q-other", "supplier_name": "Other Components"},
             ],
         },
@@ -238,9 +248,176 @@ def test_english_current_supplier_compliance_answer_is_scoped_and_localized():
     )
 
     assert turn is not None
-    assert "Current Parts' policy status is COMPLIANT" in turn["assistant_text"]
+    assert "Current Parts: confirmed total cost SGD 6,900.00" in turn["assistant_text"]
+    assert "Budget check: SGD 6,900.00 is within the SGD 8,000.00 budget" in turn["assistant_text"]
+    assert "Delivery check: the estimated arrival date 2026-11-07 is on or before the 2026-11-15 deadline" in turn["assistant_text"]
+    assert "supplier eligibility PASS, RoHS PASS" in turn["assistant_text"]
     assert "Other Components" not in turn["assistant_text"]
     assert all(mark not in turn["assistant_text"] for mark in ("（", "）", "。", "：", "的制度结论为"))
+
+
+def _demo4_investigation_observations(*, goal, dimensions):
+    suppliers = [
+        ('q-redwood', 'Redwood Components', 'B', '0.8604651162790698', '0.0232558139534884', 86),
+        ('q-schwarz', 'Schwarzwald Circuits', 'C', '1', '0.0909090909090909', 11),
+        ('q-sterling', 'Sterling Components', 'A', '0.9272727272727273', '0', 55),
+        ('q-great-wall', 'Great Wall Components', 'D', '0.0563380281690141', '0.1267605633802817', 71),
+    ]
+    observations = [{"result": {
+        "tool_name": "read_decision_overview", "status": "OK", "data": {
+            "recommended_quote_ids": ["q-schwarz"],
+            "ranking_preference": "FASTEST_CONFIRMED_DELIVERY",
+            "investigation_plan": {"analysis_goal": goal, "dimensions": dimensions},
+            "suppliers": [
+                {"quote_id": quote_id, "supplier_name": name, "status": "FEASIBLE",
+                 "total_cost": cost, "estimated_arrival_date": arrival}
+                for (quote_id, name, *_), cost, arrival in zip(
+                    suppliers,
+                    ('6700.00', '6900.00', '7100.00', '6500.00'),
+                    ('2026-11-10', '2026-11-07', '2026-11-09', '2026-11-12'),
+                    strict=True,
+                )
+            ],
+        },
+    }}]
+    for quote_id, _name, grade, on_time, rejected, sample in suppliers:
+        observations.append({"result": {
+            "tool_name": "inspect_supplier_history", "status": "OK", "data": {
+                "quote_id": quote_id, "supplier": {"history_snapshot": {
+                    "overall_grade": grade,
+                    "order_line_count": sample,
+                    "on_time": {"rate": on_time, "denominator": sample},
+                    "rejected_lines": {"rate": rejected, "denominator": sample},
+                }},
+            },
+        }})
+    observations.extend([{"result": {
+        "tool_name": "inspect_policy_evidence", "status": "OK", "data": {
+            "compliance": {"assessments": [
+                {"quote_id": quote_id, "supplier_name": name, "status": "COMPLIANT", "checks": [
+                    {"control_code": "APPROVED_SUPPLIER", "status": "PASS"},
+                    {"control_code": "ROHS_COMPLIANCE", "status": "PASS"},
+                ]}
+                for quote_id, name, *_ in suppliers
+            ]},
+            "retrievals": [{"citations": [{"text": "A policy clause was retrieved."}]}],
+        },
+    }}, {"result": {
+        "tool_name": "compile_decision_brief", "status": "OK", "data": {
+            "checked_quote_ids": [row[0] for row in suppliers],
+            "verified_risks": [], "unresolved_items": [],
+        },
+    }}])
+    return observations
+
+
+def test_all_supplier_history_and_current_evidence_status_are_kept_separate():
+    reference = 'INVESTIGATION:demo4-history-compliance'
+    observations = _demo4_investigation_observations(
+        goal='RANKING_COMPARISON', dimensions=['HISTORY', 'COMPLIANCE'],
+    )
+    context_data = {
+        'result_id': 'demo4-result',
+        'recent_messages': [{'role': 'USER', 'content': (
+            "Compare each supplier's historical grade, on-time rate, rejected-line rate, "
+            'and current compliance-evidence status.'
+        )}],
+        'allowed_reference_ids': [reference, 'RESULT:demo4-result'],
+        'frozen_references': {},
+    }
+
+    turn = compose_investigation_answer(
+        context_data, reference_id=reference,
+        record={'observations': observations}, observations=observations,
+    )
+
+    assert turn is not None
+    expected = {
+        'Redwood Components': ('grade B', 'historical on-time rate 86.05%', 'rejection rate 2.33%'),
+        'Schwarzwald Circuits': ('grade C', 'historical on-time rate 100.00%', 'rejection rate 9.09%'),
+        'Sterling Components': ('grade A', 'historical on-time rate 92.73%', 'rejection rate 0.00%'),
+        'Great Wall Components': ('grade D', 'historical on-time rate 5.63%', 'rejection rate 12.68%'),
+    }
+    for supplier, facts in expected.items():
+        sentence = next(part for part in turn['assistant_text'].split('. ') if supplier in part)
+        assert all(fact in sentence for fact in facts)
+        assert 'current supplier eligibility PASS' in sentence
+        assert 'current RoHS PASS' in sentence
+    assert 'a policy-retrieval hit alone does not make supporting evidence valid' in turn['assistant_text']
+
+
+def test_grade_and_perfect_on_time_rate_are_not_reported_as_a_contradiction():
+    reference = 'INVESTIGATION:demo4-grade'
+    observations = _demo4_investigation_observations(
+        goal='CONFLICT_REVIEW', dimensions=['HISTORY'],
+    )
+    context_data = {
+        'result_id': 'demo4-result',
+        'recent_messages': [{'role': 'USER', 'content': (
+            'Schwarzwald Circuits has a 100% historical on-time rate but only a grade C. '
+            'Is this a contradiction?'
+        )}],
+        'allowed_reference_ids': [reference, 'RESULT:demo4-result'],
+        'frozen_references': {},
+    }
+
+    turn = compose_investigation_answer(
+        context_data, reference_id=reference,
+        record={'observations': observations}, observations=observations,
+    )
+
+    assert turn is not None
+    assert 'This is not a contradiction' in turn['assistant_text']
+    assert '11 historical order lines' in turn['assistant_text']
+    assert 'rejection rate 9.09%' in turn['assistant_text']
+    assert 'rather than using the on-time rate alone' in turn['assistant_text']
+
+
+def test_sterling_price_basis_explains_goods_cost_without_scaling_error():
+    reference = 'INVESTIGATION:sterling-price-basis'
+    requirement_reference = 'REQUIREMENT:demo4'
+    observations = [{"result": {
+        "tool_name": "read_decision_overview", "status": "OK", "data": {
+            "recommended_quote_ids": ["q-schwarz"],
+            "ranking_preference": "FASTEST_CONFIRMED_DELIVERY",
+            "investigation_plan": {"analysis_goal": "EVIDENCE_VALIDATION", "dimensions": ["COST"]},
+            "suppliers": [{"quote_id": "q-sterling", "supplier_name": "Sterling Components",
+                           "status": "FEASIBLE", "total_cost": "7100.00",
+                           "estimated_arrival_date": "2026-11-09"}],
+        },
+    }}, {"result": {
+        "tool_name": "inspect_quote_evidence", "status": "OK", "data": {
+            "quote_id": "q-sterling", "fields": [
+                {"field_name": "unit_price", "normalized_value": "680.00"},
+                {"field_name": "price_basis_quantity", "normalized_value": 100},
+                {"field_name": "shipping_fee_amount", "normalized_value": "200.00"},
+                {"field_name": "other_fees_amount", "normalized_value": "100.00"},
+            ],
+        },
+    }}, {"result": {
+        "tool_name": "compile_decision_brief", "status": "OK", "data": {
+            "checked_quote_ids": ["q-sterling"], "verified_risks": [], "unresolved_items": [],
+        },
+    }}]
+    context_data = {
+        'result_id': 'demo4-result',
+        'recent_messages': [{'role': 'USER', 'content': (
+            "Sterling's quoted unit price is SGD 680, but its goods cost is only SGD 6,800 "
+            'rather than SGD 680,000. Verify the price basis.'
+        )}],
+        'allowed_reference_ids': [reference, requirement_reference, 'RESULT:demo4-result'],
+        'frozen_references': {requirement_reference: {'required_quantity': 1000}},
+    }
+
+    turn = compose_investigation_answer(
+        context_data, reference_id=reference,
+        record={'observations': observations}, observations=observations,
+    )
+
+    assert turn is not None
+    assert 'unit price SGD 680.00' in turn['assistant_text']
+    assert 'price basis 100 pieces' in turn['assistant_text']
+    assert '1,000 pieces require 10 price units, giving goods cost SGD 6,800.00' in turn['assistant_text']
 
 
 def test_grounding_accepts_normalized_tool_cost_fields_and_computed_cost_deltas():
@@ -257,6 +434,8 @@ def test_grounding_accepts_normalized_tool_cost_fields_and_computed_cost_deltas(
     ("If the budget is reduced to SGD 6,800, how would the current recommendation change? Simulate it without changing the official requirement.", "budget_amount", "6800"),
     ("如果要求提前到 2026-11-09 前到货，哪些供应商仍然可选？制度结论是否会改变？", "delivery_deadline", "2026-11-09"),
     ("If delivery is required on or before 2026-11-09, which suppliers remain eligible? Would the compliance conclusion change?", "delivery_deadline", "2026-11-09"),
+    ("If highest overall supplier performance became the primary criterion, who would be recommended and what additional approval would be required? Simulate only.",
+     "primary_criterion", "HIGHEST_SUPPLIER_PERFORMANCE"),
 ])
 def test_bilingual_explicit_scenarios_route_deterministically(monkeypatch, prompt, field, expected):
     monkeypatch.setattr(
@@ -673,9 +852,13 @@ def comparison_context(question: str):
 @pytest.mark.parametrize('question,expected', [
     ('四家供应商里，成本和交期分别谁最好？', ('Great Wall Components', 'Schwarzwald Circuits')),
     ('Great Wall Components 明明最便宜，为什么没有排第一？',
-     ('确认总成本最低', '最快确认到货', '当前推荐供应商是 Schwarzwald Circuits')),
+     ('确认总成本最低', '最快确认到货', '预计到货日期为 2026-11-12',
+      '当前推荐供应商是 Schwarzwald Circuits')),
     ('Why is Schwarzwald Circuits recommended instead of the cheapest supplier?',
      ('lowest confirmed total cost', 'fastest confirmed delivery', 'current recommendation is Schwarzwald Circuits')),
+    ('Great Wall Components has the lowest total cost. Why is it not the current recommendation?',
+     ('lowest confirmed total cost', 'fastest confirmed delivery',
+      'estimated arrival date of 2026-11-12', 'current recommendation is Schwarzwald Circuits')),
 ])
 def test_common_comparison_questions_use_stable_grounded_answer(monkeypatch, question, expected):
     from supplier_comparison.backend.decision_intents import ConversationIntent
@@ -691,6 +874,79 @@ def test_common_comparison_questions_use_stable_grounded_answer(monkeypatch, que
     turn, calls = process_conversation_turn(ctx, CONFIG)
     assert calls == 1
     assert all(value in turn['assistant_text'] for value in expected)
+    conversations.validate_conversation_turn(turn, ctx)
+
+
+def test_all_supplier_costs_and_amount_threshold_are_answered_completely(monkeypatch):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+    monkeypatch.setattr(
+        'supplier_comparison.backend.decision_intents.route_conversation_intent',
+        lambda *_args, **_kwargs: (ConversationIntent(route='EXPLAIN'), 1),
+    )
+    ctx = comparison_context(
+        'List the confirmed total cost of all four suppliers and identify which quotation '
+        'reaches the SGD 7,000 amount-approval threshold.'
+    )
+    result = ctx['frozen_references']['RESULT:comparison-1']
+    result['supplier_results'].extend([
+        {'quote_id': 'q-sterling', 'supplier_name': 'Sterling Components', 'status': 'FEASIBLE',
+         'total_cost': '7100.00', 'estimated_arrival_date': '2026-11-09'},
+        {'quote_id': 'q-redwood', 'supplier_name': 'Redwood Components', 'status': 'FEASIBLE',
+         'total_cost': '6700.00', 'estimated_arrival_date': '2026-11-10'},
+    ])
+    compliance_id = 'COMPLIANCE:comparison-1'
+    ctx['frozen_references'][compliance_id] = {'amount_requirements': [{
+        'quote_id': 'q-sterling', 'currency': 'SGD', 'threshold': '7000.00',
+    }]}
+    ctx['allowed_reference_ids'].append(compliance_id)
+
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+
+    assert calls == 1
+    for expected in (
+        'Sterling Components: SGD 7,100.00',
+        'Schwarzwald Circuits: SGD 6,900.00',
+        'Redwood Components: SGD 6,700.00',
+        'Great Wall Components: SGD 6,500.00',
+        'amount-approval threshold is SGD 7,000.00',
+        'meets or exceeds it is Sterling Components',
+    ):
+        assert expected in turn['assistant_text']
+    conversations.validate_conversation_turn(turn, ctx)
+
+
+def test_all_supplier_arrivals_deadline_and_fastest_are_answered_completely(monkeypatch):
+    from supplier_comparison.backend.decision_intents import ConversationIntent
+    monkeypatch.setattr(
+        'supplier_comparison.backend.decision_intents.route_conversation_intent',
+        lambda *_args, **_kwargs: (ConversationIntent(route='EXPLAIN'), 1),
+    )
+    ctx = comparison_context(
+        'Compare the confirmed arrival dates of all suppliers. Which suppliers meet '
+        'the 15 November deadline, and which is the fastest?'
+    )
+    result = ctx['frozen_references']['RESULT:comparison-1']
+    result['supplier_results'].extend([
+        {'quote_id': 'q-sterling', 'supplier_name': 'Sterling Components', 'status': 'FEASIBLE',
+         'total_cost': '7100.00', 'estimated_arrival_date': '2026-11-09'},
+        {'quote_id': 'q-redwood', 'supplier_name': 'Redwood Components', 'status': 'FEASIBLE',
+         'total_cost': '6700.00', 'estimated_arrival_date': '2026-11-10'},
+    ])
+    requirement = ctx['frozen_references']['REQUIREMENT:requirement-1']
+    requirement['delivery_deadline'] = '2026-11-15'
+
+    turn, calls = process_conversation_turn(ctx, CONFIG)
+
+    assert calls == 1
+    for supplier, arrival in (
+        ('Schwarzwald Circuits', '2026-11-07'),
+        ('Sterling Components', '2026-11-09'),
+        ('Redwood Components', '2026-11-10'),
+        ('Great Wall Components', '2026-11-12'),
+    ):
+        assert f'{supplier} has a confirmed arrival date of {arrival}' in turn['assistant_text']
+    assert turn['assistant_text'].count('meets the stated deadline') == 4
+    assert 'The fastest supplier is Schwarzwald Circuits, arriving on 2026-11-07' in turn['assistant_text']
     conversations.validate_conversation_turn(turn, ctx)
 
 

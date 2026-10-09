@@ -159,6 +159,34 @@ def test_baseline_totals_against_independent_oracle():
         assert item.payment_term.net_days == expected["payment_days"]
 
 
+@pytest.mark.parametrize(("changes", "expected_feasible", "expected_winner"), [
+    (
+        {"budget_amount": "6800", "primary_criterion": "FASTEST_CONFIRMED_DELIVERY"},
+        ["SUP-022", "SUP-029"],
+        ["SUP-022"],
+    ),
+    (
+        {"delivery_deadline": "2026-11-09", "primary_criterion": "FASTEST_CONFIRMED_DELIVERY"},
+        ["SUP-023", "SUP-024"],
+        ["SUP-023"],
+    ),
+])
+def test_demo_questions_budget_and_deadline_scenarios_match_oracle(
+    changes, expected_feasible, expected_winner,
+):
+    request = rule_request(changes=changes)
+    result = compare_suppliers(request)
+    by_quote = {quote.quote_id: quote.supplier_id for quote in request.quotes}
+    feasible = sorted(
+        by_quote[row.quote_id]
+        for row in result.supplier_results
+        if row.status.value == "FEASIBLE"
+    )
+
+    assert feasible == expected_feasible
+    assert winner_ids(result, request) == expected_winner
+
+
 @pytest.mark.parametrize("case", ANSWERS["decision_cases"], ids=lambda c: c["id"])
 def test_decision_boundaries_and_upload_order_invariance(case):
     request = rule_request(case["changes"])

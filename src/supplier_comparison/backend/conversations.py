@@ -940,6 +940,22 @@ _CRITERION_LABELS_ZH = {
 }
 
 
+def _nested_value(payload: Any, key: str) -> Any:
+    if isinstance(payload, dict):
+        if key in payload:
+            return payload[key]
+        for value in payload.values():
+            found = _nested_value(value, key)
+            if found is not None:
+                return found
+    elif isinstance(payload, (list, tuple)):
+        for value in payload:
+            found = _nested_value(value, key)
+            if found is not None:
+                return found
+    return None
+
+
 def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, Any] | None:
     """Answer common comparison questions from frozen facts without model variance."""
 
@@ -984,6 +1000,164 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
     earliest_date = min(str(row["estimated_arrival_date"]) for row in rows)
     cheapest = [row for row in rows if Decimal(str(row["total_cost"])) == lowest_cost]
     fastest = [row for row in rows if str(row["estimated_arrival_date"]) == earliest_date]
+
+    wants_all_costs = bool(
+        wants_cost
+        and (
+            re.search(r"(?:列出|显示|给出).*(?:所有|全部|四家|4\s*家).*(?:成本|总价|报价)", question, re.IGNORECASE)
+            or re.search(
+                r"\b(?:list|show|give)\b.*\b(?:all|four|4)\b.*\b(?:suppliers?|quotations?|quotes?)\b",
+                question,
+                re.IGNORECASE,
+            )
+        )
+    )
+    wants_approval_threshold = bool(
+        re.search(r"金额审批|审批阈值|approval[-\s]?threshold|amount[-\s]?approval", question, re.IGNORECASE)
+    )
+    if wants_all_costs:
+        ordered_rows = sorted(
+            rows,
+            key=lambda row: (
+                Decimal(str(row["total_cost"])),
+                str(row.get("supplier_name") or row.get("quote_id")),
+            ),
+            reverse=True,
+        )
+        sentences = [
+            (
+                f"{row.get('supplier_name') or row.get('quote_id')} 的确认总成本为 "
+                f"SGD {Decimal(str(row['total_cost'])):,.2f}（{result_reference}）。"
+                if language == "zh" else
+                f"{row.get('supplier_name') or row.get('quote_id')}: "
+                f"SGD {Decimal(str(row['total_cost'])):,.2f} ({result_reference})"
+            )
+            for row in ordered_rows
+        ]
+        reference_ids = [result_reference]
+        if wants_approval_threshold:
+            threshold_item = next((
+                (reference_id, requirement)
+                for reference_id, payload in references.items()
+                if reference_id.startswith("COMPLIANCE:") and isinstance(payload, dict)
+                for requirement in payload.get("amount_requirements", [])
+                if isinstance(requirement, dict) and requirement.get("threshold") is not None
+            ), None)
+            if threshold_item is None:
+                return None
+            compliance_reference, amount_requirement = threshold_item
+            threshold = Decimal(str(amount_requirement["threshold"]))
+            currency = str(amount_requirement.get("currency") or "SGD")
+            triggered = [
+                str(row.get("supplier_name") or row.get("quote_id"))
+                for row in ordered_rows
+                if Decimal(str(row["total_cost"])) >= threshold
+            ]
+            names = ("、" if language == "zh" else ", ").join(triggered)
+            sentences.extend((
+                (
+                    f"金额审批阈值为 {currency} {threshold:,.2f}（{compliance_reference}）。"
+                    if language == "zh" else
+                    f"The amount-approval threshold is {currency} {threshold:,.2f} "
+                    f"({compliance_reference})"
+                ),
+                (
+                    f"达到或超过该阈值的报价为 {names or '无'}"
+                    f"（{result_reference}，{compliance_reference}）。"
+                    if language == "zh" else
+                    f"The quotation{'s' if len(triggered) != 1 else ''} that "
+                    f"{'meet or exceed' if len(triggered) != 1 else 'meets or exceeds'} it "
+                    f"{'are' if len(triggered) != 1 else 'is'} {names or 'none'} "
+                    f"({result_reference}, {compliance_reference})"
+                ),
+            ))
+            reference_ids.append(compliance_reference)
+        return {
+            "assistant_text": (
+                "".join(sentences) if language == "zh" else "; ".join(sentences) + "."
+            ),
+            "reference_ids": reference_ids,
+            "changes": None,
+            "clarification": None,
+        }
+
+    wants_all_deliveries = bool(
+        wants_delivery
+        and not wants_cost
+        and (
+            re.search(
+                r"(?:所有|各家|四家|4\s*家).*(?:交期|到货|交付)|"
+                r"(?:交期|到货|交付).*(?:所有|各家|四家|4\s*家)",
+                question,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"\b(?:compare|list|show|give)\b.*\b(?:arrival|delivery)\b.*\b(?:all|four|4)\b|"
+                r"\b(?:all|four|4)\b.*\b(?:suppliers?|quotations?|quotes?)\b.*\b(?:arrival|delivery)\b",
+                question,
+                re.IGNORECASE,
+            )
+        )
+    )
+    if wants_all_deliveries:
+        requirement_reference = next(
+            (key for key in references if key.startswith("REQUIREMENT:")), None
+        )
+        deadline_value = None
+        if requirement_reference:
+            deadline_value = _nested_value(
+                references[requirement_reference], "delivery_deadline"
+            )
+        ordered_rows = sorted(
+            rows,
+            key=lambda row: (
+                str(row["estimated_arrival_date"]),
+                str(row.get("supplier_name") or row.get("quote_id")),
+            ),
+        )
+        sentences = []
+        for row in ordered_rows:
+            name = str(row.get("supplier_name") or row.get("quote_id"))
+            arrival = str(row["estimated_arrival_date"])
+            if deadline_value:
+                meets = arrival <= str(deadline_value)
+                text = (
+                    f"{name} 预计于 {arrival} 到货，"
+                    f"{'满足' if meets else '不满足'}当前截止日期"
+                    if language == "zh" else
+                    f"{name} has a confirmed arrival date of {arrival} and "
+                    f"{'meets' if meets else 'does not meet'} the stated deadline"
+                )
+                source = f"{result_reference}, {requirement_reference}"
+            else:
+                text = (
+                    f"{name} 预计于 {arrival} 到货"
+                    if language == "zh" else
+                    f"{name} has a confirmed arrival date of {arrival}"
+                )
+                source = result_reference
+            sentences.append(
+                f"{text}（{source}）。" if language == "zh" else f"{text} ({source})."
+            )
+        fastest_names = ("、" if language == "zh" else ", ").join(
+            str(row.get("supplier_name") or row.get("quote_id")) for row in fastest
+        )
+        sentences.append(
+            (
+                f"最快到货的是 {fastest_names}，日期为 {earliest_date}（{result_reference}）。"
+                if language == "zh" else
+                f"The fastest supplier is {fastest_names}, arriving on {earliest_date} ({result_reference})."
+            )
+        )
+        return {
+            "assistant_text": "".join(sentences) if language == "zh" else " ".join(sentences),
+            "reference_ids": list(dict.fromkeys(
+                [result_reference, requirement_reference]
+                if requirement_reference and deadline_value else [result_reference]
+            )),
+            "changes": None,
+            "clarification": None,
+        }
 
     wants_two_delivery_candidates = bool(
         wants_delivery
@@ -1071,10 +1245,22 @@ def deterministic_comparison_explanation(context: dict[str, Any]) -> dict[str, A
     already_described = {
         str(row.get("quote_id")) for row in cheapest + fastest + recommended
     }
+    recommended_quote_ids = {str(row.get("quote_id")) for row in recommended}
     for row in rows:
         name = str(row.get("supplier_name") or "").strip()
-        if (not name or name.casefold() not in question.casefold()
-                or str(row.get("quote_id")) in already_described):
+        explicitly_named_alternative = (
+            wants_choice
+            and name.casefold() in question.casefold()
+            and str(row.get("quote_id")) not in recommended_quote_ids
+        )
+        if (
+            not name
+            or name.casefold() not in question.casefold()
+            or (
+                str(row.get("quote_id")) in already_described
+                and not explicitly_named_alternative
+            )
+        ):
             continue
         sentences.append((
             f"{name} 的确认总成本为 SGD {Decimal(str(row['total_cost'])):,.2f}，预计到货日期为 {row['estimated_arrival_date']}（{result_reference}）。"
@@ -1794,6 +1980,8 @@ def _monetary_values(value: Any, *, key: str | None = None) -> set[Decimal]:
         field_name = value.get("field_name")
         if field_name in _MONEY_KEYS and "normalized_value" in value:
             values.update(_monetary_values(value["normalized_value"], key=str(field_name)))
+        if value.get("currency") and value.get("threshold") is not None:
+            values.update(_monetary_values(value["threshold"], key="amount"))
         for child_key, item in value.items():
             values.update(_monetary_values(item, key=str(child_key)))
     elif isinstance(value, (list, tuple)):

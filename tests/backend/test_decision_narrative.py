@@ -1,5 +1,6 @@
 """Fixed structured inputs; no live model calls or evaluation answers at runtime."""
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 from supplier_comparison.backend.decision_narrative import render_decision_preview
 from supplier_comparison.rules import ComparisonRequest, DecisionImpactRequest, RequirementChanges, simulate_requirement_change
@@ -96,3 +97,39 @@ def test_budget_preview_does_not_call_a_non_compliant_quote_policy_eligible():
         if 'policy-eligible quotations that remain in the ranking' in line
     )
     assert non_compliant_id not in eligible_line
+
+
+def test_scenario_preview_discloses_amount_approval_boundary():
+    trial, _text = trial_for(primary_criterion='LOWEST_CONFIRMED_TOTAL_COST')
+    winner_id = trial.comparison.recommended_quote_ids[0]
+    supplier_results = tuple(
+        row.model_copy(update={'total_cost': Decimal('7100.00')})
+        if row.quote_id == winner_id else row
+        for row in trial.comparison.supplier_results
+    )
+    comparison = trial.comparison.model_copy(update={
+        'supplier_results': supplier_results,
+        'compliance_assessment': {
+            'assessments': [],
+            'amount_requirements': [{
+                'quote_id': winner_id,
+                'triggered': True,
+                'approval_confirmed': False,
+                'currency': 'SGD',
+                'threshold': '7000.00',
+            }],
+        },
+    })
+    trial = trial.model_copy(update={'comparison': comparison})
+
+    text = render_decision_preview(
+        trial,
+        currency='SGD',
+        supplier_bindings={row.quote_id: row.quote_id for row in comparison.supplier_results},
+        reference='SIMULATION:test-approval-boundary',
+    )
+
+    assert 'reaches the SGD 7,000.00 amount-approval threshold' in text
+    assert 'requires separate amount approval' in text
+    assert 'this simulation does not grant approval' in text
+    assert text.endswith('Generate a scenario using these conditions?')

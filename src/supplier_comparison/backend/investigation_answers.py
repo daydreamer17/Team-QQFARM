@@ -234,9 +234,78 @@ def compose_investigation_answer(
             )
         return "、".join(facts) if zh else ", ".join(facts)
 
+    asks_requirement_fit = any(token in lowered for token in (
+        "是否满足", "是否符合", "满足预算", "满足交期", "预算内", "截止日期前",
+        "satisfy", "within budget", "meet the budget", "meet the delivery",
+        "meet the deadline", "before the deadline",
+    ))
+    asks_budget_fit = "预算" in question or "budget" in lowered
+    asks_deadline_fit = any(token in lowered for token in (
+        "截止日期", "交期", "到货", "delivery deadline", "deadline", "delivery",
+    ))
+    asks_all_supplier_history_and_compliance = (
+        "HISTORY" in dimensions
+        and "COMPLIANCE" in dimensions
+        and any(token in lowered for token in (
+            "所有供应商", "各家供应商", "四家供应商", "每家供应商",
+            "all suppliers", "each supplier", "all four suppliers",
+        ))
+    )
+    asks_grade_contradiction = (
+        "HISTORY" in dimensions
+        and any(token in lowered for token in ("矛盾", "冲突", "contradiction", "conflict"))
+        and any(token in lowered for token in ("评级", "等级", "grade"))
+        and any(token in lowered for token in ("准时率", "on-time", "on time"))
+    )
+
     sentences: list[str] = []
 
-    if goal == "RECOMMENDATION_EXPLANATION":
+    if asks_all_supplier_history_and_compliance:
+        for quote_id in relevant_ids:
+            if quote_id not in histories:
+                continue
+            parts = history_parts(quote_id)
+            if quote_id in assessments:
+                parts.extend([
+                    f"当前供应商准入 {status(quote_id, 'APPROVED_SUPPLIER')}"
+                    if zh else f"current supplier eligibility {status(quote_id, 'APPROVED_SUPPLIER')}",
+                    f"当前 RoHS {status(quote_id, 'ROHS_COMPLIANCE')}"
+                    if zh else f"current RoHS {status(quote_id, 'ROHS_COMPLIANCE')}",
+                ])
+            sentences.append(sentence(
+                label(names.get(quote_id, quote_id), ("、" if zh else ", ").join(parts))
+            ))
+        sentences.append(sentence(
+            "以上准入和 RoHS 状态来自当前证明材料的控制项评估，制度检索命中本身不等于证明有效"
+            if zh else
+            "The eligibility and RoHS statuses above come from control evaluations of the current evidence; a policy-retrieval hit alone does not make supporting evidence valid"
+        ))
+
+    elif asks_grade_contradiction and explicit_ids:
+        quote_id = explicit_ids[0]
+        history = histories.get(quote_id) or {}
+        sample_size = (
+            history.get("order_line_count")
+            or (history.get("on_time") or {}).get("denominator")
+        )
+        parts = history_parts(quote_id)
+        if parts:
+            sentences.append(sentence(label(
+                names.get(quote_id, quote_id), ("、" if zh else ", ").join(parts)
+            )))
+        sentences.append(sentence(
+            (
+                f"这不是矛盾：该评级基于 {sample_size} 笔历史订单行，并综合准时率和拒收率，而不是只看准时率"
+                if sample_size is not None else
+                "这不是矛盾：综合评级同时考虑准时率、拒收率和样本可用性，而不是只看准时率"
+            ) if zh else (
+                f"This is not a contradiction: the grade is based on {sample_size} historical order lines and combines on-time and rejection performance rather than using the on-time rate alone"
+                if sample_size is not None else
+                "This is not a contradiction: the overall grade combines on-time performance, rejection performance, and sample availability rather than using the on-time rate alone"
+            )
+        ))
+
+    elif goal == "RECOMMENDATION_EXPLANATION":
         asserted = explicit_ids[0] if explicit_ids else None
         if asserted and recommended_id and asserted != recommended_id:
             sentences.append(sentence(
@@ -279,6 +348,43 @@ def compose_investigation_answer(
                 ])
             if parts:
                 sentences.append(sentence(label(names[quote_id], ("、" if zh else ", ").join(parts))))
+            if asks_requirement_fit and asks_budget_fit and rows[quote_id].get("total_cost") is not None:
+                budget_value = _recursive_value(requirement, "budget_amount")
+                if budget_value is not None:
+                    total = Decimal(str(rows[quote_id]["total_cost"]))
+                    budget = Decimal(str(budget_value))
+                    currency = str(_recursive_value(requirement, "currency") or "SGD")
+                    within_budget = total <= budget
+                    sentences.append(sentence(
+                        (
+                            f"预算核对：{currency} {total:,.2f}"
+                            f"{'不超过' if within_budget else '超过'}预算 {currency} {budget:,.2f}，"
+                            f"因此{'满足' if within_budget else '不满足'}预算要求"
+                            if zh else
+                            f"Budget check: {currency} {total:,.2f} is "
+                            f"{'within' if within_budget else 'above'} the {currency} {budget:,.2f} budget, "
+                            f"so the budget requirement is {'satisfied' if within_budget else 'not satisfied'}"
+                        ),
+                        requirement_reference,
+                    ))
+            if asks_requirement_fit and asks_deadline_fit and rows[quote_id].get("estimated_arrival_date"):
+                deadline_value = _recursive_value(requirement, "delivery_deadline")
+                if deadline_value:
+                    arrival = date.fromisoformat(str(rows[quote_id]["estimated_arrival_date"]))
+                    deadline = date.fromisoformat(str(deadline_value))
+                    on_time = arrival <= deadline
+                    sentences.append(sentence(
+                        (
+                            f"交期核对：预计到货日期 {arrival.isoformat()}"
+                            f"{'不晚于' if on_time else '晚于'}截止日期 {deadline.isoformat()}，"
+                            f"因此{'满足' if on_time else '不满足'}交期要求"
+                            if zh else
+                            f"Delivery check: the estimated arrival date {arrival.isoformat()} is "
+                            f"{'on or before' if on_time else 'after'} the {deadline.isoformat()} deadline, "
+                            f"so the delivery requirement is {'satisfied' if on_time else 'not satisfied'}"
+                        ),
+                        requirement_reference,
+                    ))
 
         if "HISTORY" in dimensions and recommended_id and not explicit_ids:
             sentences.append(sentence(
@@ -674,17 +780,37 @@ def _cost_detail(
 ) -> str:
     zh = language == "zh"
     parts: list[str] = []
+    unit_price: Decimal | None = None
     try:
         if fields.get("unit_price") is not None:
+            unit_price = Decimal(str(fields["unit_price"]))
             parts.append(
-                f"单价 SGD {Decimal(str(fields['unit_price'])):,.2f}"
-                if zh else f"unit price SGD {Decimal(str(fields['unit_price'])):,.2f}"
+                f"单价 SGD {unit_price:,.2f}"
+                if zh else f"unit price SGD {unit_price:,.2f}"
             )
     except (InvalidOperation, TypeError, ValueError):
         pass
     quantity = _recursive_value(requirement, "required_quantity")
     if quantity is not None:
         parts.append(f"数量 {quantity} 件" if zh else f"quantity {quantity} pieces")
+    try:
+        basis_quantity = Decimal(str(fields.get("price_basis_quantity") or 1))
+        required_quantity = Decimal(str(quantity)) if quantity is not None else None
+        if unit_price is not None and basis_quantity > 0:
+            parts.append(
+                f"计价基础为每 {basis_quantity:g} 件"
+                if zh else f"price basis {basis_quantity:g} pieces"
+            )
+            if required_quantity is not None:
+                price_units = required_quantity / basis_quantity
+                goods_cost = unit_price * price_units
+                parts.append(
+                    f"{required_quantity:,.0f} 件需要 {price_units:g} 个计价单位，货物成本为 SGD {goods_cost:,.2f}"
+                    if zh else
+                    f"{required_quantity:,.0f} pieces require {price_units:g} price units, giving goods cost SGD {goods_cost:,.2f}"
+                )
+    except (InvalidOperation, TypeError, ValueError):
+        pass
     for key, zh_label, en_label in (
         ("shipping_fee_amount", "运费", "shipping"),
         ("other_fees_amount", "其他费用", "other fees"),

@@ -217,6 +217,31 @@ def render_decision_preview(
                 if zh else
                 f"- Under the new budget, the policy-eligible quotations that remain in the ranking are: {feasible_names} ({reference})."
             )
+
+    if len(winners) == 1:
+        winner_id = winners[0]
+        amount_requirement = next((
+            item for item in compliance.get("amount_requirements") or []
+            if isinstance(item, dict)
+            and str(item.get("quote_id")) == winner_id
+            and item.get("triggered") is True
+        ), None)
+        if amount_requirement:
+            threshold_currency = str(amount_requirement.get("currency") or currency)
+            threshold = Decimal(str(amount_requirement.get("threshold") or "0"))
+            if amount_requirement.get("approval_confirmed") is True:
+                approval_text = (
+                    f"- 该试算推荐达到 {threshold_currency} {threshold:,.2f} 的金额审批阈值；当前审批记录已核验，但推荐本身仍不等同于审批（{reference}）。"
+                    if zh else
+                    f"- This scenario recommendation reaches the {threshold_currency} {threshold:,.2f} amount-approval threshold; the current approval record is verified, but the recommendation itself is not approval ({reference})."
+                )
+            else:
+                approval_text = (
+                    f"- 该试算推荐达到 {threshold_currency} {threshold:,.2f} 的金额审批阈值，需要单独完成金额审批；本试算不会授予审批（{reference}）。"
+                    if zh else
+                    f"- This scenario recommendation reaches the {threshold_currency} {threshold:,.2f} amount-approval threshold and requires separate amount approval; this simulation does not grant approval ({reference})."
+                )
+            lines.append(approval_text)
     lines.extend([
         "",
         ("这是一个等待确认的模拟情景，不会改变正式决策，也不代表制度审批通过。" if zh else
