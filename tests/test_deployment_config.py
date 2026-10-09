@@ -14,6 +14,13 @@ from supplier_comparison.rag.explanation import ExplanationConfig
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_nginx_allows_same_origin_pdf_preview_without_external_framing() -> None:
+    config = (ROOT / "deploy/nginx.conf").read_text(encoding="utf-8")
+
+    assert 'add_header X-Frame-Options "SAMEORIGIN" always;' in config
+    assert 'add_header X-Frame-Options "DENY" always;' not in config
+
+
 def _posix_shell() -> str | None:
     """Return a usable POSIX shell, avoiding the Windows WSL launcher stub."""
     if os.name == "nt":

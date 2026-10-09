@@ -18,6 +18,7 @@ CONFLICT_STATUS_PLACEHOLDER_RULE = "conflict-status-placeholder-null/1.0.0"
 PAYMENT_TERMS_NET_DAYS_RULE = "payment-terms-net-days/1.1.0"
 INCLUDED_FEE_WITHOUT_SEPARATE_AMOUNT_RULE = "included-fee-no-separate-amount/1.0.0"
 START_EVENT_PAYMENT_RECEIPT_RULE = "start-event-payment-receipt/1.0.0"
+SUPPLIER_NAME_TRAILING_SYSTEM_ID_RULE = "supplier-name-trailing-system-id/1.0.0"
 FEE_AMOUNT_FIELDS = frozenset({"shipping_fee_amount", "other_fees_amount"})
 FEE_STATUS_BY_AMOUNT_FIELD = {
     "shipping_fee_amount": "shipping_fee_status",
@@ -34,6 +35,10 @@ NO_SEPARATE_AMOUNT_PATTERN = re.compile(
 )
 PAYMENT_RECEIPT_EVENT_PATTERN = re.compile(
     r"\b(?:cleared\s+payment|payment)\b.{0,40}\b(?:receipt|received)\b",
+    re.IGNORECASE,
+)
+TRAILING_SUPPLIER_ID_PATTERN = re.compile(
+    r"\s*[\(\[]\s*SUP[-_][A-Z0-9][A-Z0-9._/-]{0,63}\s*[\)\]]\s*$",
     re.IGNORECASE,
 )
 
@@ -59,6 +64,25 @@ def normalize_model_payload(
     for candidate in payload.candidates:
         value = candidate.normalized_value
         fee_status_field = FEE_STATUS_BY_AMOUNT_FIELD.get(candidate.field_name)
+        if (
+            candidate.field_name == "supplier_name"
+            and candidate.validation_status == "EXTRACTED"
+            and isinstance(value, str)
+        ):
+            normalized_name = TRAILING_SUPPLIER_ID_PATTERN.sub("", value).strip()
+            if normalized_name and normalized_name != value:
+                normalized_candidates.append(
+                    candidate.model_copy(update={"normalized_value": normalized_name})
+                )
+                events.append(
+                    NormalizationEvent(
+                        field_name=candidate.field_name,
+                        input_value=value,
+                        output_value=normalized_name,
+                        rule_id=SUPPLIER_NAME_TRAILING_SYSTEM_ID_RULE,
+                    )
+                )
+                continue
         if (
             candidate.field_name == "start_event"
             and candidate.validation_status == "EXTRACTED"

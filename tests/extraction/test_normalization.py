@@ -9,6 +9,7 @@ from supplier_comparison.extraction.normalization import (
     PAYMENT_TERMS_NET_DAYS_RULE,
     SGD_FEE_SCALE_RULE,
     START_EVENT_PAYMENT_RECEIPT_RULE,
+    SUPPLIER_NAME_TRAILING_SYSTEM_ID_RULE,
     normalize_model_payload,
 )
 
@@ -69,6 +70,71 @@ def test_unit_price_precision_is_preserved() -> None:
 def test_non_sgd_fee_amount_is_not_reformatted() -> None:
     payload = _payload("0", currency="USD")
     normalized, events = normalize_model_payload(payload)
+    assert normalized == payload
+    assert events == ()
+
+
+@pytest.mark.parametrize(
+    ("input_value", "expected"),
+    (
+        ("Schwarzwald Circuits (SUP-023)", "Schwarzwald Circuits"),
+        ("Great Wall Components [sup_029]", "Great Wall Components"),
+    ),
+)
+def test_supplier_name_trailing_system_id_is_removed(
+    input_value: str,
+    expected: str,
+) -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "supplier_name",
+                    "raw_value": input_value,
+                    "normalized_value": input_value,
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [
+                        {"source_id": "SRC-SUPPLIER", "quoted_text": input_value}
+                    ],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
+    assert normalized.candidates[0].raw_value == input_value
+    assert normalized.candidates[0].normalized_value == expected
+    assert len(events) == 1
+    assert events[0].input_value == input_value
+    assert events[0].output_value == expected
+    assert events[0].rule_id == SUPPLIER_NAME_TRAILING_SYSTEM_ID_RULE
+
+
+def test_supplier_name_without_trailing_system_id_is_preserved() -> None:
+    payload = ModelExtractionPayload.model_validate(
+        {
+            "candidates": [
+                {
+                    "field_name": "supplier_name",
+                    "raw_value": "SUP-023 Components",
+                    "normalized_value": "SUP-023 Components",
+                    "unit": None,
+                    "validation_status": "EXTRACTED",
+                    "source_refs": [
+                        {
+                            "source_id": "SRC-SUPPLIER",
+                            "quoted_text": "SUP-023 Components",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    normalized, events = normalize_model_payload(payload)
+
     assert normalized == payload
     assert events == ()
 
