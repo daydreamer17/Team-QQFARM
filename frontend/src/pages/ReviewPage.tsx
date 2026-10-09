@@ -8,6 +8,7 @@ import type {
   ReviewProblem,
 } from '../api/types'
 import { TaskWorkspaceHeader } from '../components/TaskWorkspaceHeader'
+import { IssuePanel } from '../components/IssuePanel'
 import { fieldLabel, reasonText } from '../lib/presentation'
 import { reviewFindingAction } from '../lib/reviewMessages'
 
@@ -245,6 +246,7 @@ export function ReviewPage() {
     queryKey: ['tasks', taskId],
     queryFn: () => api.getTask(taskId),
     enabled: Boolean(taskId),
+    refetchInterval: (query) => ['QUEUED', 'RUNNING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 1500 : false,
   })
   const review = useQuery({
     queryKey: ['tasks', taskId, 'review'],
@@ -471,6 +473,16 @@ export function ReviewPage() {
           <div><dt>Recorded</dt><dd>{recordOnly.length}</dd></div>
         </dl>
       </section>
+
+      {data.current_issue && data.current_issue.issue_type !== 'BATCH_FIELD_REVIEW' && (
+        <IssuePanel
+          task={data}
+          onRefresh={() => void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['tasks', taskId] }),
+            queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'review'] }),
+          ])}
+        />
+      )}
 
       {waitingForReview && <div className="run-notice">Some quotations are still under review. Complete them before submitting the batch; this page will update automatically.</div>}
       {!report.review_pending && data.task_revision !== report.task_revision && (

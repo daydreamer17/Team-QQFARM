@@ -187,6 +187,27 @@ describe('ReviewPage', () => {
     expect(screen.queryByText(/项待处理$/)).not.toBeInTheDocument()
   })
 
+  test('shows a workflow confirmation issue on the Actions page', async () => {
+    const task = makeTask()
+    task.current_issue = {
+      issue_id: 'issue-1',
+      issue_type: 'CONFIRM_MISSING',
+      status: 'OPEN',
+      quote_id: 'quote-1',
+      field_name: 'shipping_fee_status',
+      question: 'Confirm that the quotation does not provide a calculable shipping amount.',
+      answer_schema: { answer_type: 'CONFIRM_MISSING' },
+    }
+    vi.spyOn(api, 'getTask').mockResolvedValue(task)
+    vi.spyOn(api, 'getReview').mockResolvedValue(makeReview())
+    vi.spyOn(api, 'getQuoteFieldSchema').mockResolvedValue(makeQuoteFieldSchema())
+
+    renderPage()
+
+    expect(await screen.findByRole('heading', { name: 'Human confirmation required' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Confirm missing calculable shipping amount' })).toBeInTheDocument()
+  })
+
   test('shows unsupported business days as a pending system limitation, not an editable field', async () => {
     const report = makeReview()
     report.problems = [{

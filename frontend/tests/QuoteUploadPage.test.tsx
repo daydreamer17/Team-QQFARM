@@ -33,16 +33,18 @@ const task = {
 function renderPage(taskDetail: TaskDetail = task) {
   vi.mocked(api.getTask).mockResolvedValue(taskDetail)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/tasks/task-1/quotes/new']}>
         <Routes>
           <Route path="/tasks/:taskId/quotes/new" element={<QuoteUploadPage />} />
+          <Route path="/tasks/:taskId/review" element={<div>Action items page</div>} />
           <Route path="/tasks/:taskId/compliance" element={<div>Compliance initial page</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return { ...view, client }
 }
 
 
@@ -92,17 +94,59 @@ describe('QuoteUploadPage supplier identification', () => {
     expect(supplier).toHaveValue('')
   })
 
-  test('shows Continue after quotation review is complete for an active task', async () => {
-    const startRun = vi.spyOn(api, 'startRun')
-    renderPage({
+  test('runs quotation checks and opens compliance only after they finish without actions', async () => {
+    const startRun = vi.spyOn(api, 'startRun').mockResolvedValue({
+      task_id: 'task-1', task_revision: 1, graph_run_id: 'graph-1', job_id: 'job-1', job_type: 'START', job_status: 'PENDING',
+    })
+    const { client } = renderPage({
       ...task,
       progress: { ...task.progress, quote_review_completed: true },
     })
 
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(startRun).toHaveBeenCalledOnce())
+    expect(screen.queryByText('Compliance initial page')).not.toBeInTheDocument()
+
+    vi.mocked(api.getTask).mockResolvedValue({
+      ...task,
+      status: 'NEEDS_INPUT',
+      current_graph_run_id: 'graph-1',
+      progress: {
+        ...task.progress,
+        quote_review_completed: true,
+        compliance: { status: 'NOT_STARTED' },
+      },
+    } as TaskDetail)
+    await client.invalidateQueries({ queryKey: ['tasks', 'task-1'] })
 
     expect(await screen.findByText('Compliance initial page')).toBeInTheDocument()
-    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  test('runs quotation checks and opens Actions when the workflow finds an issue', async () => {
+    vi.spyOn(api, 'startRun').mockResolvedValue({
+      task_id: 'task-1', task_revision: 1, graph_run_id: 'graph-1', job_id: 'job-1', job_type: 'START', job_status: 'PENDING',
+    })
+    const { client } = renderPage({
+      ...task,
+      progress: { ...task.progress, quote_review_completed: true },
+    })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+    await waitFor(() => expect(api.startRun).toHaveBeenCalledOnce())
+    vi.mocked(api.getTask).mockResolvedValue({
+      ...task,
+      status: 'NEEDS_INPUT',
+      current_graph_run_id: 'graph-1',
+      progress: { ...task.progress, quote_review_completed: true },
+      current_issue: {
+        issue_id: 'issue-1', issue_type: 'BATCH_FIELD_REVIEW', status: 'OPEN', quote_id: null,
+        field_name: 'batch_review:1', question: 'Review fields.', answer_schema: {},
+      },
+    } as unknown as TaskDetail)
+    await client.invalidateQueries({ queryKey: ['tasks', 'task-1'] })
+
+    expect(await screen.findByText('Action items page')).toBeInTheDocument()
+    expect(screen.queryByText('Compliance initial page')).not.toBeInTheDocument()
   })
 
   test('does not show Continue for an abandoned task', async () => {

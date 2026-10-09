@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiClientError, createIdempotencyKey, documentContentUrl, quoteDraftContentUrl } from '../api/client'
 import type { QuoteSupplierIdentification } from '../api/types'
@@ -92,7 +92,14 @@ export function QuoteUploadPage() {
   const [identificationError, setIdentificationError] = useState(false)
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
-  const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
+  const [continuationGraphRunId, setContinuationGraphRunId] = useState<string | null>(null)
+  const task = useQuery({
+    queryKey: ['tasks', taskId],
+    queryFn: () => api.getTask(taskId),
+    enabled: Boolean(taskId),
+    refetchInterval: (query) => continuationGraphRunId
+      && ['QUEUED', 'RUNNING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 1_000 : false,
+  })
   const quoteHistory = useQuery({ queryKey: ['tasks', taskId, 'quotes'], queryFn: () => api.listQuotes(taskId), enabled: Boolean(taskId) })
   const drafts = useQuery({ queryKey: ['tasks', taskId, 'quote-drafts'], queryFn: () => api.listQuoteDrafts(taskId), enabled: Boolean(taskId), refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PROCESSING') ? 1_500 : false })
   const activeDraftSummary = drafts.data?.items.find((item) => ACTIVE_STATUSES.has(item.status))
@@ -110,6 +117,16 @@ export function QuoteUploadPage() {
   })
   const activeDraft = activeDraftDetail.data ?? activeDraftSummary
   const refreshAll = async () => { await Promise.all([queryClient.invalidateQueries({ queryKey: ['tasks', taskId] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quotes'] }), queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'quote-drafts'] })]) }
+  const nextStep = useMutation({
+    mutationFn: () => {
+      if (!task.data) throw new Error('The task has not loaded.')
+      return api.startRun(taskId, task.data.task_revision, createIdempotencyKey())
+    },
+    onSuccess: async (started) => {
+      setContinuationGraphRunId(started.graph_run_id)
+      await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
+    },
+  })
   const upload = useMutation({ mutationFn: (submission: UploadSubmission) => api.uploadQuoteDraft(taskId, submission, submission.idempotencyKey), onSuccess: async () => { setSupplierId(''); supplierIdManuallyEdited.current = false; setSupplierIdentification(null); setSelectedFile(null); if (fileInput.current) fileInput.current.value = ''; await refreshAll() } })
   const revise = useMutation({
     mutationFn: (quoteId: string) => {
@@ -185,6 +202,29 @@ export function QuoteUploadPage() {
   const legacyFieldReview = task.data && task.data.status === 'FAILED' && task.data.current_job?.error_code === 'review_required'
   const batchReview = task.data?.current_issue?.issue_type === 'BATCH_FIELD_REVIEW'
   const legacyIssueReview = task.data?.current_issue && !['POLICY_EVIDENCE_REVIEW', 'BATCH_FIELD_REVIEW'].includes(task.data.current_issue.issue_type)
+  const continuationRunning = Boolean(continuationGraphRunId) && (
+    !task.data
+    || task.data.current_graph_run_id !== continuationGraphRunId
+    || ['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)
+  )
+  const continuationError = continuationGraphRunId
+    && task.data?.current_graph_run_id === continuationGraphRunId
+    && task.data.status === 'FAILED'
+    ? task.data.current_job?.error_message ?? 'Quotation checks failed. Review the task history and try again.'
+    : ''
+  useEffect(() => {
+    if (!continuationGraphRunId || !task.data) return
+    if (task.data.current_graph_run_id !== continuationGraphRunId) return
+    if (['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)) return
+    if (task.data.current_issue?.status === 'OPEN') {
+      navigate(`/tasks/${taskId}/review`)
+      return
+    }
+    if (task.data.status === 'FAILED') return
+    if (task.data.progress.compliance?.status === 'NOT_STARTED') {
+      navigate(`/tasks/${taskId}/compliance`)
+    }
+  }, [continuationGraphRunId, navigate, task.data, taskId])
   const currentUploadNotice = localError || upload.isError
     ? uploadFailureNotice(upload.error, localError || undefined)
     : null
@@ -307,7 +347,7 @@ export function QuoteUploadPage() {
           : quoteHistory.isError ? <div className="card empty-upload-list">Unable to load quotation history.</div>
             : submittedQuoteTable()}
       </section>
-      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" onClick={() => navigate(`/tasks/${taskId}/compliance`)}>Continue</button></section>}
+      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><p>Continue to check decision-critical fields before preparing compliance evidence.</p><button className="button button-submit" disabled={nextStep.isPending || continuationRunning} onClick={() => task.data?.current_issue?.status === 'OPEN' ? navigate(`/tasks/${taskId}/review`) : nextStep.mutate()}>{nextStep.isPending ? 'Starting checks…' : continuationRunning ? 'Checking quotations…' : task.data?.current_issue?.status === 'OPEN' ? 'Review actions' : 'Continue'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}{continuationError && <p role="alert">{continuationError}</p>}</section>}
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   )
