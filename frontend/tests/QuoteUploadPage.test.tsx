@@ -36,7 +36,10 @@ function renderPage(taskDetail: TaskDetail = task) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/tasks/task-1/quotes/new']}>
-        <Routes><Route path="/tasks/:taskId/quotes/new" element={<QuoteUploadPage />} /></Routes>
+        <Routes>
+          <Route path="/tasks/:taskId/quotes/new" element={<QuoteUploadPage />} />
+          <Route path="/tasks/:taskId/compliance" element={<div>Compliance initial page</div>} />
+        </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -90,12 +93,16 @@ describe('QuoteUploadPage supplier identification', () => {
   })
 
   test('shows Continue after quotation review is complete for an active task', async () => {
+    const startRun = vi.spyOn(api, 'startRun')
     renderPage({
       ...task,
       progress: { ...task.progress, quote_review_completed: true },
     })
 
-    expect(await screen.findByRole('button', { name: 'Continue' })).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }))
+
+    expect(await screen.findByText('Compliance initial page')).toBeInTheDocument()
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   test('does not show Continue for an abandoned task', async () => {

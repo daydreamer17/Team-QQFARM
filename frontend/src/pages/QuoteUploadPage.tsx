@@ -93,16 +93,6 @@ export function QuoteUploadPage() {
   const [preview, setPreview] = useState<PreviewFileSource | null>(null)
   const [localError, setLocalError] = useState('')
   const task = useQuery({ queryKey: ['tasks', taskId], queryFn: () => api.getTask(taskId), enabled: Boolean(taskId) })
-  const nextStep = useMutation({ mutationFn: async () => {
-    if (!task.data) throw new Error('The task has not loaded.')
-    if (task.data.progress.compliance?.status === 'NOT_STARTED'
-      && !['QUEUED', 'RUNNING', 'PROCESSING'].includes(task.data.status)) {
-      await api.startRun(taskId, task.data.task_revision, createIdempotencyKey())
-    }
-  }, onSuccess: async () => {
-    await queryClient.invalidateQueries({ queryKey: ['tasks', taskId] })
-    navigate(`/tasks/${taskId}/compliance`)
-  } })
   const quoteHistory = useQuery({ queryKey: ['tasks', taskId, 'quotes'], queryFn: () => api.listQuotes(taskId), enabled: Boolean(taskId) })
   const drafts = useQuery({ queryKey: ['tasks', taskId, 'quote-drafts'], queryFn: () => api.listQuoteDrafts(taskId), enabled: Boolean(taskId), refetchInterval: (query) => query.state.data?.items.some((item) => item.status === 'PROCESSING') ? 1_500 : false })
   const activeDraftSummary = drafts.data?.items.find((item) => ACTIVE_STATUSES.has(item.status))
@@ -317,7 +307,7 @@ export function QuoteUploadPage() {
           : quoteHistory.isError ? <div className="card empty-upload-list">Unable to load quotation history.</div>
             : submittedQuoteTable()}
       </section>
-      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" disabled={nextStep.isPending} onClick={() => nextStep.mutate()}>{nextStep.isPending ? 'Opening…' : 'Continue'}</button>{nextStep.isError && <p role="alert">{errorMessage(nextStep.error)}</p>}</section>}
+      {task.data?.progress.quote_review_completed && !activeDraft && <section className="card"><h3>Quotation review complete</h3><button className="button button-submit" onClick={() => navigate(`/tasks/${taskId}/compliance`)}>Continue</button></section>}
       {preview && <FilePreviewDialog source={preview} onClose={() => setPreview(null)} />}
     </div>
   )
