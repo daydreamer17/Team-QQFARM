@@ -249,6 +249,7 @@ def test_batch_answer_reaudits_and_preserves_historical_investigation(tmp_path):
     fields = {f["field_name"]: f for f in quote["fields"]}
     corrected = service.correct_fields(
         task_id=task["task_id"], expected_task_revision=3, idempotency_key="batch-answer",
+        compliance_requested=False,
         corrections=[{"quote_id": quote["quote_id"], "field_name": name,
                       "expected_field_version": fields[name]["field_version"],
                       "raw_value": value, "normalized_value": value, "unit": unit,
@@ -256,7 +257,11 @@ def test_batch_answer_reaudits_and_preserves_historical_investigation(tmp_path):
                      for name, value, unit in (("shipping_fee_status", "KNOWN_AMOUNT", None),
                                                ("shipping_fee_amount", "200.00", "SGD"))],
     )
-    assert runner.run_job(corrected["job_id"])["status"] == "SUCCEEDED"
+    assert corrected["job_type"] == "START"
+    assert runner.run_job(corrected["job_id"])["status"] == "WAITING_INPUT"
+    compliance = service.compliance_workspace(task["task_id"])
+    assert compliance["stage"]["status"] == "NOT_STARTED"
+    assert compliance["assessment"] is None
     history = service.list_investigations(task["task_id"])
     assert len(history) == 1 and history[0]["status"] == "STALE"
     assert history[0]["stored_status"] == "WAITING_INPUT"

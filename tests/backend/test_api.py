@@ -1291,6 +1291,21 @@ def fk_batch_review(fk_client, tmp_path):
     return _prepare_batch_review(fk_client, tmp_path)
 
 
+def _run_corrected_inputs_through_explicit_compliance(service, runner, corrected):
+    paused = runner.run_job(corrected["job_id"])
+    assert corrected["job_type"] == "START"
+    assert paused["status"] == "WAITING_INPUT"
+    workspace = service.compliance_workspace(corrected["task_id"])
+    assert workspace["stage"]["status"] == "NOT_STARTED"
+    assert workspace["assessment"] is None
+    requested = service.start_compliance(
+        corrected["task_id"],
+        expected_task_revision=workspace["task_revision"],
+        idempotency_key=f"compliance-after-{corrected['job_id']}",
+    )
+    return runner.run_job(requested["job_id"])
+
+
 def test_batch_review_lists_all_quotes_and_current_problems(batch_review):
     http, _service, task, _runner, review, _body = batch_review
     assert review["task_revision"] == 3
@@ -2606,7 +2621,9 @@ def test_batch_corrections_reaudit_once_and_recompute_without_reextraction(batch
     assert queued_review["review_pending"]
     assert queued_review["problems"] == []  # Old findings are not represented as current.
     assert service.get_task(task["task_id"])["current_result_id"] is None
-    assert runner.run_job(updated["job_id"])["status"] == "SUCCEEDED"
+    assert _run_corrected_inputs_through_explicit_compliance(
+        service, runner, updated,
+    )["status"] == "SUCCEEDED"
     assert len(runner.processor.calls) == 2
     final = http.get(f"/api/v1/tasks/{task['task_id']}/review").json()
     assert not final["review_pending"]
@@ -2769,7 +2786,7 @@ def test_second_batch_keeps_previous_human_audit_and_invalidates_old_result(batc
     http, service, task, runner, _review, body = batch_review
     url = f"/api/v1/tasks/{task['task_id']}/fields/corrections"
     first = http.post(url, json=body, headers={"Idempotency-Key": "first-batch"}).json()
-    runner.run_job(first["job_id"])
+    _run_corrected_inputs_through_explicit_compliance(service, runner, first)
     historical = service.list_results(task["task_id"])[0]
     review = http.get(f"/api/v1/tasks/{task['task_id']}/review").json()
     quote = next(q for q in review["quotes"] if q["supplier_id"] == "SUP-023")
@@ -2783,7 +2800,9 @@ def test_second_batch_keeps_previous_human_audit_and_invalidates_old_result(batc
     assert second.status_code == 202, second.text
     assert service.get_task(task["task_id"])["current_result_id"] is None
     assert not service.get_result(task["task_id"], historical["result_id"])["is_current"]
-    assert runner.run_job(second.json()["job_id"])["status"] == "SUCCEEDED"
+    assert _run_corrected_inputs_through_explicit_compliance(
+        service, runner, second.json(),
+    )["status"] == "SUCCEEDED"
     result = service.list_results(task["task_id"])[0]["result"]
     assert sorted(s["total_cost"] for s in result["supplier_results"]) == ["7100.00", "7100.00"]
     assert len(result["recommended_quote_ids"]) == 2
@@ -2856,7 +2875,7 @@ def test_selection_analysis_and_authorized_simulation_are_read_only(batch_review
     http, service, task, runner, _review, body = batch_review
     updated = http.post(f"/api/v1/tasks/{task['task_id']}/fields/corrections", json=body,
                         headers={'Idempotency-Key': 'gap-ready'}).json()
-    runner.run_job(updated['job_id'])
+    _run_corrected_inputs_through_explicit_compliance(service, runner, updated)
     before = service.get_task(task['task_id'])
     url = f"/api/v1/tasks/{task['task_id']}"
     response = http.get(url + '/selection-gaps', params={'expected_task_revision': 5})
@@ -2899,13 +2918,13 @@ def test_selection_analysis_and_authorized_simulation_are_read_only(batch_review
 
 
 def test_supplier_information_uses_current_frozen_result(batch_review):
-    http, _service, task, runner, _review, body = batch_review
+    http, service, task, runner, _review, body = batch_review
     updated = http.post(
         f"/api/v1/tasks/{task['task_id']}/fields/corrections",
         json=body,
         headers={'Idempotency-Key': 'supplier-information-ready'},
     ).json()
-    runner.run_job(updated['job_id'])
+    _run_corrected_inputs_through_explicit_compliance(service, runner, updated)
     current_task = http.get(f"/api/v1/tasks/{task['task_id']}").json()
     response = http.get(f"/api/v1/tasks/{task['task_id']}/suppliers")
     assert response.status_code == 200, response.text
@@ -2949,7 +2968,7 @@ def test_decision_scenario_persists_delta_becomes_stale_and_applies(batch_review
         json=body,
         headers={'Idempotency-Key': 'scenario-ready'},
     ).json()
-    runner.run_job(updated['job_id'])
+    _run_corrected_inputs_through_explicit_compliance(service, runner, updated)
     task_id = task['task_id']
     url = f"/api/v1/tasks/{task_id}/decision-scenarios"
     payload = {
@@ -3130,7 +3149,7 @@ def test_decision_scenario_apply_updates_hard_requirement_and_profile_atomically
         json=body,
         headers={'Idempotency-Key': 'scenario-combined-ready'},
     ).json()
-    runner.run_job(updated['job_id'])
+    _run_corrected_inputs_through_explicit_compliance(service, runner, updated)
     task_id = task['task_id']
     created = http.post(
         f"/api/v1/tasks/{task_id}/decision-scenarios",

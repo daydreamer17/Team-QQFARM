@@ -1339,6 +1339,7 @@ def create_app(
             expected_task_revision=body.expected_task_revision,
             corrections=[item.model_dump(mode="json") for item in body.corrections],
             idempotency_key=idempotency_key,
+            compliance_requested=False,
         )
 
     @app.post(
@@ -1395,6 +1396,7 @@ def create_app(
             expected_task_revision=body.expected_task_revision,
             corrections=[item.model_dump(mode='json') for item in body.corrections],
             idempotency_key=idempotency_key,
+            compliance_requested=False,
         )
 
     @app.get("/api/v1/tasks/{task_id}/results")

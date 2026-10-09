@@ -7202,7 +7202,8 @@ class BackendService(ComplianceMixin):
 
     def correct_fields(self, *, task_id: str, expected_task_revision: int,
                        corrections: list[dict[str, Any]], idempotency_key: str,
-                       _single: bool = False) -> dict[str, Any]:
+                       _single: bool = False,
+                       compliance_requested: bool = True) -> dict[str, Any]:
         from .models import utc_now
 
         if not corrections or len(corrections) > 100:
@@ -7211,9 +7212,10 @@ class BackendService(ComplianceMixin):
         if any(not q or not n for q, n in pairs) or len(set(pairs)) != len(pairs):
             raise BackendError("field_correction_invalid", "Duplicate or empty correction fields.")
         request = {"task_id": task_id, "expected_task_revision": expected_task_revision,
-                   "corrections": corrections}
+                   "corrections": corrections, "compliance_requested": compliance_requested}
         if _single:
-            request = {"task_id": task_id, "expected_task_revision": expected_task_revision, **corrections[0]}
+            request = {"task_id": task_id, "expected_task_revision": expected_task_revision,
+                       "compliance_requested": compliance_requested, **corrections[0]}
         request_sha = content_hash(request)
         operation = (f"correct_field:{task_id}:{pairs[0][0]}:{pairs[0][1]}" if _single
                      else f"correct_fields:{task_id}")
@@ -7425,12 +7427,13 @@ class BackendService(ComplianceMixin):
                     request_sha256=request_sha,
                 )
             )
+            next_job_type = "COMPLIANCE_START" if compliance_requested else "START"
             session.add(
                 Job(
                     job_id=job_id,
                     task_id=task_id,
                     graph_run_id=graph_run_id,
-                    job_type="COMPLIANCE_START",
+                    job_type=next_job_type,
                     status="PENDING",
                     task_revision=next_revision,
                     history_binding_id=(
@@ -7443,7 +7446,7 @@ class BackendService(ComplianceMixin):
                 "task_revision": next_revision,
                 "graph_run_id": graph_run_id,
                 "job_id": job_id,
-                "job_type": "COMPLIANCE_START",
+                "job_type": next_job_type,
                 "job_status": "PENDING",
                 "correction_count": len(corrections),
             }
